@@ -88,9 +88,8 @@ impl GnawTreeWriter {
         Ok(node.content.clone())
     }
 
+    // Test indent insert
     pub fn edit(&self, operation: EditOperation) -> Result<()> {
-        self.create_backup()?;
-
         let modified_code = match operation {
             EditOperation::Edit { node_path, content } => {
                 self.edit_node(&self.tree, &node_path, &content)?
@@ -103,6 +102,15 @@ impl GnawTreeWriter {
             }
         };
 
+        // VALIDATION: Try to parse the modified code in memory before saving
+        let path = Path::new(&self.file_path);
+        let parser = get_parser(path)?;
+        if let Err(e) = parser.parse(&modified_code) {
+            return Err(anyhow::anyhow!("Validation failed: The proposed edit would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e));
+        }
+
+        // Only create backup and write if validation passed
+        self.create_backup()?;
         fs::write(&self.file_path, modified_code)
             .context(format!("Failed to write file: {}", self.file_path))?;
 
@@ -152,33 +160,64 @@ impl GnawTreeWriter {
             .context(format!("Parent node not found at path: {}", parent_path))?;
 
         let lines: Vec<&str> = self.source_code.lines().collect();
-        let mut new_lines = lines.clone();
+        let mut new_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
 
         let insert_pos = match position {
-            0 => parent.start_line - 1,
-            1 => parent.end_line,
+            0 => {
+                // If it starts with a brace, insert after it
+                if parent.content.trim_start().starts_with('{') {
+                    parent.start_line
+                } else {
+                    parent.start_line - 1
+                }
+            }
+            1 => parent.end_line - 1,
             2 => {
-                let mut last_property_end = parent.start_line;
-
+                let mut last_prop_line = parent.start_line;
+                let mut found = false;
                 for child in &parent.children {
-                    if child.node_type == "Property" && child.end_line < parent.end_line {
-                        last_property_end = child.end_line;
+                    if (child.node_type == "ui_property" || child.node_type == "ui_binding") && child.end_line < parent.end_line {
+                        last_prop_line = child.end_line;
+                        found = true;
                     }
                 }
-
-                if last_property_end == parent.start_line {
-                    last_property_end = parent.start_line + 1;
+                if found {
+                    last_prop_line
+                } else {
+                    // Fallback to top (after brace if exists)
+                    if parent.content.trim_start().starts_with('{') {
+                        parent.start_line
+                    } else {
+                        parent.start_line
+                    }
                 }
-
-                last_property_end
             }
             _ => return Err(anyhow::anyhow!("Invalid position: {}", position)),
         };
 
-        if insert_pos >= new_lines.len() {
-            new_lines.push(content);
+        // Detect indentation from parent or siblings
+        let indentation = if !lines.is_empty() {
+            let ref_line = if insert_pos < lines.len() { lines[insert_pos] } else { lines[lines.len()-1] };
+            let ws: String = ref_line.chars().take_while(|c| c.is_whitespace()).collect();
+            if ws.is_empty() && insert_pos > 0 {
+                lines[insert_pos-1].chars().take_while(|c| c.is_whitespace()).collect()
+            } else {
+                ws
+            }
         } else {
-            new_lines.insert(insert_pos, content);
+            String::new()
+        };
+
+        let indented_content: Vec<String> = content.lines()
+            .map(|line| format!("{}{}", indentation, line))
+            .collect();
+
+        if insert_pos >= new_lines.len() {
+            new_lines.extend(indented_content);
+        } else {
+            for (i, line) in indented_content.into_iter().enumerate() {
+                new_lines.insert(insert_pos + i, line);
+            }
         }
 
         Ok(new_lines.join("\n"))

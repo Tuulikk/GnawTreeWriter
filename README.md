@@ -26,31 +26,11 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 
 ### How GnawTreeWriter Solves This
 - **No bracket management**: AST handles structure automatically
-- **No indentation worries**: Formatting is preserved
+- **No indentation worries**: Formatting is preserved with smart indentation
+- **Syntax Validation**: proposed edits are checked against the parser before saving
 - **Precise targeting**: Edit specific nodes at specific paths
 - **Deterministic results**: Same input always produces same output
 - **Context-aware**: LLM can understand surrounding code structure
-
-## Known Limitations
-
-### QML Parser Path Duplication
-
-The QML parser has a known issue where nested components may receive duplicate paths in certain structures. For complex QML files with multiple levels of nesting:
-
-- Use `list` or `find` with `--node-type` to identify the correct path
-- Use `insert` with `position 2` instead of `add-property` for precise control
-- For QML files, fuzzy-search (`fuzzy-edit`) may match incorrect components
-
-**Workaround:**
-```bash
-# Find the exact component path
-gnawtreewriter list app.qml --filter-type Rectangle
-
-# Then use insert with the exact path
-gnawtreewriter insert app.qml root.1 2 'borderWidth: 5'
-```
-
-This limitation does not affect other languages (Python, Rust, TypeScript, etc.).
 
 ---
 
@@ -110,7 +90,7 @@ See [LLM_INTEGRATION.md](docs/LLM_INTEGRATION.md) for comprehensive guide on int
 
 | Language | Extension | Parser | Status |
 |-----------|-----------|---------|---------|
-| QML | `.qml` | Custom | ✅ Stable |
+| QML | `.qml` | TreeSitter | ✅ Stable |
 | Python | `.py` | TreeSitter | ✅ Stable |
 | Rust | `.rs` | TreeSitter | ✅ Stable |
 | TypeScript | `.ts`, `.tsx` | TreeSitter | ✅ Stable |
@@ -121,21 +101,26 @@ See [LLM_INTEGRATION.md](docs/LLM_INTEGRATION.md) for comprehensive guide on int
 ## CLI Commands
 
 ### analyze
-Analyze file and show tree structure in JSON format.
+Analyze file and show tree structure in JSON format. Supports wildcards and directories.
 
 ```bash
 # Analyze single file
-gnawtreewriter analyze <file_path>
+gnawtreewriter analyze app.py
 
 # Analyze multiple files (supports wildcards)
 gnawtreewriter analyze *.qml
-
-# Analyze directory
-gnawtreewriter analyze app/ui/qml/
-
-# Get compact summary
-gnawtreewriter analyze <file_path> --format compact
 ```
+
+### add-property
+QML-specific command to safely add a property to a component at the correct position.
+
+```bash
+gnawtreewriter add-property <file_path> <target_path> <name> <type> <value>
+
+# Example: Add property to Rectangle
+gnawtreewriter add-property app.qml "0.1" myProp string "'hello'"
+```
+
 
 ### list
 List all nodes with their paths in a file.

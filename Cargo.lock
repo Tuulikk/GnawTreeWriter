@@ -212,8 +212,10 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-html",
  "tree-sitter-javascript",
+ "tree-sitter-language",
  "tree-sitter-php",
  "tree-sitter-python",
+ "tree-sitter-qmljs",
  "tree-sitter-rust",
  "tree-sitter-typescript",
 ]
@@ -620,6 +622,16 @@ checksum = "b4066c6cf678f962f8c2c4561f205945c84834cce73d981e71392624fdc390a9"
 dependencies = [
  "cc",
  "tree-sitter",
+]
+
+[[package]]
+name = "tree-sitter-qmljs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67445ea937cd7eadaf2f628e2e7dd234374586cc31b4d1d63dbb5f5e7f9d9b62"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
 ]
 
 [[package]]

@@ -1,4 +1,5 @@
 pub mod qml;
+pub mod qml_tree_sitter;
 pub mod python;
 pub mod rust;
 pub mod typescript;
@@ -32,7 +33,7 @@ pub fn get_parser(file_path: &Path) -> Result<Box<dyn ParserEngine>> {
         .context("No file extension found")?;
 
     match extension {
-        "qml" => Ok(Box::new(qml::QmlParser::new())),
+        "qml" => Ok(Box::new(qml_tree_sitter::QmlTreeSitterParser::new())),
         "py" => Ok(Box::new(python::PythonParser::new())),
         "rs" => Ok(Box::new(rust::RustParser::new())),
         "ts" | "tsx" => Ok(Box::new(typescript::TypeScriptParser::new())),

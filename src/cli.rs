@@ -1,13 +1,11 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use crate::core::{GnawTreeWriter, EditOperation};
-use std::fs;
-use std::path::Path;
 use crate::parser::TreeNode;
 
 #[derive(Parser)]
 #[command(name = "gnawtreewriter")]
-#[command(about = "Tree-based code editor for LLM-assisted editing", long_about = None)]
+#[command(about = "A tool for tree-based code editing", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -15,739 +13,122 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Analyze file and show tree structure
+    /// Analyze files and output the tree structure
     Analyze {
-        /// Path to file or directory (supports multiple paths)
         paths: Vec<String>,
-        /// Output format (json, compact, summary)
         #[arg(short, long, default_value = "json")]
         format: String,
     },
-    /// List all nodes with paths in a file
+    /// List all nodes in a file
     List {
-        /// Path to file
         file_path: String,
-        /// Filter by node type
         #[arg(short, long)]
         filter_type: Option<String>,
     },
-    /// Find nodes matching criteria
-    Find {
-        /// Path to file or directory
-        paths: Vec<String>,
-        /// Filter by node type
-        #[arg(short, long)]
-        node_type: Option<String>,
-        /// Filter by content (partial match)
-        #[arg(short, long)]
-        content: Option<String>,
-    },
-    /// Fuzzy edit - find and edit node without exact path
-    FuzzyEdit {
-        /// Path to file
-        file_path: String,
-        /// Fuzzy search query (type, content, or description)
-        query: String,
-        /// New content/code snippet
-        content: String,
-        /// Preview changes without applying them
-        #[arg(short, long)]
-        preview: bool,
-        /// Filter by node type for more precise matching
-        #[arg(short, long)]
-        node_type: Option<String>,
-    },
-    /// Add property to QML component
-    AddProperty {
-        /// Path to QML file
-        file_path: String,
-        /// Query to find component (fuzzy)
-        query: String,
-        /// Property to add (e.g., "borderWidth: 2")
-        property: String,
-        /// Preview changes without applying them
-        #[arg(short, long)]
-        preview: bool,
-    },
-    /// Lint files and show issues with severity levels
-    Lint {
-        /// Path to file or directory
-        paths: Vec<String>,
-        /// Output format (text, json)
-        #[arg(short, long, default_value = "text")]
-        format: String,
-    },
-    /// Show tree node at specific path
+    /// Show the content of a specific node
     Show {
-        /// Path to file
         file_path: String,
-        /// Tree path to node (e.g., "0.2.1")
         node_path: String,
     },
-    /// Edit node at tree path
+    /// Replace the content of a node
     Edit {
-        /// Path to file
         file_path: String,
-        /// Tree path to node
         node_path: String,
-        /// New content/code snippet
         content: String,
-        /// Preview changes without applying them
         #[arg(short, long)]
         preview: bool,
     },
-    /// Insert new node
+    /// Insert code into a parent node at a specific position (0: top, 1: bottom, 2: after properties)
     Insert {
-        /// Path to file
         file_path: String,
-        /// Tree path to parent node
         parent_path: String,
-        /// Insert position (0 = before, 1 = after, 2 = as child)
         position: usize,
-        /// Content to insert
         content: String,
     },
-    /// Delete node at tree path
+    /// Delete a node
     Delete {
-        /// Path to file
         file_path: String,
-        /// Tree path to node
         node_path: String,
+    },
+    /// QML-specific: Add a property to a component
+    AddProperty {
+        file_path: String,
+        target_path: String,
+        name: String,
+        r#type: String,
+        value: String,
     },
 }
 
 impl Cli {
     pub async fn run(self) -> Result<()> {
         match self.command {
-            Commands::Analyze { paths, format: fmt } => {
-                if paths.is_empty() {
-                    eprintln!("Error: No paths provided");
-                    std::process::exit(1);
-                }
-
+            Commands::Analyze { paths, format: _fmt } => {
                 let mut results = Vec::new();
                 for path in &paths {
-                    if let Err(e) = analyze_path(path, &fmt, &mut results) {
-                        eprintln!("Error analyzing {}: {}", path, e);
-                    }
+                    let writer = GnawTreeWriter::new(path)?;
+                    let tree = writer.analyze();
+                    results.push(serde_json::to_value(tree)?);
                 }
-
-                if results.len() == 1 && fmt == "json" {
-                    println!("{}", serde_json::to_string_pretty(&results[0])?);
-                } else {
-                    println!("{}", serde_json::to_string_pretty(&results)?);
-                }
+                println!("{}", serde_json::to_string_pretty(&results)?);
             }
             Commands::List { file_path, filter_type } => {
                 let writer = GnawTreeWriter::new(&file_path)?;
-                let tree = writer.analyze();
-                list_nodes(tree, &file_path, filter_type.as_deref());
-            }
-            Commands::FuzzyEdit { file_path, query, content, preview, node_type } => {
-                fuzzy_edit(&file_path, &query, &content, preview, node_type.as_deref())?;
-            }
-            Commands::AddProperty { file_path, query, property, preview } => {
-                add_property(&file_path, &query, &property, preview)?;
-            }
-            Commands::Find { paths, node_type, content } => {
-                if paths.is_empty() {
-                    eprintln!("Error: No paths provided");
-                    std::process::exit(1);
-                }
-
-                for path in &paths {
-                    let path_obj = Path::new(path);
-                    if path_obj.is_dir() {
-                        find_in_directory(path_obj, node_type.as_deref(), content.as_deref())?;
-                    } else {
-                        find_in_file(path, node_type.as_deref(), content.as_deref())?;
-                    }
-                }
-            }
-            Commands::Lint { paths, format: fmt } => {
-                if paths.is_empty() {
-                    eprintln!("Error: No paths provided");
-                    std::process::exit(1);
-                }
-
-                let mut issues = Vec::new();
-                for path in &paths {
-                    if let Err(e) = lint_path(path, &mut issues) {
-                        eprintln!("Error linting {}: {}", path, e);
-                    }
-                }
-
-                if fmt == "json" {
-                    println!("{}", serde_json::to_string_pretty(&issues)?);
-                } else {
-                    for issue in &issues {
-                        println!("{}:{}:{} {}: {} [{}]",
-                            issue.file,
-                            issue.line,
-                            issue.column,
-                            issue.severity,
-                            issue.message,
-                            issue.suggestion
-                        );
-                    }
-                }
-
-                let error_count = issues.iter().filter(|i| i.severity == "error").count();
-                if error_count > 0 {
-                    std::process::exit(1);
-                }
+                list_nodes(writer.analyze(), filter_type.as_deref());
             }
             Commands::Show { file_path, node_path } => {
                 let writer = GnawTreeWriter::new(&file_path)?;
-                let node = writer.show_node(&node_path)?;
-                println!("{}", node);
+                println!("{}", writer.show_node(&node_path)?);
             }
             Commands::Edit { file_path, node_path, content, preview } => {
+                let writer = GnawTreeWriter::new(&file_path)?;
                 if preview {
-                    let writer = GnawTreeWriter::new(&file_path)?;
-                    let original = std::fs::read_to_string(&file_path)?;
-                    let modified = writer.preview_edit(EditOperation::Edit {
-                        node_path,
-                        content: content.clone(),
-                    })?;
-                    let diff = generate_diff(&original, &modified, &file_path);
-                    println!("{}", diff);
+                    println!("{}", writer.preview_edit(EditOperation::Edit { node_path, content })?);
                 } else {
-                    let writer = GnawTreeWriter::new(&file_path)?;
                     writer.edit(EditOperation::Edit { node_path, content })?;
-                    println!("Edited successfully");
                 }
             }
             Commands::Insert { file_path, parent_path, position, content } => {
                 let writer = GnawTreeWriter::new(&file_path)?;
                 writer.edit(EditOperation::Insert { parent_path, position, content })?;
-                println!("Inserted successfully");
             }
             Commands::Delete { file_path, node_path } => {
                 let writer = GnawTreeWriter::new(&file_path)?;
                 writer.edit(EditOperation::Delete { node_path })?;
-                println!("Deleted successfully");
+            }
+            Commands::AddProperty { file_path, target_path, name, r#type, value } => {
+                let writer = GnawTreeWriter::new(&file_path)?;
+                let property_code = format!("property {} {}: {}", r#type, name, value);
+                writer.edit(EditOperation::Insert { 
+                    parent_path: target_path.clone(), 
+                    position: 2, // After existing properties
+                    content: property_code 
+                })?;
+                println!("Successfully added property '{}' to {}", name, target_path);
             }
         }
         Ok(())
     }
-
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-struct LintIssue {
-    file: String,
-    line: usize,
-    column: usize,
-    severity: String,
-    message: String,
-    suggestion: String,
-}
-
-#[derive(Debug, Clone)]
-struct MatchCandidate {
-    path: String,
-    node_type: String,
-    content: String,
-    line: usize,
-    score: f64,
-    match_reason: String,
-}
-
-impl MatchCandidate {
-    fn new(path: String, node_type: String, content: String, line: usize) -> Self {
-        Self {
-            path,
-            node_type,
-            content,
-            line,
-            score: 0.0,
-            match_reason: String::new(),
-        }
-    }
-
-    fn with_score(mut self, score: f64, reason: String) -> Self {
-        self.score = score;
-        self.match_reason = reason;
-        self
-    }
-}
-
-fn lint_path(path: &str, issues: &mut Vec<LintIssue>) -> Result<()> {
-    let path_obj = Path::new(path);
-
-    if path_obj.is_dir() {
-        lint_directory(path_obj, issues)?;
-    } else {
-        let writer = GnawTreeWriter::new(path)?;
-        let tree = writer.analyze();
-        check_tree_issues(&tree, path, issues);
-    }
-
-    Ok(())
-}
-
-fn lint_directory(dir: &Path, issues: &mut Vec<LintIssue>) -> Result<()> {
-    let entries = fs::read_dir(dir)
-        .context(format!("Failed to read directory: {}", dir.display()))?;
-
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.path();
-
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if is_supported_extension(ext.to_str().unwrap_or("")) {
-                    if let Some(path_str) = path.to_str() {
-                        if let Err(e) = lint_path(path_str, issues) {
-                            eprintln!("Error linting {}: {}", path.display(), e);
-                        }
-                    }
-                }
-            }
-        } else if path.is_dir() {
-            lint_directory(&path, issues)?;
-        }
-    }
-
-    Ok(())
-}
-
-fn check_tree_issues(tree: &TreeNode, file_path: &str, issues: &mut Vec<LintIssue>) {
-    check_node(tree, file_path, issues);
-
+fn list_nodes(tree: &TreeNode, filter_type: Option<&str>) {
+    print_node(tree, 0, filter_type);
     for child in &tree.children {
-        check_tree_issues(child, file_path, issues);
+        list_nodes_recursive(child, 1, filter_type);
     }
 }
 
-fn check_node(node: &TreeNode, file_path: &str, issues: &mut Vec<LintIssue>) {
-    if node.node_type == "Property" {
-        if node.content.trim().is_empty() {
-            issues.push(LintIssue {
-                file: file_path.to_string(),
-                line: node.start_line,
-                column: 1,
-                severity: "warning".to_string(),
-                message: "Empty property found".to_string(),
-                suggestion: "Remove or add content to property".to_string(),
-            });
-        }
-
-        if node.content.len() > 200 {
-            issues.push(LintIssue {
-                file: file_path.to_string(),
-                line: node.start_line,
-                column: 1,
-                severity: "info".to_string(),
-                message: "Property is very long".to_string(),
-                suggestion: "Consider splitting into multiple properties".to_string(),
-            });
-        }
-    }
-
-    if node.node_type == "Text" && node.content.len() > 100 {
-        issues.push(LintIssue {
-            file: file_path.to_string(),
-            line: node.start_line,
-            column: 1,
-            severity: "info".to_string(),
-            message: "Long text content".to_string(),
-            suggestion: "Consider using translation keys".to_string(),
-        });
-    }
-}
-
-fn list_nodes(tree: &TreeNode, file_path: &str, filter_type: Option<&str>) {
-    print_node(tree, file_path, filter_type, 0);
-
-    for child in &tree.children {
-        list_nodes_helper(child, file_path, filter_type, 1);
-    }
-}
-
-fn list_nodes_helper(node: &TreeNode, file_path: &str, filter_type: Option<&str>, depth: usize) {
-    print_node(node, file_path, filter_type, depth);
-
+fn list_nodes_recursive(node: &TreeNode, depth: usize, filter_type: Option<&str>) {
+    print_node(node, depth, filter_type);
     for child in &node.children {
-        list_nodes_helper(child, file_path, filter_type, depth + 1);
+        list_nodes_recursive(child, depth + 1, filter_type);
     }
 }
 
-fn print_node(node: &TreeNode, _file_path: &str, filter_type: Option<&str>, depth: usize) {
-    if let Some(filter) = filter_type {
-        if node.node_type != filter {
-            return;
-        }
+fn print_node(node: &TreeNode, depth: usize, filter_type: Option<&str>) {
+    if let Some(f) = filter_type {
+        if node.node_type != f { return; }
     }
-
     let indent = "  ".repeat(depth);
-    let content_preview = if node.content.len() > 50 {
-        format!("{}...", &node.content[..50])
-    } else {
-        node.content.clone()
-    };
-
-    println!("{}{} [{}:{}{}] {}",
-        indent,
-        node.path,
-        node.node_type,
-        node.start_line,
-        if node.end_line != node.start_line { format!("-{}", node.end_line) } else { String::new() },
-        if !content_preview.is_empty() { format!(": {}", content_preview) } else { String::new() }
-    );
-}
-
-fn find_in_file(path: &str, node_type: Option<&str>, content: Option<&str>) -> Result<()> {
-    let writer = GnawTreeWriter::new(path)?;
-    let tree = writer.analyze();
-    find_in_tree(tree, path, node_type, content);
-    Ok(())
-}
-
-fn find_in_directory(dir: &Path, node_type: Option<&str>, content: Option<&str>) -> Result<()> {
-    let entries = fs::read_dir(dir)?;
-
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.path();
-
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if is_supported_extension(ext.to_str().unwrap_or("")) {
-                    if let Some(path_str) = path.to_str() {
-                        find_in_file(path_str, node_type, content)?;
-                    }
-                }
-            }
-        } else if path.is_dir() {
-            find_in_directory(&path, node_type, content)?;
-        }
-    }
-
-    Ok(())
-}
-
-fn add_property(file_path: &str, node_path: &str, property: &str, preview: bool) -> Result<()> {
-    let writer = GnawTreeWriter::new(file_path)?;
-    let original = std::fs::read_to_string(file_path)?;
-
-    let is_qml = file_path.to_lowercase().ends_with(".qml");
-    if is_qml {
-        eprintln!("Note: For QML files, add-property inserts after existing properties.");
-        eprintln!("If component has nested elements, this may place property incorrectly.");
-        eprintln!("Use 'list' or 'find' to locate the correct path, then use 'insert' with position 2.");
-        eprintln!();
-    }
-
-    if preview {
-        let modified = writer.preview_edit(EditOperation::Insert {
-            parent_path: node_path.to_string(),
-            position: 2,
-            content: property.to_string(),
-        })?;
-        let diff = generate_diff(&original, &modified, file_path);
-        println!("{}", diff);
-    } else {
-        writer.edit(EditOperation::Insert {
-            parent_path: node_path.to_string(),
-            position: 2,
-            content: property.to_string(),
-        })?;
-        println!("Added property '{}' to {}", property, node_path);
-    }
-
-    Ok(())
-}
-
-fn fuzzy_edit(file_path: &str, query: &str, new_content: &str, preview: bool, filter_type: Option<&str>) -> Result<()> {
-    let writer = GnawTreeWriter::new(file_path)?;
-    let tree = writer.analyze();
-
-    let query_lower = query.to_lowercase();
-    let mut candidates = Vec::new();
-
-    collect_candidates(tree, &query_lower, filter_type, &mut candidates);
-
-    if candidates.is_empty() {
-        eprintln!("No matches found for query: {}", query);
-        return Ok(());
-    }
-
-    candidates.sort_by(|a, b| {
-        b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    let best = &candidates[0];
-
-    if candidates.len() > 1 && (candidates[1].score - best.score).abs() < 10.0 {
-        println!("Found {} matches for \"{}\":", candidates.len(), query);
-        for (i, cand) in candidates.iter().take(5).enumerate() {
-            println!("  {}. {} [{}:{}{}] {} - {:.1}% match - {}",
-                i + 1,
-                cand.path,
-                cand.node_type,
-                cand.line,
-                if cand.content.len() > 50 { "" } else { "" },
-                if cand.content.len() > 50 { format!("{}...", &cand.content[..50]) } else { cand.content.clone() },
-                cand.score,
-                cand.match_reason
-            );
-        }
-        println!("Using best match: {}", best.path);
-        println!();
-    } else {
-        println!("Matched: {} [{}:{}{}] - {:.1}% ({})",
-            best.path,
-            best.node_type,
-            best.line,
-            if best.content.len() > 50 { "" } else { "" },
-            best.score,
-            best.match_reason
-        );
-    }
-
-    if preview {
-        let original = std::fs::read_to_string(file_path)?;
-        let modified = writer.preview_edit(EditOperation::Edit {
-            node_path: best.path.clone(),
-            content: new_content.to_string(),
-        })?;
-        let diff = generate_diff(&original, &modified, file_path);
-        println!("{}", diff);
-    } else {
-        writer.edit(EditOperation::Edit {
-            node_path: best.path.clone(),
-            content: new_content.to_string(),
-        })?;
-        println!("Edited successfully");
-    }
-
-    Ok(())
-}
-
-fn collect_candidates(tree: &TreeNode, query: &str, filter_type: Option<&str>, candidates: &mut Vec<MatchCandidate>) {
-    if let Some(filter) = filter_type {
-        if tree.node_type == filter {
-            evaluate_node(tree, query, candidates);
-        }
-    } else {
-        evaluate_node(tree, query, candidates);
-    }
-
-    for child in &tree.children {
-        collect_candidates(child, query, filter_type, candidates);
-    }
-}
-
-fn evaluate_node(node: &TreeNode, query: &str, candidates: &mut Vec<MatchCandidate>) {
-    if node.path == "root" {
-        return;
-    }
-
-    let content_lower = node.content.to_lowercase();
-    let node_type_lower = node.node_type.to_lowercase();
-
-    let mut score = 0.0;
-    let mut reasons: Vec<String> = Vec::new();
-
-    if content_lower.contains(query) {
-        score += 90.0;
-        reasons.push("content match".to_string());
-    }
-
-    if node_type_lower.contains(query) {
-        score += 80.0;
-        reasons.push("type match".to_string());
-    }
-
-    let words: Vec<&str> = query.split_whitespace().collect();
-    let content_words: Vec<&str> = content_lower.split_whitespace().collect();
-
-    for word in &words {
-        if content_words.iter().any(|cw| cw.contains(word)) {
-            score += 30.0;
-            reasons.push(format!("word match: {}", word));
-        }
-    }
-
-    if !node.content.trim().is_empty() && content_lower.starts_with(query) {
-        score += 40.0;
-        reasons.push("prefix match".to_string());
-    }
-
-    let distance = levenshtein_distance(&content_lower, query);
-    let max_len = content_lower.len().max(query.len());
-    if max_len > 0 {
-        let similarity = 1.0 - (distance as f64 / max_len as f64);
-        if similarity > 0.7 {
-            score += similarity * 50.0;
-            reasons.push(format!("similarity: {:.1}%", similarity * 100.0));
-        }
-    }
-
-    if !node.content.trim().is_empty() && content_lower.starts_with(query.chars().next().unwrap_or(' ')) {
-        score += 15.0;
-        reasons.push("first char match".to_string());
-    }
-
-    if score > 0.0 {
-        let reason = if reasons.len() > 2 {
-            format!("{}, and {} more", reasons.join(", "), reasons.len() - 2)
-        } else {
-            reasons.join(", ")
-        };
-
-        candidates.push(MatchCandidate::new(
-            node.path.clone(),
-            node.node_type.clone(),
-            node.content.clone(),
-            node.start_line,
-        ).with_score(score.min(100.0), reason));
-    }
-}
-
-fn levenshtein_distance(a: &str, b: &str) -> usize {
-    if a.is_empty() { return b.len(); }
-    if b.is_empty() { return a.len(); }
-
-    let mut prev_row: Vec<usize> = (0..=b.len()).collect();
-
-    for (i, a_char) in a.chars().enumerate() {
-        let mut curr_row = vec![i];
-
-        for (j, b_char) in b.chars().enumerate() {
-            let cost = if a_char == b_char { 0 } else { 1 };
-            let min_val = (curr_row[j] + 1).min(prev_row[j + 1] + 1).min(prev_row[j] + cost);
-            curr_row.push(min_val);
-        }
-
-        prev_row = curr_row;
-    }
-
-    prev_row[b.len()]
-}
-
-fn find_in_tree(tree: &TreeNode, file_path: &str, node_type: Option<&str>, content: Option<&str>) {
-    let matches_type = node_type.map_or(true, |t| tree.node_type == t);
-    let matches_content = content.map_or(true, |c| tree.content.contains(c));
-
-    if matches_type && matches_content && tree.path != "root" {
-        let content_preview = if tree.content.len() > 60 {
-            format!("{}...", &tree.content[..60])
-        } else {
-            tree.content.clone()
-        };
-
-        println!("{}: {} [{}:{}]: {}",
-            file_path,
-            tree.path,
-            tree.node_type,
-            tree.start_line,
-            if !content_preview.is_empty() { content_preview } else { "<empty>".to_string() }
-        );
-    }
-
-    for child in &tree.children {
-        find_in_tree(child, file_path, node_type, content);
-    }
-}
-
-fn analyze_path(path: &str, format: &str, results: &mut Vec<serde_json::Value>) -> Result<()> {
-    let path_obj = Path::new(path);
-
-    if path_obj.is_dir() {
-        analyze_directory(path_obj, format, results)?;
-    } else {
-        let writer = GnawTreeWriter::new(path)?;
-        let tree = writer.analyze();
-
-        let result = match format {
-            "json" => serde_json::to_value(tree)?,
-            "compact" => serde_json::json!({
-                "file": path,
-                "node_type": tree.node_type,
-                "nodes_count": count_nodes(tree),
-            }),
-            "summary" => serde_json::json!({
-                "file": path,
-                "type": tree.node_type,
-                "lines": format!("{}-{}", tree.start_line, tree.end_line),
-            }),
-            _ => return Err(anyhow::anyhow!("Unknown format: {}", format)),
-        };
-
-        results.push(result);
-    }
-
-    Ok(())
-}
-
-fn analyze_directory(dir: &Path, format: &str, results: &mut Vec<serde_json::Value>) -> Result<()> {
-    let entries = fs::read_dir(dir)
-        .context(format!("Failed to read directory: {}", dir.display()))?;
-
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.path();
-
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if is_supported_extension(ext.to_str().unwrap_or("")) {
-                    if let Some(path_str) = path.to_str() {
-                        if let Err(e) = analyze_path(path_str, format, results) {
-                            eprintln!("Error analyzing {}: {}", path.display(), e);
-                        }
-                    }
-                }
-            }
-        } else if path.is_dir() {
-            analyze_directory(&path, format, results)?;
-        }
-    }
-
-    Ok(())
-}
-
-fn count_nodes(tree: &TreeNode) -> usize {
-    1 + tree.children.iter().map(|child| count_nodes(child)).sum::<usize>()
-}
-
-fn is_supported_extension(ext: &str) -> bool {
-    matches!(ext.to_lowercase().as_str(), "qml" | "py" | "rs" | "ts" | "tsx" | "js" | "php" | "html")
-}
-
-fn generate_diff(original: &str, modified: &str, file_path: &str) -> String {
-    let original_lines: Vec<&str> = original.lines().collect();
-    let modified_lines: Vec<&str> = modified.lines().collect();
-
-    let mut diff = String::new();
-    let mut orig_idx = 0;
-    let mut mod_idx = 0;
-
-    diff.push_str(&format!("--- a/{}\n", file_path));
-    diff.push_str(&format!("+++ b/{}\n", file_path));
-
-    while orig_idx < original_lines.len() || mod_idx < modified_lines.len() {
-        if orig_idx < original_lines.len() && mod_idx < modified_lines.len() {
-            if original_lines[orig_idx] == modified_lines[mod_idx] {
-                diff.push_str(&format!(" {}\n", original_lines[orig_idx]));
-                orig_idx += 1;
-                mod_idx += 1;
-            } else {
-                diff.push_str(&format!("-{}\n", original_lines[orig_idx]));
-                diff.push_str(&format!("+{}\n", modified_lines[mod_idx]));
-                orig_idx += 1;
-                mod_idx += 1;
-            }
-        } else if orig_idx < original_lines.len() {
-            diff.push_str(&format!("-{}\n", original_lines[orig_idx]));
-            orig_idx += 1;
-        } else {
-            diff.push_str(&format!("+{}\n", modified_lines[mod_idx]));
-            mod_idx += 1;
-        }
-    }
-
-    diff
+    println!("{}{} [{}] (line {}- {})", indent, node.path, node.node_type, node.start_line, node.end_line);
 }
