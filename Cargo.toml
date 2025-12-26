@@ -29,3 +29,4 @@ thiserror = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 regex = "1.10"
 tree-sitter-javascript = "0.25.0"
+chrono = "0.4"

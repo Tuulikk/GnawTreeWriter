@@ -1,7 +1,8 @@
 use crate::parser::{get_parser, TreeNode};
 use anyhow::{Context, Result};
+use chrono::Utc;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub struct GnawTreeWriter {
     file_path: String,
@@ -41,6 +42,42 @@ impl GnawTreeWriter {
         })
     }
 
+    fn create_backup(&self) -> Result<PathBuf> {
+        let file_name = Path::new(&self.file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+
+        let timestamp = Utc::now().format("%Y%m%d_%H%M%S_%3f");
+        let backup_name = format!("{}_backup_{}.json", file_name, timestamp);
+
+        let backup_dir = self.get_backup_dir()?;
+        fs::create_dir_all(&backup_dir)?;
+
+        let backup_path = backup_dir.join(&backup_name);
+
+        let backup_data = serde_json::json!({
+            "file_path": self.file_path,
+            "timestamp": Utc::now().to_rfc3339(),
+            "tree": &self.tree,
+            "source_code": self.source_code
+        });
+
+        fs::write(&backup_path, serde_json::to_string_pretty(&backup_data)?)
+            .context(format!("Failed to write backup: {}", backup_path.display()))?;
+
+        Ok(backup_path)
+    }
+
+    fn get_backup_dir(&self) -> Result<PathBuf> {
+        let file_path = Path::new(&self.file_path);
+        let file_dir = file_path.parent()
+            .context("Cannot determine parent directory")?;
+
+        let backup_dir = file_dir.join(".gnawtreewriter_backups");
+        Ok(backup_dir)
+    }
+
     pub fn analyze(&self) -> &TreeNode {
         &self.tree
     }
@@ -52,6 +89,8 @@ impl GnawTreeWriter {
     }
 
     pub fn edit(&self, operation: EditOperation) -> Result<()> {
+        self.create_backup()?;
+
         let modified_code = match operation {
             EditOperation::Edit { node_path, content } => {
                 self.edit_node(&self.tree, &node_path, &content)?
@@ -68,6 +107,20 @@ impl GnawTreeWriter {
             .context(format!("Failed to write file: {}", self.file_path))?;
 
         Ok(())
+    }
+
+    pub fn preview_edit(&self, operation: EditOperation) -> Result<String> {
+        match operation {
+            EditOperation::Edit { node_path, content } => {
+                self.edit_node(&self.tree, &node_path, &content)
+            }
+            EditOperation::Insert { parent_path, position, content } => {
+                self.insert_node(&self.tree, &parent_path, position, &content)
+            }
+            EditOperation::Delete { node_path } => {
+                self.delete_node(&self.tree, &node_path)
+            }
+        }
     }
 
     fn find_node<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode> {
