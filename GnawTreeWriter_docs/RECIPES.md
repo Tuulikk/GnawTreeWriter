@@ -259,14 +259,60 @@ gnawtreewriter find . --content "width:"
 
 ### Recommended Workflow for LLMs
 
-1. **Analyze** the file to get the AST structure
-2. **Find** the relevant nodes using `find` command
+**Option 1: Fuzzy Editing (Recommended for LLMs)**
+
+Fuzzy editing allows LLMs to edit nodes without knowing exact paths:
+
+```bash
+# Edit by content query
+gnawtreewriter fuzzy-edit file.qml "title property" 'title: "New Title"'
+
+# Edit with type filter
+gnawtreewriter fuzzy-edit file.qml "red" 'color: "blue"' --node-type Property
+
+# Preview before applying
+gnawtreewriter fuzzy-edit file.qml "mainButton" 'text: "Click Me"' --preview
+```
+
+The fuzzy matching uses multiple strategies:
+- Content substring match (90 points)
+- Node type match (80 points)
+- Word match in content (30 points per word)
+- Prefix match (40 points)
+- Levenshtein similarity (up to 50 points)
+- First character match (15 points)
+
+**Option 2: Precise Path Editing**
+
+1. **Analyze** file to get AST structure
+2. **Find** relevant nodes using `find` command
 3. **Show** specific node content if needed
-4. **Preview** the edit using `--preview` flag
-5. **Apply** the edit if preview looks correct
+4. **Preview** edit using `--preview` flag
+5. **Apply** edit if preview looks correct
 
 ### Example LLM Prompt Structure
 
+```
+User: Add a "borderWidth" property set to 2 to the Rectangle in MainWindow.qml
+
+Assistant:
+Let me analyze the file and add the property using fuzzy editing:
+
+1. Find the Rectangle component:
+gnawtreewriter fuzzy-edit MainWindow.qml "Rectangle" ...
+
+Wait, I should insert, not edit. Let me find the path first:
+gnawtreewriter find MainWindow.qml --node-type Rectangle
+
+Found: root.2 [Rectangle:9-13]
+
+2. Insert the property (position 2 = as child):
+gnawtreewriter insert MainWindow.qml root.2 2 'borderWidth: 2'
+
+3. Preview the result:
+gnawtreewidth insert ... --preview
+
+4. Apply if correct.
 ```
 User: Add a "borderWidth" property set to 2 to the Rectangle in MainWindow.qml
 
