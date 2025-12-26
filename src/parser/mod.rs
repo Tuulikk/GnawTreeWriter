@@ -2,6 +2,8 @@ pub mod qml;
 pub mod python;
 pub mod rust;
 pub mod typescript;
+pub mod php;
+pub mod html;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -34,6 +36,8 @@ pub fn get_parser(file_path: &Path) -> Result<Box<dyn ParserEngine>> {
         "py" => Ok(Box::new(python::PythonParser::new())),
         "rs" => Ok(Box::new(rust::RustParser::new())),
         "ts" | "tsx" => Ok(Box::new(typescript::TypeScriptParser::new())),
+        "php" => Ok(Box::new(php::PhpParser::new())),
+        "html" | "htm" => Ok(Box::new(html::HtmlParser::new())),
         _ => Err(anyhow::anyhow!("Unsupported file extension: {}", extension)),
     }
 }
