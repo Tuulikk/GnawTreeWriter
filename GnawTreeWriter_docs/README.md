@@ -10,11 +10,6 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 - **LLM-optimized**: Structured edit requests and detailed context
 - **Batch operations**: Apply multiple edits simultaneously
 - **Comprehensive parsing**: Full AST tree structure for all languages
-- **Automatic backups**: Timestamped JSON backups before every edit
-- **Safe editing**: Preview changes with `--preview` flag
-- **Multi-file operations**: Analyze and lint multiple files at once
-- **Smart search**: Find nodes by type and content
-- **Human-friendly linting**: `file:line:col severity message` format
 
 ## Why Use GnawTreeWriter?
 
@@ -101,56 +96,7 @@ See [LLM_INTEGRATION.md](docs/LLM_INTEGRATION.md) for comprehensive guide on int
 Analyze file and show tree structure in JSON format.
 
 ```bash
-# Analyze single file
 gnawtreewriter analyze <file_path>
-
-# Analyze multiple files (supports wildcards)
-gnawtreewriter analyze *.qml
-
-# Analyze directory
-gnawtreewriter analyze app/ui/qml/
-
-# Get compact summary
-gnawtreewriter analyze <file_path> --format compact
-```
-
-### list
-List all nodes with their paths in a file.
-
-```bash
-# List all nodes
-gnawtreewriter list <file_path>
-
-# Filter by node type
-gnawtreewriter list <file_path> --filter-type Property
-```
-
-### find
-Find nodes matching criteria across files.
-
-```bash
-# Find by node type
-gnawtreewriter find <file_path> --node-type Property
-
-# Find by content
-gnawtreewriter find <file_path> --content "mainToolbar"
-
-# Find in directory
-gnawtreewriter find app/ui/qml/ --content "width:"
-```
-
-### lint
-Lint files and show issues with severity levels.
-
-```bash
-# Lint with human-readable output
-gnawtreewriter lint <file_path>
-
-# Lint directory
-gnawtreewriter lint app/ui/qml/
-
-# Get JSON output for CI
-gnawtreewriter lint app/ui/qml/ --format json
 ```
 
 **Output**: Complete AST tree with node types, paths, content, and line numbers.
@@ -168,18 +114,11 @@ gnawtreewriter show <file_path> <node_path>
 Edit a node's content.
 
 ```bash
-# Edit node directly
 gnawtreewriter edit <file_path> <node_path> <new_content>
-
-# Preview changes without applying
-gnawtreewriter edit <file_path> <node_path> <new_content> --preview
 ```
 
-**Backup**: Every edit automatically creates a timestamped JSON backup in `.gnawtreewriter_backups/`.
+Replaces the entire content of the node at `node_path` with `new_content`.
 
-**Output**: Success message (or error if node not found).
-
-Replaces entire content of node at `node_path` with `new_content`.
 ### insert
 Insert new content relative to a node.
 
@@ -225,14 +164,6 @@ root
 ## Architecture
 
 See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed technical documentation.
-
-### Additional Documentation
-
-- [Recipes](docs/RECIPES.md) - Common tasks and workflows
-- [QML Examples](docs/QML_EXAMPLES.md) - Step-by-step QML editing examples
-- [LLM Integration](docs/LLM_INTEGRATION.md) - Guide for language model integration
-- [Testing](docs/TESTING.md) - Testing strategies and examples
-- [Developer Report](docs/DEVELOPER_REPORT.md) - Feedback and improvement roadmap
 
 ## Examples
 
