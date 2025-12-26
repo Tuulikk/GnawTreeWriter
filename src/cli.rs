@@ -374,7 +374,7 @@ fn list_nodes_helper(node: &TreeNode, file_path: &str, filter_type: Option<&str>
     }
 }
 
-fn print_node(node: &TreeNode, file_path: &str, filter_type: Option<&str>, depth: usize) {
+fn print_node(node: &TreeNode, _file_path: &str, filter_type: Option<&str>, depth: usize) {
     if let Some(filter) = filter_type {
         if node.node_type != filter {
             return;
