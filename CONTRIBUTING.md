@@ -302,7 +302,7 @@ impl NewLanguageParser {
 ## Getting Help
 
 If you need help:
-- Check existing issues and discussions
+- Check existing issues and discussions at https://github.com/Tuulikk/GnawTreeWriter
 - Create a new issue for bugs
 - Start a discussion for questions
 - Join our community channels (future)

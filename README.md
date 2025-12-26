@@ -41,7 +41,7 @@ The binary will be at `target/release/gnawtreewriter`.
 ### Using cargo install (Recommended)
 
 ```bash
-cargo install --git https://github.com/Gnaw-Software/GnawTreeWriter.git
+cargo install --git https://github.com/Tuulikk/GnawTreeWriter.git
 ```
 
 ### From Binary Release (Future)
