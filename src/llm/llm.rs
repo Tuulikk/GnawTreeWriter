@@ -11,7 +11,7 @@ pub struct LLMEditRequest {
     pub intent: EditIntent,
 }
 
-/// The intent behind the edit request
+/// The intent behind edit request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum EditIntent {
@@ -67,9 +67,8 @@ pub fn process_llm_request(request: LLMEditRequest) -> Result<LLMResponse> {
     
     match request.intent {
         EditIntent::ReplaceNode { description, node_path, new_content } => {
-            let node_path_clone = node_path.clone();
-            writer.edit(EditOperation::Edit { node_path, content: new_content })?;
-            Ok(LLMResponse::success(format!("Replaced node at {}: {}", node_path_clone, description)))
+            writer.edit(EditOperation::Edit { node_path: node_path.clone(), content: new_content })?;
+            Ok(LLMResponse::success(format!("Replaced node at {}: {}", node_path, description)))
         }
         EditIntent::InsertBefore { description, node_path, content } => {
             let tree = writer.analyze();
@@ -188,7 +187,7 @@ fn get_sibling_content(tree: &TreeNode, node_path: &str) -> Vec<String> {
     Vec::new()
 }
 
-/// Create a map of all nodes in the tree for easy lookup
+/// Create a map of all nodes in tree for easy lookup
 pub fn create_node_map(tree: &TreeNode) -> HashMap<String, TreeNode> {
     let mut map = HashMap::new();
     build_node_map(tree, &mut map);
