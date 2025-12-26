@@ -428,60 +428,21 @@ fn find_in_directory(dir: &Path, node_type: Option<&str>, content: Option<&str>)
     Ok(())
 }
 
-fn add_property(file_path: &str, query: &str, property: &str, preview: bool) -> Result<()> {
+fn add_property(file_path: &str, node_path: &str, property: &str, preview: bool) -> Result<()> {
     let writer = GnawTreeWriter::new(file_path)?;
-    let tree = writer.analyze();
+    let original = std::fs::read_to_string(file_path)?;
 
-    let query_lower = query.to_lowercase();
-    let mut candidates = Vec::new();
-
-    let qml_types = ["rectangle", "button", "applicationwindow", "text", "image",
-                     "mousearea", "flickable", "listview", "item", "loader",
-                     "column", "row", "grid", "stack", "textfield", "textarea",
-                     "checkbox", "radiobutton", "slider", "progressbar"];
-
-    collect_component_candidates(tree, &query_lower, &qml_types, &mut candidates);
-
-    if candidates.is_empty() {
-        eprintln!("No QML components found for query: {}", query);
-        eprintln!("Try searching for: Rectangle, Button, ApplicationWindow, Text, etc.");
-        return Ok(());
-    }
-
-    candidates.sort_by(|a, b| {
-        b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    let best = &candidates[0];
-
-    if candidates.len() > 1 && (candidates[1].score - best.score).abs() < 10.0 {
-        println!("Found {} matches for \"{}\":", candidates.len(), query);
-        for (i, cand) in candidates.iter().take(5).enumerate() {
-            println!("  {}. {} [{}:{}{}] - {:.1}% match - {}",
-                i + 1,
-                cand.path,
-                cand.node_type,
-                cand.line,
-                if cand.content.len() > 50 { "" } else { "" },
-                cand.score,
-                cand.match_reason
-            );
-        }
-        println!("Using best match: {}", best.path);
-        println!();
-    } else {
-        println!("Matched: {} [{}:] - {:.1}% ({})",
-            best.path,
-            best.node_type,
-            best.score,
-            best.match_reason
-        );
+    let is_qml = file_path.to_lowercase().ends_with(".qml");
+    if is_qml {
+        eprintln!("Note: For QML files, add-property inserts after existing properties.");
+        eprintln!("If component has nested elements, this may place property incorrectly.");
+        eprintln!("Use 'list' or 'find' to locate the correct path, then use 'insert' with position 2.");
+        eprintln!();
     }
 
     if preview {
-        let original = std::fs::read_to_string(file_path)?;
         let modified = writer.preview_edit(EditOperation::Insert {
-            parent_path: best.path.clone(),
+            parent_path: node_path.to_string(),
             position: 2,
             content: property.to_string(),
         })?;
@@ -489,27 +450,14 @@ fn add_property(file_path: &str, query: &str, property: &str, preview: bool) -> 
         println!("{}", diff);
     } else {
         writer.edit(EditOperation::Insert {
-            parent_path: best.path.clone(),
+            parent_path: node_path.to_string(),
             position: 2,
             content: property.to_string(),
         })?;
-        println!("Added property '{}' to {}", property, best.path);
+        println!("Added property '{}' to {}", property, node_path);
     }
 
     Ok(())
-}
-
-fn collect_component_candidates(tree: &TreeNode, query: &str, qml_types: &[&str], candidates: &mut Vec<MatchCandidate>) {
-    let node_type_lower = tree.node_type.to_lowercase();
-    let is_qml_component = qml_types.iter().any(|t| node_type_lower == *t);
-
-    if tree.path != "root" && is_qml_component {
-        evaluate_node(tree, query, candidates);
-    }
-
-    for child in &tree.children {
-        collect_component_candidates(child, query, qml_types, candidates);
-    }
 }
 
 fn fuzzy_edit(file_path: &str, query: &str, new_content: &str, preview: bool, filter_type: Option<&str>) -> Result<()> {

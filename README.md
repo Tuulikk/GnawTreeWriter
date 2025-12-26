@@ -31,6 +31,29 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 - **Deterministic results**: Same input always produces same output
 - **Context-aware**: LLM can understand surrounding code structure
 
+## Known Limitations
+
+### QML Parser Path Duplication
+
+The QML parser has a known issue where nested components may receive duplicate paths in certain structures. For complex QML files with multiple levels of nesting:
+
+- Use `list` or `find` with `--node-type` to identify the correct path
+- Use `insert` with `position 2` instead of `add-property` for precise control
+- For QML files, fuzzy-search (`fuzzy-edit`) may match incorrect components
+
+**Workaround:**
+```bash
+# Find the exact component path
+gnawtreewriter list app.qml --filter-type Rectangle
+
+# Then use insert with the exact path
+gnawtreewriter insert app.qml root.1 2 'borderWidth: 5'
+```
+
+This limitation does not affect other languages (Python, Rust, TypeScript, etc.).
+
+---
+
 ## Installation
 
 ### From Source
