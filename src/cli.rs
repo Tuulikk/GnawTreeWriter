@@ -57,6 +57,18 @@ enum Commands {
         #[arg(short, long)]
         node_type: Option<String>,
     },
+    /// Add property to QML component
+    AddProperty {
+        /// Path to QML file
+        file_path: String,
+        /// Query to find component (fuzzy)
+        query: String,
+        /// Property to add (e.g., "borderWidth: 2")
+        property: String,
+        /// Preview changes without applying them
+        #[arg(short, long)]
+        preview: bool,
+    },
     /// Lint files and show issues with severity levels
     Lint {
         /// Path to file or directory
@@ -134,6 +146,9 @@ impl Cli {
             Commands::FuzzyEdit { file_path, query, content, preview, node_type } => {
                 fuzzy_edit(&file_path, &query, &content, preview, node_type.as_deref())?;
             }
+            Commands::AddProperty { file_path, query, property, preview } => {
+                add_property(&file_path, &query, &property, preview)?;
+            }
             Commands::Find { paths, node_type, content } => {
                 if paths.is_empty() {
                     eprintln!("Error: No paths provided");
@@ -190,9 +205,13 @@ impl Cli {
             Commands::Edit { file_path, node_path, content, preview } => {
                 if preview {
                     let writer = GnawTreeWriter::new(&file_path)?;
-                    let modified = writer.preview_edit(EditOperation::Edit { node_path, content })?;
-                    println!("Preview of changes:");
-                    println!("{}", modified);
+                    let original = std::fs::read_to_string(&file_path)?;
+                    let modified = writer.preview_edit(EditOperation::Edit {
+                        node_path,
+                        content: content.clone(),
+                    })?;
+                    let diff = generate_diff(&original, &modified, &file_path);
+                    println!("{}", diff);
                 } else {
                     let writer = GnawTreeWriter::new(&file_path)?;
                     writer.edit(EditOperation::Edit { node_path, content })?;
@@ -409,6 +428,90 @@ fn find_in_directory(dir: &Path, node_type: Option<&str>, content: Option<&str>)
     Ok(())
 }
 
+fn add_property(file_path: &str, query: &str, property: &str, preview: bool) -> Result<()> {
+    let writer = GnawTreeWriter::new(file_path)?;
+    let tree = writer.analyze();
+
+    let query_lower = query.to_lowercase();
+    let mut candidates = Vec::new();
+
+    let qml_types = ["rectangle", "button", "applicationwindow", "text", "image",
+                     "mousearea", "flickable", "listview", "item", "loader",
+                     "column", "row", "grid", "stack", "textfield", "textarea",
+                     "checkbox", "radiobutton", "slider", "progressbar"];
+
+    collect_component_candidates(tree, &query_lower, &qml_types, &mut candidates);
+
+    if candidates.is_empty() {
+        eprintln!("No QML components found for query: {}", query);
+        eprintln!("Try searching for: Rectangle, Button, ApplicationWindow, Text, etc.");
+        return Ok(());
+    }
+
+    candidates.sort_by(|a, b| {
+        b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let best = &candidates[0];
+
+    if candidates.len() > 1 && (candidates[1].score - best.score).abs() < 10.0 {
+        println!("Found {} matches for \"{}\":", candidates.len(), query);
+        for (i, cand) in candidates.iter().take(5).enumerate() {
+            println!("  {}. {} [{}:{}{}] - {:.1}% match - {}",
+                i + 1,
+                cand.path,
+                cand.node_type,
+                cand.line,
+                if cand.content.len() > 50 { "" } else { "" },
+                cand.score,
+                cand.match_reason
+            );
+        }
+        println!("Using best match: {}", best.path);
+        println!();
+    } else {
+        println!("Matched: {} [{}:] - {:.1}% ({})",
+            best.path,
+            best.node_type,
+            best.score,
+            best.match_reason
+        );
+    }
+
+    if preview {
+        let original = std::fs::read_to_string(file_path)?;
+        let modified = writer.preview_edit(EditOperation::Insert {
+            parent_path: best.path.clone(),
+            position: 2,
+            content: property.to_string(),
+        })?;
+        let diff = generate_diff(&original, &modified, file_path);
+        println!("{}", diff);
+    } else {
+        writer.edit(EditOperation::Insert {
+            parent_path: best.path.clone(),
+            position: 2,
+            content: property.to_string(),
+        })?;
+        println!("Added property '{}' to {}", property, best.path);
+    }
+
+    Ok(())
+}
+
+fn collect_component_candidates(tree: &TreeNode, query: &str, qml_types: &[&str], candidates: &mut Vec<MatchCandidate>) {
+    let node_type_lower = tree.node_type.to_lowercase();
+    let is_qml_component = qml_types.iter().any(|t| node_type_lower == *t);
+
+    if tree.path != "root" && is_qml_component {
+        evaluate_node(tree, query, candidates);
+    }
+
+    for child in &tree.children {
+        collect_component_candidates(child, query, qml_types, candidates);
+    }
+}
+
 fn fuzzy_edit(file_path: &str, query: &str, new_content: &str, preview: bool, filter_type: Option<&str>) -> Result<()> {
     let writer = GnawTreeWriter::new(file_path)?;
     let tree = writer.analyze();
@@ -437,7 +540,7 @@ fn fuzzy_edit(file_path: &str, query: &str, new_content: &str, preview: bool, fi
                 cand.path,
                 cand.node_type,
                 cand.line,
-                if cand.line != cand.line { "" } else { "" },
+                if cand.content.len() > 50 { "" } else { "" },
                 if cand.content.len() > 50 { format!("{}...", &cand.content[..50]) } else { cand.content.clone() },
                 cand.score,
                 cand.match_reason
@@ -457,12 +560,13 @@ fn fuzzy_edit(file_path: &str, query: &str, new_content: &str, preview: bool, fi
     }
 
     if preview {
+        let original = std::fs::read_to_string(file_path)?;
         let modified = writer.preview_edit(EditOperation::Edit {
             node_path: best.path.clone(),
             content: new_content.to_string(),
         })?;
-        println!("Preview of changes:");
-        println!("{}", modified);
+        let diff = generate_diff(&original, &modified, file_path);
+        println!("{}", diff);
     } else {
         writer.edit(EditOperation::Edit {
             node_path: best.path.clone(),
@@ -663,4 +767,39 @@ fn count_nodes(tree: &TreeNode) -> usize {
 
 fn is_supported_extension(ext: &str) -> bool {
     matches!(ext.to_lowercase().as_str(), "qml" | "py" | "rs" | "ts" | "tsx" | "js" | "php" | "html")
+}
+
+fn generate_diff(original: &str, modified: &str, file_path: &str) -> String {
+    let original_lines: Vec<&str> = original.lines().collect();
+    let modified_lines: Vec<&str> = modified.lines().collect();
+
+    let mut diff = String::new();
+    let mut orig_idx = 0;
+    let mut mod_idx = 0;
+
+    diff.push_str(&format!("--- a/{}\n", file_path));
+    diff.push_str(&format!("+++ b/{}\n", file_path));
+
+    while orig_idx < original_lines.len() || mod_idx < modified_lines.len() {
+        if orig_idx < original_lines.len() && mod_idx < modified_lines.len() {
+            if original_lines[orig_idx] == modified_lines[mod_idx] {
+                diff.push_str(&format!(" {}\n", original_lines[orig_idx]));
+                orig_idx += 1;
+                mod_idx += 1;
+            } else {
+                diff.push_str(&format!("-{}\n", original_lines[orig_idx]));
+                diff.push_str(&format!("+{}\n", modified_lines[mod_idx]));
+                orig_idx += 1;
+                mod_idx += 1;
+            }
+        } else if orig_idx < original_lines.len() {
+            diff.push_str(&format!("-{}\n", original_lines[orig_idx]));
+            orig_idx += 1;
+        } else {
+            diff.push_str(&format!("+{}\n", modified_lines[mod_idx]));
+            mod_idx += 1;
+        }
+    }
+
+    diff
 }

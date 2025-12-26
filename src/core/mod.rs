@@ -151,15 +151,29 @@ impl GnawTreeWriter {
         let parent = self.find_node(tree, parent_path)
             .context(format!("Parent node not found at path: {}", parent_path))?;
 
+        let lines: Vec<&str> = self.source_code.lines().collect();
+        let mut new_lines = lines.clone();
+
         let insert_pos = match position {
             0 => parent.start_line - 1,
             1 => parent.end_line,
-            2 => parent.end_line - 1,
+            2 => {
+                let mut last_property_end = parent.start_line;
+
+                for child in &parent.children {
+                    if child.node_type == "Property" && child.end_line < parent.end_line {
+                        last_property_end = child.end_line;
+                    }
+                }
+
+                if last_property_end == parent.start_line {
+                    last_property_end = parent.start_line + 1;
+                }
+
+                last_property_end
+            }
             _ => return Err(anyhow::anyhow!("Invalid position: {}", position)),
         };
-
-        let lines: Vec<&str> = self.source_code.lines().collect();
-        let mut new_lines = lines.clone();
 
         if insert_pos >= new_lines.len() {
             new_lines.push(content);
