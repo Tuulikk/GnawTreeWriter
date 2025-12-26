@@ -139,6 +139,30 @@ gnawtreewriter find <file_path> --content "mainToolbar"
 gnawtreewriter find app/ui/qml/ --content "width:"
 ```
 
+### fuzzy-edit
+Fuzzy edit - find and edit node without exact path. Ideal for LLM integration.
+
+```bash
+# Edit by content query
+gnawtreewriter fuzzy-edit <file_path> <query> <new_content>
+
+# With node type filter
+gnawtreewriter fuzzy-edit <file_path> <query> <new_content> --node-type Property
+
+# Preview before applying
+gnawtreewriter fuzzy-edit <file_path> <query> <new_content> --preview
+```
+
+The fuzzy matcher uses multiple strategies:
+- Content substring match
+- Node type match
+- Word match in content
+- Prefix match
+- Levenshtein similarity
+- First character match
+
+If multiple nodes have similar scores, fuzzy-edit will show all candidates and use the best match.
+
 ### lint
 Lint files and show issues with severity levels.
 

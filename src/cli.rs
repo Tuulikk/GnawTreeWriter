@@ -42,6 +42,21 @@ enum Commands {
         #[arg(short, long)]
         content: Option<String>,
     },
+    /// Fuzzy edit - find and edit node without exact path
+    FuzzyEdit {
+        /// Path to file
+        file_path: String,
+        /// Fuzzy search query (type, content, or description)
+        query: String,
+        /// New content/code snippet
+        content: String,
+        /// Preview changes without applying them
+        #[arg(short, long)]
+        preview: bool,
+        /// Filter by node type for more precise matching
+        #[arg(short, long)]
+        node_type: Option<String>,
+    },
     /// Lint files and show issues with severity levels
     Lint {
         /// Path to file or directory
@@ -115,6 +130,9 @@ impl Cli {
                 let writer = GnawTreeWriter::new(&file_path)?;
                 let tree = writer.analyze();
                 list_nodes(tree, &file_path, filter_type.as_deref());
+            }
+            Commands::FuzzyEdit { file_path, query, content, preview, node_type } => {
+                fuzzy_edit(&file_path, &query, &content, preview, node_type.as_deref())?;
             }
             Commands::Find { paths, node_type, content } => {
                 if paths.is_empty() {
@@ -205,6 +223,35 @@ struct LintIssue {
     severity: String,
     message: String,
     suggestion: String,
+}
+
+#[derive(Debug, Clone)]
+struct MatchCandidate {
+    path: String,
+    node_type: String,
+    content: String,
+    line: usize,
+    score: f64,
+    match_reason: String,
+}
+
+impl MatchCandidate {
+    fn new(path: String, node_type: String, content: String, line: usize) -> Self {
+        Self {
+            path,
+            node_type,
+            content,
+            line,
+            score: 0.0,
+            match_reason: String::new(),
+        }
+    }
+
+    fn with_score(mut self, score: f64, reason: String) -> Self {
+        self.score = score;
+        self.match_reason = reason;
+        self
+    }
 }
 
 fn lint_path(path: &str, issues: &mut Vec<LintIssue>) -> Result<()> {
@@ -360,6 +407,173 @@ fn find_in_directory(dir: &Path, node_type: Option<&str>, content: Option<&str>)
     }
 
     Ok(())
+}
+
+fn fuzzy_edit(file_path: &str, query: &str, new_content: &str, preview: bool, filter_type: Option<&str>) -> Result<()> {
+    let writer = GnawTreeWriter::new(file_path)?;
+    let tree = writer.analyze();
+
+    let query_lower = query.to_lowercase();
+    let mut candidates = Vec::new();
+
+    collect_candidates(tree, &query_lower, filter_type, &mut candidates);
+
+    if candidates.is_empty() {
+        eprintln!("No matches found for query: {}", query);
+        return Ok(());
+    }
+
+    candidates.sort_by(|a, b| {
+        b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let best = &candidates[0];
+
+    if candidates.len() > 1 && (candidates[1].score - best.score).abs() < 10.0 {
+        println!("Found {} matches for \"{}\":", candidates.len(), query);
+        for (i, cand) in candidates.iter().take(5).enumerate() {
+            println!("  {}. {} [{}:{}{}] {} - {:.1}% match - {}",
+                i + 1,
+                cand.path,
+                cand.node_type,
+                cand.line,
+                if cand.line != cand.line { "" } else { "" },
+                if cand.content.len() > 50 { format!("{}...", &cand.content[..50]) } else { cand.content.clone() },
+                cand.score,
+                cand.match_reason
+            );
+        }
+        println!("Using best match: {}", best.path);
+        println!();
+    } else {
+        println!("Matched: {} [{}:{}{}] - {:.1}% ({})",
+            best.path,
+            best.node_type,
+            best.line,
+            if best.content.len() > 50 { "" } else { "" },
+            best.score,
+            best.match_reason
+        );
+    }
+
+    if preview {
+        let modified = writer.preview_edit(EditOperation::Edit {
+            node_path: best.path.clone(),
+            content: new_content.to_string(),
+        })?;
+        println!("Preview of changes:");
+        println!("{}", modified);
+    } else {
+        writer.edit(EditOperation::Edit {
+            node_path: best.path.clone(),
+            content: new_content.to_string(),
+        })?;
+        println!("Edited successfully");
+    }
+
+    Ok(())
+}
+
+fn collect_candidates(tree: &TreeNode, query: &str, filter_type: Option<&str>, candidates: &mut Vec<MatchCandidate>) {
+    if let Some(filter) = filter_type {
+        if tree.node_type == filter {
+            evaluate_node(tree, query, candidates);
+        }
+    } else {
+        evaluate_node(tree, query, candidates);
+    }
+
+    for child in &tree.children {
+        collect_candidates(child, query, filter_type, candidates);
+    }
+}
+
+fn evaluate_node(node: &TreeNode, query: &str, candidates: &mut Vec<MatchCandidate>) {
+    if node.path == "root" {
+        return;
+    }
+
+    let content_lower = node.content.to_lowercase();
+    let node_type_lower = node.node_type.to_lowercase();
+
+    let mut score = 0.0;
+    let mut reasons: Vec<String> = Vec::new();
+
+    if content_lower.contains(query) {
+        score += 90.0;
+        reasons.push("content match".to_string());
+    }
+
+    if node_type_lower.contains(query) {
+        score += 80.0;
+        reasons.push("type match".to_string());
+    }
+
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let content_words: Vec<&str> = content_lower.split_whitespace().collect();
+
+    for word in &words {
+        if content_words.iter().any(|cw| cw.contains(word)) {
+            score += 30.0;
+            reasons.push(format!("word match: {}", word));
+        }
+    }
+
+    if !node.content.trim().is_empty() && content_lower.starts_with(query) {
+        score += 40.0;
+        reasons.push("prefix match".to_string());
+    }
+
+    let distance = levenshtein_distance(&content_lower, query);
+    let max_len = content_lower.len().max(query.len());
+    if max_len > 0 {
+        let similarity = 1.0 - (distance as f64 / max_len as f64);
+        if similarity > 0.7 {
+            score += similarity * 50.0;
+            reasons.push(format!("similarity: {:.1}%", similarity * 100.0));
+        }
+    }
+
+    if !node.content.trim().is_empty() && content_lower.starts_with(query.chars().next().unwrap_or(' ')) {
+        score += 15.0;
+        reasons.push("first char match".to_string());
+    }
+
+    if score > 0.0 {
+        let reason = if reasons.len() > 2 {
+            format!("{}, and {} more", reasons.join(", "), reasons.len() - 2)
+        } else {
+            reasons.join(", ")
+        };
+
+        candidates.push(MatchCandidate::new(
+            node.path.clone(),
+            node.node_type.clone(),
+            node.content.clone(),
+            node.start_line,
+        ).with_score(score.min(100.0), reason));
+    }
+}
+
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    if a.is_empty() { return b.len(); }
+    if b.is_empty() { return a.len(); }
+
+    let mut prev_row: Vec<usize> = (0..=b.len()).collect();
+
+    for (i, a_char) in a.chars().enumerate() {
+        let mut curr_row = vec![i];
+
+        for (j, b_char) in b.chars().enumerate() {
+            let cost = if a_char == b_char { 0 } else { 1 };
+            let min_val = (curr_row[j] + 1).min(prev_row[j + 1] + 1).min(prev_row[j] + cost);
+            curr_row.push(min_val);
+        }
+
+        prev_row = curr_row;
+    }
+
+    prev_row[b.len()]
 }
 
 fn find_in_tree(tree: &TreeNode, file_path: &str, node_type: Option<&str>, content: Option<&str>) {
