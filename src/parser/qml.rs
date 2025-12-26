@@ -11,7 +11,85 @@ impl QmlParser {
 
 impl ParserEngine for QmlParser {
     fn parse(&self, code: &str) -> Result<TreeNode> {
-        Ok(self.parse_qml(code, "root".to_string(), 1)?)
+        let mut root = TreeNode {
+            id: "root".to_string(),
+            path: "root".to_string(),
+            node_type: "QmlDocument".to_string(),
+            content: code.to_string(),
+            start_line: 1,
+            end_line: code.lines().count(),
+            children: Vec::new(),
+        };
+
+        let lines: Vec<&str> = code.lines().collect();
+        let mut current_component: Option<(TreeNode, Vec<TreeNode>)> = None;
+        let mut component_stack: Vec<(TreeNode, Vec<TreeNode>, usize)> = Vec::new();
+
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            let depth = line.len() - trimmed.len();
+
+            if trimmed.starts_with("import ") {
+                root.children.push(TreeNode {
+                    id: format!("root.{}", root.children.len()),
+                    path: format!("root.{}", root.children.len()),
+                    node_type: "Import".to_string(),
+                    content: trimmed.to_string(),
+                    start_line: i + 1,
+                    end_line: i + 1,
+                    children: Vec::new(),
+                });
+            } else if trimmed.ends_with("{") {
+                let component_name = trimmed[..trimmed.len() - 1].trim();
+                if !component_name.is_empty() {
+                    let component = TreeNode {
+                        id: format!("root.{}", root.children.len()),
+                        path: format!("root.{}", root.children.len()),
+                        node_type: component_name.to_string(),
+                        content: String::new(),
+                        start_line: i + 1,
+                        end_line: i + 1,
+                        children: Vec::new(),
+                    };
+                    
+                    if let Some((comp, props)) = current_component {
+                        component_stack.push((comp, props, depth));
+                    }
+                    
+                    current_component = Some((component, Vec::new()));
+                }
+            } else if trimmed.starts_with("}") {
+                if let Some((comp, props, _comp_depth)) = component_stack.pop() {
+                    if let Some((ref mut root_comp, ref mut root_props)) = current_component {
+                        root_comp.children = root_props.clone();
+                        root_comp.end_line = i + 1;
+                        root.children.push(std::mem::take(root_comp));
+                    }
+                    current_component = Some((comp, props));
+                } else if let Some((ref mut comp, ref mut props)) = current_component {
+                    comp.children = props.clone();
+                    comp.end_line = i + 1;
+                    root.children.push(std::mem::take(comp));
+                    current_component = None;
+                }
+            } else if !trimmed.is_empty() && !trimmed.starts_with("//") {
+                if let Some((ref mut comp, ref mut props)) = current_component {
+                    if let Some((prop_name, prop_value)) = self.parse_property(trimmed) {
+                        props.push(TreeNode {
+                            id: format!("root.{}.{}", root.children.len(), props.len()),
+                            path: format!("root.{}.{}", root.children.len(), props.len()),
+                            node_type: "Property".to_string(),
+                            content: format!("{}: {}", prop_name, prop_value),
+                            start_line: i + 1,
+                            end_line: i + 1,
+                            children: Vec::new(),
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(root)
     }
 
     fn get_supported_extensions(&self) -> Vec<&'static str> {
@@ -20,136 +98,14 @@ impl ParserEngine for QmlParser {
 }
 
 impl QmlParser {
-    fn parse_qml(&self, code: &str, path: String, line: usize) -> Result<TreeNode> {
-        let lines: Vec<&str> = code.lines().collect();
-        let mut children = Vec::new();
-        let mut current_content = String::new();
-        let mut depth = 0;
-        let start_line = line;
-
-        for (i, line_content) in lines.iter().enumerate() {
-            let actual_line = line + i;
-            let trimmed = line_content.trim_start();
-            let new_depth = line_content.len() - trimmed.len();
-
-            if trimmed.is_empty() || trimmed.starts_with("//") {
-                continue;
-            }
-
-            if trimmed.starts_with("}") {
-                if depth > 0 {
-                    depth -= 2;
-                }
-                continue;
-            }
-
-            if trimmed.ends_with("{") {
-                let component_name = trimmed[..trimmed.len() - 1].trim();
-                if !component_name.is_empty() {
-                    let child_path = format!("{}.{}", path, children.len());
-                    let mut subtree = self.parse_nested_qml(
-                        &lines[i + 1..],
-                        child_path.clone(),
-                        actual_line + 1,
-                        new_depth + 2,
-                    )?;
-
-                    subtree.node_type = component_name.to_string();
-                    children.push(subtree);
-                }
-                continue;
-            }
-
-            if !current_content.is_empty() {
-                current_content.push('\n');
-            }
-            current_content.push_str(line_content);
-        }
-
-        Ok(TreeNode {
-            id: path.clone(),
-            path,
-            node_type: "QmlDocument".to_string(),
-            content: current_content,
-            start_line,
-            end_line: line + lines.len(),
-            children,
-        })
-    }
-
-    fn parse_nested_qml(
-        &self,
-        lines: &[&str],
-        path: String,
-        line: usize,
-        target_depth: usize,
-    ) -> Result<TreeNode> {
-        let mut children = Vec::new();
-        let mut properties = Vec::new();
-        let mut current_content = String::new();
-        let start_line = line;
-        let mut i = 0;
-
-        while i < lines.len() {
-            let line_content = lines[i].to_string();
-            let trimmed = line_content.trim_start();
-            let current_depth = line_content.len() - trimmed.len();
-
-            if trimmed.is_empty() || trimmed.starts_with("//") {
-                i += 1;
-                continue;
-            }
-
-            if trimmed.starts_with("}") && current_depth == target_depth - 2 {
-                break;
-            }
-
-            if current_depth == target_depth {
-                if trimmed.ends_with("{") {
-                    let component_name = trimmed[..trimmed.len() - 1].trim();
-                    let child_path = format!("{}.{}", path, children.len());
-                    let subtree = self.parse_nested_qml(
-                        &lines[i + 1..],
-                        child_path.clone(),
-                        line + i + 1,
-                        target_depth + 2,
-                    )?;
-                    
-                    let mut result = subtree;
-                    result.node_type = component_name.to_string();
-                    children.push(result);
-                    
-                    i += 1;
-                    while i < lines.len() {
-                        let d = lines[i].len() - lines[i].trim_start().len();
-                        if d < target_depth + 2 {
-                            break;
-                        }
-                        i += 1;
-                    }
-                } else {
-                    properties.push(line_content.clone());
-                    if !current_content.is_empty() {
-                        current_content.push('\n');
-                    }
-                    current_content.push_str(&line_content);
-                    i += 1;
-                }
-            } else if current_depth > target_depth {
-                i += 1;
-            } else {
-                break;
+    fn parse_property(&self, line: &str) -> Option<(String, String)> {
+        if let Some(colon_pos) = line.find(':') {
+            let name = line[..colon_pos].trim().to_string();
+            let value = line[colon_pos + 1..].trim().to_string();
+            if !name.is_empty() && !value.is_empty() {
+                return Some((name, value));
             }
         }
-
-        Ok(TreeNode {
-            id: path.clone(),
-            path,
-            node_type: "Component".to_string(),
-            content: current_content,
-            start_line,
-            end_line: line + i,
-            children,
-        })
+        None
     }
 }
