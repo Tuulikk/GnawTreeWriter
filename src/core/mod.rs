@@ -239,4 +239,7 @@ impl GnawTreeWriter {
 
         Ok(new_lines.join("\n"))
     }
+    pub fn get_source(&self) -> &str {
+            &self.source_code
+        }
 }

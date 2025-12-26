@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use crate::core::{GnawTreeWriter, EditOperation};
 use crate::parser::TreeNode;
+use similar::{ChangeTag, TextDiff};
 
 #[derive(Parser)]
 #[command(name = "gnawtreewriter")]
@@ -44,11 +45,15 @@ enum Commands {
         parent_path: String,
         position: usize,
         content: String,
+        #[arg(short, long)]
+        preview: bool,
     },
     /// Delete a node
     Delete {
         file_path: String,
         node_path: String,
+        #[arg(short, long)]
+        preview: bool,
     },
     /// QML-specific: Add a property to a component
     AddProperty {
@@ -57,6 +62,18 @@ enum Commands {
         name: String,
         r#type: String,
         value: String,
+        #[arg(short, long)]
+        preview: bool,
+    },
+    /// QML-specific: Add a child component
+    AddComponent {
+        file_path: String,
+        target_path: String,
+        name: String,
+        #[arg(short, long)]
+        content: Option<String>,
+        #[arg(short, long)]
+        preview: bool,
     },
 }
 
@@ -82,32 +99,83 @@ impl Cli {
             }
             Commands::Edit { file_path, node_path, content, preview } => {
                 let writer = GnawTreeWriter::new(&file_path)?;
+                let op = EditOperation::Edit { node_path, content };
                 if preview {
-                    println!("{}", writer.preview_edit(EditOperation::Edit { node_path, content })?);
+                    let modified = writer.preview_edit(op)?;
+                    print_diff(writer.get_source(), &modified);
                 } else {
-                    writer.edit(EditOperation::Edit { node_path, content })?;
+                    writer.edit(op)?;
                 }
             }
-            Commands::Insert { file_path, parent_path, position, content } => {
+            Commands::Insert { file_path, parent_path, position, content, preview } => {
                 let writer = GnawTreeWriter::new(&file_path)?;
-                writer.edit(EditOperation::Insert { parent_path, position, content })?;
+                let op = EditOperation::Insert { parent_path, position, content };
+                if preview {
+                    let modified = writer.preview_edit(op)?;
+                    print_diff(writer.get_source(), &modified);
+                } else {
+                    writer.edit(op)?;
+                }
             }
-            Commands::Delete { file_path, node_path } => {
+            Commands::Delete { file_path, node_path, preview } => {
                 let writer = GnawTreeWriter::new(&file_path)?;
-                writer.edit(EditOperation::Delete { node_path })?;
+                let op = EditOperation::Delete { node_path };
+                if preview {
+                    let modified = writer.preview_edit(op)?;
+                    print_diff(writer.get_source(), &modified);
+                } else {
+                    writer.edit(op)?;
+                }
             }
-            Commands::AddProperty { file_path, target_path, name, r#type, value } => {
+            Commands::AddProperty { file_path, target_path, name, r#type, value, preview } => {
                 let writer = GnawTreeWriter::new(&file_path)?;
                 let property_code = format!("property {} {}: {}", r#type, name, value);
-                writer.edit(EditOperation::Insert { 
+                let op = EditOperation::Insert { 
                     parent_path: target_path.clone(), 
-                    position: 2, // After existing properties
+                    position: 2, 
                     content: property_code 
-                })?;
-                println!("Successfully added property '{}' to {}", name, target_path);
+                };
+                if preview {
+                    let modified = writer.preview_edit(op)?;
+                    print_diff(writer.get_source(), &modified);
+                } else {
+                    writer.edit(op)?;
+                    println!("Successfully added property '{}' to {}", name, target_path);
+                }
+            }
+            Commands::AddComponent { file_path, target_path, name, content, preview } => {
+                let writer = GnawTreeWriter::new(&file_path)?;
+                let component_code = match content {
+                    Some(c) => format!("{} {{\n    {}\n}}", name, c),
+                    None => format!("{} {{}}\n", name),
+                };
+                let op = EditOperation::Insert { 
+                    parent_path: target_path.clone(), 
+                    position: 1, 
+                    content: component_code 
+                };
+                if preview {
+                    let modified = writer.preview_edit(op)?;
+                    print_diff(writer.get_source(), &modified);
+                } else {
+                    writer.edit(op)?;
+                    println!("Successfully added component '{}' to {}", name, target_path);
+                }
             }
         }
         Ok(())
+    }
+}
+
+fn print_diff(old: &str, new: &str) {
+    let diff = TextDiff::from_lines(old, new);
+    for change in diff.iter_all_changes() {
+        let sign = match change.tag() {
+            ChangeTag::Delete => "-",
+            ChangeTag::Insert => "+",
+            ChangeTag::Equal => " ",
+        };
+        print!("{}{}", sign, change);
     }
 }
 
@@ -130,5 +198,5 @@ fn print_node(node: &TreeNode, depth: usize, filter_type: Option<&str>) {
         if node.node_type != f { return; }
     }
     let indent = "  ".repeat(depth);
-    println!("{}{} [{}] (line {}- {})", indent, node.path, node.node_type, node.start_line, node.end_line);
+    println!("{}{} [{}] (line {}-{})", indent, node.path, node.node_type, node.start_line, node.end_line);
 }

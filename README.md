@@ -91,6 +91,7 @@ See [LLM_INTEGRATION.md](docs/LLM_INTEGRATION.md) for comprehensive guide on int
 | Language | Extension | Parser | Status |
 |-----------|-----------|---------|---------|
 | QML | `.qml` | TreeSitter | ✅ Stable |
+| Go | `.go` | TreeSitter | ✅ Stable |
 | Python | `.py` | TreeSitter | ✅ Stable |
 | Rust | `.rs` | TreeSitter | ✅ Stable |
 | TypeScript | `.ts`, `.tsx` | TreeSitter | ✅ Stable |
@@ -120,6 +121,17 @@ gnawtreewriter add-property <file_path> <target_path> <name> <type> <value>
 # Example: Add property to Rectangle
 gnawtreewriter add-property app.qml "0.1" myProp string "'hello'"
 ```
+
+### add-component
+QML-specific command to safely add a child component.
+
+```bash
+gnawtreewriter add-component <file_path> <target_path> <component_name> [--content "props"]
+
+# Example: Add a Button inside a Rectangle
+gnawtreewriter add-component app.qml "0.1" Button --content "text: 'Click me'"
+```
+
 
 
 ### list

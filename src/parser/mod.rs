@@ -5,6 +5,7 @@ pub mod rust;
 pub mod typescript;
 pub mod php;
 pub mod html;
+pub mod go;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,7 @@ pub fn get_parser(file_path: &Path) -> Result<Box<dyn ParserEngine>> {
         "ts" | "tsx" => Ok(Box::new(typescript::TypeScriptParser::new())),
         "php" => Ok(Box::new(php::PhpParser::new())),
         "html" | "htm" => Ok(Box::new(html::HtmlParser::new())),
+        "go" => Ok(Box::new(go::GoParser::new())),
         _ => Err(anyhow::anyhow!("Unsupported file extension: {}", extension)),
     }
 }

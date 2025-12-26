@@ -2,6 +2,19 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.2.1] - 2025-12-26
+
+### Added
+- **Go Support**: Full TreeSitter-based parsing support for Go (`.go`).
+- **Enhanced Preview**: `--preview` now shows a proper unified diff (using `similar` crate) instead of just the whole file.
+- **QML add-component**: New command to safely inject child components into QML objects.
+- **Core API**: Added `get_source()` to `GnawTreeWriter` for easier integration.
+
+### Changed
+- Improved CLI `preview` flags across all edit/insert/delete operations.
+
+---
+
 ## [0.2.0] - 2025-12-26
 
 ### Added
