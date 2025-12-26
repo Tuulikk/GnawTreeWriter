@@ -2,6 +2,17 @@
 name = "gnawtreewriter"
 version = "0.1.0"
 edition = "2021"
+authors = ["Gnaw Software"]
+description = "Tree-based code editor for LLM-assisted editing"
+repository = "https://github.com/Gnaw-Software/GnawTreeWriter"
+license = "MIT"
+readme = "README.md"
+keywords = ["code-editor", "tree-sitter", "AST", "LLM", "code-generation"]
+categories = ["development-tools", "parser-implementations"]
+
+[[bin]]
+name = "gnawtreewriter"
+path = "src/main.rs"
 
 [dependencies]
 tree-sitter = "0.22"

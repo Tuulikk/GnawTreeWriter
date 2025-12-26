@@ -73,7 +73,7 @@ impl ParserEngine for QmlParser {
                     current_component = None;
                 }
             } else if !trimmed.is_empty() && !trimmed.starts_with("//") {
-                if let Some((ref mut comp, ref mut props)) = current_component {
+                if let Some((ref mut _comp, ref mut props)) = current_component {
                     if let Some((prop_name, prop_value)) = self.parse_property(trimmed) {
                         props.push(TreeNode {
                             id: format!("root.{}.{}", root.children.len(), props.len()),

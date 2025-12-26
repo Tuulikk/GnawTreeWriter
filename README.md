@@ -4,53 +4,311 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 
 ## Features
 
-- Parse QML and Python files into tree structures
-- Analyze file tree structure
-- Edit nodes at specific tree paths
-- Insert, edit, and delete tree nodes
-- CLI interface optimized for both LLM and human usage
+- **Multi-language support**: Python, Rust, TypeScript/TSX, PHP, HTML, QML
+- **Tree-based editing**: Work at AST level, not raw text
+- **Precise edits**: Target specific nodes with dot-notation paths
+- **LLM-optimized**: Structured edit requests and detailed context
+- **Batch operations**: Apply multiple edits simultaneously
+- **Comprehensive parsing**: Full AST tree structure for all languages
+
+## Why Use GnawTreeWriter?
+
+### Problems with Traditional LLM Code Editing
+- LLMs often struggle with matching brackets
+- Indentation errors are common
+- Structural changes can break code
+- Hard to make precise, targeted edits
+
+### How GnawTreeWriter Solves This
+- **No bracket management**: AST handles structure automatically
+- **No indentation worries**: Formatting is preserved
+- **Precise targeting**: Edit specific nodes at specific paths
+- **Deterministic results**: Same input always produces same output
+- **Context-aware**: LLM can understand surrounding code structure
 
 ## Installation
 
+### From Source
+
 ```bash
+git clone https://github.com/Gnaw-Software/GnawTreeWriter.git
+cd GnawTreeWriter
 cargo build --release
 ```
 
-## Usage
+The binary will be at `target/release/gnawtreewriter`.
 
-### Analyze file structure
+### Using cargo install (Recommended)
 
 ```bash
-cargo run -- analyze path/to/file.qml
+cargo install --git https://github.com/Gnaw-Software/GnawTreeWriter.git
 ```
 
-### Show specific node
+### From Binary Release (Future)
 
+Once releases are published:
 ```bash
-cargo run -- show path/to/file.qml "0.2.1"
+# Download binary for your platform
+chmod +x gnawtreewriter
+sudo mv gnawtreewriter /usr/local/bin/
 ```
 
-### Edit node
+## Quick Start
+
+### Basic Usage
 
 ```bash
-cargo run -- edit path/to/file.qml "0.2.1" "width: 100"
+# Analyze a file
+gnawtreewriter analyze app.py
+
+# Show a specific node
+gnawtreewriter show app.py "1"
+
+# Edit a node
+gnawtreewriter edit app.py "1" "def new_function():\n    pass"
+
+# Insert content before a node
+gnawtreewriter insert app.py "1" 0 "# New import"
+
+# Delete a node
+gnawtreewriter delete app.py "2"
 ```
 
-### Insert node (0 = before, 1 = after, 2 = as child)
+### For LLM Integration
+
+See [LLM_INTEGRATION.md](docs/LLM_INTEGRATION.md) for comprehensive guide on integrating with language models.
+
+## Supported Languages
+
+| Language | Extension | Parser | Status |
+|-----------|-----------|---------|---------|
+| QML | `.qml` | Custom | ✅ Stable |
+| Python | `.py` | TreeSitter | ✅ Stable |
+| Rust | `.rs` | TreeSitter | ✅ Stable |
+| TypeScript | `.ts`, `.tsx` | TreeSitter | ✅ Stable |
+| JavaScript | `.js`, `.jsx` | TreeSitter | ✅ Stable |
+| PHP | `.php` | TreeSitter | ✅ Stable |
+| HTML | `.html`, `.htm` | TreeSitter | ✅ Stable |
+
+## CLI Commands
+
+### analyze
+Analyze file and show tree structure in JSON format.
 
 ```bash
-cargo run -- insert path/to/file.qml "0.2" 0 "height: 200"
+gnawtreewriter analyze <file_path>
 ```
 
-### Delete node
+**Output**: Complete AST tree with node types, paths, content, and line numbers.
+
+### show
+Show content of a specific node.
 
 ```bash
-cargo run -- delete path/to/file.qml "0.2.1"
+gnawtreewriter show <file_path> <node_path>
+```
+
+**node_path**: Dot-notation path (e.g., "0.2.1")
+
+### edit
+Edit a node's content.
+
+```bash
+gnawtreewriter edit <file_path> <node_path> <new_content>
+```
+
+Replaces the entire content of the node at `node_path` with `new_content`.
+
+### insert
+Insert new content relative to a node.
+
+```bash
+gnawtreewriter insert <file_path> <parent_path> <position> <content>
+```
+
+**position** values:
+- `0`: Insert before the node at `parent_path`
+- `1`: Insert after the node at `parent_path`
+- `2`: Insert as a child of the node (where applicable)
+
+### delete
+Delete a node from the tree.
+
+```bash
+gnawtreewriter delete <file_path> <node_path>
+```
+
+Removes the node and all its children from the tree.
+
+## Tree Paths
+
+Nodes are addressed using dot-notation:
+- `root` - Document root
+- `0` - First child of root
+- `0.1` - Second child of first root child
+- `0.2.1` - Second child of third child of first root child
+
+Example tree:
+```
+root
+├── 0 (Import)
+├── 1 (Function)
+│   ├── 1.0 (function keyword)
+│   ├── 1.1 (function name)
+│   └── 1.2 (function body)
+│       ├── 1.2.0 (statement 1)
+│       └── 1.2.1 (statement 2)
+└── 2 (Class)
 ```
 
 ## Architecture
 
-- Parser engines using TreeSitter
-- Tree-based node manipulation
-- Deterministic edits without bracket issues
-- LLM-friendly CLI interface
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed technical documentation.
+
+## Examples
+
+### Python: Add a function to a module
+```bash
+# 1. Analyze to find the module path
+gnawtreewriter analyze module.py
+
+# 2. Insert new function
+gnawtreewriter insert module.py "0" 1 "def new_function(x, y):\n    return x + y"
+```
+
+### QML: Change a property value
+```bash
+# 1. Find the property node path
+gnawtreewriter analyze app.qml
+
+# 2. Edit the property
+gnawtreewriter edit app.qml "0.1.0" "width: 300"
+```
+
+### TypeScript: Add a method to a class
+```bash
+# 1. Analyze the file
+gnawtreewriter analyze app.ts
+
+# 2. Find the class block path
+gnawtreewriter show app.ts "1.3"
+
+# 3. Insert the new method
+gnawtreewriter insert app.ts "1.3" 2 "newMethod(): void { console.log('hello'); }"
+```
+
+## LLM Integration
+
+GnawTreeWriter is designed from the ground up for LLM integration. Key features:
+
+### Structured Edit Intents
+- **ReplaceNode**: Replace entire node content
+- **AddProperty**: Add property to component (QML-specific)
+- **InsertBefore**: Insert before a node
+- **InsertAfter**: Insert after a node
+- **DeleteNode**: Remove a node
+
+### Context Awareness
+- Get node context with parent and sibling information
+- Understand tree structure before making changes
+- Validate node paths before editing
+
+### Error Handling
+- Detailed error messages with suggestions
+- Path validation before edits
+- Change detection and reporting
+
+For complete integration guide, see [docs/LLM_INTEGRATION.md](docs/LLM_INTEGRATION.md).
+
+## Development
+
+### Building
+
+```bash
+cargo build
+```
+
+### Running Tests
+
+```bash
+cargo test
+```
+
+### Development Workflow
+
+1. Make changes to parser or core logic
+2. Test with example files in `examples/` directory
+3. Run `cargo check` for compilation errors
+4. Commit with descriptive message following conventional commits
+5. Update CHANGELOG.md with user-facing changes
+
+### Adding New Languages
+
+1. Create new parser file in `src/parser/{language}.rs`
+2. Implement `ParserEngine` trait
+3. Add to `src/parser/mod.rs` in `get_parser()`
+4. Update Cargo.toml with TreeSitter dependency
+5. Add example file in `examples/`
+6. Update README and documentation
+
+## Contributing
+
+We welcome contributions! Areas of interest:
+
+- **More languages**: Add parsers for JavaScript, Go, Java, C++, etc.
+- **Better QML parsing**: Improve nested component handling
+- **Diff preview**: Show what will change before applying edits
+- **Undo/redo**: Track and revert changes
+- **LSP integration**: Provide language server protocol support
+- **VSCode extension**: Create editor plugin
+- **Testing**: Add test suite with edge cases
+
+### For Language Models
+
+If you're testing GnawTreeWriter with an LLM:
+
+1. Start with the example files in `examples/`
+2. Try basic edits (property changes, simple insertions)
+3. Move to complex edits (nested structures, multiple changes)
+4. Report issues or confusing behavior
+5. Suggest improvements to the edit intents or API
+
+Your feedback is crucial for making this tool truly LLM-friendly!
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
+## Roadmap
+
+### v0.2.0
+- [ ] JavaScript parser (using existing TypeScript parser)
+- [ ] Go language support
+- [ ] Improved QML parser with better nesting
+- [ ] Diff generation and preview
+
+### v0.3.0
+- [ ] Batch undo/redo
+- [ ] Context-aware suggestions
+- [ ] VSCode extension
+- [ ] Python API/SDK
+
+### Future
+- [ ] More languages (Java, C++, C#, etc.)
+- [ ] LSP server
+- [ ] Web interface
+- [ ] AI-powered refactoring suggestions
+
+## License
+
+MIT License - see LICENSE file for details
+
+## Support
+
+- **Issues**: Report bugs on GitHub Issues
+- **Discussions**: Use GitHub Discussions for questions
+- **Documentation**: Check docs/ directory for detailed guides
+
+## Acknowledgments
+
+- TreeSitter for excellent parser grammar framework
+- Rust community for the amazing tooling
+- All contributors and testers
