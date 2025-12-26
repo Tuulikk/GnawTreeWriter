@@ -73,7 +73,7 @@ Replace entire content of a node.
 ```
 
 ### AddProperty
-Add a property to a component (QML-specific).
+Add a property to a component (QML-specific). Safely handles placement after existing properties.
 
 ```json
 {
@@ -84,6 +84,20 @@ Add a property to a component (QML-specific).
   "property_value": "0.8"
 }
 ```
+
+### AddComponent
+Add a child component to a parent (QML-specific). Handles brackets and indentation.
+
+```json
+{
+  "type": "AddComponent",
+  "description": "Add a button inside the layout",
+  "parent_path": "0.1",
+  "component_name": "Button",
+  "content": "text: 'Submit'"
+}
+```
+
 
 ### InsertBefore
 Insert content before a node.

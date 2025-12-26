@@ -2,6 +2,39 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.2.1] - 2025-12-26
+
+### Added
+- **Go Support**: Full TreeSitter-based parsing support for Go (`.go`).
+- **Enhanced Preview**: `--preview` now shows a proper unified diff (using `similar` crate) instead of just the whole file.
+- **QML add-component**: New command to safely inject child components into QML objects.
+- **Core API**: Added `get_source()` to `GnawTreeWriter` for easier integration.
+
+### Changed
+- Improved CLI `preview` flags across all edit/insert/delete operations.
+
+---
+
+## [0.2.0] - 2025-12-26
+
+### Added
+- **TreeSitter QML Parser**: Replaced custom regex parser with a robust TreeSitter-based parser for QML.
+- **Syntax Validation**: Automatic in-memory syntax validation before saving any edits. Prevents file corruption.
+- **Smart Indentation**: `insert` command now automatically detects and applies parent/sibling indentation to new content.
+- **Dedicated QML Add-Property**: New `add-property` command specifically optimized for QML AST structure.
+- **Automatic FFI Linking**: Resolved version mismatch issues with `tree-sitter-qmljs` using dynamic language loading.
+
+### Changed
+- Improved `insert` logic to handle container braces correctly (e.g., inserting after `{`).
+- Standardized node paths across all supported languages.
+- Updated documentation with new command examples and technical details.
+
+### Fixed
+- Fixed a bug where nested braces in macros (like `serde_json::json!`) could cause code corruption during edits.
+- Improved CLI stability and error reporting for missing nodes.
+
+---
+
 ## [0.1.1] - 2025-12-26
 
 ### Added
@@ -9,11 +42,6 @@ All notable changes to GnawTreeWriter.
 - **Automatic backup system**: timestamped JSON backups before every edit
 - **Human-friendly lint mode**: `file:line:col severity message` format with JSON output
 - **Fuzzy-edit command**: LLM-friendly editing with multi-strategy matching
-  - Content substring matching
-  - Node type matching
-  - Word matching
-  - Prefix matching
-  - Levenshtein similarity
 - **QML add-property command**: Safe property injection for QML components
 - **Diff preview**: `--preview` flag shows unified diff for all edit operations
 - **List command**: Show all nodes with paths in a file
@@ -36,17 +64,5 @@ All notable changes to GnawTreeWriter.
 ### Initial Release
 
 - Basic tree-based code editor for LLM-assisted editing
-- Multi-language support:
-  - Python (TreeSitter)
-  - Rust (TreeSitter)
-  - TypeScript/TSX (TreeSitter)
-  - PHP (TreeSitter)
-  - HTML (TreeSitter)
-  - QML (Custom parser)
-- CLI commands:
-  - analyze: Parse files and show AST structure
-  - show: Display specific node content
-  - edit: Replace node content
-  - insert: Add new content
-  - delete: Remove nodes
+- Multi-language support: Python, Rust, TypeScript, PHP, HTML, QML
 - Foundation for tree-level code manipulation

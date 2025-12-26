@@ -10,6 +10,11 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 - **LLM-optimized**: Structured edit requests and detailed context
 - **Batch operations**: Apply multiple edits simultaneously
 - **Comprehensive parsing**: Full AST tree structure for all languages
+- **Automatic backups**: Timestamped JSON backups before every edit
+- **Safe editing**: Preview changes with `--preview` flag
+- **Multi-file operations**: Analyze and lint multiple files at once
+- **Smart search**: Find nodes by type and content
+- **Human-friendly linting**: `file:line:col severity message` format
 
 ## Why Use GnawTreeWriter?
 
@@ -21,10 +26,13 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 
 ### How GnawTreeWriter Solves This
 - **No bracket management**: AST handles structure automatically
-- **No indentation worries**: Formatting is preserved
+- **No indentation worries**: Formatting is preserved with smart indentation
+- **Syntax Validation**: proposed edits are checked against the parser before saving
 - **Precise targeting**: Edit specific nodes at specific paths
 - **Deterministic results**: Same input always produces same output
 - **Context-aware**: LLM can understand surrounding code structure
+
+---
 
 ## Installation
 
@@ -82,7 +90,8 @@ See [LLM_INTEGRATION.md](docs/LLM_INTEGRATION.md) for comprehensive guide on int
 
 | Language | Extension | Parser | Status |
 |-----------|-----------|---------|---------|
-| QML | `.qml` | Custom | ✅ Stable |
+| QML | `.qml` | TreeSitter | ✅ Stable |
+| Go | `.go` | TreeSitter | ✅ Stable |
 | Python | `.py` | TreeSitter | ✅ Stable |
 | Rust | `.rs` | TreeSitter | ✅ Stable |
 | TypeScript | `.ts`, `.tsx` | TreeSitter | ✅ Stable |
@@ -93,10 +102,99 @@ See [LLM_INTEGRATION.md](docs/LLM_INTEGRATION.md) for comprehensive guide on int
 ## CLI Commands
 
 ### analyze
-Analyze file and show tree structure in JSON format.
+Analyze file and show tree structure in JSON format. Supports wildcards and directories.
 
 ```bash
-gnawtreewriter analyze <file_path>
+# Analyze single file
+gnawtreewriter analyze app.py
+
+# Analyze multiple files (supports wildcards)
+gnawtreewriter analyze *.qml
+```
+
+### add-property
+QML-specific command to safely add a property to a component at the correct position.
+
+```bash
+gnawtreewriter add-property <file_path> <target_path> <name> <type> <value>
+
+# Example: Add property to Rectangle
+gnawtreewriter add-property app.qml "0.1" myProp string "'hello'"
+```
+
+### add-component
+QML-specific command to safely add a child component.
+
+```bash
+gnawtreewriter add-component <file_path> <target_path> <component_name> [--content "props"]
+
+# Example: Add a Button inside a Rectangle
+gnawtreewriter add-component app.qml "0.1" Button --content "text: 'Click me'"
+```
+
+
+
+### list
+List all nodes with their paths in a file.
+
+```bash
+# List all nodes
+gnawtreewriter list <file_path>
+
+# Filter by node type
+gnawtreewriter list <file_path> --filter-type Property
+```
+
+### find
+Find nodes matching criteria across files.
+
+```bash
+# Find by node type
+gnawtreewriter find <file_path> --node-type Property
+
+# Find by content
+gnawtreewriter find <file_path> --content "mainToolbar"
+
+# Find in directory
+gnawtreewriter find app/ui/qml/ --content "width:"
+```
+
+### fuzzy-edit
+Fuzzy edit - find and edit node without exact path. Ideal for LLM integration.
+
+```bash
+# Edit by content query
+gnawtreewriter fuzzy-edit <file_path> <query> <new_content>
+
+# With node type filter
+gnawtreewriter fuzzy-edit <file_path> <query> <new_content> --node-type Property
+
+# Preview before applying
+gnawtreewriter fuzzy-edit <file_path> <query> <new_content> --preview
+```
+
+The fuzzy matcher uses multiple strategies:
+- Content substring match
+- Node type match
+- Word match in content
+- Prefix match
+- Levenshtein similarity
+- First character match
+
+If multiple nodes have similar scores, fuzzy-edit will show all candidates and use the best match.
+
+### lint
+Lint files and show issues with severity levels.
+
+```bash
+# Lint with human-readable output
+gnawtreewriter lint <file_path>
+
+# Lint directory
+gnawtreewriter lint app/ui/qml/
+
+# Get JSON output for CI
+gnawtreewriter lint app/ui/qml/ --format json
 ```
 
 **Output**: Complete AST tree with node types, paths, content, and line numbers.
@@ -114,11 +212,18 @@ gnawtreewriter show <file_path> <node_path>
 Edit a node's content.
 
 ```bash
+# Edit node directly
 gnawtreewriter edit <file_path> <node_path> <new_content>
+
+# Preview changes without applying
+gnawtreewriter edit <file_path> <node_path> <new_content> --preview
 ```
 
-Replaces the entire content of the node at `node_path` with `new_content`.
+**Backup**: Every edit automatically creates a timestamped JSON backup in `.gnawtreewriter_backups/`.
 
+**Output**: Success message (or error if node not found).
+
+Replaces entire content of node at `node_path` with `new_content`.
 ### insert
 Insert new content relative to a node.
 
@@ -164,6 +269,14 @@ root
 ## Architecture
 
 See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed technical documentation.
+
+### Additional Documentation
+
+- [Recipes](docs/RECIPES.md) - Common tasks and workflows
+- [QML Examples](docs/QML_EXAMPLES.md) - Step-by-step QML editing examples
+- [LLM Integration](docs/LLM_INTEGRATION.md) - Guide for language model integration
+- [Testing](docs/TESTING.md) - Testing strategies and examples
+- [Developer Report](docs/DEVELOPER_REPORT.md) - Feedback and improvement roadmap
 
 ## Examples
 
