@@ -2,7 +2,7 @@ use crate::core::transaction_log::{ProjectRestorationPlan, Transaction, Transact
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use std::collections::HashMap;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -109,19 +109,80 @@ impl RestorationEngine {
             .find_transaction(transaction_id)?
             .ok_or_else(|| anyhow!("Transaction not found: {}", transaction_id))?;
 
-        // Get the target hash (after_hash for the transaction)
+        // Try hash-based restoration first
+        if let Ok(result) = self.restore_by_hash(&transaction) {
+            return Ok(result);
+        }
+
+        // Fallback to timestamp-based restoration
+        self.restore_by_timestamp(&transaction)
+    }
+
+    /// Attempt restoration using hash matching
+    fn restore_by_hash(&self, transaction: &Transaction) -> Result<PathBuf> {
         let target_hash = transaction
             .after_hash
             .as_ref()
-            .ok_or_else(|| anyhow!("Transaction has no after_hash: {}", transaction_id))?;
+            .ok_or_else(|| anyhow!("Transaction has no after_hash"))?;
 
-        // Find backup file with matching content hash
-        let backup_file = self
-            .find_backup_by_content_hash(target_hash)?
-            .ok_or_else(|| anyhow!("Backup not found for hash: {}", target_hash))?;
+        // Try to find backup by after_hash first
+        if let Some(backup_file) = self.find_backup_by_content_hash(target_hash)? {
+            return self.restore_from_backup(&transaction.file_path, &backup_file.path);
+        }
 
-        // Restore from backup
-        self.restore_from_backup(&transaction.file_path, &backup_file.path)
+        // Try to find the next transaction that has our after_hash as before_hash
+        let next_transaction =
+            self.find_next_transaction_for_file(&transaction.file_path, &transaction.timestamp)?;
+        if let Some(next_tx) = next_transaction {
+            if let Some(next_before_hash) = &next_tx.before_hash {
+                if next_before_hash == target_hash {
+                    if let Some(backup_file) = self.find_backup_by_content_hash(next_before_hash)? {
+                        return self.restore_from_backup(&transaction.file_path, &backup_file.path);
+                    }
+                }
+            }
+        }
+
+        Err(anyhow!("Hash-based restoration failed"))
+    }
+
+    /// Attempt restoration using timestamp matching
+    fn restore_by_timestamp(&self, transaction: &Transaction) -> Result<PathBuf> {
+        println!("🔄 Falling back to timestamp-based restoration");
+
+        let backups = self.list_backup_files()?;
+        let file_backups: Vec<_> = backups
+            .into_iter()
+            .filter(|b| b.original_file_path == transaction.file_path)
+            .collect();
+
+        if file_backups.is_empty() {
+            return Err(anyhow!(
+                "No backups found for file: {}",
+                transaction.file_path.display()
+            ));
+        }
+
+        // Find the backup closest to but after the transaction timestamp
+        let best_backup = file_backups
+            .iter()
+            .filter(|b| b.timestamp >= transaction.timestamp)
+            .min_by_key(|b| b.timestamp)
+            .or_else(|| {
+                // If no backup after transaction, use the latest before
+                file_backups
+                    .iter()
+                    .filter(|b| b.timestamp <= transaction.timestamp)
+                    .max_by_key(|b| b.timestamp)
+            });
+
+        match best_backup {
+            Some(backup) => {
+                println!("✅ Using timestamp-based backup: {}", backup.path.display());
+                self.restore_from_backup(&transaction.file_path, &backup.path)
+            }
+            None => Err(anyhow!("No suitable backup found for transaction")),
+        }
     }
 
     /// Restore multiple files to their state before a specific timestamp
@@ -198,7 +259,7 @@ impl RestorationEngine {
                 )
             })?;
 
-        // Use the after_hash of that transaction as our target state
+        // Use the transaction ID to restore to that state
         self.restore_file_to_transaction(&transaction.id)
     }
 
@@ -237,6 +298,28 @@ impl RestorationEngine {
             .into_iter()
             .filter(|t| t.session_id == session_id)
             .collect())
+    }
+
+    /// Find the next transaction for a file after a given timestamp
+    fn find_next_transaction_for_file(
+        &self,
+        file_path: &PathBuf,
+        after_time: &chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<Transaction>> {
+        let file_history = self.transaction_log.get_file_history(file_path)?;
+
+        Ok(file_history
+            .into_iter()
+            .filter(|t| t.timestamp > *after_time)
+            .filter(|t| {
+                matches!(
+                    t.operation,
+                    crate::core::transaction_log::OperationType::Edit
+                        | crate::core::transaction_log::OperationType::Insert
+                        | crate::core::transaction_log::OperationType::Delete
+                )
+            })
+            .min_by_key(|t| t.timestamp))
     }
 
     /// Find backup file by content hash

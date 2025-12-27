@@ -79,6 +79,8 @@ enum Commands {
     SessionStart,
     /// Show current undo/redo state
     Status,
+    /// Debug hash calculation for troubleshooting
+    DebugHash { content: String },
     /// Restore entire project to a specific timestamp
     RestoreProject {
         timestamp: String,
@@ -276,6 +278,9 @@ impl Cli {
             }
             Commands::Status => {
                 Self::handle_status()?;
+            }
+            Commands::DebugHash { content } => {
+                Self::handle_debug_hash(&content)?;
             }
             Commands::RestoreProject { timestamp, preview } => {
                 Self::handle_restore_project(&timestamp, preview)?;
@@ -620,6 +625,24 @@ impl Cli {
             let engine = RestorationEngine::new(&current_dir)?;
             let result = engine.restore_session(session_id)?;
             result.print_summary();
+        }
+
+        Ok(())
+    }
+
+    fn handle_debug_hash(content: &str) -> Result<()> {
+        use crate::core::calculate_content_hash;
+
+        let hash = calculate_content_hash(content);
+        println!("Content: {:?}", content);
+        println!("Hash: {}", hash);
+
+        // Also test with file content if it exists
+        if std::path::Path::new(content).exists() {
+            let file_content = std::fs::read_to_string(content)?;
+            let file_hash = calculate_content_hash(&file_content);
+            println!("File content: {:?}", file_content);
+            println!("File hash: {}", file_hash);
         }
 
         Ok(())

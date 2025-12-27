@@ -1,2 +1,2 @@
 def hello():
-    print("New session content!")
+    print("Hello from GnawTreeWriter!")
