@@ -95,11 +95,31 @@ gnawtreewriter insert app.py "0" 1 'def new_function(): pass'
 gnawtreewriter session-start
 ```
 
-### Time Travel Features
+### Advanced Input Methods (Recommended for Agents)
+
+To avoid issues with special characters and line breaks in shells, use these safe input methods:
 
 ```bash
-# Restore entire project to specific timestamp
-gnawtreewriter restore-project "2025-12-27T15:30:00Z" --preview
+# 1. Read content from a file
+gnawtreewriter edit app.py "0.1" --source-file /tmp/new_code.py
+
+# 2. Pipe content via stdin (using "-")
+cat /tmp/new_code.py | gnawtreewriter edit app.py "0.1" -
+
+# 3. Explicitly unescape newlines (if using strings)
+gnawtreewriter edit app.py "0.1" "def foo():\n    pass" --unescape-newlines
+```
+
+### Time Travel Features
+
+Supports Local time (system default) and UTC (RFC3339).
+
+```bash
+# Restore entire project to specific timestamp (Local time assumed)
+gnawtreewriter restore-project "2025-12-27 15:30:00" --preview
+
+# Restore using precise UTC timestamp
+gnawtreewriter restore-project "2025-12-27T15:30:00Z"
 
 # Undo an entire AI agent session
 gnawtreewriter restore-session "session_id"
@@ -540,9 +560,22 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 - [ ] Web interface
 - [ ] AI-powered refactoring suggestions
 
+## Design Principles
+
+### **Safety by Design**
+- **Directory handling**: Requires explicit `--recursive` flag for directories to prevent accidental large scans
+- **Preview first**: All destructive operations support `--preview` to show changes before applying
+- **Automatic backups**: Every edit creates timestamped backups before making changes
+- **Syntax validation**: Code changes are validated before saving to prevent corruption
+
+### **Clear Intent**
+- **Explicit flags**: Directory operations require `--recursive` to make intent clear
+- **Helpful errors**: Error messages provide specific guidance and examples
+- **No surprises**: Commands do exactly what they say, nothing hidden or automatic
+
 ## Known Limitations
 
-- **Directory analysis**: Requires `--recursive` flag for directory arguments (`analyze dir/` fails, use `analyze dir/ --recursive`)
+- **Directory analysis**: Intentionally requires `--recursive` flag for directories (safety feature)
 - **QML instantiation**: Parse success doesn't guarantee runtime QML instantiation success  
 - **Large projects**: Very large projects may require patience for full analysis
 - **Hash matching**: Occasional backup hash mismatches resolved with timestamp fallback

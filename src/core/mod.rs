@@ -49,8 +49,9 @@ impl GnawTreeWriter {
         let tree = parser.parse(&source_code)?;
 
         // Initialize transaction log for the project root
-        let project_root = path.parent().unwrap_or(Path::new("."));
-        let transaction_log = TransactionLog::load(project_root)?;
+        // Use find_project_root to ensure we log to the correct centralized location
+        let project_root = find_project_root(path);
+        let transaction_log = TransactionLog::load(&project_root)?;
 
         Ok(Self {
             file_path: file_path.to_string(),
@@ -69,7 +70,10 @@ impl GnawTreeWriter {
         let timestamp = Utc::now().format("%Y%m%d_%H%M%S_%3f");
         let backup_name = format!("{}_backup_{}.json", file_name, timestamp);
 
-        let backup_dir = self.get_backup_dir()?;
+        // Backup should also be in project root to avoid scattering
+        let project_root = find_project_root(Path::new(&self.file_path));
+        let backup_dir = project_root.join(".gnawtreewriter_backups");
+
         fs::create_dir_all(&backup_dir)?;
 
         let backup_path = backup_dir.join(&backup_name);
@@ -88,13 +92,9 @@ impl GnawTreeWriter {
     }
 
     fn get_backup_dir(&self) -> Result<PathBuf> {
-        let file_path = Path::new(&self.file_path);
-        let file_dir = file_path
-            .parent()
-            .context("Cannot determine parent directory")?;
-
-        let backup_dir = file_dir.join(".gnawtreewriter_backups");
-        Ok(backup_dir)
+        // Deprecated/Modified in create_backup but kept for potential other uses
+        let project_root = find_project_root(Path::new(&self.file_path));
+        Ok(project_root.join(".gnawtreewriter_backups"))
     }
 
     pub fn analyze(&self) -> &TreeNode {
@@ -323,5 +323,34 @@ impl GnawTreeWriter {
     }
     pub fn get_source(&self) -> &str {
         &self.source_code
+    }
+}
+
+/// Helper function to find the project root
+/// Searches upwards for .gnawtreewriter_session.json or .git
+pub fn find_project_root(start_path: &Path) -> PathBuf {
+    let mut current = if start_path.is_file() {
+        start_path.parent().unwrap_or(Path::new(".")).to_path_buf()
+    } else {
+        start_path.to_path_buf()
+    };
+
+    // Try to make it absolute if possible, but don't fail if we can't
+    if let Ok(abs) = fs::canonicalize(&current) {
+        current = abs;
+    }
+
+    let start = current.clone();
+
+    loop {
+        // Check for session file or git
+        if current.join(".gnawtreewriter_session.json").exists() || current.join(".git").exists() {
+            return current;
+        }
+
+        if !current.pop() {
+            // Reached root without finding anything, return start path (fallback)
+            return start;
+        }
     }
 }

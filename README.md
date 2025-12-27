@@ -95,11 +95,31 @@ gnawtreewriter insert app.py "0" 1 'def new_function(): pass'
 gnawtreewriter session-start
 ```
 
-### Time Travel Features
+### Advanced Input Methods (Recommended for Agents)
+
+To avoid issues with special characters and line breaks in shells, use these safe input methods:
 
 ```bash
-# Restore entire project to specific timestamp
-gnawtreewriter restore-project "2025-12-27T15:30:00Z" --preview
+# 1. Read content from a file
+gnawtreewriter edit app.py "0.1" --source-file /tmp/new_code.py
+
+# 2. Pipe content via stdin (using "-")
+cat /tmp/new_code.py | gnawtreewriter edit app.py "0.1" -
+
+# 3. Explicitly unescape newlines (if using strings)
+gnawtreewriter edit app.py "0.1" "def foo():\n    pass" --unescape-newlines
+```
+
+### Time Travel Features
+
+Supports Local time (system default) and UTC (RFC3339).
+
+```bash
+# Restore entire project to specific timestamp (Local time assumed)
+gnawtreewriter restore-project "2025-12-27 15:30:00" --preview
+
+# Restore using precise UTC timestamp
+gnawtreewriter restore-project "2025-12-27T15:30:00Z"
 
 # Undo an entire AI agent session
 gnawtreewriter restore-session "session_id"

@@ -1,5 +1,6 @@
 use crate::core::{
-    EditOperation, GnawTreeWriter, RestorationEngine, TransactionLog, UndoRedoManager,
+    find_project_root, EditOperation, GnawTreeWriter, RestorationEngine, TransactionLog,
+    UndoRedoManager,
 };
 use crate::parser::TreeNode;
 use anyhow::Result;
@@ -93,11 +94,18 @@ enum Commands {
         file_path: String,
         /// Dot-notation path to the node (use 'list' to find paths)
         node_path: String,
-        /// New content to replace the node with
-        content: String,
+        /// New content to replace the node with. Use "-" to read from stdin.
+        #[arg(required_unless_present = "source_file")]
+        content: Option<String>,
+        /// Read content from a file instead of command line
+        #[arg(long, conflicts_with = "content")]
+        source_file: Option<String>,
         #[arg(short, long)]
         /// Preview changes without applying them
         preview: bool,
+        #[arg(long)]
+        /// Manually unescape \n sequences in the content (useful for some shells)
+        unescape_newlines: bool,
     },
     /// Insert new content into a parent node
     ///
@@ -116,11 +124,18 @@ enum Commands {
         parent_path: String,
         /// Position: 0=top, 1=bottom, 2=after properties
         position: usize,
-        /// Content to insert
-        content: String,
+        /// Content to insert. Use "-" to read from stdin.
+        #[arg(required_unless_present = "source_file")]
+        content: Option<String>,
+        /// Read content from a file instead of command line
+        #[arg(long, conflicts_with = "content")]
+        source_file: Option<String>,
         #[arg(short, long)]
         /// Preview changes without applying them
         preview: bool,
+        #[arg(long)]
+        /// Manually unescape \n sequences in the content (useful for some shells)
+        unescape_newlines: bool,
     },
     /// Undo recent edit operations
     ///
@@ -189,7 +204,7 @@ enum Commands {
     ///   gnawtreewriter restore-project "2025-12-27T15:30:00Z" --preview
     ///   gnawtreewriter restore-project "2025-12-27T15:30:00"
     RestoreProject {
-        /// Timestamp in ISO format (e.g., "2025-12-27T15:30:00Z")
+        /// Timestamp (e.g., "2025-12-27 15:30:00" for local, or RFC3339)
         timestamp: String,
         #[arg(short, long)]
         /// Preview what would be restored without actually doing it
@@ -201,11 +216,11 @@ enum Commands {
     /// Great for undoing changes to specific parts of your project.
     ///
     /// Examples:
-    ///   gnawtreewriter restore-files --since "2025-12-27T16:00:00Z" --files "*.py"
-    ///   gnawtreewriter restore-files -s "2025-12-27T16:00:00" -f "src/" --preview
+    ///   gnawtreewriter restore-files --since "2025-12-27 16:00:00" --files "*.py"
+    ///   gnawtreewriter restore-files -s "2025-12-27T16:00:00Z" -f "src/" --preview
     RestoreFiles {
         #[arg(short, long)]
-        /// Only restore files modified since this timestamp
+        /// Only restore files modified since this timestamp (Local or UTC)
         since: String,
         #[arg(short, long)]
         /// File patterns to restore (e.g., "*.py", "src/")
@@ -361,8 +376,11 @@ impl Cli {
                 file_path,
                 node_path,
                 content,
+                source_file,
                 preview,
+                unescape_newlines,
             } => {
+                let content = resolve_content(content, source_file, unescape_newlines)?;
                 let mut writer = GnawTreeWriter::new(&file_path)?;
                 let op = EditOperation::Edit { node_path, content };
                 if preview {
@@ -377,8 +395,11 @@ impl Cli {
                 parent_path,
                 position,
                 content,
+                source_file,
                 preview,
+                unescape_newlines,
             } => {
+                let content = resolve_content(content, source_file, unescape_newlines)?;
                 let mut writer = GnawTreeWriter::new(&file_path)?;
                 let op = EditOperation::Insert {
                     parent_path,
@@ -514,7 +535,8 @@ impl Cli {
 
     fn handle_undo(steps: usize) -> Result<()> {
         let current_dir = std::env::current_dir()?;
-        let mut undo_manager = UndoRedoManager::new(&current_dir)?;
+        let project_root = find_project_root(&current_dir);
+        let mut undo_manager = UndoRedoManager::new(&project_root)?;
 
         let results = undo_manager.undo(steps)?;
 
@@ -545,7 +567,8 @@ impl Cli {
 
     fn handle_redo(steps: usize) -> Result<()> {
         let current_dir = std::env::current_dir()?;
-        let mut undo_manager = UndoRedoManager::new(&current_dir)?;
+        let project_root = find_project_root(&current_dir);
+        let mut undo_manager = UndoRedoManager::new(&project_root)?;
 
         let results = undo_manager.redo(steps)?;
 
@@ -576,7 +599,8 @@ impl Cli {
 
     fn handle_history(limit: usize, format: &str) -> Result<()> {
         let current_dir = std::env::current_dir()?;
-        let transaction_log = TransactionLog::load(&current_dir)?;
+        let project_root = find_project_root(&current_dir);
+        let transaction_log = TransactionLog::load(&project_root)?;
 
         let history = transaction_log.get_last_n_transactions(limit)?;
 
@@ -620,7 +644,8 @@ impl Cli {
 
     fn handle_restore(file_path: &str, transaction_id: &str, preview: bool) -> Result<()> {
         let current_dir = std::env::current_dir()?;
-        let transaction_log = TransactionLog::load(&current_dir)?;
+        let project_root = find_project_root(&current_dir);
+        let transaction_log = TransactionLog::load(&project_root)?;
 
         let transaction = transaction_log
             .find_transaction(transaction_id)?
@@ -650,7 +675,8 @@ impl Cli {
 
     fn handle_session_start() -> Result<()> {
         let current_dir = std::env::current_dir()?;
-        let mut transaction_log = TransactionLog::load(&current_dir)?;
+        let project_root = find_project_root(&current_dir);
+        let mut transaction_log = TransactionLog::load(&project_root)?;
 
         transaction_log.start_new_session()?;
 
@@ -662,7 +688,8 @@ impl Cli {
 
     fn handle_status() -> Result<()> {
         let current_dir = std::env::current_dir()?;
-        let undo_manager = UndoRedoManager::new(&current_dir)?;
+        let project_root = find_project_root(&current_dir);
+        let undo_manager = UndoRedoManager::new(&project_root)?;
 
         let state = undo_manager.get_state();
 
@@ -680,7 +707,7 @@ impl Cli {
         }
 
         // Show recent history
-        let transaction_log = TransactionLog::load(&current_dir)?;
+        let transaction_log = TransactionLog::load(&project_root)?;
         let recent = transaction_log.get_last_n_transactions(5)?;
 
         if !recent.is_empty() {
@@ -698,19 +725,12 @@ impl Cli {
     }
 
     fn handle_restore_project(timestamp: &str, preview: bool) -> Result<()> {
-        use chrono::DateTime;
-
         let current_dir = std::env::current_dir()?;
-        let transaction_log = TransactionLog::load(&current_dir)?;
+        let project_root = find_project_root(&current_dir);
+        let transaction_log = TransactionLog::load(&project_root)?;
 
-        // Parse timestamp
-        let restore_to = DateTime::parse_from_rfc3339(timestamp)
-            .or_else(|_| DateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S"))
-            .or_else(|_| DateTime::parse_from_str(timestamp, "%Y-%m-%dT%H:%M:%S"))
-            .map_err(|_| {
-                anyhow::anyhow!("Invalid timestamp format. Use RFC3339 or YYYY-MM-DD HH:MM:SS")
-            })?
-            .with_timezone(&chrono::Utc);
+        // Parse timestamp (supports Local and UTC/RFC3339)
+        let restore_to = parse_user_timestamp(timestamp)?;
 
         let plan = transaction_log.get_project_restoration_plan(restore_to)?;
 
@@ -737,7 +757,7 @@ impl Cli {
             }
             println!("\nUse --no-preview to perform the restoration");
         } else {
-            let engine = RestorationEngine::new(&current_dir)?;
+            let engine = RestorationEngine::new(&project_root)?;
             let result = engine.execute_project_restoration(&plan)?;
             result.print_summary();
         }
@@ -746,19 +766,12 @@ impl Cli {
     }
 
     fn handle_restore_files(since: &str, file_patterns: &[String], preview: bool) -> Result<()> {
-        use chrono::DateTime;
-
         let current_dir = std::env::current_dir()?;
-        let transaction_log = TransactionLog::load(&current_dir)?;
+        let project_root = find_project_root(&current_dir);
+        let transaction_log = TransactionLog::load(&project_root)?;
 
-        // Parse timestamp
-        let since_time = DateTime::parse_from_rfc3339(since)
-            .or_else(|_| DateTime::parse_from_str(since, "%Y-%m-%d %H:%M:%S"))
-            .or_else(|_| DateTime::parse_from_str(since, "%Y-%m-%dT%H:%M:%S"))
-            .map_err(|_| {
-                anyhow::anyhow!("Invalid timestamp format. Use RFC3339 or YYYY-MM-DD HH:MM:SS")
-            })?
-            .with_timezone(&chrono::Utc);
+        // Parse timestamp (supports Local and UTC/RFC3339)
+        let since_time = parse_user_timestamp(since)?;
 
         let affected_files = transaction_log.get_affected_files_since(since_time)?;
 
@@ -803,7 +816,7 @@ impl Cli {
             }
             println!("\nUse --no-preview to perform the restoration");
         } else {
-            let engine = RestorationEngine::new(&current_dir)?;
+            let engine = RestorationEngine::new(&project_root)?;
             let result = engine.restore_files_before_timestamp(&filtered_files, since_time)?;
             result.print_summary();
         }
@@ -813,7 +826,8 @@ impl Cli {
 
     fn handle_restore_session(session_id: &str, preview: bool) -> Result<()> {
         let current_dir = std::env::current_dir()?;
-        let transaction_log = TransactionLog::load(&current_dir)?;
+        let project_root = find_project_root(&current_dir);
+        let transaction_log = TransactionLog::load(&project_root)?;
 
         let session_files = transaction_log.get_session_files(session_id)?;
 
@@ -832,7 +846,7 @@ impl Cli {
             }
             println!("\nUse --no-preview to perform the restoration");
         } else {
-            let engine = RestorationEngine::new(&current_dir)?;
+            let engine = RestorationEngine::new(&project_root)?;
             let result = engine.restore_session(session_id)?;
             result.print_summary();
         }
@@ -1280,4 +1294,57 @@ fn print_node(node: &TreeNode, depth: usize, filter_type: Option<&str>) {
         "{}{} [{}] (line {}-{})",
         indent, node.path, node.node_type, node.start_line, node.end_line
     );
+}
+
+fn resolve_content(
+    content: Option<String>,
+    source_file: Option<String>,
+    unescape_newlines: bool,
+) -> Result<String> {
+    let mut final_content = if let Some(path) = source_file {
+        std::fs::read_to_string(path)?
+    } else if let Some(c) = content {
+        if c == "-" {
+            use std::io::Read;
+            let mut buffer = String::new();
+            std::io::stdin().read_to_string(&mut buffer)?;
+            buffer
+        } else {
+            c
+        }
+    } else {
+        return Err(anyhow::anyhow!(
+            "Either content or --source-file must be provided"
+        ));
+    };
+
+    if unescape_newlines {
+        final_content = final_content.replace("\\n", "\n");
+    }
+
+    Ok(final_content)
+}
+
+fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>> {
+    use anyhow::Context;
+    use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
+
+    // 1. Try RFC3339 (e.g., "2025-12-27T15:30:00Z" or "2025-12-27T16:30:00+01:00")
+    if let Ok(dt) = DateTime::parse_from_rfc3339(timestamp) {
+        return Ok(dt.with_timezone(&Utc));
+    }
+
+    // 2. Try Naive formats (assume Local time)
+    // We try common formats: "YYYY-MM-DD HH:MM:SS" and "YYYY-MM-DDTHH:MM:SS"
+    let naive = NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S")
+        .or_else(|_| NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%dT%H:%M:%S"))
+        .context("Invalid timestamp format. \nSupported formats:\n  - Local time: \"YYYY-MM-DD HH:MM:SS\"\n  - RFC3339:    \"YYYY-MM-DDTHH:MM:SSZ\" (or with offset)")?;
+
+    // Convert Local Naive -> UTC
+    // Local::from_local_datetime returns a LocalResult (None, Single, or Ambiguous)
+    let local_dt = Local.from_local_datetime(&naive).single().ok_or_else(|| {
+        anyhow::anyhow!("Ambiguous or invalid local time (e.g. during DST transition)")
+    })?;
+
+    Ok(local_dt.with_timezone(&Utc))
 }

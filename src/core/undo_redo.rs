@@ -24,9 +24,29 @@ impl UndoRedoManager {
 
         let transaction_log = TransactionLog::load(&project_root)?;
 
+        // Populate undo stack from transaction log history
+        let mut undo_stack = Vec::new();
+        let history = transaction_log.get_full_history()?;
+
+        for transaction in history {
+            // Only add reversible operations to the undo stack
+            if matches!(
+                transaction.operation,
+                OperationType::Edit
+                    | OperationType::Insert
+                    | OperationType::Delete
+                    | OperationType::AddProperty
+                    | OperationType::AddComponent
+                    | OperationType::Move
+                    | OperationType::Restore
+            ) {
+                undo_stack.push(transaction.id);
+            }
+        }
+
         Ok(Self {
             transaction_log,
-            undo_stack: Vec::new(),
+            undo_stack,
             redo_stack: Vec::new(),
             backup_dir,
         })
