@@ -2,7 +2,7 @@
 
 **The Complete Handbook for AI-Native Temporal Code Editing**
 
-Version: 0.2.1| Last Updated: 2025-12-27| Status: Phase 1 Complete
+Version: 0.2.2| Last Updated: 2025-12-27| Status: Phase 1 Complete
 
 ---
 
@@ -185,4 +185,4 @@ Community Edition features are free forever. Commercial features require paid li
 
 *This documentation represents the collaborative effort of human developers and AI agents (Claude, Gemini, GLM-4.7, Raptor Mini) working together to create the future of software development.*
 
-**Last updated**: 2025-12-27| **Document version**: 1.0 | **Software version**: 0.2.1
+**Last updated**: 2025-12-27| **Document version**: 1.0 | **Software version**: 0.2.2

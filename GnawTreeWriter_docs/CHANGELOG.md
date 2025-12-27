@@ -2,6 +2,21 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.2.2] - 2025-12-27
+
+### Added
+- **Safe Input Methods**: New `--source-file` and stdin support (`-`) for `edit` and `insert` commands to handle complex code without shell escaping issues.
+- **Smart Timestamp Parsing**: Restoration commands now accept naive timestamps (e.g., "2025-12-27 20:30:00") and intelligently assume Local time, converting to UTC automatically.
+- **Persistent Undo**: The `undo` stack is now restored from the transaction log between sessions, allowing undo across restarts.
+- **Context Awareness**: Commands now automatically locate the project root (via `.git` or session file) regardless of the current working directory, fixing "No changes found" errors when running from subdirectories.
+- **Unescape Flag**: New `--unescape-newlines` flag for manual string unescaping if needed.
+
+### Changed
+- Updated `restore-project` and `restore-files` to use the new smart timestamp parser.
+- Improved CLI help text for restoration commands to clarify time format support.
+
+---
+
 ## [0.2.1] - 2025-12-27
 
 ### Added
