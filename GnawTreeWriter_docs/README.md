@@ -136,6 +136,12 @@ gnawtreewriter analyze app.py
 
 # Analyze multiple files (supports wildcards)
 gnawtreewriter analyze *.qml
+
+# Analyze directory recursively
+gnawtreewriter analyze src/ --recursive
+
+# Get summary format
+gnawtreewriter analyze . --recursive --format summary
 ```
 
 ### add-property
@@ -183,6 +189,20 @@ gnawtreewriter find <file_path> --content "mainToolbar"
 
 # Find in directory
 gnawtreewriter find app/ui/qml/ --content "width:"
+```
+
+### lint
+Lint files and show issues with severity levels.
+
+```bash
+# Lint single file
+gnawtreewriter lint app.py
+
+# Lint directory recursively
+gnawtreewriter lint src/ --recursive
+
+# Get JSON output for CI
+gnawtreewriter lint . --recursive --format json
 ```
 
 ### Time Travel & Restoration Commands
@@ -279,7 +299,26 @@ gnawtreewriter wizard --task editing
 gnawtreewriter wizard --task troubleshooting
 ```
 
-**Output**: Complete AST tree with node types, paths, content, and line numbers.
+### Version and Help Commands
+
+#### --version
+Check your current GnawTreeWriter version.
+
+```bash
+gnawtreewriter --version
+```
+
+#### --help
+Get comprehensive help for any command.
+
+```bash
+# General help
+gnawtreewriter --help
+
+# Command-specific help
+gnawtreewriter edit --help
+gnawtreewriter restore-project --help
+```
 
 ### show
 Show content of a specific node.
@@ -500,6 +539,22 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 - [ ] LSP server
 - [ ] Web interface
 - [ ] AI-powered refactoring suggestions
+
+## Known Limitations
+
+- **Directory analysis**: Requires `--recursive` flag for directory arguments (`analyze dir/` fails, use `analyze dir/ --recursive`)
+- **QML instantiation**: Parse success doesn't guarantee runtime QML instantiation success  
+- **Large projects**: Very large projects may require patience for full analysis
+- **Hash matching**: Occasional backup hash mismatches resolved with timestamp fallback
+
+## Version History & Feature Availability
+
+- **v0.2.1**: Complete time restoration system, interactive help system (`examples`, `wizard`), AI testing framework, `lint` command, `--version` flag
+- **v0.2.0**: Multi-file support, transaction logging, session management (`restore-project`, `restore-session`)  
+- **v0.1.x**: Basic tree editing and QML support (`analyze`, `edit`, `add-property`)
+
+**Current version check**: `gnawtreewriter --version`  
+**Feature verification**: All examples in this README are tested with v0.2.1+
 
 ## License
 

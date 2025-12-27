@@ -2,16 +2,30 @@
 
 All notable changes to GnawTreeWriter.
 
-## [0.2.1] - 2025-12-26
+## [0.2.1] - 2025-12-27
 
 ### Added
-- **Go Support**: Full TreeSitter-based parsing support for Go (`.go`).
-- **Enhanced Preview**: `--preview` now shows a proper unified diff (using `similar` crate) instead of just the whole file.
-- **QML add-component**: New command to safely inject child components into QML objects.
-- **Core API**: Added `get_source()` to `GnawTreeWriter` for easier integration.
+- **Revolutionary Help System**: Interactive `examples` and `wizard` commands for guided learning
+- **AI Agent Testing Framework**: Comprehensive test scenarios (AI_AGENT_TEST_SCENARIOS.md) with structured evaluation
+- **Multi-File Time Restoration**: Complete project-wide time travel with `restore-project`, `restore-files`, `restore-session`
+- **Transaction Logging**: Full audit trail of all operations with session management
+- **Version Flag**: `--version` command to check current version
+- **Lint Command**: `lint` command for basic file validation and issue detection
+- **Directory Analysis**: `--recursive` flag for analyzing entire directories
+- **Go Support**: Full TreeSitter-based parsing support for Go (`.go`)
+- **Enhanced Preview**: `--preview` now shows a proper unified diff (using `similar` crate) instead of just the whole file
+- **QML add-component**: New command to safely inject child components into QML objects
+- **Core API**: Added `get_source()` to `GnawTreeWriter` for easier integration
 
 ### Changed
-- Improved CLI `preview` flags across all edit/insert/delete operations.
+- **Documentation Overhaul**: Complete README and ROADMAP updates reflecting current capabilities
+- **Error Handling**: Better error messages for directory analysis and invalid paths
+- Improved CLI `preview` flags across all edit/insert/delete operations
+
+### Fixed
+- **Directory Analysis Bug**: Fixed "Is a directory" error with proper `--recursive` flag requirement
+- **Documentation Inconsistencies**: Aligned all documentation with actual CLI behavior
+- **Missing Commands**: Added previously documented but missing `lint` and `--version` commands
 
 ---
 

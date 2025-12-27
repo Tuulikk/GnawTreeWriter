@@ -30,6 +30,10 @@ Version: 0.2.1| Last Updated: 2025-12-27| Status: Phase 1 Complete
 ### **Advanced Topics**
 - **[FUTURE_CONCEPTS.md](FUTURE_CONCEPTS.md)** - Deep dive into planned features and concepts
 
+### **Troubleshooting & Testing**
+- **[AI_AGENT_TEST_SCENARIOS.md](AI_AGENT_TEST_SCENARIOS.md)** - Comprehensive testing scenarios for AI agents
+- **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)** - Known limitations, workarounds, and troubleshooting guide
+
 ### **Release Information**
 - **[CHANGELOG.md](CHANGELOG.md)** - Version history and release notes
 
@@ -39,9 +43,9 @@ Version: 0.2.1| Last Updated: 2025-12-27| Status: Phase 1 Complete
 
 ### **For AI Agents**
 ```
-Start Here: AGENTS.md → LLM_INTEGRATION.md → RECIPES.md
+Start Here: AGENTS.md → AI_AGENT_TEST_SCENARIOS.md → LLM_INTEGRATION.md → RECIPES.md
 ```
-Essential for understanding GnawTreeWriter commands and workflows.
+Essential for understanding GnawTreeWriter commands and comprehensive testing.
 
 ### **For Developers**
 ```
@@ -57,9 +61,15 @@ Understand business model, team features, and enterprise capabilities.
 
 ### **For QML Development**
 ```
-Start Here: AGENTS.md → QML_EXAMPLES.md → RECIPES.md
+Start Here: AGENTS.md → QML_EXAMPLES.md → RECIPES.md → KNOWN_ISSUES.md
 ```
-Specialized workflow for QML component development.
+Specialized workflow for QML component development with troubleshooting.
+
+### **For Troubleshooting**
+```
+Start Here: KNOWN_ISSUES.md → AI_AGENT_TEST_SCENARIOS.md → AGENTS.md
+```
+When things aren't working as expected or you need comprehensive testing.
 
 ---
 
