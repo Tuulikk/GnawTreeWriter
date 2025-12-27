@@ -1,19 +1,21 @@
 use crate::parser::{get_parser, TreeNode};
 use anyhow::{Context, Result};
 use chrono::Utc;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub mod transaction_log;
 pub mod undo_redo;
 
-pub use transaction_log::{OperationType, Transaction, TransactionLog};
+pub use transaction_log::{calculate_content_hash, OperationType, Transaction, TransactionLog};
 pub use undo_redo::{UndoRedoManager, UndoRedoResult, UndoRedoState};
 
 pub struct GnawTreeWriter {
     file_path: String,
     source_code: String,
     tree: TreeNode,
+    transaction_log: TransactionLog,
 }
 
 #[derive(Debug, Clone)]
@@ -41,10 +43,15 @@ impl GnawTreeWriter {
         let parser = get_parser(path)?;
         let tree = parser.parse(&source_code)?;
 
+        // Initialize transaction log for the project root
+        let project_root = path.parent().unwrap_or(Path::new("."));
+        let transaction_log = TransactionLog::load(project_root)?;
+
         Ok(Self {
             file_path: file_path.to_string(),
             source_code,
             tree,
+            transaction_log,
         })
     }
 
@@ -97,17 +104,20 @@ impl GnawTreeWriter {
     }
 
     // Test indent insert
-    pub fn edit(&self, operation: EditOperation) -> Result<()> {
-        let modified_code = match operation {
+    pub fn edit(&mut self, operation: EditOperation) -> Result<()> {
+        // Calculate before hash
+        let before_hash = calculate_content_hash(&self.source_code);
+
+        let modified_code = match &operation {
             EditOperation::Edit { node_path, content } => {
-                self.edit_node(&self.tree, &node_path, &content)?
+                self.edit_node(&self.tree, node_path, content)?
             }
             EditOperation::Insert {
                 parent_path,
                 position,
                 content,
-            } => self.insert_node(&self.tree, &parent_path, position, &content)?,
-            EditOperation::Delete { node_path } => self.delete_node(&self.tree, &node_path)?,
+            } => self.insert_node(&self.tree, parent_path, *position, content)?,
+            EditOperation::Delete { node_path } => self.delete_node(&self.tree, node_path)?,
         };
 
         // VALIDATION: Try to parse the modified code in memory before saving
@@ -117,8 +127,48 @@ impl GnawTreeWriter {
             return Err(anyhow::anyhow!("Validation failed: The proposed edit would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e));
         }
 
+        // Calculate after hash
+        let after_hash = calculate_content_hash(&modified_code);
+
         // Only create backup and write if validation passed
         self.create_backup()?;
+
+        // Log the transaction
+        let (operation_type, node_path, description) = match &operation {
+            EditOperation::Edit {
+                node_path,
+                content: _,
+            } => (
+                OperationType::Edit,
+                Some(node_path.clone()),
+                format!("Edited node at path: {}", node_path),
+            ),
+            EditOperation::Insert {
+                parent_path,
+                position,
+                content: _,
+            } => (
+                OperationType::Insert,
+                Some(parent_path.clone()),
+                format!("Inserted content at {}, position {}", parent_path, position),
+            ),
+            EditOperation::Delete { node_path } => (
+                OperationType::Delete,
+                Some(node_path.clone()),
+                format!("Deleted node at path: {}", node_path),
+            ),
+        };
+
+        let _transaction_id = self.transaction_log.log_transaction(
+            operation_type,
+            PathBuf::from(&self.file_path),
+            node_path,
+            Some(before_hash),
+            Some(after_hash),
+            description,
+            HashMap::new(),
+        )?;
+
         fs::write(&self.file_path, modified_code)
             .context(format!("Failed to write file: {}", self.file_path))?;
 

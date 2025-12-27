@@ -1,9 +1,9 @@
-use anyhow::Result;
-use clap::{Parser, Subcommand};
-use crate::core::{GnawTreeWriter, EditOperation, TransactionLog, UndoRedoManager};
+use crate::core::{EditOperation, GnawTreeWriter, TransactionLog, UndoRedoManager};
 use crate::parser::TreeNode;
+use anyhow::Result;
+
+use clap::{Parser, Subcommand};
 use similar::{ChangeTag, TextDiff};
-use chrono::{DateTime, Utc};
 
 #[derive(Parser)]
 #[command(name = "gnawtreewriter")]
@@ -77,7 +77,6 @@ enum Commands {
     SessionStart,
     /// Show current undo/redo state
     Status,
-    },
     /// Delete a node
     Delete {
         file_path: String,
@@ -110,7 +109,10 @@ enum Commands {
 impl Cli {
     pub async fn run(self) -> Result<()> {
         match self.command {
-            Commands::Analyze { paths, format: _fmt } => {
+            Commands::Analyze {
+                paths,
+                format: _fmt,
+            } => {
                 let mut results = Vec::new();
                 for path in &paths {
                     let writer = GnawTreeWriter::new(path)?;
@@ -119,16 +121,27 @@ impl Cli {
                 }
                 println!("{}", serde_json::to_string_pretty(&results)?);
             }
-            Commands::List { file_path, filter_type } => {
+            Commands::List {
+                file_path,
+                filter_type,
+            } => {
                 let writer = GnawTreeWriter::new(&file_path)?;
                 list_nodes(writer.analyze(), filter_type.as_deref());
             }
-            Commands::Show { file_path, node_path } => {
+            Commands::Show {
+                file_path,
+                node_path,
+            } => {
                 let writer = GnawTreeWriter::new(&file_path)?;
                 println!("{}", writer.show_node(&node_path)?);
             }
-            Commands::Edit { file_path, node_path, content, preview } => {
-                let writer = GnawTreeWriter::new(&file_path)?;
+            Commands::Edit {
+                file_path,
+                node_path,
+                content,
+                preview,
+            } => {
+                let mut writer = GnawTreeWriter::new(&file_path)?;
                 let op = EditOperation::Edit { node_path, content };
                 if preview {
                     let modified = writer.preview_edit(op)?;
@@ -137,9 +150,19 @@ impl Cli {
                     writer.edit(op)?;
                 }
             }
-            Commands::Insert { file_path, parent_path, position, content, preview } => {
-                let writer = GnawTreeWriter::new(&file_path)?;
-                let op = EditOperation::Insert { parent_path, position, content };
+            Commands::Insert {
+                file_path,
+                parent_path,
+                position,
+                content,
+                preview,
+            } => {
+                let mut writer = GnawTreeWriter::new(&file_path)?;
+                let op = EditOperation::Insert {
+                    parent_path,
+                    position,
+                    content,
+                };
                 if preview {
                     let modified = writer.preview_edit(op)?;
                     print_diff(writer.get_source(), &modified);
@@ -147,8 +170,12 @@ impl Cli {
                     writer.edit(op)?;
                 }
             }
-            Commands::Delete { file_path, node_path, preview } => {
-                let writer = GnawTreeWriter::new(&file_path)?;
+            Commands::Delete {
+                file_path,
+                node_path,
+                preview,
+            } => {
+                let mut writer = GnawTreeWriter::new(&file_path)?;
                 let op = EditOperation::Delete { node_path };
                 if preview {
                     let modified = writer.preview_edit(op)?;
@@ -157,13 +184,20 @@ impl Cli {
                     writer.edit(op)?;
                 }
             }
-            Commands::AddProperty { file_path, target_path, name, r#type, value, preview } => {
-                let writer = GnawTreeWriter::new(&file_path)?;
+            Commands::AddProperty {
+                file_path,
+                target_path,
+                name,
+                r#type,
+                value,
+                preview,
+            } => {
+                let mut writer = GnawTreeWriter::new(&file_path)?;
                 let property_code = format!("property {} {}: {}", r#type, name, value);
                 let op = EditOperation::Insert {
                     parent_path: target_path.clone(),
                     position: 2,
-                    content: property_code
+                    content: property_code,
                 };
                 if preview {
                     let modified = writer.preview_edit(op)?;
@@ -173,8 +207,14 @@ impl Cli {
                     println!("Successfully added property '{}' to {}", name, target_path);
                 }
             }
-            Commands::AddComponent { file_path, target_path, name, content, preview } => {
-                let writer = GnawTreeWriter::new(&file_path)?;
+            Commands::AddComponent {
+                file_path,
+                target_path,
+                name,
+                content,
+                preview,
+            } => {
+                let mut writer = GnawTreeWriter::new(&file_path)?;
                 let component_code = match content {
                     Some(c) => format!("{} {{\n    {}\n}}", name, c),
                     None => format!("{} {{}}\n", name),
@@ -182,7 +222,7 @@ impl Cli {
                 let op = EditOperation::Insert {
                     parent_path: target_path.clone(),
                     position: 1,
-                    content: component_code
+                    content: component_code,
                 };
                 if preview {
                     let modified = writer.preview_edit(op)?;
@@ -201,7 +241,11 @@ impl Cli {
             Commands::History { limit, format } => {
                 Self::handle_history(limit, &format)?;
             }
-            Commands::Restore { file_path, transaction_id, preview } => {
+            Commands::Restore {
+                file_path,
+                transaction_id,
+                preview,
+            } => {
                 Self::handle_restore(&file_path, &transaction_id, preview)?;
             }
             Commands::SessionStart => {
@@ -229,13 +273,18 @@ impl Cli {
             if result.success {
                 println!("✓ Undone: {} ({})", result.message, result.transaction_id);
             } else {
-                println!("✗ Failed to undo: {} ({})", result.message, result.transaction_id);
+                println!(
+                    "✗ Failed to undo: {} ({})",
+                    result.message, result.transaction_id
+                );
             }
         }
 
         let state = undo_manager.get_state();
-        println!("\nUndo/Redo state: {} undo, {} redo available",
-                 state.undo_available, state.redo_available);
+        println!(
+            "\nUndo/Redo state: {} undo, {} redo available",
+            state.undo_available, state.redo_available
+        );
 
         Ok(())
     }
@@ -255,13 +304,18 @@ impl Cli {
             if result.success {
                 println!("✓ Redone: {} ({})", result.message, result.transaction_id);
             } else {
-                println!("✗ Failed to redo: {} ({})", result.message, result.transaction_id);
+                println!(
+                    "✗ Failed to redo: {} ({})",
+                    result.message, result.transaction_id
+                );
             }
         }
 
         let state = undo_manager.get_state();
-        println!("\nUndo/Redo state: {} undo, {} redo available",
-                 state.undo_available, state.redo_available);
+        println!(
+            "\nUndo/Redo state: {} undo, {} redo available",
+            state.undo_available, state.redo_available
+        );
 
         Ok(())
     }
@@ -276,28 +330,33 @@ impl Cli {
             "json" => {
                 let json = serde_json::to_string_pretty(&history)?;
                 println!("{}", json);
-            },
+            }
             "table" | _ => {
                 if history.is_empty() {
                     println!("No transaction history found");
                     return Ok(());
                 }
 
-                println!("{:<20} {:<10} {:<30} {:<15} {}",
-                         "Timestamp", "Operation", "File", "Node Path", "Description");
+                println!(
+                    "{:<20} {:<10} {:<30} {:<15} {}",
+                    "Timestamp", "Operation", "File", "Node Path", "Description"
+                );
                 println!("{}", "=".repeat(90));
 
                 for transaction in history.iter().rev() {
                     let timestamp = transaction.timestamp.format("%m-%d %H:%M:%S").to_string();
                     let operation = format!("{:?}", transaction.operation);
-                    let file_name = transaction.file_path
+                    let file_name = transaction
+                        .file_path
                         .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("unknown");
                     let node_path = transaction.node_path.as_deref().unwrap_or("N/A");
 
-                    println!("{:<20} {:<10} {:<30} {:<15} {}",
-                             timestamp, operation, file_name, node_path, transaction.description);
+                    println!(
+                        "{:<20} {:<10} {:<30} {:<15} {}",
+                        timestamp, operation, file_name, node_path, transaction.description
+                    );
                 }
             }
         }
@@ -309,20 +368,27 @@ impl Cli {
         let current_dir = std::env::current_dir()?;
         let transaction_log = TransactionLog::load(&current_dir)?;
 
-        let transaction = transaction_log.find_transaction(transaction_id)?
+        let transaction = transaction_log
+            .find_transaction(transaction_id)?
             .ok_or_else(|| anyhow::anyhow!("Transaction not found: {}", transaction_id))?;
 
         if preview {
             println!("Would restore {} to state from transaction:", file_path);
             println!("  ID: {}", transaction.id);
-            println!("  Timestamp: {}", transaction.timestamp.format("%Y-%m-%d %H:%M:%S"));
+            println!(
+                "  Timestamp: {}",
+                transaction.timestamp.format("%Y-%m-%d %H:%M:%S")
+            );
             println!("  Operation: {:?}", transaction.operation);
             println!("  Description: {}", transaction.description);
             println!("\nUse --no-preview to actually perform the restore");
         } else {
             // TODO: Implement actual restore logic
             println!("Restore functionality not yet implemented");
-            println!("Would restore {} using transaction {}", file_path, transaction_id);
+            println!(
+                "Would restore {} using transaction {}",
+                file_path, transaction_id
+            );
         }
 
         Ok(())
@@ -367,7 +433,10 @@ impl Cli {
             println!("\nRecent transactions:");
             for transaction in recent.iter().rev().take(3) {
                 let timestamp = transaction.timestamp.format("%H:%M:%S").to_string();
-                println!("  {} - {:?}: {}", timestamp, transaction.operation, transaction.description);
+                println!(
+                    "  {} - {:?}: {}",
+                    timestamp, transaction.operation, transaction.description
+                );
             }
         }
 
@@ -403,8 +472,13 @@ fn list_nodes_recursive(node: &TreeNode, depth: usize, filter_type: Option<&str>
 
 fn print_node(node: &TreeNode, depth: usize, filter_type: Option<&str>) {
     if let Some(f) = filter_type {
-        if node.node_type != f { return; }
+        if node.node_type != f {
+            return;
+        }
     }
     let indent = "  ".repeat(depth);
-    println!("{}{} [{}] (line {}-{})", indent, node.path, node.node_type, node.start_line, node.end_line);
+    println!(
+        "{}{} [{}] (line {}-{})",
+        indent, node.path, node.node_type, node.start_line, node.end_line
+    );
 }

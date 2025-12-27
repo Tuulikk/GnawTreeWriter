@@ -1,6 +1,6 @@
 use crate::core::transaction_log::{OperationType, Transaction, TransactionLog};
 use anyhow::{anyhow, Context, Result};
-use std::collections::HashMap;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

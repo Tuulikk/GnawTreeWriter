@@ -63,36 +63,86 @@ pub struct NodeContext {
 
 /// Process LLM edit request
 pub fn process_llm_request(request: LLMEditRequest) -> Result<LLMResponse> {
-    let writer = GnawTreeWriter::new(&request.file_path)?;
-    
+    let mut writer = GnawTreeWriter::new(&request.file_path)?;
+
     match request.intent {
-        EditIntent::ReplaceNode { description, node_path, new_content } => {
-            writer.edit(EditOperation::Edit { node_path: node_path.clone(), content: new_content })?;
-            Ok(LLMResponse::success(format!("Replaced node at {}: {}", node_path, description)))
+        EditIntent::ReplaceNode {
+            description,
+            node_path,
+            new_content,
+        } => {
+            writer.edit(EditOperation::Edit {
+                node_path: node_path.clone(),
+                content: new_content,
+            })?;
+            Ok(LLMResponse::success(format!(
+                "Replaced node at {}: {}",
+                node_path, description
+            )))
         }
-        EditIntent::InsertBefore { description, node_path, content } => {
+        EditIntent::InsertBefore {
+            description,
+            node_path,
+            content,
+        } => {
             let tree = writer.analyze();
             let parent_path = find_parent_path(&tree, &node_path)
                 .ok_or_else(|| anyhow::anyhow!("Could not find parent for node: {}", node_path))?;
-            writer.edit(EditOperation::Insert { parent_path, position: 0, content })?;
-            Ok(LLMResponse::success(format!("Inserted before node {}: {}", node_path, description)))
+            writer.edit(EditOperation::Insert {
+                parent_path,
+                position: 0,
+                content,
+            })?;
+            Ok(LLMResponse::success(format!(
+                "Inserted before node {}: {}",
+                node_path, description
+            )))
         }
-        EditIntent::InsertAfter { description, node_path, content } => {
+        EditIntent::InsertAfter {
+            description,
+            node_path,
+            content,
+        } => {
             let tree = writer.analyze();
             let parent_path = find_parent_path(&tree, &node_path)
                 .ok_or_else(|| anyhow::anyhow!("Could not find parent for node: {}", node_path))?;
-            writer.edit(EditOperation::Insert { parent_path, position: 1, content })?;
-            Ok(LLMResponse::success(format!("Inserted after node {}: {}", node_path, description)))
+            writer.edit(EditOperation::Insert {
+                parent_path,
+                position: 1,
+                content,
+            })?;
+            Ok(LLMResponse::success(format!(
+                "Inserted after node {}: {}",
+                node_path, description
+            )))
         }
-        EditIntent::DeleteNode { description, node_path } => {
+        EditIntent::DeleteNode {
+            description,
+            node_path,
+        } => {
             let node_path_clone = node_path.clone();
             writer.edit(EditOperation::Delete { node_path })?;
-            Ok(LLMResponse::success(format!("Deleted node {}: {}", node_path_clone, description)))
+            Ok(LLMResponse::success(format!(
+                "Deleted node {}: {}",
+                node_path_clone, description
+            )))
         }
-        EditIntent::AddProperty { description, component_path, property_name, property_value } => {
+        EditIntent::AddProperty {
+            description,
+            component_path,
+            property_name,
+            property_value,
+        } => {
             let content = format!("{}: {}", property_name, property_value);
-            writer.edit(EditOperation::Insert { parent_path: component_path.clone(), position: 1, content })?;
-            Ok(LLMResponse::success(format!("Added property {} to {}: {}", property_name, component_path, description)))
+            writer.edit(EditOperation::Insert {
+                parent_path: component_path.clone(),
+                position: 1,
+                content,
+            })?;
+            Ok(LLMResponse::success(format!(
+                "Added property {} to {}: {}",
+                property_name, component_path, description
+            )))
         }
     }
 }
@@ -101,13 +151,13 @@ pub fn process_llm_request(request: LLMEditRequest) -> Result<LLMResponse> {
 pub fn get_node_context(file_path: &str, node_path: &str) -> Result<NodeContext> {
     let writer = GnawTreeWriter::new(file_path)?;
     let tree = writer.analyze();
-    
+
     let node = find_node(&tree, node_path)
         .ok_or_else(|| anyhow::anyhow!("Node not found: {}", node_path))?;
-    
+
     let parent_path = find_parent_path(&tree, node_path);
     let sibling_context = get_sibling_content(&tree, node_path);
-    
+
     Ok(NodeContext {
         path: node_path.to_string(),
         node_type: node.node_type.clone(),
@@ -121,7 +171,7 @@ pub fn get_node_context(file_path: &str, node_path: &str) -> Result<NodeContext>
 /// Suggest edits based on LLM analysis
 pub fn suggest_edits(file_path: &str, analysis: LLMAnalysis) -> Result<Vec<LLMResponse>> {
     let mut responses = Vec::new();
-    
+
     for edit in analysis.suggested_edits {
         let request = LLMEditRequest {
             file_path: file_path.to_string(),
@@ -129,7 +179,7 @@ pub fn suggest_edits(file_path: &str, analysis: LLMAnalysis) -> Result<Vec<LLMRe
         };
         responses.push(process_llm_request(request)?);
     }
-    
+
     Ok(responses)
 }
 
@@ -178,7 +228,9 @@ fn find_parent_path(tree: &TreeNode, node_path: &str) -> Option<String> {
 fn get_sibling_content(tree: &TreeNode, node_path: &str) -> Vec<String> {
     if let Some(parent_path) = find_parent_path(tree, node_path) {
         if let Some(parent) = find_node(tree, &parent_path) {
-            return parent.children.iter()
+            return parent
+                .children
+                .iter()
                 .filter(|c| c.path != node_path)
                 .map(|c| c.content.clone())
                 .collect();
