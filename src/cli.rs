@@ -1,4 +1,6 @@
-use crate::core::{EditOperation, GnawTreeWriter, TransactionLog, UndoRedoManager};
+use crate::core::{
+    EditOperation, GnawTreeWriter, RestorationEngine, TransactionLog, UndoRedoManager,
+};
 use crate::parser::TreeNode;
 use anyhow::Result;
 
@@ -520,13 +522,9 @@ impl Cli {
             }
             println!("\nUse --no-preview to perform the restoration");
         } else {
-            println!("🚧 Project restoration not yet fully implemented");
-            println!(
-                "Would restore {} files to state at {}",
-                plan.affected_files.len(),
-                restore_to.format("%Y-%m-%d %H:%M:%S UTC")
-            );
-            // TODO: Implement actual multi-file restoration
+            let engine = RestorationEngine::new(&current_dir)?;
+            let result = engine.execute_project_restoration(&plan)?;
+            result.print_summary();
         }
 
         Ok(())
@@ -590,9 +588,9 @@ impl Cli {
             }
             println!("\nUse --no-preview to perform the restoration");
         } else {
-            println!("🚧 File restoration not yet fully implemented");
-            println!("Would restore {} files", filtered_files.len());
-            // TODO: Implement actual file restoration
+            let engine = RestorationEngine::new(&current_dir)?;
+            let result = engine.restore_files_before_timestamp(&filtered_files, since_time)?;
+            result.print_summary();
         }
 
         Ok(())
@@ -619,13 +617,9 @@ impl Cli {
             }
             println!("\nUse --no-preview to perform the restoration");
         } else {
-            println!("🚧 Session restoration not yet fully implemented");
-            println!(
-                "Would restore {} files from session {}",
-                session_files.len(),
-                session_id
-            );
-            // TODO: Implement actual session restoration
+            let engine = RestorationEngine::new(&current_dir)?;
+            let result = engine.restore_session(session_id)?;
+            result.print_summary();
         }
 
         Ok(())

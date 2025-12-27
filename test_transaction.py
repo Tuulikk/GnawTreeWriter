@@ -1,2 +1,2 @@
 def hello():
-    print("Updated again!")
+    print("New session content!")

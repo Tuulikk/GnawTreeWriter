@@ -5,9 +5,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod restoration_engine;
 pub mod transaction_log;
 pub mod undo_redo;
 
+pub use restoration_engine::{RestorationEngine, RestorationResult, RestorationStats};
 pub use transaction_log::{
     calculate_content_hash, FileRestorationPlan, OperationType, ProjectRestorationPlan,
     Transaction, TransactionLog,
