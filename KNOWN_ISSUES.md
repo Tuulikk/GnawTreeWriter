@@ -8,11 +8,11 @@ This document tracks known issues, limitations, and workarounds based on real-wo
 
 ## 📋 **Directory Analysis Issues**
 
-### **Issue**: Directory paths without `--recursive` fail
-**Status**: Expected behavior (by design)  
-**Symptom**: `gnawtreewriter analyze src/` gives "Is a directory (os error 21)"  
-**Workaround**: Use `gnawtreewriter analyze src/ --recursive`  
-**Rationale**: Prevents accidental analysis of large directory trees
+### **Issue**: Directory paths without `--recursive` require explicit flag
+**Status**: Intentional design decision (not a bug)  
+**Behavior**: `gnawtreewriter analyze src/` gives helpful message: "Directory 'src/' requires --recursive flag for safety"  
+**Solution**: Use `gnawtreewriter analyze src/ --recursive`  
+**Rationale**: Prevents accidental analysis of large directory trees and makes intent explicit
 
 ### **Issue**: No glob expansion in recursive mode
 **Status**: Shell-dependent  
@@ -115,7 +115,7 @@ This document tracks known issues, limitations, and workarounds based on real-wo
 
 | Error Message | Likely Cause | Quick Fix |
 |---------------|--------------|-----------|
-| `Is a directory (os error 21)` | Used directory path without `--recursive` | Add `--recursive` flag |
+| `Directory requires --recursive flag` | Used directory path without `--recursive` (intentional safety feature) | Add `--recursive` flag |
 | `Node not found at path` | Path changed since last analysis | Re-run `analyze` or `list` to get current paths |
 | `Backup not found for hash` | Hash mismatch in restoration | System auto-retries with timestamp method |
 | `Validation failed` | Syntax error in edit content | Check syntax of new content |
@@ -127,8 +127,11 @@ This document tracks known issues, limitations, and workarounds based on real-wo
 
 ### **Safe Analysis Pattern**
 ```bash
-# Always verify before analyzing large directories
+# Directories require explicit --recursive flag (by design)
 gnawtreewriter analyze . --recursive --format summary | head -20
+
+# This is intentional - prevents accidental large scans
+# gnawtreewriter analyze .  # Will require --recursive flag
 ```
 
 ### **Reliable Restoration Pattern**

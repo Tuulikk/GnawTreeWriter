@@ -30,14 +30,23 @@ enum Commands {
     ///   gnawtreewriter analyze app.py
     ///   gnawtreewriter analyze src/*.rs
     ///   gnawtreewriter analyze . --format summary
+    /// Files or directories to analyze (supports wildcards and recursive directory scanning)
+    ///
+    /// By design, directories require the --recursive flag for safety and clarity.
+    /// This prevents accidental analysis of large directory trees.
+    ///
+    /// Examples:
+    ///   gnawtreewriter analyze app.py
+    ///   gnawtreewriter analyze src/*.rs
+    ///   gnawtreewriter analyze src/ --recursive
     Analyze {
-        /// Files or directories to analyze (supports wildcards and recursive directory scanning)
+        /// Files or directories to analyze. Directories require --recursive flag
         paths: Vec<String>,
         #[arg(short, long, default_value = "json")]
         /// Output format: json, summary, or table
         format: String,
         #[arg(long)]
-        /// Recursively analyze directories for supported file types
+        /// Required flag to analyze directories (prevents accidental large scans)
         recursive: bool,
     },
     /// List all nodes in a file with their paths
@@ -306,18 +315,20 @@ enum Commands {
     /// Analyze files for potential issues and coding standard violations.
     /// This is a convenience wrapper around analyze with issue detection.
     ///
+    /// By design, directories require the --recursive flag for safety.
+    ///
     /// Examples:
     ///   gnawtreewriter lint app.py
     ///   gnawtreewriter lint src/ --recursive
-    ///   gnawtreewriter lint . --format json
+    ///   gnawtreewriter lint . --recursive --format json
     Lint {
-        /// Files or directories to lint
+        /// Files or directories to lint. Directories require --recursive flag
         paths: Vec<String>,
         #[arg(short, long, default_value = "text")]
         /// Output format: text or json
         format: String,
         #[arg(long)]
-        /// Recursively lint directories
+        /// Required flag to lint directories (prevents accidental large scans)
         recursive: bool,
     },
 }
@@ -1086,8 +1097,8 @@ impl Cli {
                     all_files.extend(Self::find_supported_files(&path_buf)?);
                 } else {
                     return Err(anyhow::anyhow!(
-                        "Path '{}' is a directory. Use --recursive to analyze directories, or specify individual files.",
-                        path
+                        "Directory '{}' requires --recursive flag for safety.\n\nTo analyze this directory: gnawtreewriter analyze {} --recursive\nTo analyze specific files: gnawtreewriter analyze {}/*.ext",
+                        path, path, path
                     ));
                 }
             } else {
@@ -1174,8 +1185,8 @@ impl Cli {
                     all_files.extend(Self::find_supported_files(&path_buf)?);
                 } else {
                     return Err(anyhow::anyhow!(
-                        "Path '{}' is a directory. Use --recursive to lint directories, or specify individual files.",
-                        path
+                        "Directory '{}' requires --recursive flag for safety.\n\nTo lint this directory: gnawtreewriter lint {} --recursive\nTo lint specific files: gnawtreewriter lint {}/*.ext",
+                        path, path, path
                     ));
                 }
             } else {

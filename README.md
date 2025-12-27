@@ -540,9 +540,22 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 - [ ] Web interface
 - [ ] AI-powered refactoring suggestions
 
+## Design Principles
+
+### **Safety by Design**
+- **Directory handling**: Requires explicit `--recursive` flag for directories to prevent accidental large scans
+- **Preview first**: All destructive operations support `--preview` to show changes before applying
+- **Automatic backups**: Every edit creates timestamped backups before making changes
+- **Syntax validation**: Code changes are validated before saving to prevent corruption
+
+### **Clear Intent**
+- **Explicit flags**: Directory operations require `--recursive` to make intent clear
+- **Helpful errors**: Error messages provide specific guidance and examples
+- **No surprises**: Commands do exactly what they say, nothing hidden or automatic
+
 ## Known Limitations
 
-- **Directory analysis**: Requires `--recursive` flag for directory arguments (`analyze dir/` fails, use `analyze dir/ --recursive`)
+- **Directory analysis**: Intentionally requires `--recursive` flag for directories (safety feature)
 - **QML instantiation**: Parse success doesn't guarantee runtime QML instantiation success  
 - **Large projects**: Very large projects may require patience for full analysis
 - **Hash matching**: Occasional backup hash mismatches resolved with timestamp fallback
