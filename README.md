@@ -14,7 +14,10 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 - **Safe editing**: Preview changes with `--preview` flag
 - **Multi-file operations**: Analyze and lint multiple files at once
 - **Smart search**: Find nodes by type and content
-- **Human-friendly linting**: `file:line:col severity message` format
+- **Revolutionary time travel**: Project-wide restoration to any timestamp
+- **Session management**: Track and undo entire AI agent workflows
+- **Interactive help system**: Examples, wizards, and comprehensive guidance
+- **AI-native design**: Built specifically for AI-assisted development
 
 ## Why Use GnawTreeWriter?
 
@@ -63,28 +66,51 @@ sudo mv gnawtreewriter /usr/local/bin/
 
 ## Quick Start
 
+### First Time? Get Interactive Help!
+
+```bash
+# Get comprehensive help and examples
+gnawtreewriter --help
+gnawtreewriter examples
+gnawtreewriter wizard --task first-time
+```
+
 ### Basic Usage
 
 ```bash
-# Analyze a file
+# Analyze a file to understand structure
 gnawtreewriter analyze app.py
 
-# Show a specific node
-gnawtreewriter show app.py "1"
+# List all available nodes with paths
+gnawtreewriter list app.py
 
-# Edit a node
-gnawtreewriter edit app.py "1" "def new_function():\n    pass"
+# Edit a specific node (with preview first)
+gnawtreewriter edit app.py "0.1" 'def hello(): print("world")' --preview
+gnawtreewriter edit app.py "0.1" 'def hello(): print("world")'
 
-# Insert content before a node
-gnawtreewriter insert app.py "1" 0 "# New import"
+# Insert new content
+gnawtreewriter insert app.py "0" 1 'def new_function(): pass'
 
-# Delete a node
-gnawtreewriter delete app.py "2"
+# Start session tracking for AI workflows
+gnawtreewriter session-start
 ```
 
-### For LLM Integration
+### Time Travel Features
 
-See [LLM_INTEGRATION.md](docs/LLM_INTEGRATION.md) for comprehensive guide on integrating with language models.
+```bash
+# Restore entire project to specific timestamp
+gnawtreewriter restore-project "2025-12-27T15:30:00Z" --preview
+
+# Undo an entire AI agent session
+gnawtreewriter restore-session "session_id"
+
+# View what happened and when
+gnawtreewriter history
+```
+
+### For AI Agents
+
+See [AI_AGENT_TEST_SCENARIOS.md](AI_AGENT_TEST_SCENARIOS.md) for comprehensive testing guide and [AGENTS.md](AGENTS.md) for quick reference.
 
 ## Supported Languages
 
@@ -159,42 +185,98 @@ gnawtreewriter find <file_path> --content "mainToolbar"
 gnawtreewriter find app/ui/qml/ --content "width:"
 ```
 
-### fuzzy-edit
-Fuzzy edit - find and edit node without exact path. Ideal for LLM integration.
+### Time Travel & Restoration Commands
+
+#### restore-project
+Restore entire project to a specific point in time.
 
 ```bash
-# Edit by content query
-gnawtreewriter fuzzy-edit <file_path> <query> <new_content>
+# Preview what would be restored
+gnawtreewriter restore-project "2025-12-27T15:30:00Z" --preview
 
-# With node type filter
-gnawtreewriter fuzzy-edit <file_path> <query> <new_content> --node-type Property
-
-# Preview before applying
-gnawtreewriter fuzzy-edit <file_path> <query> <new_content> --preview
+# Restore all files to timestamp
+gnawtreewriter restore-project "2025-12-27T15:30:00Z"
 ```
 
-The fuzzy matcher uses multiple strategies:
-- Content substring match
-- Node type match
-- Word match in content
-- Prefix match
-- Levenshtein similarity
-- First character match
-
-If multiple nodes have similar scores, fuzzy-edit will show all candidates and use the best match.
-
-### lint
-Lint files and show issues with severity levels.
+#### restore-session
+Undo all changes from a specific AI agent session.
 
 ```bash
-# Lint with human-readable output
-gnawtreewriter lint <file_path>
+# Find session ID from history
+gnawtreewriter history
 
-# Lint directory
-gnawtreewriter lint app/ui/qml/
+# Restore entire session
+gnawtreewriter restore-session "session_1766859069329812591" --preview
+```
 
-# Get JSON output for CI
-gnawtreewriter lint app/ui/qml/ --format json
+#### restore-files
+Selectively restore files modified since a timestamp.
+
+```bash
+# Restore Python files modified since timestamp
+gnawtreewriter restore-files --since "2025-12-27T16:00:00Z" --files "*.py"
+```
+
+### Session Management
+
+#### session-start
+Start a new session to group related operations.
+
+```bash
+gnawtreewriter session-start
+```
+
+#### history
+Show transaction history with timestamps.
+
+```bash
+# Show recent operations
+gnawtreewriter history
+
+# Show more with JSON format
+gnawtreewriter history --limit 20 --format json
+```
+
+#### undo / redo
+Session-based undo and redo operations.
+
+```bash
+# Undo last operation
+gnawtreewriter undo
+
+# Undo multiple steps
+gnawtreewriter undo --steps 3
+
+# Redo operations
+gnawtreewriter redo --steps 2
+```
+
+### Help & Learning
+
+#### examples
+Show practical examples for common tasks.
+
+```bash
+# General examples
+gnawtreewriter examples
+
+# Topic-specific examples
+gnawtreewriter examples --topic editing
+gnawtreewriter examples --topic restoration
+gnawtreewriter examples --topic qml
+```
+
+#### wizard
+Interactive help for guided workflows.
+
+```bash
+# Start interactive wizard
+gnawtreewriter wizard
+
+# Task-specific guidance
+gnawtreewriter wizard --task first-time
+gnawtreewriter wizard --task editing
+gnawtreewriter wizard --task troubleshooting
 ```
 
 **Output**: Complete AST tree with node types, paths, content, and line numbers.
@@ -310,26 +392,35 @@ gnawtreewriter show app.ts "1.3"
 gnawtreewriter insert app.ts "1.3" 2 "newMethod(): void { console.log('hello'); }"
 ```
 
-## LLM Integration
+## AI Agent Integration
 
-GnawTreeWriter is designed from the ground up for LLM integration. Key features:
+GnawTreeWriter is designed from the ground up for AI-native development workflows.
 
-### Structured Edit Intents
-- **ReplaceNode**: Replace entire node content
-- **AddProperty**: Add property to component (QML-specific)
-- **InsertBefore**: Insert before a node
-- **InsertAfter**: Insert after a node
-- **DeleteNode**: Remove a node
+### Revolutionary Capabilities for AI Agents
+- **Temporal Project Management**: Restore entire projects to specific timestamps
+- **Session-based Workflows**: Track and undo complete AI agent sessions
+- **Safe Experimentation**: Preview all changes before applying
+- **Tree-based Editing**: No more bracket-matching or indentation errors
+- **Comprehensive Help System**: Interactive learning and troubleshooting
 
-### Context Awareness
-- Get node context with parent and sibling information
-- Understand tree structure before making changes
-- Validate node paths before editing
+### Perfect for AI Development Workflows
+```bash
+# Start AI session
+gnawtreewriter session-start
 
-### Error Handling
-- Detailed error messages with suggestions
-- Path validation before edits
-- Change detection and reporting
+# Make multiple changes safely
+gnawtreewriter edit file.py "0.1" 'new code' --preview
+gnawtreewriter add-component ui.qml "0" Button
+
+# If something goes wrong, undo entire session
+gnawtreewriter restore-session "session_id"
+```
+
+### Built-in Testing Framework
+See [AI_AGENT_TEST_SCENARIOS.md](AI_AGENT_TEST_SCENARIOS.md) for comprehensive testing scenarios designed specifically for AI agents.
+
+### Multi-Agent Development Proven
+This tool was built using multi-agent collaboration (Claude, Gemini, GLM-4.7, Raptor Mini), proving that human-AI collaborative development is not just possible, but superior.
 
 For complete integration guide, see [docs/LLM_INTEGRATION.md](docs/LLM_INTEGRATION.md).
 
@@ -414,11 +505,15 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 MIT License - see LICENSE file for details
 
-## Support
+## Getting Help
 
+- **Interactive Help**: `gnawtreewriter wizard` for guided assistance
+- **Examples**: `gnawtreewriter examples` for practical workflows  
+- **Command Help**: `gnawtreewriter <command> --help` for detailed usage
+- **AI Agent Testing**: See [AI_AGENT_TEST_SCENARIOS.md](AI_AGENT_TEST_SCENARIOS.md)
 - **Issues**: Report bugs on GitHub Issues
 - **Discussions**: Use GitHub Discussions for questions
-- **Documentation**: Check docs/ directory for detailed guides
+- **Documentation**: Complete handbook in [GnawTreeWriter_docs/](GnawTreeWriter_docs/)
 
 ## Acknowledgments
 
