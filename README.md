@@ -39,7 +39,7 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 ### From Source
 
 ```bash
-git clone https://github.com/Gnaw-Software/GnawTreeWriter.git
+git clone https://github.com/Tuulikk/GnawTreeWriter.git
 cd GnawTreeWriter
 cargo build --release
 ```

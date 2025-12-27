@@ -121,9 +121,9 @@ gnawtreewriter redo [--steps N]        # Redo operations
 
 ## 🔗 **External Resources**
 
-- **GitHub Repository**: https://github.com/Gnaw-Software/GnawTreeWriter
-- **Issues & Support**: https://github.com/Gnaw-Software/GnawTreeWriter/issues
-- **Discussions**: https://github.com/Gnaw-Software/GnawTreeWriter/discussions
+- **GitHub Repository**: https://github.com/Tuulikk/GnawTreeWriter
+- **Issues & Support**: https://github.com/Tuulikk/GnawTreeWriter/issues
+- **Discussions**: https://github.com/Tuulikk/GnawTreeWriter/discussions
 
 ---
 
