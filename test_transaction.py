@@ -1,2 +1,2 @@
 def hello():
-    print("Hello from GnawTreeWriter!")
+    print("Updated again!")

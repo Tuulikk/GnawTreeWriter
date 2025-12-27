@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 pub mod transaction_log;
 pub mod undo_redo;
 
-pub use transaction_log::{calculate_content_hash, OperationType, Transaction, TransactionLog};
+pub use transaction_log::{
+    calculate_content_hash, FileRestorationPlan, OperationType, ProjectRestorationPlan,
+    Transaction, TransactionLog,
+};
 pub use undo_redo::{UndoRedoManager, UndoRedoResult, UndoRedoState};
 
 pub struct GnawTreeWriter {

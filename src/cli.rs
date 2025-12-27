@@ -77,6 +77,27 @@ enum Commands {
     SessionStart,
     /// Show current undo/redo state
     Status,
+    /// Restore entire project to a specific timestamp
+    RestoreProject {
+        timestamp: String,
+        #[arg(short, long)]
+        preview: bool,
+    },
+    /// Restore multiple files to state before a timestamp
+    RestoreFiles {
+        #[arg(short, long)]
+        since: String,
+        #[arg(short, long)]
+        files: Vec<String>,
+        #[arg(short, long)]
+        preview: bool,
+    },
+    /// Restore all files modified in a specific session
+    RestoreSession {
+        session_id: String,
+        #[arg(short, long)]
+        preview: bool,
+    },
     /// Delete a node
     Delete {
         file_path: String,
@@ -253,6 +274,22 @@ impl Cli {
             }
             Commands::Status => {
                 Self::handle_status()?;
+            }
+            Commands::RestoreProject { timestamp, preview } => {
+                Self::handle_restore_project(&timestamp, preview)?;
+            }
+            Commands::RestoreFiles {
+                since,
+                files,
+                preview,
+            } => {
+                Self::handle_restore_files(&since, &files, preview)?;
+            }
+            Commands::RestoreSession {
+                session_id,
+                preview,
+            } => {
+                Self::handle_restore_session(&session_id, preview)?;
             }
         }
         Ok(())
@@ -438,6 +475,157 @@ impl Cli {
                     timestamp, transaction.operation, transaction.description
                 );
             }
+        }
+
+        Ok(())
+    }
+
+    fn handle_restore_project(timestamp: &str, preview: bool) -> Result<()> {
+        use chrono::DateTime;
+
+        let current_dir = std::env::current_dir()?;
+        let transaction_log = TransactionLog::load(&current_dir)?;
+
+        // Parse timestamp
+        let restore_to = DateTime::parse_from_rfc3339(timestamp)
+            .or_else(|_| DateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S"))
+            .or_else(|_| DateTime::parse_from_str(timestamp, "%Y-%m-%dT%H:%M:%S"))
+            .map_err(|_| {
+                anyhow::anyhow!("Invalid timestamp format. Use RFC3339 or YYYY-MM-DD HH:MM:SS")
+            })?
+            .with_timezone(&chrono::Utc);
+
+        let plan = transaction_log.get_project_restoration_plan(restore_to)?;
+
+        if !plan.has_changes() {
+            println!(
+                "No changes found since {}",
+                restore_to.format("%Y-%m-%d %H:%M:%S UTC")
+            );
+            return Ok(());
+        }
+
+        if preview {
+            println!("Project Restoration Plan:");
+            println!("=========================");
+            println!("{}", plan.get_summary());
+            println!("\nFiles to be restored:");
+            for file_plan in &plan.affected_files {
+                println!(
+                    "  {} ({} modifications since {})",
+                    file_plan.file_path.display(),
+                    file_plan.current_modifications_count,
+                    restore_to.format("%Y-%m-%d %H:%M:%S")
+                );
+            }
+            println!("\nUse --no-preview to perform the restoration");
+        } else {
+            println!("🚧 Project restoration not yet fully implemented");
+            println!(
+                "Would restore {} files to state at {}",
+                plan.affected_files.len(),
+                restore_to.format("%Y-%m-%d %H:%M:%S UTC")
+            );
+            // TODO: Implement actual multi-file restoration
+        }
+
+        Ok(())
+    }
+
+    fn handle_restore_files(since: &str, file_patterns: &[String], preview: bool) -> Result<()> {
+        use chrono::DateTime;
+
+        let current_dir = std::env::current_dir()?;
+        let transaction_log = TransactionLog::load(&current_dir)?;
+
+        // Parse timestamp
+        let since_time = DateTime::parse_from_rfc3339(since)
+            .or_else(|_| DateTime::parse_from_str(since, "%Y-%m-%d %H:%M:%S"))
+            .or_else(|_| DateTime::parse_from_str(since, "%Y-%m-%dT%H:%M:%S"))
+            .map_err(|_| {
+                anyhow::anyhow!("Invalid timestamp format. Use RFC3339 or YYYY-MM-DD HH:MM:SS")
+            })?
+            .with_timezone(&chrono::Utc);
+
+        let affected_files = transaction_log.get_affected_files_since(since_time)?;
+
+        // Filter files by patterns (simplified - would need proper glob matching)
+        let filtered_files: Vec<_> = if file_patterns.is_empty() {
+            affected_files
+        } else {
+            affected_files
+                .into_iter()
+                .filter(|file| {
+                    file_patterns.iter().any(|pattern| {
+                        file.to_string_lossy().contains(pattern)
+                            || file
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .contains(pattern)
+                    })
+                })
+                .collect()
+        };
+
+        if filtered_files.is_empty() {
+            println!(
+                "No matching files found that were modified since {}",
+                since_time.format("%Y-%m-%d %H:%M:%S UTC")
+            );
+            return Ok(());
+        }
+
+        if preview {
+            println!("Files Restoration Plan:");
+            println!("=======================");
+            println!(
+                "Restore {} files to state before {}",
+                filtered_files.len(),
+                since_time.format("%Y-%m-%d %H:%M:%S UTC")
+            );
+            println!("\nFiles to be restored:");
+            for file in &filtered_files {
+                println!("  {}", file.display());
+            }
+            println!("\nUse --no-preview to perform the restoration");
+        } else {
+            println!("🚧 File restoration not yet fully implemented");
+            println!("Would restore {} files", filtered_files.len());
+            // TODO: Implement actual file restoration
+        }
+
+        Ok(())
+    }
+
+    fn handle_restore_session(session_id: &str, preview: bool) -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let transaction_log = TransactionLog::load(&current_dir)?;
+
+        let session_files = transaction_log.get_session_files(session_id)?;
+
+        if session_files.is_empty() {
+            println!("No files found for session: {}", session_id);
+            return Ok(());
+        }
+
+        if preview {
+            println!("Session Restoration Plan:");
+            println!("=========================");
+            println!("Restore all changes from session: {}", session_id);
+            println!("Files affected in this session:");
+            for file in &session_files {
+                println!("  {}", file.display());
+            }
+            println!("\nUse --no-preview to perform the restoration");
+        } else {
+            println!("🚧 Session restoration not yet fully implemented");
+            println!(
+                "Would restore {} files from session {}",
+                session_files.len(),
+                session_id
+            );
+            // TODO: Implement actual session restoration
         }
 
         Ok(())

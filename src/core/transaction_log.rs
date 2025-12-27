@@ -1,10 +1,10 @@
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use anyhow::{Context, Result};
 
 /// Represents a single transaction in the log
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,8 +131,7 @@ impl TransactionLog {
             return Ok(Vec::new());
         }
 
-        let file = File::open(&self.log_file)
-            .context("Failed to open transaction log file")?;
+        let file = File::open(&self.log_file).context("Failed to open transaction log file")?;
         let reader = BufReader::new(file);
 
         let mut transactions = Vec::new();
@@ -143,8 +142,8 @@ impl TransactionLog {
                 continue;
             }
 
-            let transaction: Transaction = serde_json::from_str(&line)
-                .context("Failed to parse transaction from log")?;
+            let transaction: Transaction =
+                serde_json::from_str(&line).context("Failed to parse transaction from log")?;
             transactions.push(transaction);
         }
 
@@ -172,6 +171,138 @@ impl TransactionLog {
             .collect())
     }
 
+    /// Get transactions within a time range
+    pub fn get_history_range(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<Transaction>> {
+        let full_history = self.get_full_history()?;
+
+        Ok(full_history
+            .into_iter()
+            .filter(|t| t.timestamp >= start && t.timestamp <= end)
+            .collect())
+    }
+
+    /// Get all files affected in a time range
+    pub fn get_affected_files_since(&self, since: DateTime<Utc>) -> Result<Vec<PathBuf>> {
+        let transactions = self.get_history_since(since)?;
+        let mut files: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+
+        for transaction in transactions {
+            if matches!(
+                transaction.operation,
+                OperationType::Edit | OperationType::Insert | OperationType::Delete
+            ) {
+                files.insert(transaction.file_path);
+            }
+        }
+
+        Ok(files.into_iter().collect())
+    }
+
+    /// Get all files affected in a session
+    pub fn get_session_files(&self, session_id: &str) -> Result<Vec<PathBuf>> {
+        let full_history = self.get_full_history()?;
+        let mut files: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+
+        for transaction in full_history {
+            if transaction.session_id == session_id {
+                if matches!(
+                    transaction.operation,
+                    OperationType::Edit | OperationType::Insert | OperationType::Delete
+                ) {
+                    files.insert(transaction.file_path);
+                }
+            }
+        }
+
+        Ok(files.into_iter().collect())
+    }
+
+    /// Find the last transaction for a file before a specific timestamp
+    pub fn get_last_transaction_before(
+        &self,
+        file_path: &PathBuf,
+        before: DateTime<Utc>,
+    ) -> Result<Option<Transaction>> {
+        let file_history = self.get_file_history(file_path)?;
+
+        Ok(file_history
+            .into_iter()
+            .filter(|t| t.timestamp < before)
+            .filter(|t| {
+                matches!(
+                    t.operation,
+                    OperationType::Edit | OperationType::Insert | OperationType::Delete
+                )
+            })
+            .max_by_key(|t| t.timestamp))
+    }
+
+    /// Get project restoration plan for a specific timestamp
+    pub fn get_project_restoration_plan(
+        &self,
+        restore_to: DateTime<Utc>,
+    ) -> Result<ProjectRestorationPlan> {
+        let affected_files = self.get_affected_files_since(restore_to)?;
+        let mut file_plans = Vec::new();
+
+        for file_path in affected_files {
+            if let Some(last_transaction) =
+                self.get_last_transaction_before(&file_path, restore_to)?
+            {
+                file_plans.push(FileRestorationPlan {
+                    file_path: file_path.clone(),
+                    target_transaction_id: last_transaction.id,
+                    target_hash: last_transaction.after_hash.clone(),
+                    current_modifications_count: self
+                        .count_modifications_since(&file_path, restore_to)?,
+                });
+            }
+        }
+
+        Ok(ProjectRestorationPlan {
+            restore_to_timestamp: restore_to,
+            affected_files: file_plans,
+            total_transactions_to_revert: self.count_transactions_since(restore_to)?,
+        })
+    }
+
+    /// Count modifications to a file since a timestamp
+    fn count_modifications_since(
+        &self,
+        file_path: &PathBuf,
+        since: DateTime<Utc>,
+    ) -> Result<usize> {
+        let file_history = self.get_file_history(file_path)?;
+        Ok(file_history
+            .into_iter()
+            .filter(|t| t.timestamp >= since)
+            .filter(|t| {
+                matches!(
+                    t.operation,
+                    OperationType::Edit | OperationType::Insert | OperationType::Delete
+                )
+            })
+            .count())
+    }
+
+    /// Count total transactions since a timestamp
+    fn count_transactions_since(&self, since: DateTime<Utc>) -> Result<usize> {
+        let transactions = self.get_history_since(since)?;
+        Ok(transactions
+            .into_iter()
+            .filter(|t| {
+                matches!(
+                    t.operation,
+                    OperationType::Edit | OperationType::Insert | OperationType::Delete
+                )
+            })
+            .count())
+    }
+
     /// Find transaction by ID
     pub fn find_transaction(&self, transaction_id: &str) -> Result<Option<Transaction>> {
         // Check current session first
@@ -196,12 +327,7 @@ impl TransactionLog {
     pub fn get_last_n_transactions(&self, n: usize) -> Result<Vec<Transaction>> {
         let full_history = self.get_full_history()?;
 
-        Ok(full_history
-            .into_iter()
-            .rev()
-            .take(n)
-            .rev()
-            .collect())
+        Ok(full_history.into_iter().rev().take(n).rev().collect())
     }
 
     /// Start a new session (clears current session, keeps history)
@@ -214,7 +340,10 @@ impl TransactionLog {
                 None,
                 None,
                 None,
-                format!("Session ended with {} operations", self.current_session.len()),
+                format!(
+                    "Session ended with {} operations",
+                    self.current_session.len()
+                ),
                 HashMap::new(),
             )?;
         }
@@ -241,14 +370,10 @@ impl TransactionLog {
         let history = self.get_full_history()?;
 
         match format {
-            ExportFormat::Json => {
-                serde_json::to_string_pretty(&history)
-                    .context("Failed to serialize history to JSON")
-            }
-            ExportFormat::JsonCompact => {
-                serde_json::to_string(&history)
-                    .context("Failed to serialize history to compact JSON")
-            }
+            ExportFormat::Json => serde_json::to_string_pretty(&history)
+                .context("Failed to serialize history to JSON"),
+            ExportFormat::JsonCompact => serde_json::to_string(&history)
+                .context("Failed to serialize history to compact JSON"),
         }
     }
 
@@ -261,14 +386,12 @@ impl TransactionLog {
             .context("Failed to open log file for writing")?;
 
         let mut writer = BufWriter::new(file);
-        let json_line = serde_json::to_string(transaction)
-            .context("Failed to serialize transaction")?;
+        let json_line =
+            serde_json::to_string(transaction).context("Failed to serialize transaction")?;
 
-        writeln!(writer, "{}", json_line)
-            .context("Failed to write transaction to log")?;
+        writeln!(writer, "{}", json_line).context("Failed to write transaction to log")?;
 
-        writer.flush()
-            .context("Failed to flush log file")?;
+        writer.flush().context("Failed to flush log file")?;
 
         Ok(())
     }
@@ -278,6 +401,45 @@ impl TransactionLog {
 pub enum ExportFormat {
     Json,
     JsonCompact,
+}
+
+/// Plan for restoring multiple files to a specific point in time
+#[derive(Debug, Clone)]
+pub struct ProjectRestorationPlan {
+    pub restore_to_timestamp: DateTime<Utc>,
+    pub affected_files: Vec<FileRestorationPlan>,
+    pub total_transactions_to_revert: usize,
+}
+
+/// Plan for restoring a single file
+#[derive(Debug, Clone)]
+pub struct FileRestorationPlan {
+    pub file_path: PathBuf,
+    pub target_transaction_id: String,
+    pub target_hash: Option<String>,
+    pub current_modifications_count: usize,
+}
+
+impl ProjectRestorationPlan {
+    /// Check if this restoration would affect any files
+    pub fn has_changes(&self) -> bool {
+        !self.affected_files.is_empty()
+    }
+
+    /// Get summary of what will be restored
+    pub fn get_summary(&self) -> String {
+        format!(
+            "Restore {} files to state at {}, reverting {} transactions",
+            self.affected_files.len(),
+            self.restore_to_timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
+            self.total_transactions_to_revert
+        )
+    }
+
+    /// Get list of files that will be affected
+    pub fn get_file_list(&self) -> Vec<&PathBuf> {
+        self.affected_files.iter().map(|f| &f.file_path).collect()
+    }
 }
 
 /// Generate a unique session ID
@@ -311,7 +473,10 @@ mod tests {
         let log = TransactionLog::new(temp_dir.path()).unwrap();
 
         assert_eq!(log.current_session.len(), 1); // SessionStart
-        assert!(matches!(log.current_session[0].operation, OperationType::SessionStart));
+        assert!(matches!(
+            log.current_session[0].operation,
+            OperationType::SessionStart
+        ));
     }
 
     #[test]
@@ -319,15 +484,17 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let mut log = TransactionLog::new(temp_dir.path()).unwrap();
 
-        let transaction_id = log.log_transaction(
-            OperationType::Edit,
-            PathBuf::from("test.py"),
-            Some("0.1".to_string()),
-            Some("hash1".to_string()),
-            Some("hash2".to_string()),
-            "Test edit".to_string(),
-            HashMap::new(),
-        ).unwrap();
+        let transaction_id = log
+            .log_transaction(
+                OperationType::Edit,
+                PathBuf::from("test.py"),
+                Some("0.1".to_string()),
+                Some("hash1".to_string()),
+                Some("hash2".to_string()),
+                "Test edit".to_string(),
+                HashMap::new(),
+            )
+            .unwrap();
 
         assert_eq!(log.current_session.len(), 2); // SessionStart + Edit
         assert!(!transaction_id.is_empty());
@@ -338,15 +505,17 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let mut log = TransactionLog::new(temp_dir.path()).unwrap();
 
-        let transaction_id = log.log_transaction(
-            OperationType::Edit,
-            PathBuf::from("test.py"),
-            Some("0.1".to_string()),
-            Some("hash1".to_string()),
-            Some("hash2".to_string()),
-            "Test edit".to_string(),
-            HashMap::new(),
-        ).unwrap();
+        let transaction_id = log
+            .log_transaction(
+                OperationType::Edit,
+                PathBuf::from("test.py"),
+                Some("0.1".to_string()),
+                Some("hash1".to_string()),
+                Some("hash2".to_string()),
+                "Test edit".to_string(),
+                HashMap::new(),
+            )
+            .unwrap();
 
         let found = log.find_transaction(&transaction_id).unwrap();
         assert!(found.is_some());
