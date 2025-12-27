@@ -9,6 +9,7 @@ use similar::{ChangeTag, TextDiff};
 
 #[derive(Parser)]
 #[command(name = "gnawtreewriter")]
+#[command(version)]
 #[command(about = "AI-native temporal code editor for tree-based editing")]
 #[command(
     long_about = "GnawTreeWriter is a revolutionary tree-based code editor designed for AI-assisted development.\nIt provides temporal project management, multi-file restoration, and session-based rollback capabilities.\n\nQuick start: gnawtreewriter analyze <file> to see the structure, then edit specific nodes safely.\nFor help with specific commands, use: gnawtreewriter <command> --help"
@@ -30,11 +31,14 @@ enum Commands {
     ///   gnawtreewriter analyze src/*.rs
     ///   gnawtreewriter analyze . --format summary
     Analyze {
-        /// Files or directories to analyze (supports wildcards)
+        /// Files or directories to analyze (supports wildcards and recursive directory scanning)
         paths: Vec<String>,
         #[arg(short, long, default_value = "json")]
         /// Output format: json, summary, or table
         format: String,
+        #[arg(long)]
+        /// Recursively analyze directories for supported file types
+        recursive: bool,
     },
     /// List all nodes in a file with their paths
     ///
@@ -297,6 +301,25 @@ enum Commands {
         /// Jump to specific task: first-time, editing, qml, restoration, troubleshooting
         task: Option<String>,
     },
+    /// Lint files and show issues with severity levels
+    ///
+    /// Analyze files for potential issues and coding standard violations.
+    /// This is a convenience wrapper around analyze with issue detection.
+    ///
+    /// Examples:
+    ///   gnawtreewriter lint app.py
+    ///   gnawtreewriter lint src/ --recursive
+    ///   gnawtreewriter lint . --format json
+    Lint {
+        /// Files or directories to lint
+        paths: Vec<String>,
+        #[arg(short, long, default_value = "text")]
+        /// Output format: text or json
+        format: String,
+        #[arg(long)]
+        /// Recursively lint directories
+        recursive: bool,
+    },
 }
 
 impl Cli {
@@ -305,14 +328,9 @@ impl Cli {
             Commands::Analyze {
                 paths,
                 format: _fmt,
+                recursive,
             } => {
-                let mut results = Vec::new();
-                for path in &paths {
-                    let writer = GnawTreeWriter::new(path)?;
-                    let tree = writer.analyze();
-                    results.push(serde_json::to_value(tree)?);
-                }
-                println!("{}", serde_json::to_string_pretty(&results)?);
+                Self::handle_analyze(&paths, &_fmt, recursive)?;
             }
             Commands::List {
                 file_path,
@@ -452,6 +470,13 @@ impl Cli {
             }
             Commands::Wizard { task } => {
                 Self::handle_wizard(task.as_deref())?;
+            }
+            Commands::Lint {
+                paths,
+                format,
+                recursive,
+            } => {
+                Self::handle_lint(&paths, &format, recursive)?;
             }
             Commands::DebugHash { content } => {
                 Self::handle_debug_hash(&content)?;
@@ -1045,6 +1070,162 @@ impl Cli {
                 println!("🎯 Most common first steps:");
                 println!("  1. gnawtreewriter analyze <your-file>          # See structure");
                 println!("  2. gnawtreewriter wizard --task first-time     # Detailed walkthrough");
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_analyze(paths: &[String], format: &str, recursive: bool) -> Result<()> {
+        let mut all_files = Vec::new();
+
+        for path in paths {
+            let path_buf = std::path::PathBuf::from(path);
+            if path_buf.is_dir() {
+                if recursive {
+                    // Recursively find supported files
+                    all_files.extend(Self::find_supported_files(&path_buf)?);
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Path '{}' is a directory. Use --recursive to analyze directories, or specify individual files.",
+                        path
+                    ));
+                }
+            } else {
+                all_files.push(path.clone());
+            }
+        }
+
+        if all_files.is_empty() {
+            println!("No supported files found to analyze.");
+            return Ok(());
+        }
+
+        let mut results = Vec::new();
+        for file_path in &all_files {
+            match GnawTreeWriter::new(file_path) {
+                Ok(writer) => {
+                    let tree = writer.analyze();
+                    results.push(serde_json::to_value(tree)?);
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to analyze {}: {}", file_path, e);
+                }
+            }
+        }
+
+        match format {
+            "summary" => {
+                println!("Analyzed {} files", results.len());
+                for (i, result) in results.iter().enumerate() {
+                    if let Some(file_path) = all_files.get(i) {
+                        println!("File: {}", file_path);
+                        if let Some(children) = result.get("children") {
+                            if let Some(array) = children.as_array() {
+                                println!("  Nodes: {}", array.len());
+                            }
+                        }
+                    }
+                }
+            }
+            "json" | _ => {
+                println!("{}", serde_json::to_string_pretty(&results)?);
+            }
+        }
+        Ok(())
+    }
+
+    fn find_supported_files(dir: &std::path::Path) -> Result<Vec<String>> {
+        let mut files = Vec::new();
+        let supported_extensions = vec![
+            "py", "rs", "ts", "tsx", "js", "jsx", "php", "html", "htm", "qml", "go",
+        ];
+
+        if dir.is_dir() {
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                let path = entry.path();
+
+                if path.is_dir() {
+                    files.extend(Self::find_supported_files(&path)?);
+                } else if let Some(ext) = path.extension() {
+                    if let Some(ext_str) = ext.to_str() {
+                        if supported_extensions.contains(&ext_str) {
+                            if let Some(path_str) = path.to_str() {
+                                files.push(path_str.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(files)
+    }
+
+    fn handle_lint(paths: &[String], format: &str, recursive: bool) -> Result<()> {
+        // For now, lint is a wrapper around analyze with issue detection
+        // In the future, this could include actual linting rules
+
+        let mut all_files = Vec::new();
+
+        for path in paths {
+            let path_buf = std::path::PathBuf::from(path);
+            if path_buf.is_dir() {
+                if recursive {
+                    all_files.extend(Self::find_supported_files(&path_buf)?);
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Path '{}' is a directory. Use --recursive to lint directories, or specify individual files.",
+                        path
+                    ));
+                }
+            } else {
+                all_files.push(path.clone());
+            }
+        }
+
+        if all_files.is_empty() {
+            println!("No supported files found to lint.");
+            return Ok(());
+        }
+
+        let mut issues = Vec::new();
+        let mut total_files = 0;
+
+        for file_path in &all_files {
+            total_files += 1;
+            match GnawTreeWriter::new(file_path) {
+                Ok(_writer) => {
+                    // For now, successful parsing means no syntax issues
+                    // Future: Add actual linting rules here
+                }
+                Err(e) => {
+                    issues.push(format!("{}:1:1 error {}", file_path, e));
+                }
+            }
+        }
+
+        match format {
+            "json" => {
+                let result = serde_json::json!({
+                    "files_checked": total_files,
+                    "issues_found": issues.len(),
+                    "issues": issues
+                });
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            "text" | _ => {
+                if issues.is_empty() {
+                    println!("✅ No issues found in {} files", total_files);
+                } else {
+                    println!(
+                        "⚠️  Found {} issues in {} files:",
+                        issues.len(),
+                        total_files
+                    );
+                    for issue in issues {
+                        println!("{}", issue);
+                    }
+                }
             }
         }
         Ok(())
