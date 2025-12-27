@@ -1,8 +1,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use crate::core::{GnawTreeWriter, EditOperation};
+use crate::core::{GnawTreeWriter, EditOperation, TransactionLog, UndoRedoManager};
 use crate::parser::TreeNode;
 use similar::{ChangeTag, TextDiff};
+use chrono::{DateTime, Utc};
 
 #[derive(Parser)]
 #[command(name = "gnawtreewriter")]
@@ -47,6 +48,35 @@ enum Commands {
         content: String,
         #[arg(short, long)]
         preview: bool,
+    },
+    /// Undo the last N operations
+    Undo {
+        #[arg(short, long, default_value = "1")]
+        steps: usize,
+    },
+    /// Redo the last N operations
+    Redo {
+        #[arg(short, long, default_value = "1")]
+        steps: usize,
+    },
+    /// Show transaction history
+    History {
+        #[arg(short, long, default_value = "10")]
+        limit: usize,
+        #[arg(short, long, default_value = "table")]
+        format: String,
+    },
+    /// Restore file to a specific transaction state
+    Restore {
+        file_path: String,
+        transaction_id: String,
+        #[arg(short, long)]
+        preview: bool,
+    },
+    /// Start a new session (clears current session history)
+    SessionStart,
+    /// Show current undo/redo state
+    Status,
     },
     /// Delete a node
     Delete {
@@ -130,10 +160,10 @@ impl Cli {
             Commands::AddProperty { file_path, target_path, name, r#type, value, preview } => {
                 let writer = GnawTreeWriter::new(&file_path)?;
                 let property_code = format!("property {} {}: {}", r#type, name, value);
-                let op = EditOperation::Insert { 
-                    parent_path: target_path.clone(), 
-                    position: 2, 
-                    content: property_code 
+                let op = EditOperation::Insert {
+                    parent_path: target_path.clone(),
+                    position: 2,
+                    content: property_code
                 };
                 if preview {
                     let modified = writer.preview_edit(op)?;
@@ -149,10 +179,10 @@ impl Cli {
                     Some(c) => format!("{} {{\n    {}\n}}", name, c),
                     None => format!("{} {{}}\n", name),
                 };
-                let op = EditOperation::Insert { 
-                    parent_path: target_path.clone(), 
-                    position: 1, 
-                    content: component_code 
+                let op = EditOperation::Insert {
+                    parent_path: target_path.clone(),
+                    position: 1,
+                    content: component_code
                 };
                 if preview {
                     let modified = writer.preview_edit(op)?;
@@ -162,7 +192,185 @@ impl Cli {
                     println!("Successfully added component '{}' to {}", name, target_path);
                 }
             }
+            Commands::Undo { steps } => {
+                Self::handle_undo(steps)?;
+            }
+            Commands::Redo { steps } => {
+                Self::handle_redo(steps)?;
+            }
+            Commands::History { limit, format } => {
+                Self::handle_history(limit, &format)?;
+            }
+            Commands::Restore { file_path, transaction_id, preview } => {
+                Self::handle_restore(&file_path, &transaction_id, preview)?;
+            }
+            Commands::SessionStart => {
+                Self::handle_session_start()?;
+            }
+            Commands::Status => {
+                Self::handle_status()?;
+            }
         }
+        Ok(())
+    }
+
+    fn handle_undo(steps: usize) -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let mut undo_manager = UndoRedoManager::new(&current_dir)?;
+
+        let results = undo_manager.undo(steps)?;
+
+        if results.is_empty() {
+            println!("Nothing to undo");
+            return Ok(());
+        }
+
+        for result in results {
+            if result.success {
+                println!("✓ Undone: {} ({})", result.message, result.transaction_id);
+            } else {
+                println!("✗ Failed to undo: {} ({})", result.message, result.transaction_id);
+            }
+        }
+
+        let state = undo_manager.get_state();
+        println!("\nUndo/Redo state: {} undo, {} redo available",
+                 state.undo_available, state.redo_available);
+
+        Ok(())
+    }
+
+    fn handle_redo(steps: usize) -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let mut undo_manager = UndoRedoManager::new(&current_dir)?;
+
+        let results = undo_manager.redo(steps)?;
+
+        if results.is_empty() {
+            println!("Nothing to redo");
+            return Ok(());
+        }
+
+        for result in results {
+            if result.success {
+                println!("✓ Redone: {} ({})", result.message, result.transaction_id);
+            } else {
+                println!("✗ Failed to redo: {} ({})", result.message, result.transaction_id);
+            }
+        }
+
+        let state = undo_manager.get_state();
+        println!("\nUndo/Redo state: {} undo, {} redo available",
+                 state.undo_available, state.redo_available);
+
+        Ok(())
+    }
+
+    fn handle_history(limit: usize, format: &str) -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let transaction_log = TransactionLog::load(&current_dir)?;
+
+        let history = transaction_log.get_last_n_transactions(limit)?;
+
+        match format {
+            "json" => {
+                let json = serde_json::to_string_pretty(&history)?;
+                println!("{}", json);
+            },
+            "table" | _ => {
+                if history.is_empty() {
+                    println!("No transaction history found");
+                    return Ok(());
+                }
+
+                println!("{:<20} {:<10} {:<30} {:<15} {}",
+                         "Timestamp", "Operation", "File", "Node Path", "Description");
+                println!("{}", "=".repeat(90));
+
+                for transaction in history.iter().rev() {
+                    let timestamp = transaction.timestamp.format("%m-%d %H:%M:%S").to_string();
+                    let operation = format!("{:?}", transaction.operation);
+                    let file_name = transaction.file_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown");
+                    let node_path = transaction.node_path.as_deref().unwrap_or("N/A");
+
+                    println!("{:<20} {:<10} {:<30} {:<15} {}",
+                             timestamp, operation, file_name, node_path, transaction.description);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_restore(file_path: &str, transaction_id: &str, preview: bool) -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let transaction_log = TransactionLog::load(&current_dir)?;
+
+        let transaction = transaction_log.find_transaction(transaction_id)?
+            .ok_or_else(|| anyhow::anyhow!("Transaction not found: {}", transaction_id))?;
+
+        if preview {
+            println!("Would restore {} to state from transaction:", file_path);
+            println!("  ID: {}", transaction.id);
+            println!("  Timestamp: {}", transaction.timestamp.format("%Y-%m-%d %H:%M:%S"));
+            println!("  Operation: {:?}", transaction.operation);
+            println!("  Description: {}", transaction.description);
+            println!("\nUse --no-preview to actually perform the restore");
+        } else {
+            // TODO: Implement actual restore logic
+            println!("Restore functionality not yet implemented");
+            println!("Would restore {} using transaction {}", file_path, transaction_id);
+        }
+
+        Ok(())
+    }
+
+    fn handle_session_start() -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let mut transaction_log = TransactionLog::load(&current_dir)?;
+
+        transaction_log.start_new_session()?;
+
+        println!("✓ New session started");
+        println!("Previous session history has been preserved");
+
+        Ok(())
+    }
+
+    fn handle_status() -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let undo_manager = UndoRedoManager::new(&current_dir)?;
+
+        let state = undo_manager.get_state();
+
+        println!("GnawTreeWriter Status:");
+        println!("=====================");
+        println!("Undo operations available: {}", state.undo_available);
+        println!("Redo operations available: {}", state.redo_available);
+
+        if let Some(last_undo) = &state.last_undo {
+            println!("Last undo transaction: {}", last_undo);
+        }
+
+        if let Some(last_redo) = &state.last_redo {
+            println!("Last redo transaction: {}", last_redo);
+        }
+
+        // Show recent history
+        let transaction_log = TransactionLog::load(&current_dir)?;
+        let recent = transaction_log.get_last_n_transactions(5)?;
+
+        if !recent.is_empty() {
+            println!("\nRecent transactions:");
+            for transaction in recent.iter().rev().take(3) {
+                let timestamp = transaction.timestamp.format("%H:%M:%S").to_string();
+                println!("  {} - {:?}: {}", timestamp, transaction.operation, transaction.description);
+            }
+        }
+
         Ok(())
     }
 }

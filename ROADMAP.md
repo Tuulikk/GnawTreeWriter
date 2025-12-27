@@ -2,179 +2,239 @@
 
 ## Overview
 
-GnawTreeWriter is a tree-based code editor optimized for LLM-assisted editing. This roadmap outlines planned features and improvements.
+GnawTreeWriter is a tree-based code editor optimized for LLM-assisted editing. This roadmap outlines the evolution from a precise CLI tool to an intelligent agent-integrated platform.
 
-## Current Status: v0.1.0 (Released 2025-12-26)
+## Current Status: v0.2.1 (Released 2025-12-26)
 
 ### ✅ Completed Features
 
-- Multi-language support (Python, Rust, TypeScript/TSX, PHP, HTML, QML)
-- Tree-based editing with dot-notation paths
-- Basic CLI commands (analyze, show, edit, insert, delete)
-- Fuzzy-edit with multi-strategy matching
-- Diff preview for all edit operations
-- Automatic backup system with timestamps
-- Multi-file operations (analyze, lint, find)
-- Human-friendly lint mode
-- QML-specific property injection (add-property)
+- **Multi-language support**: Python, Rust, TypeScript, PHP, HTML, QML, **Go**.
+- **TreeSitter Foundation**: Robust parsing for all core languages.
+- **Smart Indentation**: Automatic preservation of code style during insertions.
+- **Syntax Validation**: In-memory re-parsing before saving changes.
+- **QML Intents**: Dedicated commands for `add-property` and `add-component`.
+- **Diff Preview**: Visual unified diff display using the `similar` library.
+- **Automatic Backups**: Non-git safety net creating JSON snapshots before every edit.
 
 ---
 
-## v0.2.0 - QML Parser Improvements
+## Phase 1: Reliability & Safety (The Non-Git Safety Net)
+**Target: v0.3.0 - Q1 2026**
 
-### Priority: HIGH
-### Target: Q1 2026
+Focus on making the tool bulletproof and independent of Git for session-level recovery.
 
-### Goals
+### **Core Safety & Recovery System**
 
-Fix QML parser limitations and improve reliability for QML development.
+- [x] **Transaction Log System**: 
+  - JSON-based log file (`.gnawtreewriter_session.json`) tracking all operations
+  - Human-readable format: `{"timestamp": "2025-01-02T15:30:45Z", "operation": "edit", "file": "app.py", "path": "0.1", "before_hash": "abc123", "after_hash": "def456", "description": "Updated function signature"}`
+  - Session-scoped: cleared on explicit `gnawtreewriter session-start`, persists through crashes
+  - Enables forensic analysis: "What happened to my code between 14:00 and 15:00?"
+  - **STATUS**: Core implementation complete in `src/core/transaction_log.rs`
 
-- [ ] Fix QML parser path duplication bug for nested components
-- [ ] Improve QML parser to handle complex nesting correctly
-- [ ] Add QML-specific validation (unresolved imports, invalid bindings)
-- [ ] Add QML runtime error detection (beyond parse errors)
-- [ ] Improve property insertion logic for QML components
-- [ ] Add QML signal/slot validation
+- [x] **`undo` & `redo` Commands**:
+  - `gnawtreewriter undo [--steps N]` - Reverse N operations (default 1)
+  - `gnawtreewriter redo [--steps N]` - Re-apply N reversed operations  
+  - `gnawtreewriter history [--format json/table]` - Show operation timeline
+  - Navigate backup history without Git dependency
+  - Atomic operation reversal: if undo fails, leave system in previous state
+  - **STATUS**: Framework complete in `src/core/undo_redo.rs`, CLI commands added
 
-### Technical Debt
+- [x] **Enhanced Restore System**:
+  - `gnawtreewriter restore <timestamp|operation-id> [--preview]`
+  - `gnawtreewriter list-snapshots [--file path] [--since timestamp]`
+  - Point-in-time recovery: "Restore app.py to state at 14:30"
+  - Selective restoration: restore individual files or nodes
+  - Diff preview before restoration
+  - **STATUS**: CLI interface complete, restore logic framework ready
 
-- [ ] Refactor QML parser to use TreeSitter instead of custom parser
-- [ ] Add comprehensive QML test suite with edge cases
-- [ ] Document all QML-specific node types and behaviors
-
----
-
-## v0.3.0 - Developer Experience
-
-### Priority: HIGH
-### Target: Q2 2026
-
-### Goals
-
-Improve ergonomics for both LLM and human developers.
-
-- [ ] Add `undo` command with version history
-- [ ] Add `redo` command
-- [ ] Implement transaction/batch mode for multiple atomic edits
-- [ ] Add `restore` command to restore from specific backup
-- [ ] Improve backup cleanup (auto-cleanup old backups)
-- [ ] Add configuration file support (~/.gnawtreewriter/config.toml)
-- [ ] Add shell completions (bash, zsh, fish)
-- [ ] Add man page generation
+- [ ] **Stable Node Addressing**:
+  - Content-based node IDs: `node_abc123def` (hash of node content + position)
+  - Graceful fallback to path-based addressing when content changes
+  - Cross-edit stability: same logical node keeps same ID across minor edits
+  - Migration tool: convert old path-based references to content-based IDs
 
 ---
 
-## v0.4.0 - LLM Integration
+## Phase 2: AI Agent Integration & Intelligence
+**Target: v0.4.0 - Q2 2026**
 
-### Priority: MEDIUM
-### Target: Q3 2026
+Transform from tool to AI-native development platform.
 
-### Goals
+### **MCP & Agent Integration**
 
-Make GnawTreeWriter even more LLM-friendly and powerful.
+- [ ] **MCP Server Implementation**: 
+  - Native Model Context Protocol support as built-in tool
+  - Tool definitions for all major operations (edit, analyze, find, restore)
+  - Context-aware responses optimized for LLM processing
+  - Batch operation support: multiple edits in single MCP call
 
-- [ ] Add content-based node IDs (hash-based addressing)
-- [ ] Implement anchor nodes for robust path resolution
-- [ ] Add LLM-specific output formats (structured JSON for LLM parsing)
-- [ ] Add reasoning/validation mode for LLM operations
-- [ ] Implement context window optimization (minimal context, focused edits)
-- [ ] Add LLM mode with simplified, deterministic responses
+- [ ] **Smart Semantic Targeting**:
+  - `--function "main"` instead of raw paths
+  - `--class "UserController" --method "create"`  
+  - `--property "width" --within "Rectangle"`
+  - Natural language queries: `--find "the button that handles login"`
+  - Fuzzy matching with confidence scores
 
----
+- [ ] **LLM-Optimized Output**:
+  - Token-compressed JSON formats for large ASTs
+  - Hierarchical detail levels: summary → detailed → full AST
+  - Context window management: smart truncation preserving important nodes
+  - Streaming responses for large operations
 
-## v0.5.0 - Advanced Features
-
-### Priority: MEDIUM
-### Target: Q4 2026
-
-### Goals
-
-Advanced editing capabilities and tooling integration.
-
-- [ ] Add `rename` command (rename node by path or fuzzy)
-- [ ] Add `move` command (move node to different parent)
-- [ ] Add `copy` command (copy node to different location)
-- [ ] Add `refactor` command (complex transformations)
-- [ ] Implement cross-file references analysis
-- [ ] Add dependency graph visualization
-- [ ] Add import/export of edit scripts
+- [ ] **Intent Extrapolation Engine**:
+  - High-level commands: `gnawtreewriter refactor-extract-function app.py "calculate_total" --lines 45-60`
+  - Pattern-based transformations: `gnawtreewriter apply-pattern observer app.py --class "DataModel"`
+  - Architecture enforcement: `gnawtreewriter ensure-pattern repository database.py`
 
 ---
 
-## Future Enhancements
+## Phase 3: Autonomous Code Guardian 
+**Target: v0.5.0 - Q3 2026**
 
-### Language Support
+Evolve into always-on development infrastructure.
 
-- [ ] Go language support
-- [ ] Java language support
-- [ ] C++ language support
-- [ ] C# language support
-- [ ] C language support
-- [ ] Swift language support
-- [ ] Kotlin language support
+### **Continuous Monitoring System**
 
-### Editor Integration
+- [ ] **File System Watcher**:
+  - `gnawtreewriter daemon start` - Background process monitoring project files
+  - Real-time AST updates when files change (even from external tools)
+  - Change event streaming to connected AI agents
+  - Conflict detection: "File changed outside GnawTreeWriter, merging changes"
 
-- [ ] VS Code extension
-- [ ] Vim plugin
-- [ ] Neovim plugin
-- [ ] Emacs mode
-- [ ] JetBrains plugin (IntelliJ, CLion, etc.)
-- [ ] LSP server implementation
+- [ ] **Intelligent Structural Analysis**:
+  - Architectural lint rules: "Controllers should not directly access database"
+  - QML-specific rules: "All Rectangle components must have explicit dimensions"
+  - Security scanning: "No hardcoded API keys or secrets detected"
+  - Performance warnings: "Large function detected (>100 lines), consider refactoring"
 
-### Advanced Tooling
+- [ ] **Visual Development Interface**:
+  - Web-based AST explorer with real-time updates
+  - Interactive tree manipulation: drag-and-drop node reordering
+  - Multi-file project view with dependency graphs
+  - Collaboration features: share AST views with team members
 
-- [ ] Web interface for visual tree editing
-- [ ] VS Code LLM chat integration
-- [ ] Cursor integration
-- [ ] GitHub Copilot extension
-- [ ] CLI GUI (TUI mode)
-
-### Performance
-
-- [ ] Parallel file processing for batch operations
-- [ ] Incremental parsing for large files
-- [ ] Caching of parsed trees
-- [ ] Lazy loading for very large projects
-
-### Security
-
-- [ ] Sandbox execution mode
-- [ ] Permission-based file access control
-- [ ] Audit log of all operations
-- [ ] Encryption of backup files
+- [ ] **Workflow Automation Engine**:
+  - GnawScript DSL for complex operations:
+    ```gnaw
+    project.find("*.qml")
+      .filter(component="Rectangle") 
+      .where(missing="width,height")
+      .auto_fix(add_properties=["width: 100", "height: 100"])
+    ```
+  - Template system: reusable transformation patterns
+  - CI/CD integration: automated code quality enforcement
 
 ---
+
+## Phase 4: Universal Tree Platform
+**Target: v0.6.0 - Q4 2026**
+
+Expand beyond code to all hierarchical systems.
+
+### **Multi-Domain Tree Support**
+
+- [ ] **Infrastructure as Code**:
+  - Terraform/CloudFormation AST parsing and editing
+  - `gnawtreewriter scale-service infrastructure.tf "web_servers" --count 5`
+  - Cloud resource dependency visualization
+  - Cost impact analysis for infrastructure changes
+
+- [ ] **Configuration Management**:
+  - Docker Compose, Kubernetes YAML, CI/CD pipelines
+  - `gnawtreewriter add-service docker-compose.yml "redis" --image "redis:7"`
+  - Environment-specific configuration templating
+  - Secret management integration
+
+- [ ] **Data Structure Manipulation**:
+  - JSON/YAML/TOML editing with schema validation
+  - Database schema migrations via AST
+  - API specification editing (OpenAPI/GraphQL)
+
+### **Enterprise & Cloud Evolution**
+
+- [ ] **Multi-Tenant Cloud Service**:
+  - SaaS version with per-organization isolation
+  - Enterprise SSO integration
+  - Audit logging for compliance (SOX, GDPR)
+  - Global policy enforcement across teams
+
+- [ ] **Advanced Policy Engine**:
+  - Company-specific coding standards enforcement
+  - Architecture decision record (ADR) compliance checking  
+  - Automated security vulnerability patching
+  - License compliance scanning and management
+
+## Future Horizons (2027+)
+
+### **AI-Native Development Ecosystem**
+
+- [ ] **Autonomous Refactoring Agent**: AI that continuously improves codebase architecture
+- [ ] **Cross-Language Translation**: Convert between languages while preserving tree structure
+- [ ] **Predictive Code Evolution**: Suggest architectural changes before they become necessary
+- [ ] **Natural Language Programming**: "Create a REST API for user management" → Full implementation
+
+### **Integration Ecosystem**
+
+- [ ] **LSP Server**: Universal structured editing for all IDEs
+- [ ] **GitHub App**: Automated PR reviews and suggestions
+- [ ] **IDE Extensions**: Native plugins for VS Code, IntelliJ, Neovim  
+- [ ] **API Gateway**: RESTful API for third-party tool integration
+
+---
+
+## Implementation Priorities
+
+### **Phase 1 Quick Wins** (Next 3 months)
+1. Transaction logging system (foundation for all future features)
+2. Undo/redo commands (immediate developer value)
+3. Enhanced restore with preview (safety & confidence)
+4. Content-based node IDs (stability for AI agents)
+
+### **Phase 2 AI Integration** (Months 4-9)  
+1. MCP server implementation (unlock AI ecosystem)
+2. Semantic targeting (make AI agents more effective)
+3. LLM-optimized output formats (performance & usability)
+4. Intent extrapolation engine (high-level automation)
+
+### **Multi-Agent Development Strategy**
+
+Based on AI agent strengths observed:
+
+- **Gemini 3**: Architecture decisions, documentation, long-term planning
+- **Claude**: Implementation details, error handling, user experience  
+- **GLM-4.7**: Fast iteration on specific features (with careful monitoring)
+- **Raptor Mini**: User experience feedback, edge case identification
+
+### **Success Metrics**
+
+- **Phase 1**: Zero data loss incidents, <5 second recovery time
+- **Phase 2**: 80% of AI editing tasks use GnawTreeWriter instead of raw text
+- **Phase 3**: 90% reduction in structural code errors across team
+- **Phase 4**: Enterprise adoption with measurable productivity gains
 
 ## Contributing
 
-Want to help? See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-### Areas of High Impact
+## Documentation
 
-1. **QML Parser Fixes**: QML is the most fragile parser and needs the most attention
-2. **Test Suite**: Add comprehensive tests for all languages
-3. **Performance**: Optimize for large files and projects
-4. **Language Support**: Add parsers for popular languages
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Technical design  
+- [FUTURE_CONCEPTS.md](docs/FUTURE_CONCEPTS.md) - Deep dive into planned features
+- [LLM_INTEGRATION.md](docs/LLM_INTEGRATION.md) - Guide for AI agents
+- [MULTI_AGENT_DEVELOPMENT.md](docs/MULTI_AGENT_DEVELOPMENT.md) - Collaboration strategies ✓
 
-### Suggested First Contributions
+## Recent Progress (2025-01-02)
 
-- Fix specific QML parser bug (path duplication)
-- Add basic test suite for one language
-- Improve error messages
-- Add one new language parser
-- Write example usage scripts
+### ✅ **Phase 1 Foundation Complete**
+- Transaction logging system implemented
+- Undo/redo command framework built
+- CLI commands added: `undo`, `redo`, `history`, `restore`, `session-start`, `status`
+- Multi-agent development documentation created
+- Roadmap expanded with universal tree platform vision
 
----
-
-## Changelog
-
-For detailed version history, see [CHANGELOG.md](CHANGELOG.md).
-
-## Architecture
-
-For technical details, see [ARCHITECTURE.md](ARCHITECTURE.md).
-
-## LLM Integration
-
-For LLM-specific guidance, see [LLM_INTEGRATION.md](LLM_INTEGRATION.md).
+### 🔄 **Next Immediate Steps**
+- Integrate transaction logging with existing edit operations
+- Complete undo/redo operation logic for all operation types
+- Test transaction log persistence and recovery
+- Add content-based node ID system

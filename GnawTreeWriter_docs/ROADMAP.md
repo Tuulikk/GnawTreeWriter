@@ -2,179 +2,72 @@
 
 ## Overview
 
-GnawTreeWriter is a tree-based code editor optimized for LLM-assisted editing. This roadmap outlines planned features and improvements.
+GnawTreeWriter is a tree-based code editor optimized for LLM-assisted editing. This roadmap outlines the evolution from a precise CLI tool to an intelligent agent-integrated platform.
 
-## Current Status: v0.1.0 (Released 2025-12-26)
+## Current Status: v0.2.1 (Released 2025-12-26)
 
 ### ✅ Completed Features
 
-- Multi-language support (Python, Rust, TypeScript/TSX, PHP, HTML, QML)
-- Tree-based editing with dot-notation paths
-- Basic CLI commands (analyze, show, edit, insert, delete)
-- Fuzzy-edit with multi-strategy matching
-- Diff preview for all edit operations
-- Automatic backup system with timestamps
-- Multi-file operations (analyze, lint, find)
-- Human-friendly lint mode
-- QML-specific property injection (add-property)
+- **Multi-language support**: Python, Rust, TypeScript, PHP, HTML, QML, **Go**.
+- **TreeSitter Foundation**: Robust parsing for all core languages.
+- **Smart Indentation**: Automatic preservation of code style during insertions.
+- **Syntax Validation**: In-memory re-parsing before saving changes.
+- **QML Intents**: Dedicated commands for `add-property` and `add-component`.
+- **Diff Preview**: Visual unified diff display using the `similar` library.
+- **Automatic Backups**: Non-git safety net creating JSON snapshots before every edit.
 
 ---
 
-## v0.2.0 - QML Parser Improvements
+## Phase 1: Reliability & Safety (The Non-Git Safety Net)
+**Target: v0.3.0 - Q1 2026**
 
-### Priority: HIGH
-### Target: Q1 2026
+Focus on making the tool bulletproof and independent of Git for session-level recovery.
 
-### Goals
-
-Fix QML parser limitations and improve reliability for QML development.
-
-- [ ] Fix QML parser path duplication bug for nested components
-- [ ] Improve QML parser to handle complex nesting correctly
-- [ ] Add QML-specific validation (unresolved imports, invalid bindings)
-- [ ] Add QML runtime error detection (beyond parse errors)
-- [ ] Improve property insertion logic for QML components
-- [ ] Add QML signal/slot validation
-
-### Technical Debt
-
-- [ ] Refactor QML parser to use TreeSitter instead of custom parser
-- [ ] Add comprehensive QML test suite with edge cases
-- [ ] Document all QML-specific node types and behaviors
+- [ ] **`undo` & `redo` Commands**: Traverse the `.gnawtreewriter_backups` history without touching Git.
+- [ ] **Transaction Log**: A human/agent-readable log of all structural changes made during a session.
+- [ ] **`restore <timestamp|id>`**: Browse and restore specific node states from the backup repository.
+- [ ] **Content-based Node IDs**: Move from index-based paths (`0.1`) to more stable hash-based IDs where possible to handle concurrent changes.
 
 ---
 
-## v0.3.0 - Developer Experience
+## Phase 2: Connectivity & Agent Integration
+**Target: v0.4.0 - Q2 2026**
 
-### Priority: HIGH
-### Target: Q2 2026
+Making it easier for AI Agents (like Claude, GPT, Raptor) to use the tool effectively.
 
-### Goals
-
-Improve ergonomics for both LLM and human developers.
-
-- [ ] Add `undo` command with version history
-- [ ] Add `redo` command
-- [ ] Implement transaction/batch mode for multiple atomic edits
-- [ ] Add `restore` command to restore from specific backup
-- [ ] Improve backup cleanup (auto-cleanup old backups)
-- [ ] Add configuration file support (~/.gnawtreewriter/config.toml)
-- [ ] Add shell completions (bash, zsh, fish)
-- [ ] Add man page generation
+- [ ] **MCP Server Implementation**: Native Model Context Protocol support to let agents call GnawTreeWriter as a built-in tool.
+- [ ] **Smart Path Targeting**: Allow edits by name/type instead of just raw path (e.g., `edit --function "main" --content "..."`).
+- [ ] **Token Optimization**: Compressed JSON output formats designed specifically for LLM context windows.
+- [ ] **"Intent Extrapolation"**: High-level commands that perform complex AST transformations from minimal input.
 
 ---
 
-## v0.4.0 - LLM Integration
+## Phase 3: Intelligence & Background Automation
+**Target: v0.5.0 - Q3 2026**
 
-### Priority: MEDIUM
-### Target: Q3 2026
+Moving towards an "always-on" assistant that maintains the tree structure.
 
-### Goals
-
-Make GnawTreeWriter even more LLM-friendly and powerful.
-
-- [ ] Add content-based node IDs (hash-based addressing)
-- [ ] Implement anchor nodes for robust path resolution
-- [ ] Add LLM-specific output formats (structured JSON for LLM parsing)
-- [ ] Add reasoning/validation mode for LLM operations
-- [ ] Implement context window optimization (minimal context, focused edits)
-- [ ] Add LLM mode with simplified, deterministic responses
+- [ ] **Analysis Toggles**: Background "watch mode" that keeps the tree updated and alerts agents of structural changes.
+- [ ] **Structural Linting**: Go beyond syntax errors to detect logical AST issues (e.g., "This Rectangle has no size properties").
+- [ ] **Visual AST Explorer (Optional UI)**: A TUI or Web-view to visualize the tree, helping developers and agents debug complex paths.
+- [ ] **Batch Scripting**: A simple DSL (Domain Specific Language) to chain multiple tree operations into one atomic unit.
 
 ---
 
-## v0.5.0 - Advanced Features
+## Future Vision
 
-### Priority: MEDIUM
-### Target: Q4 2026
-
-### Goals
-
-Advanced editing capabilities and tooling integration.
-
-- [ ] Add `rename` command (rename node by path or fuzzy)
-- [ ] Add `move` command (move node to different parent)
-- [ ] Add `copy` command (copy node to different location)
-- [ ] Add `refactor` command (complex transformations)
-- [ ] Implement cross-file references analysis
-- [ ] Add dependency graph visualization
-- [ ] Add import/export of edit scripts
-
----
-
-## Future Enhancements
-
-### Language Support
-
-- [ ] Go language support
-- [ ] Java language support
-- [ ] C++ language support
-- [ ] C# language support
-- [ ] C language support
-- [ ] Swift language support
-- [ ] Kotlin language support
-
-### Editor Integration
-
-- [ ] VS Code extension
-- [ ] Vim plugin
-- [ ] Neovim plugin
-- [ ] Emacs mode
-- [ ] JetBrains plugin (IntelliJ, CLion, etc.)
-- [ ] LSP server implementation
-
-### Advanced Tooling
-
-- [ ] Web interface for visual tree editing
-- [ ] VS Code LLM chat integration
-- [ ] Cursor integration
-- [ ] GitHub Copilot extension
-- [ ] CLI GUI (TUI mode)
-
-### Performance
-
-- [ ] Parallel file processing for batch operations
-- [ ] Incremental parsing for large files
-- [ ] Caching of parsed trees
-- [ ] Lazy loading for very large projects
-
-### Security
-
-- [ ] Sandbox execution mode
-- [ ] Permission-based file access control
-- [ ] Audit log of all operations
-- [ ] Encryption of backup files
+- **LSP Integration**: Serve as a backend for Language Server Protocol, providing structural editing to any IDE.
+- **Refactoring Engine**: Automated structural refactoring (extract function, move component) that is 100% safe.
+- **AI-Native IDE Bridge**: Deep integration with Cursor, VS Code Copilot, and other AI-centric editors.
 
 ---
 
 ## Contributing
 
-Want to help? See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-### Areas of High Impact
+## Documentation
 
-1. **QML Parser Fixes**: QML is the most fragile parser and needs the most attention
-2. **Test Suite**: Add comprehensive tests for all languages
-3. **Performance**: Optimize for large files and projects
-4. **Language Support**: Add parsers for popular languages
-
-### Suggested First Contributions
-
-- Fix specific QML parser bug (path duplication)
-- Add basic test suite for one language
-- Improve error messages
-- Add one new language parser
-- Write example usage scripts
-
----
-
-## Changelog
-
-For detailed version history, see [CHANGELOG.md](CHANGELOG.md).
-
-## Architecture
-
-For technical details, see [ARCHITECTURE.md](ARCHITECTURE.md).
-
-## LLM Integration
-
-For LLM-specific guidance, see [LLM_INTEGRATION.md](LLM_INTEGRATION.md).
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Technical design
+- [FUTURE_CONCEPTS.md](docs/FUTURE_CONCEPTS.md) - Deep dive into planned features
+- [LLM_INTEGRATION.md](docs/LLM_INTEGRATION.md) - Guide for AI agents

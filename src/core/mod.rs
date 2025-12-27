@@ -4,6 +4,12 @@ use chrono::Utc;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod transaction_log;
+pub mod undo_redo;
+
+pub use transaction_log::{OperationType, Transaction, TransactionLog};
+pub use undo_redo::{UndoRedoManager, UndoRedoResult, UndoRedoState};
+
 pub struct GnawTreeWriter {
     file_path: String,
     source_code: String,
@@ -29,8 +35,8 @@ pub enum EditOperation {
 impl GnawTreeWriter {
     pub fn new(file_path: &str) -> Result<Self> {
         let path = Path::new(file_path);
-        let source_code = fs::read_to_string(path)
-            .context(format!("Failed to read file: {}", file_path))?;
+        let source_code =
+            fs::read_to_string(path).context(format!("Failed to read file: {}", file_path))?;
 
         let parser = get_parser(path)?;
         let tree = parser.parse(&source_code)?;
@@ -71,7 +77,8 @@ impl GnawTreeWriter {
 
     fn get_backup_dir(&self) -> Result<PathBuf> {
         let file_path = Path::new(&self.file_path);
-        let file_dir = file_path.parent()
+        let file_dir = file_path
+            .parent()
             .context("Cannot determine parent directory")?;
 
         let backup_dir = file_dir.join(".gnawtreewriter_backups");
@@ -83,7 +90,8 @@ impl GnawTreeWriter {
     }
 
     pub fn show_node(&self, node_path: &str) -> Result<String> {
-        let node = self.find_node(&self.tree, node_path)
+        let node = self
+            .find_node(&self.tree, node_path)
             .context(format!("Node not found at path: {}", node_path))?;
         Ok(node.content.clone())
     }
@@ -94,12 +102,12 @@ impl GnawTreeWriter {
             EditOperation::Edit { node_path, content } => {
                 self.edit_node(&self.tree, &node_path, &content)?
             }
-            EditOperation::Insert { parent_path, position, content } => {
-                self.insert_node(&self.tree, &parent_path, position, &content)?
-            }
-            EditOperation::Delete { node_path } => {
-                self.delete_node(&self.tree, &node_path)?
-            }
+            EditOperation::Insert {
+                parent_path,
+                position,
+                content,
+            } => self.insert_node(&self.tree, &parent_path, position, &content)?,
+            EditOperation::Delete { node_path } => self.delete_node(&self.tree, &node_path)?,
         };
 
         // VALIDATION: Try to parse the modified code in memory before saving
@@ -122,12 +130,12 @@ impl GnawTreeWriter {
             EditOperation::Edit { node_path, content } => {
                 self.edit_node(&self.tree, &node_path, &content)
             }
-            EditOperation::Insert { parent_path, position, content } => {
-                self.insert_node(&self.tree, &parent_path, position, &content)
-            }
-            EditOperation::Delete { node_path } => {
-                self.delete_node(&self.tree, &node_path)
-            }
+            EditOperation::Insert {
+                parent_path,
+                position,
+                content,
+            } => self.insert_node(&self.tree, &parent_path, position, &content),
+            EditOperation::Delete { node_path } => self.delete_node(&self.tree, &node_path),
         }
     }
 
@@ -146,7 +154,8 @@ impl GnawTreeWriter {
     }
 
     fn edit_node(&self, tree: &TreeNode, node_path: &str, new_content: &str) -> Result<String> {
-        let node = self.find_node(tree, node_path)
+        let node = self
+            .find_node(tree, node_path)
             .context(format!("Node not found at path: {}", node_path))?;
 
         let old_content = &node.content;
@@ -155,8 +164,15 @@ impl GnawTreeWriter {
         Ok(modified)
     }
 
-    fn insert_node(&self, tree: &TreeNode, parent_path: &str, position: usize, content: &str) -> Result<String> {
-        let parent = self.find_node(tree, parent_path)
+    fn insert_node(
+        &self,
+        tree: &TreeNode,
+        parent_path: &str,
+        position: usize,
+        content: &str,
+    ) -> Result<String> {
+        let parent = self
+            .find_node(tree, parent_path)
             .context(format!("Parent node not found at path: {}", parent_path))?;
 
         let lines: Vec<&str> = self.source_code.lines().collect();
@@ -176,7 +192,9 @@ impl GnawTreeWriter {
                 let mut last_prop_line = parent.start_line;
                 let mut found = false;
                 for child in &parent.children {
-                    if (child.node_type == "ui_property" || child.node_type == "ui_binding") && child.end_line < parent.end_line {
+                    if (child.node_type == "ui_property" || child.node_type == "ui_binding")
+                        && child.end_line < parent.end_line
+                    {
                         last_prop_line = child.end_line;
                         found = true;
                     }
@@ -197,10 +215,17 @@ impl GnawTreeWriter {
 
         // Detect indentation from parent or siblings
         let indentation = if !lines.is_empty() {
-            let ref_line = if insert_pos < lines.len() { lines[insert_pos] } else { lines[lines.len()-1] };
+            let ref_line = if insert_pos < lines.len() {
+                lines[insert_pos]
+            } else {
+                lines[lines.len() - 1]
+            };
             let ws: String = ref_line.chars().take_while(|c| c.is_whitespace()).collect();
             if ws.is_empty() && insert_pos > 0 {
-                lines[insert_pos-1].chars().take_while(|c| c.is_whitespace()).collect()
+                lines[insert_pos - 1]
+                    .chars()
+                    .take_while(|c| c.is_whitespace())
+                    .collect()
             } else {
                 ws
             }
@@ -208,7 +233,8 @@ impl GnawTreeWriter {
             String::new()
         };
 
-        let indented_content: Vec<String> = content.lines()
+        let indented_content: Vec<String> = content
+            .lines()
             .map(|line| format!("{}{}", indentation, line))
             .collect();
 
@@ -224,7 +250,8 @@ impl GnawTreeWriter {
     }
 
     fn delete_node(&self, tree: &TreeNode, node_path: &str) -> Result<String> {
-        let node = self.find_node(tree, node_path)
+        let node = self
+            .find_node(tree, node_path)
             .context(format!("Node not found at path: {}", node_path))?;
 
         let lines: Vec<&str> = self.source_code.lines().collect();
@@ -240,6 +267,6 @@ impl GnawTreeWriter {
         Ok(new_lines.join("\n"))
     }
     pub fn get_source(&self) -> &str {
-            &self.source_code
-        }
+        &self.source_code
+    }
 }

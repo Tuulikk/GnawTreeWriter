@@ -1,0 +1,365 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::path::{Path, PathBuf};
+use anyhow::{Context, Result};
+
+/// Represents a single transaction in the log
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Transaction {
+    pub id: String,
+    pub timestamp: DateTime<Utc>,
+    pub operation: OperationType,
+    pub file_path: PathBuf,
+    pub node_path: Option<String>,
+    pub before_hash: Option<String>,
+    pub after_hash: Option<String>,
+    pub description: String,
+    pub session_id: String,
+    pub metadata: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum OperationType {
+    Edit,
+    Insert,
+    Delete,
+    AddProperty,
+    AddComponent,
+    Move,
+    Restore,
+    SessionStart,
+    SessionEnd,
+}
+
+/// Transaction log manager
+pub struct TransactionLog {
+    log_file: PathBuf,
+    session_id: String,
+    current_session: Vec<Transaction>,
+}
+
+impl TransactionLog {
+    /// Create a new transaction log
+    pub fn new<P: AsRef<Path>>(project_root: P) -> Result<Self> {
+        let log_file = project_root.as_ref().join(".gnawtreewriter_session.json");
+        let session_id = generate_session_id();
+
+        let mut log = Self {
+            log_file,
+            session_id: session_id.clone(),
+            current_session: Vec::new(),
+        };
+
+        // Log session start
+        log.log_transaction(
+            OperationType::SessionStart,
+            PathBuf::from("session"),
+            None,
+            None,
+            None,
+            "Session started".to_string(),
+            HashMap::new(),
+        )?;
+
+        Ok(log)
+    }
+
+    /// Load existing transaction log
+    pub fn load<P: AsRef<Path>>(project_root: P) -> Result<Self> {
+        let log_file = project_root.as_ref().join(".gnawtreewriter_session.json");
+
+        if !log_file.exists() {
+            return Self::new(project_root);
+        }
+
+        let session_id = generate_session_id();
+        let current_session = Vec::new();
+
+        Ok(Self {
+            log_file,
+            session_id,
+            current_session,
+        })
+    }
+
+    /// Log a new transaction
+    pub fn log_transaction(
+        &mut self,
+        operation: OperationType,
+        file_path: PathBuf,
+        node_path: Option<String>,
+        before_hash: Option<String>,
+        after_hash: Option<String>,
+        description: String,
+        metadata: HashMap<String, String>,
+    ) -> Result<String> {
+        let transaction = Transaction {
+            id: generate_transaction_id(),
+            timestamp: Utc::now(),
+            operation,
+            file_path,
+            node_path,
+            before_hash,
+            after_hash,
+            description,
+            session_id: self.session_id.clone(),
+            metadata,
+        };
+
+        let transaction_id = transaction.id.clone();
+
+        // Add to current session
+        self.current_session.push(transaction.clone());
+
+        // Append to log file
+        self.append_to_log(&transaction)?;
+
+        Ok(transaction_id)
+    }
+
+    /// Get transaction history for current session
+    pub fn get_session_history(&self) -> &[Transaction] {
+        &self.current_session
+    }
+
+    /// Get full transaction history from file
+    pub fn get_full_history(&self) -> Result<Vec<Transaction>> {
+        if !self.log_file.exists() {
+            return Ok(Vec::new());
+        }
+
+        let file = File::open(&self.log_file)
+            .context("Failed to open transaction log file")?;
+        let reader = BufReader::new(file);
+
+        let mut transactions = Vec::new();
+
+        for line in reader.lines() {
+            let line = line.context("Failed to read line from log file")?;
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            let transaction: Transaction = serde_json::from_str(&line)
+                .context("Failed to parse transaction from log")?;
+            transactions.push(transaction);
+        }
+
+        Ok(transactions)
+    }
+
+    /// Get transactions for a specific file
+    pub fn get_file_history<P: AsRef<Path>>(&self, file_path: P) -> Result<Vec<Transaction>> {
+        let full_history = self.get_full_history()?;
+        let target_path = file_path.as_ref();
+
+        Ok(full_history
+            .into_iter()
+            .filter(|t| t.file_path == target_path)
+            .collect())
+    }
+
+    /// Get transactions since a specific timestamp
+    pub fn get_history_since(&self, since: DateTime<Utc>) -> Result<Vec<Transaction>> {
+        let full_history = self.get_full_history()?;
+
+        Ok(full_history
+            .into_iter()
+            .filter(|t| t.timestamp >= since)
+            .collect())
+    }
+
+    /// Find transaction by ID
+    pub fn find_transaction(&self, transaction_id: &str) -> Result<Option<Transaction>> {
+        // Check current session first
+        for transaction in &self.current_session {
+            if transaction.id == transaction_id {
+                return Ok(Some(transaction.clone()));
+            }
+        }
+
+        // Search full history
+        let full_history = self.get_full_history()?;
+        for transaction in full_history {
+            if transaction.id == transaction_id {
+                return Ok(Some(transaction));
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Get the last N transactions
+    pub fn get_last_n_transactions(&self, n: usize) -> Result<Vec<Transaction>> {
+        let full_history = self.get_full_history()?;
+
+        Ok(full_history
+            .into_iter()
+            .rev()
+            .take(n)
+            .rev()
+            .collect())
+    }
+
+    /// Start a new session (clears current session, keeps history)
+    pub fn start_new_session(&mut self) -> Result<()> {
+        // Log session end for current session
+        if !self.current_session.is_empty() {
+            self.log_transaction(
+                OperationType::SessionEnd,
+                PathBuf::from("session"),
+                None,
+                None,
+                None,
+                format!("Session ended with {} operations", self.current_session.len()),
+                HashMap::new(),
+            )?;
+        }
+
+        // Start new session
+        self.session_id = generate_session_id();
+        self.current_session.clear();
+
+        self.log_transaction(
+            OperationType::SessionStart,
+            PathBuf::from("session"),
+            None,
+            None,
+            None,
+            "New session started".to_string(),
+            HashMap::new(),
+        )?;
+
+        Ok(())
+    }
+
+    /// Export history as JSON
+    pub fn export_history(&self, format: ExportFormat) -> Result<String> {
+        let history = self.get_full_history()?;
+
+        match format {
+            ExportFormat::Json => {
+                serde_json::to_string_pretty(&history)
+                    .context("Failed to serialize history to JSON")
+            }
+            ExportFormat::JsonCompact => {
+                serde_json::to_string(&history)
+                    .context("Failed to serialize history to compact JSON")
+            }
+        }
+    }
+
+    /// Private method to append transaction to log file
+    fn append_to_log(&self, transaction: &Transaction) -> Result<()> {
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.log_file)
+            .context("Failed to open log file for writing")?;
+
+        let mut writer = BufWriter::new(file);
+        let json_line = serde_json::to_string(transaction)
+            .context("Failed to serialize transaction")?;
+
+        writeln!(writer, "{}", json_line)
+            .context("Failed to write transaction to log")?;
+
+        writer.flush()
+            .context("Failed to flush log file")?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ExportFormat {
+    Json,
+    JsonCompact,
+}
+
+/// Generate a unique session ID
+fn generate_session_id() -> String {
+    format!("session_{}", Utc::now().timestamp_nanos_opt().unwrap_or(0))
+}
+
+/// Generate a unique transaction ID
+fn generate_transaction_id() -> String {
+    format!("txn_{}", Utc::now().timestamp_nanos_opt().unwrap_or(0))
+}
+
+/// Utility function to calculate content hash
+pub fn calculate_content_hash(content: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    content.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_create_transaction_log() {
+        let temp_dir = tempdir().unwrap();
+        let log = TransactionLog::new(temp_dir.path()).unwrap();
+
+        assert_eq!(log.current_session.len(), 1); // SessionStart
+        assert!(matches!(log.current_session[0].operation, OperationType::SessionStart));
+    }
+
+    #[test]
+    fn test_log_transaction() {
+        let temp_dir = tempdir().unwrap();
+        let mut log = TransactionLog::new(temp_dir.path()).unwrap();
+
+        let transaction_id = log.log_transaction(
+            OperationType::Edit,
+            PathBuf::from("test.py"),
+            Some("0.1".to_string()),
+            Some("hash1".to_string()),
+            Some("hash2".to_string()),
+            "Test edit".to_string(),
+            HashMap::new(),
+        ).unwrap();
+
+        assert_eq!(log.current_session.len(), 2); // SessionStart + Edit
+        assert!(!transaction_id.is_empty());
+    }
+
+    #[test]
+    fn test_find_transaction() {
+        let temp_dir = tempdir().unwrap();
+        let mut log = TransactionLog::new(temp_dir.path()).unwrap();
+
+        let transaction_id = log.log_transaction(
+            OperationType::Edit,
+            PathBuf::from("test.py"),
+            Some("0.1".to_string()),
+            Some("hash1".to_string()),
+            Some("hash2".to_string()),
+            "Test edit".to_string(),
+            HashMap::new(),
+        ).unwrap();
+
+        let found = log.find_transaction(&transaction_id).unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().id, transaction_id);
+    }
+
+    #[test]
+    fn test_content_hash() {
+        let hash1 = calculate_content_hash("def test(): pass");
+        let hash2 = calculate_content_hash("def test(): pass");
+        let hash3 = calculate_content_hash("def other(): pass");
+
+        assert_eq!(hash1, hash2);
+        assert_ne!(hash1, hash3);
+    }
+}
