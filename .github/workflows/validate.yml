@@ -1,0 +1,63 @@
+name: Validate
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Rust
+        uses: actions/setup-rust@v1
+        with:
+          rust-version: stable
+
+      - name: Cache Cargo registry and git index
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run unit tests
+        run: cargo test --workspace --locked
+
+      - name: Install gnawtreewriter (from repo)
+        run: cargo install --path . --locked --force
+
+      - name: Validate parsing for XML/Markdown/YAML files
+        env:
+          PATH: ${{ env.HOME }}/.cargo/bin:${{ env.PATH }}
+        run: |
+          set -euo pipefail
+          echo "🔍 Running parse checks for XML/MD/YAML files"
+          patterns=('*.xml' '*.yml' '*.yaml' '*.md')
+          checked=0
+          for p in "${patterns[@]}"; do
+            files=$(git ls-files "$p" || true)
+            for f in $files; do
+              [ -n "$f" ] || continue
+              echo "  -> Checking $f"
+              if ! gnawtreewriter analyze "$f" >/dev/null 2>&1; then
+                echo "❌ Parse failed: $f"
+                exit 1
+              fi
+              checked=$((checked + 1))
+            done
+          done
+          echo "✅ Parsing check passed for $checked files."
+
+      - name: Lint (optional)
+        if: env.CARGO_LINT == 'true'
+        run: |
+          # Example: run lint command if configured
+          gnawtreewriter lint . --recursive --format json || true
