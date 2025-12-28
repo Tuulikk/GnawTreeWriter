@@ -8,13 +8,14 @@ GnawTreeWriter is a tree-based code editor optimized for LLM-assisted editing. T
 
 ### ✅ Completed Features
 
-- **Multi-language support**: Python, Rust, TypeScript, PHP, HTML, QML, **Go**.
+- **Multi-language support**: Python, Rust, TypeScript, PHP, HTML, QML, **Go**, XML.
 - **TreeSitter Foundation**: Robust parsing for all core languages.
 - **Smart Indentation**: Automatic preservation of code style during insertions.
 - **Syntax Validation**: In-memory re-parsing before saving changes.
 - **QML Intents**: Dedicated commands for `add-property` and `add-component`.
 - **Diff Preview**: Visual unified diff display using the `similar` library.
-- **Automatic Backups**: Non-git safety net creating JSON snapshots before every edit.
+- **Automatic Backups**: Non-git safety net creating JSON snapshots before every edit
+- **XML Support**: Implemented stable XML parsing using `xmltree` (declaration, DOCTYPE, comments, CDATA, attributes, nested elements) with line-number mapping and unit tests.
 
 ---
 
