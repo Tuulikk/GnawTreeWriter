@@ -30,7 +30,17 @@ thiserror = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 regex = "1.10"
 similar = { version = "2.5", features = ["inline"] }
-tree-sitter-javascript = "0.25.0"
+tree-sitter-javascript = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 tree-sitter-qmljs = "0.3.0"
 tree-sitter-language = "0.1"
+toml = "0.8"
+serde_yaml = "0.9"
+pulldown-cmark = "0.13"
+xmltree = "0.12"
+# tree-sitter-xml = "0.7"  # Using custom parser to avoid version conflicts
+# tree-sitter-css = "0.25"  # Using custom parser to avoid version conflicts
+# tree-sitter-json = "0.23"  # Using serde_json instead to avoid version conflicts
+
+[dev-dependencies]
+tempfile = "3"

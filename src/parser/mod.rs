@@ -1,11 +1,18 @@
+pub mod css;
+pub mod go;
+pub mod html;
+pub mod json;
+pub mod markdown;
+pub mod php;
+pub mod python;
 pub mod qml;
 pub mod qml_tree_sitter;
-pub mod python;
 pub mod rust;
+pub mod text;
+pub mod toml;
 pub mod typescript;
-pub mod php;
-pub mod html;
-pub mod go;
+pub mod xml;
+pub mod yaml;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -41,6 +48,13 @@ pub fn get_parser(file_path: &Path) -> Result<Box<dyn ParserEngine>> {
         "php" => Ok(Box::new(php::PhpParser::new())),
         "html" | "htm" => Ok(Box::new(html::HtmlParser::new())),
         "go" => Ok(Box::new(go::GoParser::new())),
+        "css" => Ok(Box::new(css::CssParser::new())),
+        "xml" | "svg" | "xsl" | "xsd" | "rss" | "atom" => Ok(Box::new(xml::XmlParser::new())),
+        "md" | "markdown" => Ok(Box::new(markdown::MarkdownParser::new())),
+        "txt" => Ok(Box::new(text::TextParser::new())),
+        "toml" => Ok(Box::new(toml::TomlParser::new())),
+        "json" => Ok(Box::new(json::JsonParser::new())),
+        "yaml" | "yml" => Ok(Box::new(yaml::YamlParser::new())),
         _ => Err(anyhow::anyhow!("Unsupported file extension: {}", extension)),
     }
 }

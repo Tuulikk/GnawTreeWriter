@@ -10,6 +10,11 @@ All notable changes to GnawTreeWriter.
 - **Persistent Undo**: The `undo` stack is now restored from the transaction log between sessions, allowing undo across restarts.
 - **Context Awareness**: Commands now automatically locate the project root (via `.git` or session file) regardless of the current working directory, fixing "No changes found" errors when running from subdirectories.
 - **Unescape Flag**: New `--unescape-newlines` flag for manual string unescaping if needed.
+- **CSS Support**: Full CSS parsing with custom parser for rules, selectors, declarations, at-rules (@media, @keyframes), and nested structures.
+- **YAML Support**: Complete YAML parsing using `serde_yaml` library for mappings, sequences, scalars, and tagged values.
+- **XML Support**: Added a robust XML parser implemented with the `xmltree` crate. Supports XML declaration, DOCTYPE, comments, CDATA, attributes, nested elements and converts the result into the project's `TreeNode` model. Includes unit tests for common cases.
+- **Markdown Support**: Full CommonMark-compliant Markdown parsing with support for headings (h1-h6), paragraphs, lists (ordered/unordered), code blocks with language specification, block quotes, horizontal rules, and inline formatting (bold, italic, code, links).
+- **Text Support**: Simple line-based parsing for plain text files (.txt) with line-by-line node structure for easy editing of individual lines.
 
 ### Changed
 - Updated `restore-project` and `restore-files` to use the new smart timestamp parser.

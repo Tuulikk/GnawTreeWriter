@@ -4,7 +4,7 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 
 ## Features
 
-- **Multi-language support**: Python, Rust, TypeScript/TSX, PHP, HTML, QML
+- **Multi-language support**: Python, Rust, TypeScript/TSX, PHP, HTML, QML, Go, CSS, YAML, TOML, JSON
 - **Tree-based editing**: Work at AST level, not raw text
 - **Precise edits**: Target specific nodes with dot-notation paths
 - **LLM-optimized**: Structured edit requests and detailed context
@@ -136,14 +136,37 @@ See [AI_AGENT_TEST_SCENARIOS.md](AI_AGENT_TEST_SCENARIOS.md) for comprehensive t
 
 | Language | Extension | Parser | Status |
 |-----------|-----------|---------|---------|
-| QML | `.qml` | TreeSitter | ✅ Stable |
-| Go | `.go` | TreeSitter | ✅ Stable |
 | Python | `.py` | TreeSitter | ✅ Stable |
 | Rust | `.rs` | TreeSitter | ✅ Stable |
 | TypeScript | `.ts`, `.tsx` | TreeSitter | ✅ Stable |
 | JavaScript | `.js`, `.jsx` | TreeSitter | ✅ Stable |
 | PHP | `.php` | TreeSitter | ✅ Stable |
 | HTML | `.html`, `.htm` | TreeSitter | ✅ Stable |
+| XML | `.xml`, `.svg`, `.xsl`, `.xsd`, `.rss`, `.atom` | xmltree | ✅ Stable |
+| QML | `.qml` | TreeSitter | ✅ Stable |
+| Go | `.go` | TreeSitter | ✅ Stable |
+| CSS | `.css` | Custom | ✅ Stable |
+| YAML | `.yaml`, `.yml` | serde_yaml | ✅ Stable |
+| TOML | `.toml` | toml | ✅ Stable |
+| JSON | `.json` | serde_json | ✅ Stable |
+| Markdown | `.md`, `.markdown` | Custom | ✅ Stable |
+| Text | `.txt` | Custom | ✅ Stable |
+
+## Parsing model
+
+GnawTreeWriter använder två huvudsakliga parsing-strategier beroende på format:
+
+- TreeSitter-baserade grammatikparsers — ger en komplett och detaljerad AST, bra för programmeringsspråk (t.ex. Python, Rust, TypeScript) när en stabil TreeSitter-grammar finns. Ger precisa mutationer på nod-nivå, men kräver att grammar-crates använder kompatibla `tree-sitter`-versioner (annars kan det uppstå länk- och kompabilitetsproblem).
+
+- Biblioteksbaserade parsers — exempelvis `xmltree` för XML, `serde_json` för JSON, `toml` för TOML och `serde_yaml` för YAML. Dessa är ofta mer robusta för konfigurations- och dokumentformat, undviker FFI-beroenden och är pålitliga när TreeSitter inte är lämpligt.
+
+I det här projektet:
+- Vi använder TreeSitter där det ger fördel (språk/syntax där grammatik är bra).
+- För format där TreeSitter ger problem eller inte är nödvändigt (t.ex. XML) använder vi stabila bibliotek (`xmltree`) och mappar resultatet till samma `TreeNode`-modell. Det ger stabil parsing och korrekta radnummer för `list`/`show`/`edit`.
+
+Kort guide:
+- Vill du ha maximal AST-precision och nodes: satsa på TreeSitter om grammatiken finns.
+- Vill du ha robust dokument-/konfigparser utan FFI-komplexitet: använd bibliotek (som vi gjort för XML).
 
 ## CLI Commands
 
@@ -163,6 +186,95 @@ gnawtreewriter analyze src/ --recursive
 # Get summary format
 gnawtreewriter analyze . --recursive --format summary
 ```
+
+## Examples
+
+Praktiska exempel som visar vanliga arbetsflöden. Använd `--preview` för att se diff innan du applicerar ändringen, och använd `--source-file` för att undvika shell-citatproblem vid större snippets.
+
+### Snabbkommandon
+```bash
+# Analysera en fil (skriv ut AST i JSON)
+gnawtreewriter analyze note.xml
+
+# Lista noder och deras dot-paths
+gnawtreewriter list note.xml
+
+# Visa innehåll i en nod
+gnawtreewriter show note.xml element_4
+
+# Förhandsgranska en ändring (läs ny kod från fil för att slippa quoting)
+gnawtreewriter edit note.xml element_4 --source-file replacement.xml --preview
+```
+
+### XML-exempel
+```bash
+# Steg 1: analysera och hitta mål-nod
+gnawtreewriter analyze note.xml
+gnawtreewriter list note.xml
+
+# Steg 2: visa noden och bestäm vad du vill ändra
+gnawtreewriter show note.xml element_4
+
+# Steg 3: ändra noden med fil (säkert mot shell-escaping) och förhandsgranska
+echo '<note><to>Ann</to></note>' > new_note.xml
+gnawtreewriter edit note.xml element_4 --source-file new_note.xml --preview
+
+# Om diffen ser bra ut, kör utan --preview för att applicera
+gnawtreewriter edit note.xml element_4 --source-file new_note.xml
+```
+
+Tips: I scripts och CI är det säkrast att använda `--source-file` eller `-` (stdin) när du skickar kod till `edit` för att undvika problem med citattecken och shell-escaping.
+
+## CI / Hook-exempel
+
+Här är ett minimalt GitHub Actions-exempel som testar och kör en snabb kontroll av parsing på push/pull requests:
+
+```yaml
+# .github/workflows/validate.yml
+name: Validate
+
+on: [push, pull_request]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust
+        uses: actions/setup-rust@v1
+      - name: Run tests
+        run: cargo test --all
+      - name: Install gnawtreewriter
+        run: cargo install --path .
+      - name: Basic parse validation
+        run: |
+          # Fail if any XML/Markdown/YAML file cannot be parsed
+          for f in $(git ls-files '*.xml' '*.md' '*.yml' '*.yaml' | tr '\n' ' '); do
+            if [ -n "$f" ]; then
+              ./target/debug/gnawtreewriter analyze "$f" || (echo "Parse failed: $f" && exit 1)
+            fi
+          done
+```
+
+### Pre-commit hook (lokalt)
+Ett enkelt pre-commit-hook som kontrollerar att nya ändrade XML/Markdown/YAML-filer kan parses:
+```bash
+#!/bin/sh
+# .git/hooks/pre-commit
+files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(xml|md|yml|yaml)$' || true)
+for f in $files; do
+  if ! gnawtreewriter analyze "$f" >/dev/null 2>&1; then
+    echo "Parse error in $f"
+    exit 1
+  fi
+done
+```
+
+## Documentation & Contribute
+
+- Läs `CONTRIBUTING.md` för bidragsriktlinjer.
+- Se `AGENTS.md` och `AI_AGENT_TEST_SCENARIOS.md` för exempel på hur man använder verktyget tillsammans med LLMs och automatisering.
+
 
 ### add-property
 QML-specific command to safely add a property to a component at the correct position.

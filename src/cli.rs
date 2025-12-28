@@ -1162,7 +1162,9 @@ impl Cli {
     fn find_supported_files(dir: &std::path::Path) -> Result<Vec<String>> {
         let mut files = Vec::new();
         let supported_extensions = vec![
-            "py", "rs", "ts", "tsx", "js", "jsx", "php", "html", "htm", "qml", "go",
+            "py", "rs", "ts", "tsx", "js", "jsx", "php", "html", "htm", "qml", "go", "toml",
+            "json", "yaml", "yml", "css", "md", "markdown", "txt", "xml", "svg", "xsl", "xsd",
+            "rss", "atom",
         ];
 
         if dir.is_dir() {
