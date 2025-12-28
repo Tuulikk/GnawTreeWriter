@@ -1,378 +1,519 @@
-# GnawTreeWriter LLM Agent Integration
+Ja# Contributing to GnawTreeWriter as an AI Agent
 
-This guide explains how to use GnawTreeWriter with various LLM agents (Claude, GPT, Gemini, etc.) for effective code editing.
+**Guide for AI agents contributing to the GnawTreeWriter project through dogfooding**
 
-## Quick Start for LLMs
-
-### Installation
-
-```bash
-cargo install --git https://github.com/Tuulikk/GnawTreeWriter.git
-```
-
-### Available Commands
-
-- `analyze <file>`: Parse file and show AST structure
-- `list <file>`: Show all nodes with paths
-- `find <path> [--type TYPE] [--content TEXT]`: Search for nodes
-- `fuzzy-edit <file> <query> <content>`: Fuzzy search and edit
-- `edit <file> <path> <content> [--preview]`: Edit by exact path
-- `insert <file> <path> <position> <content>`: Insert content
-- `delete <file> <path>`: Delete node
-- `add-property <file> <path> <property>`: Add property to QML component
-- `lint <path> [--format json/text]`: Lint files
+Version: 2.0 | Last Updated: 2025-12-27
 
 ---
 
-## LLM-Specific Strategies
+## 🎯 Purpose
 
-### Claude (Anthropic)
-
-#### Recommended Workflow
-
-1. **Analyze First**: Get structure before making changes
-   ```bash
-   gnawtreewriter analyze app.qml
-   ```
-
-2. **Use List for Overview**: See all available nodes
-   ```bash
-   gnawtreewriter list app.qml --filter-type Property
-   ```
-
-3. **Fuzzy-Edit When Unsure**: Let the fuzzy matcher find the right node
-   ```bash
-   gnawtreewriter fuzzy-edit app.qml "title" 'title: "New Title"'
-   ```
-
-4. **Preview Before Applying**: Always use `--preview` flag
-   ```bash
-   gnawtreewriter fuzzy-edit app.qml "color" 'color: "red"' --preview
-   ```
-
-5. **Use Add-Property for QML**: Safe property injection
-   ```bash
-   gnawtreewriter list app.qml --filter-type Rectangle
-   # Note: For QML, add-property requires exact path due to parser limitation
-   gnawtreewriter add-property app.qml root.1 'borderWidth: 5'
-   ```
-
-#### Example Prompt for Claude
-
-```
-User: Change the window title to "GnawTreeWriter Demo" in MainWindow.qml
-
-Claude: I'll use GnawTreeWriter to update the window title.
-
-First, let me find the title property:
-$ gnawtreewriter find MainWindow.qml --content "title"
-
-Now I'll update it with preview:
-$ gnawtreewriter fuzzy-edit MainWindow.qml "title" 'title: "GnawTreeWriter Demo"' --preview
-
-The diff looks good. Applying the change:
-$ gnawtreewriter fuzzy-edit MainWindow.qml "title" 'title: "GnawTreeWriter Demo"'
-
-Done! Window title updated.
-```
+This document explains how AI agents can contribute to the GnawTreeWriter project by using the tool to develop itself—a practice known as "dogfooding." By using GnawTreeWriter to edit its own codebase, AI agents help validate functionality, discover edge cases, and improve the tool's design.
 
 ---
 
-### GPT-4 / GPT-4o (OpenAI)
+## 🏗️ Project Overview
 
-#### Recommended Workflow
+GnawTreeWriter is a tree-based code editor written in Rust that works at the AST (Abstract Syntax Tree) level. It uses TreeSitter parsers to support multiple programming languages.
 
-GPT models work well with the full command set:
+### Tech Stack
+- **Language**: Rust (Edition 2021)
+- **Parsers**: TreeSitter with language-specific grammars
+- **CLI**: Clap 4.5
+- **Serialization**: serde, serde_json, serde_yaml, toml
+- **Async Runtime**: Tokio
 
-1. **Batch Analyze**: Get multiple files at once
-   ```bash
-   gnawtreewriter analyze *.qml
-   ```
-
-2. **Use Find with Filters**: Precise node location
-   ```bash
-   gnawtreewriter find app.qml --type Property --content "width:"
-   ```
-
-3. **Direct Edit with Preview**: Use exact path when possible
-   ```bash
-   gnawtreewriter edit app.qml root.2.0 'width: 500' --preview
-   ```
-
-#### Example Prompt for GPT
-
+### Project Structure
 ```
-User: Add a "backgroundColor" property set to "#F5F5F5" to all Rectangle components
-
-GPT: I'll add the background color to all Rectangle components using GnawTreeWriter.
-
-First, find all Rectangle components:
-$ gnawtreewriter find . --node-type Rectangle
-
-Found 3 Rectangle components. Adding property to each:
-$ gnawtreewriter add-property file1.qml root.1 'backgroundColor: "#F5F5F5"'
-$ gnawtreewriter add-property file2.qml root.1 'backgroundColor: "#F5F5F5"'
-$ gnawtreewriter add-property file3.qml root.1 'backgroundColor: "#F5F5F5"'
-
-Completed! All Rectangle components now have backgroundColor.
+GnawTreeWriter/
+├── src/
+│   ├── main.rs              # Entry point
+│   ├── cli.rs               # Command-line interface definitions
+│   ├── core/                # Core functionality
+│   ├── parser/              # Parser engine implementations
+│   └── llm/                 # LLM integration utilities
+├── docs/                    # Detailed documentation
+├── examples/                # Example files for testing
+├── tests/                   # Test files
+└── Cargo.toml              # Dependencies and metadata
 ```
+
+### Supported Languages
+- Python (`.py`)
+- Rust (`.rs`)
+- TypeScript (`.ts`, `.tsx`)
+- JavaScript (`.js`, `.jsx`)
+- PHP (`.php`)
+- HTML (`.html`)
+- QML (`.qml`)
+- Go (`.go`)
+- CSS (`.css`)
+- YAML (`.yaml`, `.yml`)
+- TOML (`.toml`)
+- XML (`.xml`)
 
 ---
 
-### Gemini (Google DeepMind)
+## 🐶 Dogfooding: Using GnawTreeWriter to Edit GnawTreeWriter
 
-#### Recommended Workflow
+The best way to contribute to GnawTreeWriter is to use it! This practice—eating your own dog food—helps identify issues and validate the tool's capabilities.
 
-Gemini works well with the fuzzy-edit and context-aware operations:
+### Getting Started
 
-1. **Fuzzy-Edit for Complex Queries**: Let the multi-strategy matcher work
+1. **Install GnawTreeWriter** (from source if contributing):
    ```bash
-   gnawtreewriter fuzzy-edit app.qml "toolbar button" 'text: "New Text"'
+   cd GnawTreeWriter
+   cargo install --path .
    ```
 
-2. **Use Lint First**: Check for issues before editing
+2. **Start a development session**:
    ```bash
-   gnawtreewriter lint app/ui/qml/
+   gnawtreewriter session-start
    ```
 
-3. **Batch Operations**: Process multiple files efficiently
+3. **Analyze the codebase**:
    ```bash
-   gnawtreewriter lint app/ui/qml/ --format json > issues.json
-   # Process issues and create fixes
+   # Analyze the CLI module
+   gnawtreewriter analyze src/cli.rs
+   
+   # List all functions in main.rs
+   gnawtreewriter list src/main.rs --filter-type function_definition
    ```
 
-#### Example Prompt for Gemini
+### Example Workflows
 
-```
-User: Update all button texts in the application to use the new design system
+#### Adding a New CLI Command
 
-Gemini: I'll use GnawTreeWriter to update button texts across the application.
-
-First, let me lint to see what we're working with:
-$ gnawtreewriter lint app/ui/qml/
-
-No critical issues. Now finding all Button components:
-$ gnawtreewriter find app/ui/qml/ --node-type Button
-
-Found 12 buttons. I'll use fuzzy-edit to update their text properties:
-$ gnawtreewriter fuzzy-edit file1.qml "submit" 'text: "Save"'
-$ gnawtreewriter fuzzy-edit file2.qml "cancel" 'text: "Close"'
-... (continuing for all buttons)
-
-Updated all buttons with new design system text.
-```
-
----
-
-## Common Patterns for All LLMs
-
-### Pattern 1: Property Value Updates
+**Scenario**: Add a `validate` command that checks file syntax
 
 ```bash
-# Step 1: Find the property
-gnawtreewriter find file.qml --content "propertyName"
+# Step 1: Analyze the CLI structure
+gnawtreewriter analyze src/cli.rs
 
-# Step 2: Preview the change
-gnawtreewriter fuzzy-edit file.qml "propertyName" 'propertyName: "newValue"' --preview
+# Step 2: Find the Commands enum
+gnawtreewriter list src/cli.rs --filter-type enum_item
 
-# Step 3: Apply
-gnawtreewriter fuzzy-edit file.qml "propertyName" 'propertyName: "newValue"'
+# Step 3: Add new command variant (preview first)
+gnawtreewriter fuzzy-edit src/cli.rs "enum Commands" 'Validate { file: PathBuf }' --preview
+
+# Step 4: Apply the edit
+gnawtreewriter fuzzy-edit src/cli.rs "enum Commands" 'Validate { file: PathBuf }'
+
+# Step 5: Add command handler in main.rs
+gnawtreewriter list src/main.rs --filter-type match_arm
+gnawtreewriter fuzzy-edit src/main.rs "Commands::Edit" 'Commands::Validate { file } => {
+    println!("Validating: {:?}", file);
+},' --preview
 ```
 
-### Pattern 2: Add New Property to Component
+#### Implementing a New Parser
+
+**Scenario**: Add support for a new language (e.g., C++)
 
 ```bash
-# For QML (note: requires exact path)
-gnawtreewriter list file.qml --filter-type Rectangle
-gnawtreewriter add-property file.qml root.1 'newProperty: "value"'
+# Step 1: Create new parser file
+cat > src/parser/cpp.rs << 'EOF'
+use crate::parser::ParserEngine;
+use anyhow::Result;
+use tree_sitter::{Parser, Language};
 
-# For other languages
-gnawtreewriter insert file.qml root.1 2 'newProperty: "value"'
+pub struct CppParser;
+
+impl ParserEngine for CppParser {
+    fn parse(&self, code: &str) -> Result<crate::core::TreeNode> {
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_cpp::language())?;
+        // Implementation details...
+    }
+    
+    fn get_supported_extensions(&self) -> Vec<&'static str> {
+        vec!["cpp", "cc", "cxx", "h", "hpp"]
+    }
+}
+EOF
+
+# Step 2: Update Cargo.toml to add dependency
+gnawtreewriter fuzzy-edit Cargo.toml "tree-sitter" 'tree-sitter-cpp = "0.22"' --preview
+
+# Step 3: Update main.rs to register the parser
+gnawtreewriter list src/main.rs --filter-type function_definition
+gnawtreewriter fuzzy-edit src/main.rs "register_parsers" 'parsers.push(Box::new(parser::cpp::CppParser));' --preview
 ```
 
-### Pattern 3: Batch File Operations
+#### Adding Tests
+
+**Scenario**: Add a unit test for a function
 
 ```bash
-# Analyze all files in a directory
-gnawtreewriter analyze app/ui/qml/ --format summary
+# Step 1: Find the function in src/core/
+gnawtreewriter list src/core/mod.rs --filter-type function_definition
 
-# Lint all files and collect JSON output
-gnawtreewriter lint app/ui/qml/ --format json > lint-results.json
+# Step 2: Add test module
+gnawtreewriter fuzzy-edit src/core/mod.rs "#[cfg(test)]" '
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-# Find specific nodes across project
-gnawtreewriter find . --type Property --content "color:"
+    #[test]
+    fn test_new_functionality() {
+        // Test implementation
+        assert!(true);
+    }
+}' --preview
 ```
 
-### Pattern 4: Complex Multi-step Edits
+#### Updating Documentation
+
+**Scenario**: Document a new feature in README.md
 
 ```bash
-# Step 1: Analyze structure
-gnawtreewriter analyze file.qml
+# Step 1: Analyze README structure
+gnawtreewriter list README.md --filter-type heading
 
-# Step 2: Find target nodes
-gnawtreewriter find file.qml --type Rectangle
+# Step 2: Find the CLI Commands section
+gnawtreewriter find README.md --content "## CLI Commands"
 
-# Step 3: Edit with preview for each step
-gnawtreewriter edit file.qml root.2.0 'width: 500' --preview
-# (review diff, then apply)
-gnawtreewidth edit file.qml root.2.1 'height: 300' --preview
-# (review diff, then apply)
-gnawtreewidth edit file.qml root.2.2 'color: "blue"' --preview
-# (review diff, then apply)
+# Step 3: Add documentation for the new command
+gnawtreewriter fuzzy-edit README.md "## CLI Commands" '
+### validate
+Check file syntax without making changes.
+
+```bash
+gnawtreewriter validate <file_path>
+```' --preview
 ```
 
 ---
 
-## Error Handling
+## 🤝 Contribution Areas
 
-### Common Issues and Solutions
+AI agents can contribute to several areas of the project:
 
-#### Issue: "Node not found at path"
-**Cause**: Path has changed between analyze and edit
-**Solution**: Re-analyze and get fresh path
-```bash
-gnawtreewriter analyze file.qml
-gnawtreewidth edit file.qml <new-path> 'content'
-```
+### 1. Parser Development
+- Add support for new languages (C++, Java, Kotlin, etc.)
+- Improve existing parsers (better AST representation, edge cases)
+- Optimize parser performance
 
-#### Issue: "No matches found for query" (fuzzy-edit)
-**Cause**: Query too specific or incorrect
-**Solution**: Try broader query or use `find` with filters
-```bash
-# Try broader
-gnawtreewidth fuzzy-edit file.qml "color" 'color: "red"'
+### 2. Core Functionality
+- Implement new edit operations (move, rename, refactor)
+- Improve tree navigation and path resolution
+- Enhance validation and error reporting
 
-# Or use filters
-gnawtreewriter find file.qml --type Property
-```
+### 3. CLI Features
+- Add new commands (lint, format, refactor)
+- Improve existing command ergonomics
+- Add better help text and examples
 
-#### Issue: "No QML components found" (add-property)
-**Cause**: Parser limitation with nested components
-**Solution**: Use exact path from `list` or `find`
-```bash
-gnawtreewriter list file.qml --filter-type Rectangle
-gnawtreewidth add-property file.qml root.1 'property: value'
+### 4. Testing & Quality
+- Add unit tests for existing functionality
+- Create integration tests for end-to-end workflows
+- Improve test coverage in untested areas
+
+### 5. Documentation
+- Update README with new features
+- Improve inline code documentation
+- Create examples in `examples/` directory
+- Write technical guides in `docs/`
+
+### 6. Bug Fixes
+- Identify and fix parsing issues
+- Resolve edge cases in edit operations
+- Improve error messages and handling
+
+### 7. Performance Optimization
+- Optimize tree traversal algorithms
+- Improve parser memory usage
+- Speed up file operations
+
+---
+
+## 📋 Project-Specific Conventions for AI Agents
+
+### Code Style
+- **Rust**: Follow standard `cargo fmt` formatting
+- Use `cargo clippy` for linting
+- Prefer `Result<T>` for error handling over `panic!`
+- Document public functions with `///` doc comments
+
+### Git Workflow
+- Create feature branches: `feature/add-language-X`
+- Write descriptive commit messages
+- Reference issues in commit messages: `Fixes #123`
+- Keep commits atomic (one logical change per commit)
+
+### Testing Requirements
+- All new features must have tests
+- Run `cargo test` before submitting
+- Ensure all existing tests pass
+- Test with multiple file types when applicable
+
+### Documentation Requirements
+- Update README.md for user-facing changes
+- Add inline documentation for new APIs
+- Update CHANGELOG.md for version changes
+- Document breaking changes clearly
+
+### Error Handling Patterns
+```rust
+// Preferred: Return Result
+fn parse_file(path: &Path) -> Result<TreeNode> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
+    // ...
+}
+
+// Avoid: panic! unless absolutely necessary
+fn parse_file(path: &Path) -> TreeNode {
+    let content = fs::read_to_string(path).unwrap(); // ❌ Don't do this
+    // ...
+}
 ```
 
 ---
 
-## Best Practices for LLMs
+## 🔧 Practical Contribution Examples
 
-### 1. Always Preview First
-Before making permanent changes, show the diff:
+### Example 1: Adding Fuzzy Search Feature
+
+**Goal**: Add a fuzzy search command to find nodes by approximate name
+
 ```bash
-gnawtreewidth edit file.qml <path> 'content' --preview
+# Step 1: Analyze the find command structure
+gnawtreewriter analyze src/cli.rs
+gnawtreewriter find src/cli.rs --content "Commands::Find"
+
+# Step 2: Add fuzzy command to enum
+gnawtreewriter fuzzy-edit src/cli.rs "Find" 'Fuzzy { file: PathBuf, query: String }' --preview
+
+# Step 3: Implement fuzzy matching in core
+# Create src/core/fuzzy.rs with fuzzy search logic
+# Then add handler in main.rs
 ```
 
-### 2. Use List for Understanding Structure
-Get a tree view before editing:
+### Example 2: Improving Error Messages
+
+**Goal**: Make error messages more actionable
+
 ```bash
-gnawtreewriter list file.qml
+# Step 1: Find error handling code
+gnawtreewriter list src/core/mod.rs --filter-type function_definition
+gnawtreewriter find src/core/mod.rs --content "map_err"
+
+# Step 2: Improve error message
+gnawtreewriter fuzzy-edit src/core/mod.rs "map_err" '.map_err(|e| {
+    anyhow::anyhow!(
+        "Failed to parse '{}': {}. Tip: Check file syntax with `gnawtreewriter validate`",
+        path.display(),
+        e
+    )
+})' --preview
 ```
 
-### 3. Leverage Find for Complex Queries
-Instead of guessing paths:
+### Example 3: Adding Session Management
+
+**Goal**: Track editing history across sessions
+
 ```bash
-gnawtreewriter find . --type Property --content "targetText"
-```
+# Step 1: Design session structure in core
+gnawtreewriter insert src/core/mod.rs "pub struct TreeNode;" 0 '
+pub struct Session {
+    pub id: String,
+    pub start_time: chrono::DateTime<chrono::Utc>,
+    pub operations: Vec<Operation>,
+}
 
-### 4. Check Backups After Operations
-Verify backups are created:
-```bash
-ls -la .gnawtreewriter_backups/
-```
+pub struct Operation {
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub file: PathBuf,
+    pub action: String,
+}' --preview
 
-### 5. Use Lint Before Batch Operations
-Check files before making changes:
-```bash
-gnawtreewriter lint . --format json
-```
-
-### 6. For QML, Know the Limitations
-QML parser has path duplication issues:
-- Use `list` to find correct paths
-- Use `insert` with position 2 instead of `add-property` for precision
-- Document the limitation in your responses
-
----
-
-## Troubleshooting for LLMs
-
-### Command Not Found
-**Check**: Is GnawTreeWriter installed?
-```bash
-which gnawtreewriter
-```
-
-### Permission Errors
-**Check**: File permissions
-```bash
-chmod +w file.qml
-```
-
-### Parser Errors
-**Check**: File syntax is valid
-```bash
-gnawtreewriter analyze file.qml
-```
-
-### Backup Creation Failed
-**Check**: Directory permissions
-```bash
-ls -la .gnawtreewriter_backups/
+# Step 2: Add CLI commands for session management
+# Step 3: Implement persistence logic
 ```
 
 ---
 
-## Integration Examples
+## 🧪 Testing Your Contributions
 
-### Pre-commit Hook
+Before submitting contributions, ensure:
+
 ```bash
-#!/bin/bash
-# .git/hooks/pre-commit
-files=$(git diff --cached --name-only | grep '\.qml$' || true)
-for f in $files; do
-  if ! gnawtreewidth analyze "$f" >/dev/null 2>&1; then
-    echo "Parse error in $f"
-    exit 1
-  fi
-done
-```
+# Format code
+cargo fmt
 
-### CI Pipeline
-```yaml
-# .github/workflows/lint.yml
-steps:
-  - name: Install GnawTreeWriter
-    run: cargo install --git https://github.com/Tuulikk/GnawTreeWriter.git
-  - name: Lint QML files
-    run: |
-      gnawtreewidth lint app/ui/qml/ --format json > results.json
-      if [ $(jq 'length' results.json) -gt 0 ]; then
-        jq . results.json
-        exit 1
-      fi
-```
+# Check for linting issues
+cargo clippy -- -D warnings
 
-### LLM Chat Integration
-**Example cursor/chat integration:**
-```python
-def edit_with_gnawtreewriter(file_path, query, new_content):
-    result = subprocess.run([
-        'gnawtreewriter', 'fuzzy-edit', file_path, query, new_content,
-        '--preview'
-    ], capture_output=True, text=True)
-    return result.stdout
+# Run all tests
+cargo test
+
+# Run specific test
+cargo test test_parser
+
+# Build release version to ensure it compiles
+cargo build --release
 ```
 
 ---
 
-## Getting Help
+## 📝 Creating Pull Requests
 
-- **Documentation**: [README.md](README.md)
-- **Recipes**: [RECIPES.md](RECIPES.md)
-- **QML Examples**: [QML_EXAMPLES.md](QML_EXAMPLES.md)
-- **Architecture**: [ARCHITECTURE.md](ARCHITECTURE.md)
-- **Roadmap**: [ROADMAP.md](ROADMAP.md)
+When submitting changes:
 
-For issues or questions, visit: https://github.com/Tuulikk/GnawTreeWriter/issues
+1. **Fork the repository** on GitHub
+2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
+3. **Make changes using GnawTreeWriter** (dogfooding!)
+4. **Commit changes**: `git commit -m "Add amazing feature"`
+5. **Push to branch**: `git push origin feature/amazing-feature`
+6. **Open Pull Request** with:
+   - Clear title describing the change
+   - Description of what was changed and why
+   - Link to relevant issues
+   - Screenshots if UI-related
+
+### PR Template
+```markdown
+## Description
+Brief description of changes
+
+## Type of Change
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change
+- [ ] Documentation update
+
+## Testing
+- [ ] Added tests for new functionality
+- [ ] All existing tests pass
+- [ ] Tested with `cargo test`
+
+## Dogfooding
+I used GnawTreeWriter to make these changes using these commands:
+- `gnawtreewriter analyze ...`
+- `gnawtreewriter edit ...`
+```
+
+---
+
+## 🚀 Advanced Contribution Topics
+
+### Adding TreeSitter Grammars
+
+To add a new language with TreeSitter:
+
+1. Add dependency to `Cargo.toml`
+2. Create parser module in `src/parser/`
+3. Implement `ParserEngine` trait
+4. Register parser in `main.rs`
+5. Add tests in `tests/parser_*.rs`
+
+### Custom Parsers
+
+For languages without good TreeSitter support:
+
+1. Use alternative parsing libraries (xmltree, serde_json, etc.)
+2. Implement custom parsing logic
+3. Ensure consistent `TreeNode` output format
+4. Document parsing limitations
+
+### CLI Plugin Architecture
+
+For extensibility:
+
+1. Design plugin interface in `src/plugins/`
+2. Implement command registration system
+3. Add plugin discovery mechanism
+4. Document plugin development
+
+---
+
+## 🤖 AI Agent Best Practices
+
+### 1. Always Analyze First
+Before making changes, understand the code structure:
+```bash
+gnawtreewriter analyze <file>
+gnawtreewriter list <file> --filter-type <type>
+```
+
+### 2. Use Preview Mode
+Never apply changes without previewing:
+```bash
+gnawtreewriter edit <file> <path> <content> --preview
+```
+
+### 3. Start Sessions
+Track your work with sessions:
+```bash
+gnawtreewriter session-start
+# Make changes
+gnawtreewriter history
+```
+
+### 4. Test Incrementally
+Test each small change:
+```bash
+cargo test
+gnawtreewriter validate <test_file>
+```
+
+### 5. Undo Often
+If something goes wrong:
+```bash
+gnawtreewriter undo
+# or
+gnawtreewriter restore-session <session_id>
+```
+
+### 6. Document Your Work
+Leave clear comments and docstrings:
+```rust
+/// Parses a file using the appropriate parser based on extension.
+/// 
+/// # Arguments
+/// * `path` - Path to the file to parse
+/// 
+/// # Returns
+/// * `Result<TreeNode>` - Parsed tree structure or error
+```
+
+---
+
+## 📚 Additional Resources
+
+- **[README.md](README.md)** - Project overview and usage
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Technical architecture details
+- **[MULTI_AGENT_DEVELOPMENT.md](docs/MULTI_AGENT_DEVELOPMENT.md)** - AI agent collaboration patterns
+- **[LLM_INTEGRATION.md](docs/LLM_INTEGRATION.md)** - How LLMs integrate with GnawTreeWriter
+- **[TESTING.md](docs/TESTING.md)** - Testing strategies and examples
+
+---
+
+## 💡 Success Stories
+
+### Real Contributions from AI Agents
+
+- **Gemini**: Designed the session management architecture
+- **Claude**: Improved error handling and added comprehensive tests
+- **GLM-4.7**: Implemented multiple parser engines and CLI commands
+- **Raptor Mini**: Provided critical UX feedback that improved the fuzzy-edit workflow
+
+These contributions demonstrate that AI agents, when used appropriately and following best practices, can make meaningful contributions to complex software projects.
+
+---
+
+## 🎓 Getting Help
+
+- **GitHub Issues**: https://github.com/Tuulikk/GnawTreeWriter/issues
+- **Discussions**: GitHub Discussions tab
+- **Documentation**: See docs/ directory
+- **Examples**: See examples/ directory
+
+---
+
+**Remember**: The best contributions come from real usage. Use GnawTreeWriter to build GnawTreeWriter—this dogfooding practice makes the tool better for everyone! 🐶✨
+
+---
+
+*Version 2.0 - Rewritten to focus on contributing and dogfooding rather than end-user usage*

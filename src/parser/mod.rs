@@ -1,4 +1,5 @@
 pub mod css;
+pub mod generic;
 pub mod go;
 pub mod html;
 pub mod json;
@@ -35,10 +36,9 @@ pub trait ParserEngine {
 }
 
 pub fn get_parser(file_path: &Path) -> Result<Box<dyn ParserEngine>> {
-    let extension = file_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .context("No file extension found")?;
+    // Get file extension, defaulting to empty string if none exists
+    // This handles files like README, Dockerfile, etc.
+    let extension = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     match extension {
         "qml" => Ok(Box::new(qml_tree_sitter::QmlTreeSitterParser::new())),
@@ -55,6 +55,10 @@ pub fn get_parser(file_path: &Path) -> Result<Box<dyn ParserEngine>> {
         "toml" => Ok(Box::new(toml::TomlParser::new())),
         "json" => Ok(Box::new(json::JsonParser::new())),
         "yaml" | "yml" => Ok(Box::new(yaml::YamlParser::new())),
-        _ => Err(anyhow::anyhow!("Unsupported file extension: {}", extension)),
+        _ => {
+            // Use generic parser for all other file types
+            // This enables backup/history for ALL files, not just those we can parse
+            Ok(Box::new(generic::GenericParser::new()))
+        }
     }
 }

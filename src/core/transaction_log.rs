@@ -39,21 +39,27 @@ pub struct TransactionLog {
     log_file: PathBuf,
     session_id: String,
     current_session: Vec<Transaction>,
+    session_id_file: PathBuf,
 }
 
 impl TransactionLog {
     /// Create a new transaction log
     pub fn new<P: AsRef<Path>>(project_root: P) -> Result<Self> {
         let log_file = project_root.as_ref().join(".gnawtreewriter_session.json");
+        let session_id_file = project_root.as_ref().join(".gnawtreewriter_session_id");
         let session_id = generate_session_id();
+
+        // Save session_id to file for persistence
+        std::fs::write(&session_id_file, &session_id)?;
 
         let mut log = Self {
             log_file,
             session_id: session_id.clone(),
             current_session: Vec::new(),
+            session_id_file,
         };
 
-        // Log session start
+        // Log session start - this will add it to both current_session and log file
         log.log_transaction(
             OperationType::SessionStart,
             PathBuf::from("session"),
@@ -70,19 +76,62 @@ impl TransactionLog {
     /// Load existing transaction log
     pub fn load<P: AsRef<Path>>(project_root: P) -> Result<Self> {
         let log_file = project_root.as_ref().join(".gnawtreewriter_session.json");
+        let session_id_file = project_root.as_ref().join(".gnawtreewriter_session_id");
 
         if !log_file.exists() {
             return Self::new(project_root);
         }
 
-        let session_id = generate_session_id();
-        let current_session = Vec::new();
+        // Try to load existing session_id from file
+        let session_id = if session_id_file.exists() {
+            std::fs::read_to_string(&session_id_file).unwrap_or_else(|_| generate_session_id())
+        } else {
+            generate_session_id()
+        };
+
+        // Load current session transactions from log file
+        let full_history = Self::load_full_history_from_file(&log_file)?;
+        let current_session: Vec<Transaction> = full_history
+            .into_iter()
+            .filter(|t| t.session_id == session_id)
+            .collect();
 
         Ok(Self {
             log_file,
             session_id,
             current_session,
+            session_id_file,
         })
+    }
+
+    /// Ensure a session exists (for implicit session creation)
+    fn ensure_session_exists(&mut self) -> Result<()> {
+        if self.current_session.is_empty() {
+            // Auto-start a default session
+            // This allows edits without explicit session-start command
+            self.session_id = generate_session_id();
+
+            // Save session_id to file for persistence
+            std::fs::write(&self.session_id_file, &self.session_id)?;
+
+            // Create and log SessionStart transaction
+            let transaction = Transaction {
+                id: generate_transaction_id(),
+                timestamp: Utc::now(),
+                operation: OperationType::SessionStart,
+                file_path: PathBuf::from("session"),
+                node_path: None,
+                before_hash: None,
+                after_hash: None,
+                description: "Default session auto-started".to_string(),
+                session_id: self.session_id.clone(),
+                metadata: HashMap::new(),
+            };
+
+            self.current_session.push(transaction.clone());
+            self.append_to_log(&transaction)?;
+        }
+        Ok(())
     }
 
     /// Log a new transaction
@@ -96,6 +145,15 @@ impl TransactionLog {
         description: String,
         metadata: HashMap<String, String>,
     ) -> Result<String> {
+        // Ensure we have an active session (auto-start default session if needed)
+        // Skip for session operations to avoid infinite recursion
+        if !matches!(
+            operation,
+            OperationType::SessionStart | OperationType::SessionEnd
+        ) {
+            self.ensure_session_exists()?;
+        }
+
         let transaction = Transaction {
             id: generate_transaction_id(),
             timestamp: Utc::now(),
@@ -127,11 +185,16 @@ impl TransactionLog {
 
     /// Get full transaction history from file
     pub fn get_full_history(&self) -> Result<Vec<Transaction>> {
-        if !self.log_file.exists() {
+        Self::load_full_history_from_file(&self.log_file)
+    }
+
+    /// Load full history from a log file (helper method)
+    fn load_full_history_from_file(log_file: &PathBuf) -> Result<Vec<Transaction>> {
+        if !log_file.exists() {
             return Ok(Vec::new());
         }
 
-        let file = File::open(&self.log_file).context("Failed to open transaction log file")?;
+        let file = File::open(log_file).context("Failed to open transaction log file")?;
         let reader = BufReader::new(file);
 
         let mut transactions = Vec::new();
@@ -351,6 +414,9 @@ impl TransactionLog {
         // Start new session
         self.session_id = generate_session_id();
         self.current_session.clear();
+
+        // Save session_id to file for persistence
+        std::fs::write(&self.session_id_file, &self.session_id)?;
 
         self.log_transaction(
             OperationType::SessionStart,
