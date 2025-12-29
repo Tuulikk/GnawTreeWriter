@@ -426,6 +426,20 @@ For extensibility:
 3. Add plugin discovery mechanism
 4. Document plugin development
 
+### Add-ons (LSP & MCP)
+
+Add-ons are opt-in extensions that augment GnawTreeWriter without bloating the core tool. They let users attach additional capabilities (semantic analysis, live monitoring, agent orchestration) when and where they want them.
+
+- LSP add-ons (local / OSS): provide semantic features—hover/definition/diagnostics/completion—by connecting to a language server. These are optional, local add-ons that users can enable for richer editor feedback.
+- MCP add-ons / Daemon (local OSS + optional cloud/premium): an active local daemon for monitoring projects, coordinating agent workloads, and exposing integration endpoints. A separate premium cloud offering could be provided under a different product name for users needing hosted/managed capabilities.
+
+Key ideas:
+- Keep GnawTreeWriter core 100% free and focused on AST-based editing and temporal control.
+- Make advanced capabilities available as opt-in add-ons so each user can choose the level of integration they want.
+- Document add-on APIs so third parties can implement safe, well-behaved integrations.
+
+See ROADMAP.md for the planned timeline and details about add-ons and MCP: `docs/ROADMAP.md` (search for \"Add-ons & LSP\").
+
 ---
 
 ## 🤖 AI Agent Best Practices

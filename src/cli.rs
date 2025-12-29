@@ -1,6 +1,6 @@
 use crate::core::{
-    find_project_root, EditOperation, GnawTreeWriter, RestorationEngine, TransactionLog,
-    UndoRedoManager,
+    find_project_root, EditOperation, GnawTreeWriter, RestorationEngine, TagManager,
+    TransactionLog, UndoRedoManager,
 };
 use crate::parser::TreeNode;
 use anyhow::Result;
@@ -93,7 +93,11 @@ enum Commands {
         /// File to edit
         file_path: String,
         /// Dot-notation path to the node (use 'list' to find paths)
-        node_path: String,
+        #[arg(required_unless_present = "tag")]
+        node_path: Option<String>,
+        #[arg(long)]
+        /// Named reference (tag) for the target node
+        tag: Option<String>,
         /// New content to replace the node with. Use "-" to read from stdin.
         #[arg(required_unless_present = "source_file")]
         content: Option<String>,
@@ -121,7 +125,11 @@ enum Commands {
         /// File to insert into
         file_path: String,
         /// Path to parent node where content will be inserted
-        parent_path: String,
+        #[arg(required_unless_present = "tag")]
+        parent_path: Option<String>,
+        #[arg(long)]
+        /// Named reference (tag) for the parent node
+        tag: Option<String>,
         /// Position: 0=top, 1=bottom, 2=after properties
         position: usize,
         /// Content to insert. Use "-" to read from stdin.
@@ -247,7 +255,11 @@ enum Commands {
     /// Delete a node
     Delete {
         file_path: String,
-        node_path: String,
+        #[arg(required_unless_present = "tag")]
+        node_path: Option<String>,
+        #[arg(long)]
+        /// Named reference (tag) for the target node
+        tag: Option<String>,
         #[arg(short, long)]
         preview: bool,
     },
@@ -295,6 +307,17 @@ enum Commands {
         #[arg(short, long)]
         /// Preview the addition
         preview: bool,
+    },
+    /// Manage named references (tags)
+    ///
+    /// Assign memorable names to node paths to make scripting robust to structural changes.
+    /// Examples:
+    ///   gnawtreewriter tag add main.rs "1.2.0" "my_function"
+    ///   gnawtreewriter tag list main.rs
+    ///   gnawtreewriter tag remove main.rs "my_function"
+    Tag {
+        #[command(subcommand)]
+        command: TagSubcommands,
     },
     /// Show examples and common workflows
     ///
@@ -348,6 +371,34 @@ enum Commands {
     },
 }
 
+#[derive(Subcommand)]
+enum TagSubcommands {
+    /// Add a named reference to a tree node path
+    Add {
+        /// File containing the node
+        file_path: String,
+        /// Dot-notation path to the node (use 'list' to find paths)
+        node_path: String,
+        /// Name to assign to this path
+        name: String,
+        /// Force overwrite if tag exists
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// List all named references for a file
+    List {
+        /// File to list tags for
+        file_path: String,
+    },
+    /// Remove a named reference
+    Remove {
+        /// File containing the tag
+        file_path: String,
+        /// Tag name to remove
+        name: String,
+    },
+}
+
 impl Cli {
     pub async fn run(self) -> Result<()> {
         match self.command {
@@ -375,14 +426,44 @@ impl Cli {
             Commands::Edit {
                 file_path,
                 node_path,
+                tag,
                 content,
                 source_file,
                 preview,
                 unescape_newlines,
             } => {
                 let content = resolve_content(content, source_file, unescape_newlines)?;
+
+                // Resolve target path from --tag flag, 'tag:<name>' positional, or explicit node_path
+                let target_path = if let Some(tag_name) = tag {
+                    let current_dir = std::env::current_dir()?;
+                    let project_root = find_project_root(&current_dir);
+                    let mgr = TagManager::load(&project_root)?;
+                    mgr.get_path(&file_path, &tag_name).ok_or_else(|| {
+                        anyhow::anyhow!("Tag '{}' not found for {}", tag_name, file_path)
+                    })?
+                } else if let Some(p) = node_path {
+                    // Support inline 'tag:<name>' syntax in the positional node_path
+                    if p.starts_with("tag:") {
+                        let tag_name = &p["tag:".len()..];
+                        let current_dir = std::env::current_dir()?;
+                        let project_root = find_project_root(&current_dir);
+                        let mgr = TagManager::load(&project_root)?;
+                        mgr.get_path(&file_path, tag_name).ok_or_else(|| {
+                            anyhow::anyhow!("Tag '{}' not found for {}", tag_name, file_path)
+                        })?
+                    } else {
+                        p
+                    }
+                } else {
+                    anyhow::bail!("Either node path or --tag must be specified for edit");
+                };
+
                 let mut writer = GnawTreeWriter::new(&file_path)?;
-                let op = EditOperation::Edit { node_path, content };
+                let op = EditOperation::Edit {
+                    node_path: target_path,
+                    content,
+                };
                 if preview {
                     let modified = writer.preview_edit(op)?;
                     print_diff(writer.get_source(), &modified);
@@ -393,6 +474,7 @@ impl Cli {
             Commands::Insert {
                 file_path,
                 parent_path,
+                tag,
                 position,
                 content,
                 source_file,
@@ -400,9 +482,34 @@ impl Cli {
                 unescape_newlines,
             } => {
                 let content = resolve_content(content, source_file, unescape_newlines)?;
+
+                // Resolve parent path from --tag flag, 'tag:<name>' positional, or explicit parent_path
+                let insert_parent = if let Some(tag_name) = tag {
+                    let current_dir = std::env::current_dir()?;
+                    let project_root = find_project_root(&current_dir);
+                    let mgr = TagManager::load(&project_root)?;
+                    mgr.get_path(&file_path, &tag_name).ok_or_else(|| {
+                        anyhow::anyhow!("Tag '{}' not found for {}", tag_name, file_path)
+                    })?
+                } else if let Some(p) = parent_path {
+                    if p.starts_with("tag:") {
+                        let tag_name = &p["tag:".len()..];
+                        let current_dir = std::env::current_dir()?;
+                        let project_root = find_project_root(&current_dir);
+                        let mgr = TagManager::load(&project_root)?;
+                        mgr.get_path(&file_path, tag_name).ok_or_else(|| {
+                            anyhow::anyhow!("Tag '{}' not found for {}", tag_name, file_path)
+                        })?
+                    } else {
+                        p
+                    }
+                } else {
+                    anyhow::bail!("Either parent path or --tag must be specified for insert");
+                };
+
                 let mut writer = GnawTreeWriter::new(&file_path)?;
                 let op = EditOperation::Insert {
-                    parent_path,
+                    parent_path: insert_parent,
                     position,
                     content,
                 };
@@ -416,10 +523,37 @@ impl Cli {
             Commands::Delete {
                 file_path,
                 node_path,
+                tag,
                 preview,
             } => {
+                // Resolve target path from --tag flag, 'tag:<name>' positional, or explicit node_path
+                let target_path = if let Some(tag_name) = tag {
+                    let current_dir = std::env::current_dir()?;
+                    let project_root = find_project_root(&current_dir);
+                    let mgr = TagManager::load(&project_root)?;
+                    mgr.get_path(&file_path, &tag_name).ok_or_else(|| {
+                        anyhow::anyhow!("Tag '{}' not found for {}", tag_name, file_path)
+                    })?
+                } else if let Some(p) = node_path {
+                    if p.starts_with("tag:") {
+                        let tag_name = &p["tag:".len()..];
+                        let current_dir = std::env::current_dir()?;
+                        let project_root = find_project_root(&current_dir);
+                        let mgr = TagManager::load(&project_root)?;
+                        mgr.get_path(&file_path, tag_name).ok_or_else(|| {
+                            anyhow::anyhow!("Tag '{}' not found for {}", tag_name, file_path)
+                        })?
+                    } else {
+                        p
+                    }
+                } else {
+                    anyhow::bail!("Either node path or --tag must be specified for delete");
+                };
+
                 let mut writer = GnawTreeWriter::new(&file_path)?;
-                let op = EditOperation::Delete { node_path };
+                let op = EditOperation::Delete {
+                    node_path: target_path,
+                };
                 if preview {
                     let modified = writer.preview_edit(op)?;
                     print_diff(writer.get_source(), &modified);
@@ -523,12 +657,83 @@ impl Cli {
             } => {
                 Self::handle_restore_files(&since, &files, preview)?;
             }
+            Commands::Tag { command } => match command {
+                TagSubcommands::Add {
+                    file_path,
+                    node_path,
+                    name,
+                    force,
+                } => {
+                    Self::handle_tag_add(&file_path, &node_path, &name, force)?;
+                }
+                TagSubcommands::List { file_path } => {
+                    Self::handle_tag_list(&file_path)?;
+                }
+                TagSubcommands::Remove { file_path, name } => {
+                    Self::handle_tag_remove(&file_path, &name)?;
+                }
+            },
             Commands::RestoreSession {
                 session_id,
                 preview,
             } => {
                 Self::handle_restore_session(&session_id, preview)?;
             }
+        }
+        Ok(())
+    }
+
+    fn handle_tag_add(file_path: &str, node_path: &str, name: &str, force: bool) -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        let mut mgr = TagManager::load(&project_root)?;
+
+        // Validate node exists in file
+        let writer = GnawTreeWriter::new(file_path)?;
+        fn node_exists(tree: &TreeNode, path: &str) -> bool {
+            if tree.path == path {
+                return true;
+            }
+            for child in &tree.children {
+                if node_exists(child, path) {
+                    return true;
+                }
+            }
+            false
+        }
+        if !node_exists(writer.analyze(), node_path) {
+            anyhow::bail!("Path '{}' not found in {}", node_path, file_path);
+        }
+
+        mgr.add_tag(file_path, name, node_path, force)?;
+        println!("✓ Tag '{}' added to {} -> {}", name, file_path, node_path);
+        Ok(())
+    }
+
+    fn handle_tag_list(file_path: &str) -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        let mgr = TagManager::load(&project_root)?;
+        let tags = mgr.list_tags(file_path);
+        if tags.is_empty() {
+            println!("No tags found for {}", file_path);
+            return Ok(());
+        }
+        println!("Tags for {}:", file_path);
+        for (name, path) in tags {
+            println!("  {} -> {}", name, path);
+        }
+        Ok(())
+    }
+
+    fn handle_tag_remove(file_path: &str, name: &str) -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        let mut mgr = TagManager::load(&project_root)?;
+        if mgr.remove_tag(file_path, name)? {
+            println!("✓ Removed tag '{}' from {}", name, file_path);
+        } else {
+            println!("No tag '{}' found for {}", name, file_path);
         }
         Ok(())
     }

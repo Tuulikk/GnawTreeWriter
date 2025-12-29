@@ -276,8 +276,17 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 - ✅ AI testing framework: 8 detailed scenarios with structured evaluation
 - ✅ GitHub publication: Complete repository ready for community adoption
 
+### ✅ Recent Additions (2025-12-28)
+- [x] Implicit Sessions — Sessions auto-start on first edit and persist across commands
+- [x] Built-in Diff View — `gnawtreewriter diff` shows exact changes per transaction
+- [x] Generic Node support — Generic parser for unknown files; backups/history and text-based editing for all files
+
 ### 🔄 **Phase 1 Enhancement Tasks**
 - [ ] Add content-based node ID system for enhanced stability
 - [ ] Polish hash-matching algorithm for optimal restoration performance
 - [ ] Collect and incorporate AI agent feedback from test scenarios
 - [ ] Add restoration statistics and analytics dashboard
+
+### 🔮 **Planned Next Steps**
+- [ ] Named References (Priority #4): Implement `tag` support and CLI tooling to create, list and remove named references to node paths (improves script resilience)
+- [ ] LSP Add-ons: Explore LSP integration as optional add-ons (semantic analysis, completions and diagnostics) — envisioned as separate, opt-in add-on(s) rather than core functionality
