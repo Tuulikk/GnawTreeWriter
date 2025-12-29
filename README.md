@@ -206,6 +206,24 @@ gnawtreewriter show note.xml element_4
 gnawtreewriter edit note.xml element_4 --source-file replacement.xml --preview
 ```
 
+### Named references (tags)
+```bash
+# Tilldela en namnreferens till en node-path i en fil (t.ex. 'my_function' -> '0.1.2')
+gnawtreewriter tag add main.rs "0.1.2" "my_function"
+
+# Lista alla taggar för en fil
+gnawtreewriter tag list main.rs
+
+# Ta bort en tagg från en fil
+gnawtreewriter tag remove main.rs "my_function"
+
+# Redigera via inline-tag-syntax (använd 'tag:<name>' som node-path)
+gnawtreewriter edit main.rs tag:my_function 'def updated():\n    print("Updated")'
+
+# Alternativt kan du även använda --tag som flagga:
+gnawtreewriter edit --tag my_function main.rs 'def updated():\n    print("Updated")'
+```
+
 ### XML-exempel
 ```bash
 # Steg 1: analysera och hitta mål-nod
