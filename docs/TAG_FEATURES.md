@@ -1,6 +1,6 @@
 # Named References Feature
 
-**Status**: Planned | **Priority**: #4 (Future) | **Last Updated**: 2025-12-28
+**Status**: Implemented | **Priority**: #4 (Complete) | **Last Updated**: 2025-12-28
 
 ---
 
@@ -260,7 +260,7 @@ if !writer.node_exists(&path) {
 1. **Tag Groups**: Organize related tags (e.g., "tests", "config")
 2. **Tag Descriptions**: Add optional descriptions to tags
 3. **Tag Search**: Find tags by name pattern or description
-4. **Tag Rename**: Rename existing tags
+4. ✅ **Tag Rename**: Implemented in v0.3.0 — `gnawtreewriter tag rename <file> <old_name> <new_name> [--force]`
 5. **Tag Export/Import**: Share tags between projects
 6. **Wildcards**: `gnawtreewriter edit --tag "test_*"` for multiple matching tags
 

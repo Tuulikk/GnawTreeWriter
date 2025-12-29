@@ -217,8 +217,12 @@ gnawtreewriter tag list main.rs
 # Ta bort en tagg från en fil
 gnawtreewriter tag remove main.rs "my_function"
 
+# Byt namn på en tagg
+gnawtreewriter tag rename main.rs "my_function" "main_function"
+# (lägg till --force för att skriva över befintlig tag)
+
 # Redigera via inline-tag-syntax (använd 'tag:<name>' som node-path)
-gnawtreewriter edit main.rs tag:my_function 'def updated():\n    print("Updated")'
+gnawtreewriter edit main.rs tag:my_function 'def updated():\n    print("Updated")' --preview
 
 # Alternativt kan du även använda --tag som flagga:
 gnawtreewriter edit --tag my_function main.rs 'def updated():\n    print("Updated")'
