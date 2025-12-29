@@ -210,6 +210,87 @@ Expand beyond code to all hierarchical systems.
 - [ ] **IDE Extensions**: Native plugins for VS Code, IntelliJ, Neovim  
 - [ ] **API Gateway**: RESTful API for third-party tool integration
 
+### **Add-on Architecture** 🧩
+
+GnawTreeWriter follows a **core + add-on architecture** to maintain focus while enabling extensibility:
+
+#### Core Principles
+
+**Core** (always present, no installation required):
+- **AST-based editing** - The fundamental editing capability
+- **Time travel** - Project-wide backups and restoration
+- **Sessions & Transactions** - Audit trail and undo/redo
+- **Batch operations** - Atomic multi-file edits
+- **Named references (tags)** - Stable node addressing
+- **Universal parsers** - Support for all major languages
+
+**Add-ons** (opt-in, separate deployment):
+- **LSP integration** - Semantic analysis, symbol resolution
+- **MCP daemon** - AI agent coordination and orchestration
+- **Advanced refactoring** - Rename, extract, change signatures
+- **Visualization** - Better diff views, time travel UI
+- **Language server** - Per-language semantic features
+
+#### Plugin System Design
+
+```
+┌─────────────────────────────────────────┐
+│  GnawTreeWriter Core                   │
+│  ┌──────────┬──────────┐        │
+│  │ AST Edit  │ Time Travel│        │
+│  │ Sessions  │ Batch Ops │        │
+│  │ Tags      │ Multi-Lang │        │
+│  └──────────┴──────────┘        │
+└─────────────────────────────────────────┘
+              ▲
+              │ Plug-in Interface
+              ▲
+┌────────────────────┬──────────────┬──────────────┐
+│  LSP Add-on │ MCP Daemon │ Visualization │
+│  (semantic)  │ (coord)    │  (UI)       │
+└────────────────────┴──────────────┴──────────────┘
+```
+
+#### Add-on Examples
+
+**LSP Add-on** (`gnawtreewriter-lsp`):
+```bash
+gnawtreewriter lsp-analyze project/
+gnawtreewriter lsp-hover src/main.rs:45
+gnawtreewriter lsp-find-definition AuthManager
+```
+
+**MCP Daemon** (`gnawtreewriter-mcp`):
+```bash
+gnawtreewriter mcp daemon start
+gnawtreewriter mcp list-sessions
+gnawtreewriter mcp execute-agents
+```
+
+**Visualization Add-on** (`gnawtreewriter-ui`):
+```bash
+gnawtreewriter timeline view
+gnawtreewriter diff interactive
+gnawtreewriter restore wizard
+```
+
+#### Benefits
+
+- **Core remains lightweight** - No bloat from advanced features
+- **User choice** - Install only what you need
+- **Easy contribution** - Clear boundaries for community contributions
+- **Version compatibility** - Add-ons can evolve independently
+- **Monetization ready** - Enterprise features can be add-ons
+
+#### Development Roadmap
+
+- **Phase 1** (v0.4.0): LSP add-on prototype
+- **Phase 2** (v0.5.0): MCP daemon implementation
+- **Phase 3** (v0.6.0): Visualization add-on
+- **Phase 4** (v0.7.0): Plugin marketplace
+
+**See [docs/ADD_ON_ARCHITECTURE.md](docs/ADD_ON_ARCHITECTURE.md) for detailed design.**
+
 ---
 
 ## Implementation Priorities
