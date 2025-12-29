@@ -174,19 +174,19 @@ See [AI_AGENT_TEST_SCENARIOS.md](AI_AGENT_TEST_SCENARIOS.md) for comprehensive t
 
 ## Parsing model
 
-GnawTreeWriter använder två huvudsakliga parsing-strategier beroende på format:
+GnawTreeWriter uses two main parsing strategies depending on the format:
 
-- TreeSitter-baserade grammatikparsers — ger en komplett och detaljerad AST, bra för programmeringsspråk (t.ex. Python, Rust, TypeScript) när en stabil TreeSitter-grammar finns. Ger precisa mutationer på nod-nivå, men kräver att grammar-crates använder kompatibla `tree-sitter`-versioner (annars kan det uppstå länk- och kompabilitetsproblem).
+- TreeSitter-based grammar parsers — provide a complete and detailed AST, great for programming languages (e.g., Python, Rust, TypeScript) when a stable TreeSitter-grammar is available. Allows precise node-level mutations, but requires grammar-crates to use compatible `tree-sitter`-versions (otherwise linking and compatibility issues may arise).
 
-- Biblioteksbaserade parsers — exempelvis `xmltree` för XML, `serde_json` för JSON, `toml` för TOML och `serde_yaml` för YAML. Dessa är ofta mer robusta för konfigurations- och dokumentformat, undviker FFI-beroenden och är pålitliga när TreeSitter inte är lämpligt.
+- Library-based parsers — examples include `xmltree` for XML, `serde_json` for JSON, `toml` for TOML, and `serde_yaml` for YAML. These are often more robust for configuration and documentation formats, avoiding FFI dependencies and being reliable when TreeSitter isn't suitable.
 
 I det här projektet:
-- Vi använder TreeSitter där det ger fördel (språk/syntax där grammatik är bra).
-- För format där TreeSitter ger problem eller inte är nödvändigt (t.ex. XML) använder vi stabila bibliotek (`xmltree`) och mappar resultatet till samma `TreeNode`-modell. Det ger stabil parsing och korrekta radnummer för `list`/`show`/`edit`.
+- We use TreeSitter where it provides the advantage (language/syntax where grammar is good).
+- For formats where TreeSitter has issues or isn't necessary (e.g., XML), we use stable libraries (`xmltree`) and map the result to the same `TreeNode` model. This provides stable parsing and correct line numbers for `list`/`show`/`edit`.
 
-Kort guide:
-- Vill du ha maximal AST-precision och nodes: satsa på TreeSitter om grammatiken finns.
-- Vill du ha robust dokument-/konfigparser utan FFI-komplexitet: använd bibliotek (som vi gjort för XML).
+Quick guide:
+- For maximum AST precision and nodes: use TreeSitter if the grammar is available.
+- For robust document/config parsers without FFI complexity: use libraries (as we've done for XML).
 
 ## CLI Commands
 
@@ -260,17 +260,17 @@ See [BATCH_USAGE.md](BATCH_USAGE.md) for complete documentation and examples.
 
 ## Examples
 
-Praktiska exempel som visar vanliga arbetsflöden. Använd `--preview` för att se diff innan du applicerar ändringen, och använd `--source-file` för att undvika shell-citatproblem vid större snippets.
+Practical examples showing common workflows. Use `--preview` to see diff before applying changes, and `--source-file` to avoid shell escaping issues with larger snippets.
 
 ### Batch Operations
 
-Koordinera ändringar över flera filer med atomiska batch-operationer:
+Coordinate changes across multiple files with atomic batch operations:
 
 ```bash
-# Skapa batch-specifikation
+Create batch specification
 cat > update.json << 'EOF'
 {
-  "description": "UI tema och API uppdatering",
+  "description": "UI theme and API update",
   "operations": [
     {
       "type": "edit",
