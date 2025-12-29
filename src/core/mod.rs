@@ -5,11 +5,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod batch;
 pub mod restoration_engine;
 pub mod tag_manager;
 pub mod transaction_log;
 pub mod undo_redo;
 
+pub use batch::Batch;
 pub use restoration_engine::{RestorationEngine, RestorationResult, RestorationStats};
 pub use tag_manager::TagManager;
 pub use transaction_log::{

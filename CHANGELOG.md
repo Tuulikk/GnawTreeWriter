@@ -9,6 +9,7 @@ All notable changes to GnawTreeWriter.
 - **Built-in Diff View**: `gnawtreewriter diff` implemented to show precise changes per transaction (by ID or `--last N`), using the backup system and content-hash matching.
 - **Generic Node Support**: `GenericParser` added to treat unknown file types (README, Dockerfile, .config, etc.) as a single node so they can be analyzed, backed up, and edited as text blobs.
 - **Named References (Tags)**: `tag add/list/remove` implemented; `edit/insert/delete` accept `tag:<name>` shorthand to reference named node paths (enables robust, readable scripting).
+- **Batch Operations**: `gnawtreewriter batch` command for atomic multi-file edits from JSON specification. Features in-memory validation, unified diff preview, automatic rollback on failure, and transaction logging per file. Perfect for AI agent workflows and coordinated refactoring.
 
 ### Changed
 - Documentation updates across README, AGENTS.md and ROADMAP.md to reflect the new features and add-on strategy.

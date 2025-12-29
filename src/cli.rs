@@ -3,7 +3,7 @@ use crate::core::{
     TransactionLog, UndoRedoManager,
 };
 use crate::parser::TreeNode;
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use clap::{Parser, Subcommand};
 use similar::{ChangeTag, TextDiff};
@@ -191,6 +191,17 @@ enum Commands {
         /// Output format: table or json
         format: String,
     },
+    /// Execute a batch of operations atomically from a JSON file
+    ///
+    /// Applies multiple edits/inserts/deletes atomically after in-memory validation.
+    /// Example: `gnawtreewriter batch ops.json --preview`
+    Batch {
+        /// JSON file containing batch operations
+        file: String,
+        #[arg(short, long)]
+        /// Preview changes without applying
+        preview: bool,
+    },
     /// Restore file to a specific transaction state
     Restore {
         file_path: String,
@@ -330,9 +341,10 @@ enum Commands {
     ///   gnawtreewriter examples --topic editing
     ///   gnawtreewriter examples --topic qml
     ///   gnawtreewriter examples --topic restoration
+    ///   gnawtreewriter examples --topic batch
     Examples {
         #[arg(short, long)]
-        /// Show examples for specific topic: editing, qml, restoration, workflow
+        /// Show examples for specific topic: editing, qml, restoration, workflow, batch
         topic: Option<String>,
     },
     /// Interactive help wizard
@@ -346,7 +358,7 @@ enum Commands {
     ///   gnawtreewriter wizard --task restoration
     Wizard {
         #[arg(short, long)]
-        /// Jump to specific task: first-time, editing, qml, restoration, troubleshooting
+        /// Jump to specific task: first-time, editing, qml, restoration, batch, troubleshooting
         task: Option<String>,
     },
     /// Lint files and show issues with severity levels
@@ -700,6 +712,9 @@ impl Cli {
             } => {
                 Self::handle_restore_session(&session_id, preview)?;
             }
+            Commands::Batch { file, preview } => {
+                Self::handle_batch(&file, preview)?;
+            }
         }
         Ok(())
     }
@@ -915,6 +930,19 @@ impl Cli {
             );
         }
 
+        Ok(())
+    }
+
+    fn handle_batch(file: &str, preview: bool) -> Result<()> {
+        // Load and execute batch file; preview shows diffs, apply writes atomically
+        let batch = crate::core::Batch::from_file(file)
+            .with_context(|| format!("Failed to load batch file: {}", file))?;
+        if preview {
+            println!("{}", batch.preview_text()?);
+        } else {
+            batch.apply()?;
+            println!("✓ Batch applied");
+        }
         Ok(())
     }
 
@@ -1171,6 +1199,35 @@ impl Cli {
                 println!("   gnawtreewriter restore-session \"session_123\" --preview");
                 println!("   gnawtreewriter restore-session \"session_123\"");
             }
+            Some("batch") => {
+                println!("📦 BATCH OPERATIONS EXAMPLES");
+                println!("==========================");
+                println!();
+                println!("1. Basic workflow:");
+                println!("   gnawtreewriter batch update.json --preview");
+                println!("   gnawtreewriter batch update.json");
+                println!();
+                println!("2. Batch JSON structure:");
+                println!("   Format: See BATCH_USAGE.md for complete JSON format");
+                println!("   Key components: description, operations array");
+                println!();
+                println!("3. Operation types:");
+                println!("   - edit: Replace node content");
+                println!("   - insert: Add new content (position: 0=top, 1=bottom, 2=after props)");
+                println!("   - delete: Remove a node");
+                println!();
+                println!("4. Use with tags:");
+                println!("   gnawtreewriter tag add app.qml \"1.1\" mainRect");
+                println!("   # Use path '1.1' in batch operations");
+                println!();
+                println!("**Key Features:**");
+                println!("  ✅ Atomic validation - All ops validated in-memory");
+                println!("  ✅ Unified preview - See all changes before applying");
+                println!("  ✅ Automatic rollback - Rollback on failure");
+                println!("  ✅ Transaction logging - Each file logged separately");
+                println!();
+                println!("See BATCH_USAGE.md for complete documentation and examples.");
+            }
             Some("workflow") => {
                 println!("🔄 COMMON WORKFLOWS");
                 println!("==================");
@@ -1200,6 +1257,9 @@ impl Cli {
                 );
                 println!("  gnawtreewriter examples --topic qml          # QML component editing");
                 println!("  gnawtreewriter examples --topic restoration  # Time travel features");
+                println!(
+                    "  gnawtreewriter examples --topic batch        # Multi-file batch operations"
+                );
                 println!("  gnawtreewriter examples --topic workflow     # Complete workflows");
                 println!();
                 println!("Quick Start:");

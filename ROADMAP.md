@@ -16,6 +16,7 @@ GnawTreeWriter is a tree-based code editor optimized for LLM-assisted editing. T
 - **Diff Preview**: Visual unified diff display using the `similar` library.
 - **Automatic Backups**: Non-git safety net creating JSON snapshots before every edit
 - **XML Support**: Implemented stable XML parsing using `xmltree` (declaration, DOCTYPE, comments, CDATA, attributes, nested elements) with line-number mapping and unit tests.
+- **Batch Operations**: Atomic multi-file editing via JSON specification with in-memory validation, unified diff preview, automatic rollback on failure, and per-file transaction logging. Ideal for AI agent workflows and coordinated refactoring.
 
 ---
 

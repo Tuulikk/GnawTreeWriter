@@ -187,9 +187,102 @@ gnawtreewriter analyze src/ --recursive
 gnawtreewriter analyze . --recursive --format summary
 ```
 
+### batch
+Execute a batch of operations atomically from a JSON file. Perfect for multi-file edits and AI agent workflows.
+
+```bash
+# Preview batch changes (recommended first)
+gnawtreewriter batch ops.json --preview
+
+# Apply batch operations
+gnawtreewriter batch ops.json
+```
+
+**Batch JSON Format:**
+```json
+{
+  "description": "Human-readable description",
+  "operations": [
+    {
+      "type": "edit",
+      "file": "path/to/file.ext",
+      "path": "node.path.here",
+      "content": "new content"
+    },
+    {
+      "type": "insert",
+      "file": "path/to/file.ext",
+      "parent_path": "parent.node.path",
+      "position": 1,
+      "content": "new content to insert"
+    },
+    {
+      "type": "delete",
+      "file": "path/to/file.ext",
+      "path": "node.to.delete"
+    }
+  ]
+}
+```
+
+**Operation Types:**
+- `edit` - Replace node content
+- `insert` - Add new content (position: 0=top, 1=bottom, 2=after properties)
+- `delete` - Remove a node
+
+**Key Features:**
+- ✅ Atomic validation - All ops validated in-memory before any writes
+- ✅ Unified preview - See all changes across files before applying
+- ✅ Automatic rollback - If any operation fails, all written files are restored
+- ✅ Transaction logging - Each file operation logged for undo capability
+
+See [BATCH_USAGE.md](BATCH_USAGE.md) for complete documentation and examples.
+
 ## Examples
 
 Praktiska exempel som visar vanliga arbetsflöden. Använd `--preview` för att se diff innan du applicerar ändringen, och använd `--source-file` för att undvika shell-citatproblem vid större snippets.
+
+### Batch Operations
+
+Koordinera ändringar över flera filer med atomiska batch-operationer:
+
+```bash
+# Skapa batch-specifikation
+cat > update.json << 'EOF'
+{
+  "description": "UI tema och API uppdatering",
+  "operations": [
+    {
+      "type": "edit",
+      "file": "main.qml",
+      "path": "1.1.3.2.0.1",
+      "content": "darkblue"
+    },
+    {
+      "type": "insert",
+      "file": "main.qml",
+      "parent_path": "1.1",
+      "position": 2,
+      "content": "radius: 8"
+    },
+    {
+      "type": "edit",
+      "file": "api.py",
+      "path": "1.2.1",
+      "content": "def get_theme(): return 'darkblue'"
+    }
+  ]
+}
+EOF
+
+# Förhandsgranska (rekommenderas först)
+gnawtreewriter batch update.json --preview
+
+# Applicera atomiskt
+gnawtreewriter batch update.json
+```
+
+**Se [BATCH_USAGE.md](BATCH_USAGE.md) för komplett dokumentation och fler exempel.**
 
 ### Snabbkommandon
 ```bash

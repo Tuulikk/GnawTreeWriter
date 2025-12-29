@@ -183,6 +183,58 @@ gnawtreewriter validate <file_path>
 ```' --preview
 ```
 
+#### Batch Multi-File Operations
+
+**Scenario**: Coordinated changes across multiple files using atomic batch operations
+
+```bash
+# Step 1: Create batch specification for coordinated changes
+cat > batch_update.json << 'EOF'
+{
+  "description": "Update UI theme and backend API",
+  "operations": [
+    {
+      "type": "edit",
+      "file": "src/main.qml",
+      "path": "1.1.3.2.0.1",
+      "content": "darkblue"
+    },
+    {
+      "type": "insert",
+      "file": "src/main.qml",
+      "parent_path": "1.1",
+      "position": 2,
+      "content": "radius: 8"
+    },
+    {
+      "type": "edit",
+      "file": "src/api.py",
+      "path": "1.2.1",
+      "content": "def get_theme(): return 'darkblue'"
+    }
+  ]
+}
+EOF
+
+# Step 2: Preview batch changes (recommended first)
+gnawtreewriter batch batch_update.json --preview
+
+# Step 3: Apply batch atomically
+gnawtreewriter batch batch_update.json
+
+# Step 4: Verify changes with history
+gnawtreewriter history
+
+# Step 5: Rollback if needed
+gnawtreewriter undo --steps 3
+```
+
+**Key Benefits for AI Agents:**
+- ✅ All operations validated in-memory before any writes
+- ✅ Automatic rollback if any operation fails
+- ✅ Single transaction history for coordinated changes
+- ✅ Perfect for multi-agent workflows and refactoring
+
 ---
 
 ## 🤝 Contribution Areas
@@ -195,9 +247,10 @@ AI agents can contribute to several areas of the project:
 - Optimize parser performance
 
 ### 2. Core Functionality
-- Implement new edit operations (move, rename, refactor)
+- Implement new edit operations (move, rename, refactor, clone)
 - Improve tree navigation and path resolution
 - Enhance validation and error reporting
+- Batch operations for coordinated multi-file edits
 
 ### 3. CLI Features
 - Add new commands (lint, format, refactor)

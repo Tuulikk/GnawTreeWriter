@@ -86,15 +86,83 @@ gnawtreewriter tag list test.py
 
 # Ta bort en tag
 gnawtreewriter tag remove test.py "my_function"
+---
+
+### Batch Operations (Atomiska Multi-Fil Edits)
+- Nytt kommando: `gnawtreewriter batch <json_file> [--preview]`
+- JSON-baserad batch-specifikation för koordinerade ändringar över flera filer
+- Stöder tre operationstyper: `edit`, `insert`, `delete`
+- **Atomic Validation**: Alla operationer valideras i minnet innan någon skrivning sker
+- **Unified Preview**: Visa alla ändringar över alla filer i en gemensam diff
+- **Automatic Rollback**: Om en operation misslyckas, återställs alla skrivna filer från sina backups
+- **Transaction Logging**: Varje filoperation loggas individuellt för undo-kapabilitet
+
+Batch JSON-format:
+```json
+{
+  "description": "Mänsklig läsbar beskrivning",
+  "operations": [
+    {
+      "type": "edit",
+      "file": "path/to/file.ext",
+      "path": "node.path.here",
+      "content": "nytt innehåll"
+    },
+    {
+      "type": "insert",
+      "file": "path/to/file.ext",
+      "parent_path": "parent.node.path",
+      "position": 1,
+      "content": "innehåll att infoga"
+    },
+    {
+      "type": "delete",
+      "file": "path/to/file.ext",
+      "path": "node.to.delete"
+    }
+  ]
+}
 ```
+
+Position-värden för insert:
+- `0` = Topp (efter öppnande klammerparentes om det finns)
+- `1` = Botten
+- `2` = Efter egenskaper (QML-specifikt)
+
+Exempel:
+```bash
+# Skapa batch-fil
+cat > update.json << 'EOF'
+{
+  "description": "UI tema uppdatering",
+  "operations": [
+    {"type": "edit", "file": "main.qml", "path": "1.1.3.2.0.1", "content": "darkblue"},
+    {"type": "insert", "file": "main.qml", "parent_path": "1.1", "position": 2, "content": "radius: 8"}
+  ]
+}
+EOF
+
+# Förhandsgranska (rekommenderas först)
+gnawtreewriter batch update.json --preview
+
+# Applicera atomiskt
+gnawtreewriter batch update.json
+```
+
+**Nytta för AI Agenter:**
+- ✅ Perfekt för multi-fil refaktorering och koordinerade ändringar
+- ✅ Inbyggd säkerhet genom validation och rollback
+- ✅ Enkel integration med befintlig undo/history-infrastruktur
+- ✅ Se [BATCH_USAGE.md](BATCH_USAGE.md) för komplett dokumentation
 
 ---
 
 ## Uppdateringar i dokumentation & CLI-hjälp
-- README: exempel och snabbkommandon uppdaterade med `tag`-exempel.
-- AGENTS.md: rekommendationer om add-ons (LSP & MCP) som valfria utbyggnader.
-- ROADMAP.md: status uppdaterad till `v0.3.0` och Named References markerat som nästa prioritet innan vidare add-on-prototyper.
-- CLI-hjälp uppdaterad: `gnawtreewriter tag --help` beskriver nya subkommandon.
+- README: exempel och snabbkommandon uppdaterade med `tag`- och `batch`-exempel.
+- AGENTS.md: rekommendationer om add-ons (LSP & MCP) som valfria utbyggnader; nytt batch-workflow exempel tillagt.
+- ROADMAP.md: status uppdaterad till `v0.3.0` och Batch Operations markerat som implementerad.
+- BATCH_USAGE.md: ny dokumentation för batch operations med komplett användarguide och exempel.
+- CLI-hjälp uppdaterad: `gnawtreewriter tag --help` och `gnawtreewriter batch --help` beskriver nya kommandon.
 
 ---
 
@@ -103,12 +171,13 @@ gnawtreewriter tag remove test.py "my_function"
 - Automationsskript som förlitar sig på numeriska paths kan göras mer robusta genom att byta till Named References (tags). Rekommendation:
   - Skapa taggar för viktiga målpunkter (`tag add`) och använd `tag:<name>` i skript.
 - Genom att använda taggar får skript stabilare mål trots mindre AST-ändringar (insert/delete ovanför).
+- Batch operations tillhandahåller ett säkert och kraftfullt alternativ för multi-fil automation med inbyggd rollback-kapacitet.
 
 ---
 
 ## Tester & Kvalitetssäkring
-- Enhetstester för TagManager och övriga kärnfunktioner finns under `src` (`cargo test` kör alla tester — alla tester passerade lokalt).
-- Manual QA: grundläggande arbetsflöden testade (analys, edit, diff, tag add/list/remove, history/restore).
+- Enhetstester för TagManager, Batch och övriga kärnfunktioner finns under `src` (`cargo test` kör alla tester — 19 tester passerade lokalt).
+- Manual QA: grundläggande arbetsflöden testade (analys, edit, diff, tag add/list/remove, history/restore, batch operations).
 
 ---
 
