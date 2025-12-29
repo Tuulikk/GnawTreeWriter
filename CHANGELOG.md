@@ -2,6 +2,21 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.3.0] - 2025-12-28
+
+### Added
+- **Implicit Sessions**: Sessions auto-start on first edit and session IDs persist across commands via `.gnawtreewriter_session_id`, improving UX for ad-hoc workflows and agent sessions.
+- **Built-in Diff View**: `gnawtreewriter diff` implemented to show precise changes per transaction (by ID or `--last N`), using the backup system and content-hash matching.
+- **Generic Node Support**: `GenericParser` added to treat unknown file types (README, Dockerfile, .config, etc.) as a single node so they can be analyzed, backed up, and edited as text blobs.
+- **Named References (Tags)**: `tag add/list/remove` implemented; `edit/insert/delete` accept `tag:<name>` shorthand to reference named node paths (enables robust, readable scripting).
+
+### Changed
+- Documentation updates across README, AGENTS.md and ROADMAP.md to reflect the new features and add-on strategy.
+- Roadmap current status updated to v0.3.0 (2025-12-28).
+
+### Fixed
+- Minor reliability and documentation fixes related to the new features.
+
 ## [0.2.2] - 2025-12-27
 
 ### Added

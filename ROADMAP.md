@@ -4,7 +4,7 @@
 
 GnawTreeWriter is a tree-based code editor optimized for LLM-assisted editing. This roadmap outlines the evolution from a precise CLI tool to an intelligent agent-integrated platform.
 
-## Current Status: v0.2.1 (Released 2025-12-26)
+## Current Status: v0.3.0 (Released 2025-12-28)
 
 ### ✅ Completed Features
 
