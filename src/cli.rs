@@ -89,6 +89,7 @@ enum Commands {
     ///   gnawtreewriter edit app.py "0.1" 'def hello(): print("world")'
     ///   gnawtreewriter edit main.rs "0.2" 'fn main() { println!("Hello!"); }' --preview
     ///   gnawtreewriter edit style.css "0.1.0" 'color: blue;'
+    ///   gnawtreewriter edit main.rs tag:my_function 'def updated(): print("Updated")' --preview
     Edit {
         /// File to edit
         file_path: String,
@@ -397,6 +398,18 @@ enum TagSubcommands {
         /// Tag name to remove
         name: String,
     },
+    /// Rename an existing tag
+    Rename {
+        /// File containing the tag
+        file_path: String,
+        /// Existing tag name
+        old_name: String,
+        /// New tag name
+        new_name: String,
+        /// Force overwrite if target exists
+        #[arg(short, long)]
+        force: bool,
+    },
 }
 
 impl Cli {
@@ -672,6 +685,14 @@ impl Cli {
                 TagSubcommands::Remove { file_path, name } => {
                     Self::handle_tag_remove(&file_path, &name)?;
                 }
+                TagSubcommands::Rename {
+                    file_path,
+                    old_name,
+                    new_name,
+                    force,
+                } => {
+                    Self::handle_tag_rename(&file_path, &old_name, &new_name, force)?;
+                }
             },
             Commands::RestoreSession {
                 session_id,
@@ -735,6 +756,25 @@ impl Cli {
         } else {
             println!("No tag '{}' found for {}", name, file_path);
         }
+        Ok(())
+    }
+
+    fn handle_tag_rename(
+        file_path: &str,
+        old_name: &str,
+        new_name: &str,
+        force: bool,
+    ) -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        let mut mgr = TagManager::load(&project_root)?;
+
+        mgr.rename_tag(file_path, old_name, new_name, force)?;
+
+        println!(
+            "✓ Renamed tag '{}' -> '{}' in {}",
+            old_name, new_name, file_path
+        );
         Ok(())
     }
 

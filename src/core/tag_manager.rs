@@ -91,7 +91,50 @@ impl TagManager {
         file_entry
             .tags
             .insert(name.to_string(), node_path.to_string());
+        self.save()?;
+        Ok(())
+    }
 
+    /// Rename a tag for `file_path` from `old_name` to `new_name`.
+    /// If `force` is true, overwrite any existing `new_name`.
+    pub fn rename_tag(
+        &mut self,
+        file_path: &str,
+        old_name: &str,
+        new_name: &str,
+        force: bool,
+    ) -> Result<()> {
+        // No-op if names are identical
+        if old_name == new_name {
+            return Ok(());
+        }
+
+        // Get mutable entry for the file
+        let file_entry = self
+            .tags
+            .files
+            .get_mut(file_path)
+            .ok_or_else(|| anyhow::anyhow!("Tag '{}' not found for {}", old_name, file_path))?;
+
+        // Remove the old tag and keep its value
+        let value = file_entry
+            .tags
+            .remove(old_name)
+            .ok_or_else(|| anyhow::anyhow!("Tag '{}' not found for {}", old_name, file_path))?;
+
+        // If new_name exists and not forced, restore the old tag and error
+        if file_entry.tags.contains_key(new_name) && !force {
+            // restore old tag to keep state unchanged
+            file_entry.tags.insert(old_name.to_string(), value);
+            anyhow::bail!(
+                "Tag '{}' already exists for file {}. Use --force to overwrite.",
+                new_name,
+                file_path
+            );
+        }
+
+        // Insert the new tag name
+        file_entry.tags.insert(new_name.to_string(), value);
         self.save()?;
         Ok(())
     }
@@ -223,6 +266,35 @@ mod tests {
         // Force overwrite should succeed
         mgr.add_tag("a.rs", "t", "1", true)?;
         assert_eq!(mgr.get_path("a.rs", "t"), Some("1".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn rename_tag() -> Result<()> {
+        let tmp = tempdir()?;
+        let project_root = tmp.path();
+
+        let mut mgr = TagManager::load(project_root)?;
+        // Create an initial tag
+        mgr.add_tag("file.rs", "old", "0", false)?;
+        assert_eq!(mgr.get_path("file.rs", "old"), Some("0".to_string()));
+
+        // Rename to a new name that doesn't exist
+        mgr.rename_tag("file.rs", "old", "new", false)?;
+        assert_eq!(mgr.get_path("file.rs", "new"), Some("0".to_string()));
+        assert!(mgr.get_path("file.rs", "old").is_none());
+
+        // When target exists, rename without force should fail and not lose the old tag
+        mgr.add_tag("file.rs", "old", "1", false)?;
+        let res = mgr.rename_tag("file.rs", "old", "new", false);
+        assert!(res.is_err());
+        assert_eq!(mgr.get_path("file.rs", "new"), Some("0".to_string()));
+        assert_eq!(mgr.get_path("file.rs", "old"), Some("1".to_string()));
+
+        // Rename with force should overwrite
+        mgr.rename_tag("file.rs", "old", "new", true)?;
+        assert_eq!(mgr.get_path("file.rs", "new"), Some("1".to_string()));
 
         Ok(())
     }
