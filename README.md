@@ -39,7 +39,9 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 
 ## Installation
 
-### From Source
+### From Source (Recommended)
+
+**This is the most reliable installation method.**
 
 ```bash
 git clone https://github.com/Tuulikk/GnawTreeWriter.git
@@ -49,11 +51,29 @@ cargo build --release
 
 The binary will be at `target/release/gnawtreewriter`.
 
-### Using cargo install (Recommended)
+**Why source install is recommended:**
+- ✅ Works on all systems
+- ✅ No external compiler dependencies
+- ✅ Faster installation (no cross-compilation issues)
+- ✅ Easier to debug if issues arise
+
+### Using cargo install
+
+⚠️ **Known Issues on Some Systems**
+
+`cargo install --git` may fail on certain configurations due to compiler issues with external dependencies (tree-sitter parsers). If you encounter segmentation faults or rustc panics, please use the source installation method above.
+
+**If cargo install works for you:**
 
 ```bash
 cargo install --git https://github.com/Tuulikk/GnawTreeWriter.git
 ```
+
+**Known affected systems:**
+- Fedora (GCC compilation issues with tree-sitter-qmljs)
+- Some Linux configurations with specific GCC versions
+
+**See [GitHub Issue #X](https://github.com/Tuulikk/GnawTreeWriter/issues/X) for details and workarounds.**
 
 ### From Binary Release (Future)
 
