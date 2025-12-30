@@ -28,6 +28,207 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 - Hard to make precise, targeted edits
 
 ### How GnawTreeWriter Solves This
+GnawTreeWriter provides several advantages over traditional code editors and AI assistants:
+
+#### 1. AST-Level Precision 🎯
+
+**Traditional Problem:** LLMs struggle with precise edits - often creating syntax errors when trying to match brackets or find exact text positions.
+
+**GnawTreeWriter Solution:** Edit at the abstract syntax tree level. LLMs can target "function login" directly without worrying about line numbers or bracket matching.
+```bash
+# Traditional approach (error-prone)
+# LLM: "find where 'if' is and add 'active: true' after it"
+
+# GnawTreeWriter approach (precise)
+gnawtreewriter edit app.py "0.1.2" 'active: true'
+```
+
+#### 2. Project-Wide Context 📊
+
+**Traditional Problem:** LLMs only see the current file they're editing, missing the bigger picture of how changes affect other parts of the project.
+
+**GnawTreeWriter Solution:** Built-in project-wide understanding. LLMs can see the entire codebase structure and understand relationships between files.
+```bash
+# LLM sees: "app.py" content only
+# LLM sees: All files in project with their structure
+```
+
+#### 3. Safe Experimentation ⏰
+
+**Traditional Problem:** LLMs (and their human operators) fear making changes because there's no easy way to undo if something breaks.
+
+**GnawTreeWriter Solution:** Time travel - restore entire project or specific files to any previous point in time. Sessions group related edits for easy rollback.
+```bash
+# Try new approach
+gnawtreewriter session-start
+# Make changes...
+# If it doesn't work, undo
+gnawtreewriter restore-session <session_id>
+
+# Or go back in time
+gnawtreewriter restore-project "2025-12-27 14:00:00"
+```
+
+#### 4. Atomic Multi-File Coordination 🚀
+
+**Traditional Problem:** Coordinating changes across multiple files manually is error-prone and lacks atomic guarantees.
+
+**GnawTreeWriter Solution:** Batch operations - validate all operations in memory before any writes, with automatic rollback if any operation fails.
+```bash
+# Traditional manual coordination (fragile)
+vim app.py
+vim main.py
+vim utils.py
+# Easy to miss something or break consistency
+
+# GnawTreeWriter atomic batch (safe and coordinated)
+cat > batch.json << 'EOF'
+{
+  "description": "Update login system",
+  "operations": [
+    {"type": "edit", "file": "app.py", "path": "0.1.2", "content": "active: true"},
+    {"type": "edit", "file": "main.py", "path": "0.2.1", "content": "def logout(): ..."},
+    {"type": "edit", "file": "utils.py", "path": "0.0.5", "content": "def check_token(): ..."}
+  ]
+}
+EOF
+gnawtreewriter batch batch.json --preview  # Safe preview first
+gnawtreewriter batch batch.json           # Apply atomically
+```
+
+---
+
+## Why Choose GnawTreeWriter?
+
+While there are many great code editing tools, GnawTreeWriter offers unique advantages specifically designed for **AI-assisted development** and **LLM workflows**.
+
+### Competitive Analysis
+
+#### Vs Traditional Editors (VS Code, Vim, etc.)
+
+| Feature | Traditional Editors | GnawTreeWriter | Winner |
+|---------|-------------------|------------------|--------|
+| Editing Level | String-based | AST-based | 🥇 GnawTreeWriter |
+| LLM-Friendly | ❌ No | ✅ Yes | 🥇 GnawTreeWriter |
+| Temporal Control | ❌ Git only | ✅ Native time travel | 🥇 GnawTreeWriter |
+| Multi-File Atomic | ❌ No | ✅ Batch with rollback | 🥇 GnawTreeWriter |
+| AI-Native | ❌ Retrofitted | ✅ Built for AI | 🥇 GnawTreeWriter |
+
+**Conclusion for Traditional Editors:** GnawTreeWriter wins on all LLM-relevant dimensions.
+
+#### Vs AI Code Assistants (Cursor, Copilot, etc.)
+
+| Feature | AI Assistants | GnawTreeWriter | Winner |
+|---------|--------------|------------------|--------|
+| Precision | Suggest-only | Precision editing | 🥇 GnawTreeWriter |
+| Context | Limited to current file | Project-wide | 🥇 GnawTreeWriter |
+| Safety | No rollback | Time travel + rollback | 🥇 GnawTreeWriter |
+| Control | Suggest, user applies | Agent applies directly | 🥇 GnawTreeWriter |
+| Multi-File | ❌ No | ✅ Batch operations | 🥇 GnawTreeWriter |
+
+**Conclusion for AI Assistants:** GnawTreeWriter provides execution and control that AI assistants lack.
+
+#### Vs Refactoring Tools (IntelliJ, etc.)
+
+| Feature | Refactoring Tools | GnawTreeWriter | Winner |
+|---------|-------------------|------------------|--------|
+| Automation | IDE-bound | CLI-first, scriptable | 🤝 Tie |
+| Universal | Language-specific | Multi-language | 🥇 GnawTreeWriter |
+| Temporal | ❌ No | ✅ Time travel | 🥇 GnawTreeWriter |
+| LLM-Agents | ❌ Designed for humans | ✅ AI-native | 🥇 GnawTreeWriter |
+
+**Conclusion for Refactoring Tools:** GnawTreeWriter wins on universality, temporal features, and AI-agent support (though refactoring tools are stronger for complex refactorings).
+
+---
+
+### Code Examples Demonstrating Advantages
+
+#### Example 1: Safe Multi-File Refactoring
+
+**Traditional approach:**
+```bash
+# Manual multi-file edit (error-prone)
+vim app.py
+# Navigate to function, edit
+vim main.py
+# Navigate to function, edit
+# Save, hope you didn't break anything
+```
+
+**GnawTreeWriter approach:**
+```bash
+# Atomic multi-file edit (safe and validated)
+cat > batch.json << 'EOF'
+{
+  "description": "Refactor login system",
+  "operations": [
+    {"type": "edit", "file": "app.py", "path": "0.1.2", "content": "active: true"},
+    {"type": "edit", "file": "main.py", "path": "0.2.1", "content": "def logout(): ..."},
+    {"type": "edit", "file": "utils.py", "path": "0.0.5", "content": "def check_token(): ..."}
+  ]
+}
+EOF
+gnawtreewriter batch batch.json --preview  # Safe preview first
+gnawtreewriter batch batch.json           # Apply atomically
+```
+
+#### Example 2: Error-Free Code Generation
+
+**Traditional approach:**
+```bash
+# LLM generates code (may have syntax errors)
+llm generate "def process_data()" > app.py
+# User must manually check for syntax errors
+python app.py  # May fail with SyntaxError
+```
+
+**GnawTreeWriter approach:**
+```bash
+# LLM generates code + AST validation
+llm generate "def process_data()" | gnawtreewriter edit app.py "0.1" - --preview
+# Validates syntax before applying changes
+# Prevents corrupted files from AI hallucinations
+```
+
+#### Example 3: Time Travel for AI Agents
+
+**Traditional approach:**
+```bash
+# Try new AI agent strategy (no rollback)
+git commit -am "Experimental changes"
+# Run for hours, discover it breaks things
+git reset --hard HEAD~1  # Lost work, no easy recovery
+```
+
+**GnawTreeWriter approach:**
+```bash
+# Try new AI agent strategy (full rollback)
+gnawtreewriter session-start
+# Make changes with AI agent
+# If strategy doesn't work, restore to previous state
+gnawtreewriter restore-session <session_id>
+# Or restore entire project to specific timestamp
+gnawtreewriter restore-project "2025-12-27 14:00:00"
+```
+
+---
+
+## Summary: Why GnawTreeWriter is Ideal for LLM Agents
+
+1. **AST-Level Precision** 🎯 - Edit code at abstract syntax tree level, not string level
+2. **Temporal Control** ⏰ - Project-wide backups, time travel, sessions, and undo/redo
+3. **Atomic Multi-File Operations** 🚀 - Coordinate changes across multiple files safely
+4. **Project-Wide Context** 📊 - Understand entire codebase structure
+5. **Validation-First Approach** ✅ - Validate all changes in-memory before any writes
+6. **Named References (Tags)** 🏷️️ - Stable anchors that survive structural changes
+7. **Implicit Session Management** 🔄 - Frictionless temporal tracking
+8. **Multi-Language Support** 🌐 - All major languages with universal generic parser
+9. **AI-Native Design** 🤖 - Built from the ground up for LLM workflows
+
+**Conclusion:**
+
+GnawTreeWriter provides LLM agents with precision editing, temporal control, and project-wide safety that traditional tools and AI assistants lack. It's not about replacing your IDE—it's about giving your AI agents a powerful tool they can use autonomously and safely.
+
 - **No bracket management**: AST handles structure automatically
 - **No indentation worries**: Formatting is preserved with smart indentation
 - **Syntax Validation**: proposed edits are checked against the parser before saving
@@ -37,63 +238,14 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 
 ---
 
-## Installation
 
-### From Source (Recommended)
-
-**This is the recommended installation method.**
-
-```bash
-git clone https://github.com/Tuulikk/GnawTreeWriter.git
-cd GnawTreeWriter
-cargo build --release
-```
-
-The binary will be at `target/release/gnawtreewriter`.
-
-**Why source install is recommended:**
-- ✅ Works on all systems
-- ✅ No external compiler issues
-- ✅ Faster installation
-- ✅ Easier to debug issues
-
-### Using cargo install
-
-⚠️ **Known Issues on Some Systems**
-
-`cargo install --git` may fail on certain configurations due to compiler issues with external dependencies (tree-sitter parsers). If you encounter segmentation faults or rustc panics, please use the source installation method above.
-
-**If cargo install works for you:**
-
-```bash
-cargo install --git https://github.com/Tuulikk/GnawTreeWriter.git
-```
-
-**Known affected systems:**
-- Fedora (GCC compilation issues with tree-sitter-qmljs)
-- Some Linux configurations with specific GCC versions
-
-**See [GitHub Issue #X](https://github.com/Tuulikk/GnawTreeWriter/issues/X) for details and workarounds.**
-
-### From Binary Release (Future)
-
-Once releases are published:
 ```bash
 # Download binary for your platform
 chmod +x gnawtreewriter
 sudo mv gnawtreewriter /usr/local/bin/
 ```
 
-## Quick Start
 
-### First Time? Get Interactive Help!
-
-```bash
-# Get comprehensive help and examples
-gnawtreewriter --help
-gnawtreewriter examples
-gnawtreewriter wizard --task first-time
-```
 
 ### Basic Usage
 
@@ -180,7 +332,7 @@ GnawTreeWriter uses two main parsing strategies depending on the format:
 
 - Library-based parsers — examples include `xmltree` for XML, `serde_json` for JSON, `toml` for TOML, and `serde_yaml` for YAML. These are often more robust for configuration and documentation formats, avoiding FFI dependencies and being reliable when TreeSitter isn't suitable.
 
-I det här projektet:
+In this project:
 - We use TreeSitter where it provides the advantage (language/syntax where grammar is good).
 - For formats where TreeSitter has issues or isn't necessary (e.g., XML), we use stable libraries (`xmltree`) and map the result to the same `TreeNode` model. This provides stable parsing and correct line numbers for `list`/`show`/`edit`.
 
@@ -302,67 +454,67 @@ gnawtreewriter batch update.json --preview
 gnawtreewriter batch update.json
 ```
 
-**Se [BATCH_USAGE.md](BATCH_USAGE.md) för komplett dokumentation och fler exempel.**
+**See [BATCH_USAGE.md](BATCH_USAGE.md) for complete documentation and more examples.**
 
-### Snabbkommandon
+### Quick commands
 ```bash
-# Analysera en fil (skriv ut AST i JSON)
+# Analyze a file (print AST in JSON)
 gnawtreewriter analyze note.xml
 
-# Lista noder och deras dot-paths
+# List nodes and their dot-paths
 gnawtreewriter list note.xml
 
-# Visa innehåll i en nod
+# Show content in a node
 gnawtreewriter show note.xml element_4
 
-# Förhandsgranska en ändring (läs ny kod från fil för att slippa quoting)
+# Preview a change (read new code from file to avoid quoting)
 gnawtreewriter edit note.xml element_4 --source-file replacement.xml --preview
 ```
 
 ### Named references (tags)
 ```bash
-# Tilldela en namnreferens till en node-path i en fil (t.ex. 'my_function' -> '0.1.2')
+# Assign a named reference to a node-path in a file (e.g. 'my_function' -> '0.1.2')
 gnawtreewriter tag add main.rs "0.1.2" "my_function"
 
-# Lista alla taggar för en fil
+# List all tags for a file
 gnawtreewriter tag list main.rs
 
-# Ta bort en tagg från en fil
+# Remove a tag from a file
 gnawtreewriter tag remove main.rs "my_function"
 
-# Byt namn på en tagg
+# Rename a tag
 gnawtreewriter tag rename main.rs "my_function" "main_function"
 # (lägg till --force för att skriva över befintlig tag)
 
-# Redigera via inline-tag-syntax (använd 'tag:<name>' som node-path)
+# Edit via inline-tag-syntax (use 'tag:<name>' as node-path)
 gnawtreewriter edit main.rs tag:my_function 'def updated():\n    print("Updated")' --preview
 
-# Alternativt kan du även använda --tag som flagga:
+# Alternatively, you can also use --tag as a flag:
 gnawtreewriter edit --tag my_function main.rs 'def updated():\n    print("Updated")'
 ```
 
 ### XML-exempel
 ```bash
-# Steg 1: analysera och hitta mål-nod
+# Step 1: analyze and find target node
 gnawtreewriter analyze note.xml
 gnawtreewriter list note.xml
 
-# Steg 2: visa noden och bestäm vad du vill ändra
+# Step 2: show node and decide what to change
 gnawtreewriter show note.xml element_4
 
-# Steg 3: ändra noden med fil (säkert mot shell-escaping) och förhandsgranska
+# Step 3: change node with file (safe against shell-escaping) and preview
 echo '<note><to>Ann</to></note>' > new_note.xml
 gnawtreewriter edit note.xml element_4 --source-file new_note.xml --preview
 
-# Om diffen ser bra ut, kör utan --preview för att applicera
+# If the diff looks good, run without --preview to apply
 gnawtreewriter edit note.xml element_4 --source-file new_note.xml
 ```
 
-Tips: I scripts och CI är det säkrast att använda `--source-file` eller `-` (stdin) när du skickar kod till `edit` för att undvika problem med citattecken och shell-escaping.
+Tips: In scripts or CI, it's safest to use `--source-file` or `-` (stdin) when passing code to `edit` to avoid issues with quotes and shell-escaping.
 
 ## CI / Hook-exempel
 
-Här är ett minimalt GitHub Actions-exempel som testar och kör en snabb kontroll av parsing på push/pull requests:
+Here's a minimal GitHub Actions example that tests and runs a quick parsing check on push/pull requests:
 
 ```yaml
 # .github/workflows/validate.yml
@@ -391,8 +543,8 @@ jobs:
           done
 ```
 
-### Pre-commit hook (lokalt)
-Ett enkelt pre-commit-hook som kontrollerar att nya ändrade XML/Markdown/YAML-filer kan parses:
+### Pre-commit hook (local)
+A simple pre-commit hook to ensure that newly modified XML/Markdown/YAML files can be parsed:
 ```bash
 #!/bin/sh
 # .git/hooks/pre-commit
@@ -407,8 +559,8 @@ done
 
 ## Documentation & Contribute
 
-- Läs `CONTRIBUTING.md` för bidragsriktlinjer.
-- Se `AGENTS.md` och `AI_AGENT_TEST_SCENARIOS.md` för exempel på hur man använder verktyget tillsammans med LLMs och automatisering.
+- Read `CONTRIBUTING.md` for contribution guidelines.
+- See `AGENTS.md` and `AI_AGENT_TEST_SCENARIOS.md` for examples of how to use the tool with LLMs and automation.
 
 
 ### add-property
@@ -855,3 +1007,4 @@ MIT License - see LICENSE file for details
 - TreeSitter for excellent parser grammar framework
 - Rust community for the amazing tooling
 - All contributors and testers
+- Special thanks to LLM models like Claude Sonnet 4.5, GLM-4.7, Gemini 3: Flash and Raptor mini for making this project possible.
