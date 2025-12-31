@@ -12,12 +12,14 @@ impl TypeScriptParser {
 impl ParserEngine for TypeScriptParser {
     fn parse(&self, code: &str) -> Result<TreeNode> {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_typescript::language_tsx())
+        parser
+            .set_language(&tree_sitter_typescript::language_tsx())
             .expect("Failed to load TypeScript grammar");
-        
-        let tree = parser.parse(code, None)
+
+        let tree = parser
+            .parse(code, None)
             .ok_or_else(|| anyhow::anyhow!("Failed to parse TypeScript"))?;
-        
+
         Ok(Self::build_tree(&tree.root_node(), code, "".to_string())?)
     }
 

@@ -1,0 +1,7 @@
+{
+  "description": "Test batch",
+  "operations": [
+    {"type": "edit", "file": "test_dir/test_a.txt", "path": "0", "content": "updated A"},
+    {"type": "edit", "file": "test_dir/test_b.txt", "path": "0", "content": "updated B"}
+  ]
+}

@@ -12,12 +12,14 @@ impl PhpParser {
 impl ParserEngine for PhpParser {
     fn parse(&self, code: &str) -> Result<TreeNode> {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_php::language_php())
+        parser
+            .set_language(&tree_sitter_php::language_php())
             .expect("Failed to load PHP grammar");
-        
-        let tree = parser.parse(code, None)
+
+        let tree = parser
+            .parse(code, None)
             .ok_or_else(|| anyhow::anyhow!("Failed to parse PHP"))?;
-        
+
         Ok(Self::build_tree(&tree.root_node(), code, "".to_string())?)
     }
 

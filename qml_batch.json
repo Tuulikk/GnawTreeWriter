@@ -1,0 +1,11 @@
+{
+  "description": "QML color update",
+  "operations": [
+    {
+      "type": "edit",
+      "file": "test.qml",
+      "path": "1.1.3.2.0.1",
+      "content": "navy"
+    }
+  ]
+}

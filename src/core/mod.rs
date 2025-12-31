@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod backup;
 pub mod batch;
 pub mod restoration_engine;
 pub mod tag_manager;
@@ -65,7 +66,7 @@ impl GnawTreeWriter {
         })
     }
 
-    fn create_backup(&self) -> Result<PathBuf> {
+    pub(crate) fn create_backup(&self) -> Result<PathBuf> {
         let file_name = Path::new(&self.file_path)
             .file_name()
             .and_then(|n| n.to_str())

@@ -12,12 +12,14 @@ impl HtmlParser {
 impl ParserEngine for HtmlParser {
     fn parse(&self, code: &str) -> Result<TreeNode> {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_html::language())
+        parser
+            .set_language(&tree_sitter_html::language())
             .expect("Failed to load HTML grammar");
-        
-        let tree = parser.parse(code, None)
+
+        let tree = parser
+            .parse(code, None)
             .ok_or_else(|| anyhow::anyhow!("Failed to parse HTML"))?;
-        
+
         Ok(Self::build_tree(&tree.root_node(), code, "".to_string())?)
     }
 

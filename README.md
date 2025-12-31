@@ -288,6 +288,11 @@ Supports Local time (system default) and UTC (RFC3339).
 
 ```bash
 # Restore entire project to specific timestamp (Local time assumed)
+# Restore a single file to the state produced by a transaction (transaction ID from `history` output)
+# Preview a single-file restore:
+gnawtreewriter restore path/to/file.rs <transaction_id> --preview
+# Apply a single-file restore:
+gnawtreewriter restore path/to/file.rs <transaction_id>
 gnawtreewriter restore-project "2025-12-27 15:30:00" --preview
 
 # Restore using precise UTC timestamp

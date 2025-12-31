@@ -1,6 +1,6 @@
-use anyhow::Result;
-use tree_sitter::{Parser, Language};
 use crate::parser::{ParserEngine, TreeNode};
+use anyhow::Result;
+use tree_sitter::{Language, Parser};
 
 pub struct GoParser;
 
@@ -54,10 +54,15 @@ impl ParserEngine for GoParser {
         let language: Language = tree_sitter_go::language();
         parser.set_language(&language)?;
 
-        let tree = parser.parse(source_code, None)
+        let tree = parser
+            .parse(source_code, None)
             .ok_or_else(|| anyhow::anyhow!("Failed to parse Go code"))?;
 
-        Ok(Self::build_tree(&tree.root_node(), source_code, String::new())?)
+        Ok(Self::build_tree(
+            &tree.root_node(),
+            source_code,
+            String::new(),
+        )?)
     }
 
     fn get_supported_extensions(&self) -> Vec<&'static str> {

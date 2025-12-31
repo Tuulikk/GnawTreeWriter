@@ -88,7 +88,6 @@ Transform from single-project tool to multi-project development platform.
 
 - [ ] **Project Manager System**:
   - Support for multiple concurrent projects per user
-  - Community Edition: 5 concurrent projects with unlimited rotation
   - Team Starter: 15 concurrent projects ($19/month)
   - Professional: Unlimited projects ($49/month)
   - Project switching and archival without data loss
@@ -203,15 +202,385 @@ Expand beyond code to all hierarchical systems.
   - Predictive code evolution and architectural suggestions
   - Natural language programming: "Create REST API" → Full implementation
 
-### **Integration Ecosystem**
+## Community Plugin System 🧩
+
+### Philosophy
+
+GnawTreeWriter supports a **community-driven plugin architecture** where:
+- **Core features** (batch, time travel, sessions, tags) are maintained and tested by GnawTreeWriter
+- **Extended features** (LSP, MCP, visualization, etc.) can be developed by the community
+- **Users have freedom** to install only what they need
+- **Contributions are welcome** and structured through a clear plugin system
+
+This creates an ecosystem where GnawTreeWriter is the "editor platform" and add-ons are "extensions" that can be built by anyone.
+
+### Plugin Tiers
+
+#### Tier 1: Official Plugins (Stable, Core-Equivalent)
+
+Plugins that are maintained and supported by the GnawTreeWriter project. These are considered part of the core platform and receive the same stability guarantees as core features.
+
+**Examples:**
+- **LSP Plugin** (`gnawtreewriter-lsp`) - Language Server Protocol integration
+- **MCP Daemon** (`gnawtreewriter-mcp`) - Model Context Protocol integration
+- **Visualization UI** (`gnawtreewriter-ui`) - Interactive diff and timeline explorer
+
+**Characteristics:**
+- ✅ Production-ready stability
+- ✅ Full support and documentation
+- ✅ Versioned with core (lsp v1.0, core v0.4.0 → same v0.4.0)
+- ✅ Security audited
+- ✅ Integrated with CLI (seamless experience)
+- 🎯 **Considered part of "core" for users**
+
+#### Tier 2: Community Plugins (Experimental, Community-Driven)
+
+Plugins developed by the community or third parties. These may be experimental, have different release cycles, or target specific workflows.
+
+**Examples:**
+- **Profiling Tools** (`gnawtreewriter-profiler`) - Performance and complexity analysis
+- **Language-specific Refactoring** (`gnawtreewriter-rust-refactor`) - Rust-specific refactors
+- **Testing Frameworks** (`gnawtreewriter-test-gen`) - Automated test generation
+- **Custom Parsers** (`gnawtreewriter-custom-parser`) - Experimental parser support
+
+**Characteristics:**
+- 🟡 Community-maintained or third-party
+- 🟡 Experimental features may be unstable
+- 🟡 Separate versioning (plugin v0.1.0 vs core v0.4.0)
+- 🟡 Use with caution - may have bugs
+- 🎯 **Opt-in only** - not enabled by default
+- 🎯 **Community-driven development** - anyone can contribute
+
+#### Tier 3: User Scripts (Local, Private)
+
+Simple scripts or automation developed by users for their specific workflows. Not distributed, just shared.
+
+**Examples:**
+- **Project Setup Scripts** - Automate initial project configuration
+- **Batch Operations** - Reusable batch JSON files for common workflows
+- **Git Integration** - Custom git hooks for GnawTreeWriter
+- **Deployment Scripts** - CI/CD pipeline integration
+
+**Characteristics:**
+- 🟢 Simple shell scripts, Python, etc.
+- 🟢 Not packaged as plugins
+- 🟢 Local use only
+- 🎯 **Flexibility** - adapt GnawTreeWriter to your workflow
+
+### Plugin Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              GnawTreeWriter Platform                    │
+│  ┌──────────────┬───────────────┬──────────────┐│
+│  │ Core Editing  │ Time Travel   │ Sessions & Tags ││
+│  │ (always-on)   │ (always-on)  │ (always-on)   ││
+│  │ ┌──────────────┴───────────────┬──────────────┐│
+│  │        GnawTreeWriter Core CLI              │                ││
+│  └──────────────────────────────────────────────────┘                │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐│
+│  │                 Plugin Interface Layer                  │                ││
+│  └────────────────────────────────────────────────────────────────────────┘│
+│                                                              │
+│  ┌──────────────┬──────────────┬──────────────┬──────────────┬──────────────┐│
+│  │ Official    │ Community    │ Experimental  │    User      ││
+│  │  Plugins    │ Plugins      │ Plugins      │    Scripts   ││
+│  │  ┌────────┬────────┐│  ┌────────┬────────┐│  ┌────────┬────────┐│
+│  │  │ LSP    │  MCP   ││  │  Profiler │ Refactor││  │  Custom  │
+│  │  └────────┴────────┘│  └────────┴────────┘│  └────────┴────────┘│  └────────┴────────┘│
+│  └──────────────┴──────────────┴──────────────┴──────────────┴──────────────┘│
+│                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐│
+│  │                Integration Layer                          │                │
+│  └────────────────────────────────────────────────────────────────────────┘│
+│                                                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│              Projects using GnawTreeWriter                      │
+├──────────────────────────────────────────────────────────────────────────────┤
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Plugin Development Workflow
+
+#### Step 1: Planning
+```bash
+# Start with documentation
+cat > PLUGIN_PLAN.md << 'EOF'
+# Feature Name: [My Plugin]
+# Purpose: [What it does]
+# Target: [Official / Community / Script]
+
+# Define functionality
+# - Core integration points needed
+# - New data structures (if any)
+# - CLI commands (if any)
+# - Configuration options
+
+# Identify dependencies
+# - Which core modules needed?
+# - External dependencies?
+# - Testing requirements
+EOF
+```
+
+#### Step 2: Skeleton
+```bash
+# Create plugin directory
+mkdir -p plugins/my-plugin
+
+# Create basic structure
+cat > plugins/my-plugin/Cargo.toml << 'EOF'
+[package]
+name = "gnawtreewriter-{{name}}"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gnawtreewriter = "0.4.0"
+anyhow = "1.0"
+EOF
+```
+
+#### Step 3: Implementation
+```rust
+// src/core/mod.rs - Plugin trait already defined
+
+pub trait GnawTreePlugin {
+    fn name(&self) -> &'static str;
+    fn version(&self) -> &str;
+    fn description(&self) -> &str;
+    
+    // Integration hooks
+    fn before_edit(&self, operation: &EditOperation) -> Result<()>;
+    fn after_edit(&self, operation: &EditOperation) -> Result<()>;
+    
+    // CLI extension (optional)
+    fn register_commands(&self, cli: &mut Command);
+}
+
+// Example plugin implementation
+pub struct MyPlugin {
+    writer: GnawTreeWriter,
+}
+
+impl GnawTreePlugin for MyPlugin {
+    fn name(&self) -> &'static str { "My Plugin" }
+    fn version(&self) -> &str { "0.1.0" }
+    fn description(&self) -> &str { "My awesome plugin functionality" }
+    
+    fn before_edit(&self, op: &EditOperation) -> Result<()> {
+        // Custom validation or logging before edit
+        Ok(())
+    }
+    
+    fn after_edit(&self, op: &EditOperation) -> Result<()> {
+        // Post-edit actions (notifications, analysis, etc.)
+        Ok(())
+    }
+}
+```
+
+#### Step 4: Registration
+```rust
+// src/core/plugin_manager.rs - Core loads and registers plugins
+
+pub struct PluginManager {
+    plugins: Vec<Box<dyn GnawTreePlugin>>,
+}
+
+impl PluginManager {
+    pub fn load(&mut self, path: &Path) -> Result<()> {
+        // Load plugin from directory
+        let plugin = MyPlugin::new(&path)?;
+        self.plugins.push(plugin);
+        Ok(())
+    }
+    
+    pub fn register_cli_commands(&self, cli: &mut Command) {
+        for plugin in &self.plugins {
+            plugin.register_commands(cli);
+        }
+    }
+}
+```
+
+#### Step 5: Testing
+```bash
+# Isolated plugin tests
+cd plugins/my-plugin
+cargo test
+
+# Integration tests with core
+cd ..
+cargo test --test-path plugins/my-plugin
+
+# Manual testing
+gnawtreewriter plugin my-plugin test-file.txt --dry-run
+gnawtreewriter --plugin my-plugin edit test-file.txt "0" "test content"
+```
+
+### Plugin Distribution
+
+#### Option 1: As Repository Submodules (Future - Mature)
+
+```bash
+# Add to main repo
+git submodule add https://github.com/username/gnawtreewriter-lsp.git
+git submodule update --init --recursive
+```
+
+**Pros:**
+- ✅ Clean versioning
+- ✅ Official project organization
+- ✅ Easy to browse and explore
+
+**Cons:**
+- ❌ Requires `git submodule update` for users
+- ❌ More complex git history
+
+#### Option 2: As Standalone Repositories (Current - Simple)
+
+```bash
+# Clone separately
+git clone https://github.com/username/gnawtreewriter-lsp.git
+cd gnawtreewriter-lsp
+cargo install --path ../gnawtreewriter
+```
+
+**Pros:**
+- ✅ Simple for users
+- ✅ Independent versioning
+- ✅ Easy discovery via GitHub
+
+**Cons:**
+- ❌ Manual integration required
+- ❌ Versioning separate from core
+
+#### Option 3: Local Development (For User Scripts)
+
+```bash
+# Create plugin in local gnawtreewriter/plugins/ directory
+mkdir -p ~/.gnawtreewriter/plugins/my-plugin
+cp -r my-plugin/ ~/.gnawtreewriter/plugins/my-plugin/
+```
+
+**Pros:**
+- ✅ Private, not shared
+- ✅ Perfect for personal workflows
+- ✅ No version management needed
+
+**Cons:**
+- ❌ Not shareable
+- ❌ Doesn't contribute to ecosystem
+
+### Plugin Integration Guidelines
+
+#### For Official Plugin Developers
+
+1. **Follow Architecture** - Use `GnawTreePlugin` trait
+2. **Core Compatibility** - Support current core version (0.4.0)
+3. **Comprehensive Testing** - Unit, integration, and manual tests
+4. **Documentation** - README, examples, and API reference
+5. **Version Alignment** - Match core versioning (if official plugin)
+6. **Security** - Audit for vulnerabilities before release
+7. **Maintenance** - Keep updated with core changes
+8. **Communication** - Use issues and PRs for development
+
+#### For Community Plugin Developers
+
+1. **Start Small** - Begin with minimal functionality
+2. **Document Everything** - Installation, usage, examples
+3. **Test Thoroughly** - Manual testing on real projects
+4. **Be Transparent** - Clearly mark as experimental/beta
+5. **Version Independently** - Don't couple to core versioning
+6. **Solicit Feedback** - Get community input early and often
+7. **Handle Issues Gracefully** - Respond to bug reports quickly
+8. **Share Your Work** - Publish on GitHub with good documentation
+
+#### For User Script Writers
+
+1. **Keep It Simple** - Shell or Python scripts work best
+2. **Use Core Features** - Leverage batch, time travel, tags
+3. **Document Usage** - Explain how to run and customize
+4. **Share If Useful** - Put in gist or small repo if others might benefit
+5. **Consider Making Plugin** - If your script becomes popular, package it as proper plugin
+
+### Community Resources
+
+- **Plugin Development Guide**: See `docs/PLUGIN_DEVELOPMENT.md`
+- **API Reference**: See `docs/PLUGIN_API.md`
+- **Example Plugins**: See `plugins/` directory for reference implementations
+- **Community Discussions**: Use GitHub Discussions for plugin ideas and help
+- **Plugin Showcase**: Share your plugins in community events and blog posts
+
+### Integration with Existing Features
+
+#### Plugins Can Extend:
+
+**1. Batch Operations**
+```bash
+# Plugin adds new operation type
+gnawtreewriter batch ops.json  # Uses batch system
+```
+
+**2. Time Travel**
+```bash
+# Plugin creates restore points
+gnawtreewriter restore-session <plugin_id>
+```
+
+**3. Named References (Tags)**
+```bash
+# Plugin registers tag types
+gnawtreewriter tag add my-file "custom.node" "Custom Tag"
+```
+
+**4. Sessions**
+```bash
+# Plugin creates session snapshots
+gnawtreewriter session-start
+```
+
+### Benefits for Users
+
+1. **Freedom** - Install only what you need
+2. **Choice** - Mix official and community plugins
+3. **Innovation** - Community can experiment with new features
+4. **Customization** - Tailor GnawTreeWriter to your workflow
+5. **Cost-Effective** - Free core + free community plugins
+6. **Ecosystem Growth** - More features without core bloat
+
+### Benefits for GnawTreeWriter
+
+1. **Extensibility Without Bloat** - Core remains lightweight
+2. **Community Growth** - Plugins extend functionality without core changes
+3. **Innovation Source** - Community drives new ideas
+4. **Ecosystem Maturity** - Diverse plugins make GnawTreeWriter more useful
+5. **Maintenance Distribution** - Community shares load of plugin maintenance
+
+### Future Evolution
+
+As the community grows:
+
+1. **Official Plugins** may graduate from experimental to stable to official status
+2. **Popular Community Plugins** may be promoted to official if well-maintained
+3. **Plugin Marketplace** - Easy discovery and installation of plugins
+4. **Standardization** - Community defines best practices for plugin development
+5. **Modular Architecture** - Ability to separate concerns (e.g., different LSP servers for different needs)
+
+---
+
+## Integration Ecosystem
 
 - [ ] **LSP Server**: Universal structured editing for all IDEs
 - [ ] **GitHub App**: Automated PR reviews and suggestions
 - [ ] **IDE Extensions**: Native plugins for VS Code, IntelliJ, Neovim  
 - [ ] **API Gateway**: RESTful API for third-party tool integration
 
-### **Add-on Architecture** 🧩
+---
 
+## Implementation Priorities
 GnawTreeWriter follows a **core + add-on architecture** to maintain focus while enabling extensibility:
 
 #### Core Principles

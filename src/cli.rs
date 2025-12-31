@@ -206,7 +206,17 @@ enum Commands {
     Restore {
         file_path: String,
         transaction_id: String,
-        #[arg(short, long)]
+        preview: bool,
+    },
+    /// Quick replace: simple search-and-replace in a file with preview and automatic backup
+    QuickReplace {
+        /// File to operate on
+        file: String,
+        /// Search pattern (literal string)
+        search: String,
+        /// Replacement text
+        replace: String,
+        /// Show preview but don't apply
         preview: bool,
     },
     /// Start a new session (clears current session history)
@@ -650,6 +660,14 @@ impl Cli {
             } => {
                 Self::handle_restore(&file_path, &transaction_id, preview)?;
             }
+            Commands::QuickReplace {
+                file,
+                search,
+                replace,
+                preview,
+            } => {
+                Self::handle_quick_replace(&file, &search, &replace, preview)?;
+            }
             Commands::SessionStart => {
                 Self::handle_session_start()?;
             }
@@ -922,12 +940,17 @@ impl Cli {
             println!("  Description: {}", transaction.description);
             println!("\nUse --no-preview to actually perform the restore");
         } else {
-            // TODO: Implement actual restore logic
-            println!("Restore functionality not yet implemented");
-            println!(
-                "Would restore {} using transaction {}",
-                file_path, transaction_id
-            );
+            // Perform the restore using the RestorationEngine
+            let engine = RestorationEngine::new(&project_root)?;
+
+            match engine.restore_file_to_transaction(transaction_id) {
+                Ok(restored_path) => {
+                    println!("✓ Restored: {}", restored_path.display());
+                }
+                Err(e) => {
+                    println!("❌ Restore failed: {}", e);
+                }
+            }
         }
 
         Ok(())
@@ -1654,4 +1677,176 @@ fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>
     })?;
 
     Ok(local_dt.with_timezone(&Utc))
+}
+
+fn handle_quick_replace(file: &str, search: &str, replace: &str, preview: bool) -> Result<()> {
+    use std::path::Path;
+
+    let current_dir = std::env::current_dir()?;
+    let project_root = find_project_root(&current_dir);
+    let path = Path::new(file);
+
+    // Read original content
+    let original = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file, e))?;
+
+    // Prepare modified content (simple global replace)
+    let modified = original.replace(search, replace);
+
+    // Validate with parser (if available for the file type)
+    if let Err(e) = crate::parser::get_parser(path)
+        .and_then(|parser| parser.parse(&modified).map_err(|err| err.into()))
+    {
+        return Err(anyhow::anyhow!(
+            "Validation failed: {}. Change NOT applied.",
+            e
+        ));
+    }
+
+    if preview {
+        println!("--- QuickReplace preview for: {}", file);
+        print_diff(&original, &modified);
+        println!("\nUse --no-preview to actually apply the change.");
+        return Ok(());
+    }
+
+    // Apply: create backup, log transaction, write file
+    let writer = GnawTreeWriter::new(file)?;
+    // create backup (method in core writer)
+    writer.create_backup()?;
+
+    let before_hash = crate::core::calculate_content_hash(&original);
+    let after_hash = crate::core::calculate_content_hash(&modified);
+
+    let mut tlog = TransactionLog::load(&project_root)?;
+    let txid = tlog.log_transaction(
+        OperationType::Edit,
+        PathBuf::from(file),
+        None,
+        Some(before_hash),
+        Some(after_hash),
+        format!("Quick replace '{}' -> '{}'", search, replace),
+        std::collections::HashMap::new(),
+    )?;
+
+    std::fs::write(path, modified)
+        .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", file, e))?;
+
+    println!("✓ QuickReplace applied (txn {})", txid);
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::transaction_log::OperationType;
+    use anyhow::Result;
+    use chrono::Utc;
+    use std::collections::HashMap;
+    use std::env;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_handle_restore_cli() -> Result<()> {
+        // Setup a temporary project root and current working directory
+        let tmp = tempdir()?;
+        let project_root = tmp.path();
+        let orig_dir = env::current_dir()?;
+        env::set_current_dir(project_root)?;
+
+        // Create a file that will be restored
+        let file_path = project_root.join("example.py");
+        fs::write(&file_path, "original")?;
+
+        // Create a backup that contains the 'modified' content (simulating a later backup)
+        let backup_dir = project_root.join(".gnawtreewriter_backups");
+        fs::create_dir_all(&backup_dir)?;
+        let backup_file = backup_dir.join("backup_modified.json");
+        let backup_json = serde_json::json!({
+            "file_path": file_path.to_string_lossy(),
+            "timestamp": Utc::now().to_rfc3339(),
+            "tree": {},
+            "source_code": "modified"
+        });
+        fs::write(&backup_file, serde_json::to_string_pretty(&backup_json)?)?;
+
+        // Log a transaction that has after_hash matching the 'modified' backup
+        let mut tlog = TransactionLog::load(&project_root)?;
+        let after_hash = crate::core::calculate_content_hash("modified");
+        let before_hash = crate::core::calculate_content_hash("original");
+        let txn_id = tlog.log_transaction(
+            OperationType::Edit,
+            file_path.clone(),
+            None,
+            Some(before_hash),
+            Some(after_hash),
+            "Edit for test".to_string(),
+            HashMap::new(),
+        )?;
+
+        // Sanity: file is still the original pre-restore
+        assert_eq!(fs::read_to_string(&file_path)?, "original");
+
+        // Preview should not alter the file
+        Cli::handle_restore(file_path.to_str().unwrap(), &txn_id, true)?;
+        assert_eq!(fs::read_to_string(&file_path)?, "original");
+
+        // Actual restore should replace file content with 'modified'
+        Cli::handle_restore(file_path.to_str().unwrap(), &txn_id, false)?;
+        assert_eq!(fs::read_to_string(&file_path)?, "modified");
+
+        // Restore original cwd
+        env::set_current_dir(orig_dir)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_quick_replace_preview() -> Result<()> {
+        let tmp = tempdir()?;
+        let project_root = tmp.path();
+        let orig_dir = std::env::current_dir()?;
+        std::env::set_current_dir(project_root)?;
+
+        let file_path = project_root.join("quick_preview.txt");
+        fs::write(&file_path, "hello foo world")?;
+
+        // Preview should not apply the change
+        Cli::handle_quick_replace(file_path.to_str().unwrap(), "foo", "bar", true)?;
+        assert_eq!(fs::read_to_string(&file_path)?, "hello foo world");
+
+        std::env::set_current_dir(orig_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_quick_replace_apply() -> Result<()> {
+        let tmp = tempdir()?;
+        let project_root = tmp.path();
+        let orig_dir = std::env::current_dir()?;
+        std::env::set_current_dir(project_root)?;
+
+        let file_path = project_root.join("quick_apply.txt");
+        fs::write(&file_path, "hello foo world")?;
+
+        // Apply should change the file, create a backup and log a transaction
+        Cli::handle_quick_replace(file_path.to_str().unwrap(), "foo", "bar", false)?;
+
+        // Verify file content changed
+        assert_eq!(fs::read_to_string(&file_path)?, "hello bar world");
+
+        // Verify a backup directory exists
+        let backup_dir = project_root.join(".gnawtreewriter_backups");
+        assert!(backup_dir.exists());
+
+        // Verify there's at least one transaction for the file
+        let tlog = TransactionLog::load(&project_root)?;
+        let history = tlog.get_file_history(&file_path)?;
+        assert!(!history.is_empty());
+
+        std::env::set_current_dir(orig_dir)?;
+        Ok(())
+    }
 }

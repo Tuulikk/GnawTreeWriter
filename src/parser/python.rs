@@ -13,8 +13,12 @@ impl PythonParser {
 impl ParserEngine for PythonParser {
     fn parse(&self, code: &str) -> Result<TreeNode> {
         let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_python::language()).expect("Failed to load Python grammar");
-        let tree = parser.parse(code, None).ok_or_else(|| anyhow::anyhow!("Failed to parse Python"))?;
+        parser
+            .set_language(&tree_sitter_python::language())
+            .expect("Failed to load Python grammar");
+        let tree = parser
+            .parse(code, None)
+            .ok_or_else(|| anyhow::anyhow!("Failed to parse Python"))?;
         Ok(Self::build_tree(&tree.root_node(), code, "".to_string())?)
     }
 

@@ -1,0 +1,24 @@
+{
+  "description": "Multi-file documentation update",
+  "operations": [
+    {
+      "type": "edit",
+      "file": "test_dir/file1.md",
+      "path": "0",
+      "content": "# Updated Header\n\nContent A with new info"
+    },
+    {
+      "type": "edit",
+      "file": "test_dir/file2.css",
+      "path": "0",
+      "content": "/* Updated CSS */\nbody {\n  color: navy;\n}"
+    },
+    {
+      "type": "insert",
+      "file": "test_dir/file1.md",
+      "parent_path": "0",
+      "position": 1,
+      "content": "## New Section\n\nThis was added via batch!"
+    }
+  ]
+}

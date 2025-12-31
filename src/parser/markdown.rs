@@ -109,7 +109,7 @@ impl MarkdownParser {
             }
 
             // Block quotes
-            if let Some(caps) = block_quote_regex.captures(line) {
+            if let Some(_caps) = block_quote_regex.captures(line) {
                 let start_line = line_num;
                 let mut quote_lines = Vec::new();
 
@@ -269,7 +269,7 @@ impl MarkdownParser {
         let link_regex = Regex::new(r"\[(.+?)\]\((.+?)\)").unwrap();
 
         let mut remaining = text;
-        let mut pos = 0;
+        let _pos = 0;
 
         while !remaining.is_empty() {
             let mut found = false;

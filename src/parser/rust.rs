@@ -12,12 +12,14 @@ impl RustParser {
 impl ParserEngine for RustParser {
     fn parse(&self, code: &str) -> Result<TreeNode> {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_rust::language())
+        parser
+            .set_language(&tree_sitter_rust::language())
             .expect("Failed to load Rust grammar");
-        
-        let tree = parser.parse(code, None)
+
+        let tree = parser
+            .parse(code, None)
             .ok_or_else(|| anyhow::anyhow!("Failed to parse Rust"))?;
-        
+
         Ok(Self::build_tree(&tree.root_node(), code, "".to_string())?)
     }
 

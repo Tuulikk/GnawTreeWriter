@@ -51,11 +51,11 @@ impl ParserEngine for QmlParser {
                         end_line: i + 1,
                         children: Vec::new(),
                     };
-                    
+
                     if let Some((comp, props)) = current_component {
                         component_stack.push((comp, props, depth));
                     }
-                    
+
                     current_component = Some((component, Vec::new()));
                 }
             } else if trimmed.starts_with("}") {
