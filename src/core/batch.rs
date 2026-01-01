@@ -20,13 +20,13 @@ use crate::core::{
 };
 use crate::parser::get_parser;
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use similar::{Algorithm, TextDiff};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase", tag = "type")]
 pub enum BatchOp {
     Edit {
@@ -46,6 +46,23 @@ pub enum BatchOp {
     },
 }
 
+/// Individual edit operation for batch processing
+#[derive(Debug, Clone, Serialize)]
+pub enum BatchEdit {
+    Edit {
+        node_path: String,
+        content: String,
+    },
+    Insert {
+        parent_path: String,
+        position: usize,
+        content: String,
+    },
+    Delete {
+        node_path: String,
+    },
+}
+
 #[derive(Debug, Deserialize)]
 pub struct BatchFile {
     pub description: Option<String>,
@@ -59,12 +76,54 @@ pub struct FileDiff {
     pub after: String,
 }
 
+#[derive(Debug, Serialize)]
 pub struct Batch {
     pub description: Option<String>,
     pub operations: Vec<BatchOp>,
 }
 
 impl Batch {
+    /// Create a new empty batch
+    pub fn new() -> Self {
+        Self {
+            description: None,
+            operations: Vec::new(),
+        }
+    }
+
+    /// Create a batch with operations for a single file
+    pub fn with_file(file_path: String, operations: Vec<BatchEdit>) -> Self {
+        let batch_ops: Vec<BatchOp> = operations
+            .into_iter()
+            .map(|edit| match edit {
+                BatchEdit::Edit { node_path, content } => BatchOp::Edit {
+                    file: file_path.clone(),
+                    path: node_path,
+                    content,
+                },
+                BatchEdit::Insert {
+                    parent_path,
+                    position,
+                    content,
+                } => BatchOp::Insert {
+                    file: file_path.clone(),
+                    parent_path,
+                    position,
+                    content,
+                },
+                BatchEdit::Delete { node_path } => BatchOp::Delete {
+                    file: file_path.clone(),
+                    path: node_path,
+                },
+            })
+            .collect();
+
+        Self {
+            description: None,
+            operations: batch_ops,
+        }
+    }
+
     /// Load a batch from a JSON file
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let s = fs::read_to_string(&path).context("Failed to read batch file")?;

@@ -7,12 +7,13 @@ use std::path::{Path, PathBuf};
 
 pub mod backup;
 pub mod batch;
+pub mod diff_parser;
 pub mod restoration_engine;
 pub mod tag_manager;
 pub mod transaction_log;
 pub mod undo_redo;
 
-pub use batch::Batch;
+pub use batch::{Batch, BatchEdit};
 pub use restoration_engine::{RestorationEngine, RestorationResult, RestorationStats};
 pub use tag_manager::TagManager;
 pub use transaction_log::{

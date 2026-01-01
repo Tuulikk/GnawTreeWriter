@@ -2,17 +2,19 @@
 
 All notable changes to GnawTreeWriter.
 
-## [0.3.1] - 2025-12-31 (Unreleased)
+## [0.3.2] - 2025-12-31 (Unreleased)
 
 ### Added
-- **Test Robustness**: Added mutex-based CWD protection to CLI tests to prevent race conditions when changing directories
-- **Test Environment**: Created `.git` directory mock in test temporary directories for proper project root detection
+- **Diff-to-Batch**: New `gnawtreewriter diff-to-batch` command that converts unified diffs (git diff format) to batch operation specifications
+- **Test Coverage**: Added 5 new tests for diff parser functionality
 
 ### Changed
-- **Code Quality**: Reduced clippy warnings from 46 to 23 through systematic cleanup
+- **Code Quality**: Reduced clippy warnings from 46 to 28 through systematic cleanup
 - **Parser Improvements**: Fixed string slicing in multiple parsers (go, html, php, python, rust, typescript) using `source.get()` instead of `as_bytes()` + `from_utf8()`
 - **Module Structure**: Renamed `src/llm/llm.rs` to `src/llm/llm_integration.rs` to resolve module inception warning
 - **Backup Directory Renaming**: Renamed unused `project_root` field to `_project_root` in `RestorationEngine`
+- **Batch Module**: Added Serialize trait support to Batch and BatchOp for JSON output
+- **BatchEdit Export**: Made BatchEdit enum publicly available in core module for diff-to-batch integration
 
 ### Fixed
 - **Clippy Warnings**: 
@@ -31,7 +33,12 @@ All notable changes to GnawTreeWriter.
   - Removed unnecessary Ok(?) wrapping in multiple parsers
   - Fixed manual suffix stripping using strip_suffix in QML parser
 - **CLI Quick Command**: Fixed handle_quick_replace function placement and integration
-- **Test Failures**: All 27 tests now passing after fixing test environment setup
+- **Test Failures**: All 32 tests now passing after fixing test environment setup (27 core + 5 diff-parser)
+
+## [0.3.1] - 2025-12-31
+
+### Summary
+This release includes comprehensive code quality improvements with clippy warnings reduced from 46 to 28.
 
 ## [0.3.0] - 2025-12-28
 

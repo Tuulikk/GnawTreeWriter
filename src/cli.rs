@@ -203,6 +203,25 @@ enum Commands {
         /// Preview changes without applying
         preview: bool,
     },
+    /// Convert a unified diff to a batch operation specification
+    ///
+    /// Parses a git diff format file and converts it to a batch JSON file.
+    /// This allows AI agents and users to provide diffs that can be previewed and applied atomically.
+    ///
+    /// Examples:
+    ///   gnawtreewriter diff-to-batch changes.patch
+    ///   gnawtreewriter diff-to-batch changes.patch --output batch.json
+    ///   gnawtreewriter diff-to-batch changes.patch --preview
+    DiffToBatch {
+        /// Diff file in unified format (git diff output)
+        diff_file: String,
+        #[arg(short, long)]
+        /// Output JSON file for batch specification (default: batch.json)
+        output: Option<String>,
+        #[arg(short, long)]
+        /// Preview the converted batch without writing to file
+        preview: bool,
+    },
     /// Restore file to a specific transaction state
     Restore {
         file_path: String,
@@ -731,6 +750,13 @@ impl Cli {
             Commands::Batch { file, preview } => {
                 Self::handle_batch(&file, preview)?;
             }
+            Commands::DiffToBatch {
+                diff_file,
+                output,
+                preview,
+            } => {
+                Self::handle_diff_to_batch(&diff_file, output.as_deref(), preview)?;
+            }
         }
         Ok(())
     }
@@ -964,6 +990,45 @@ impl Cli {
             batch.apply()?;
             println!("✓ Batch applied");
         }
+        Ok(())
+    }
+
+    fn handle_diff_to_batch(diff_file: &str, output: Option<&str>, preview: bool) -> Result<()> {
+        use crate::core::diff_parser::{diff_to_batch, parse_diff_file, preview_diff};
+
+        // Parse the diff file
+        let parsed = parse_diff_file(diff_file)
+            .with_context(|| format!("Failed to parse diff file: {}", diff_file))?;
+
+        // Show preview of what the diff contains
+        println!("{}", preview_diff(&parsed));
+
+        // Convert to batch operation
+        let batch =
+            diff_to_batch(&parsed).with_context(|| "Failed to convert diff to batch operation")?;
+
+        if preview {
+            // Show what the batch will do
+            println!("\n=== Batch Preview ===");
+            println!("{}", batch.preview_text()?);
+            println!("\nUse --no-preview to write batch file");
+            return Ok(());
+        }
+
+        // Determine output file path
+        let output_file = output.unwrap_or("batch.json");
+
+        // Write batch specification to JSON
+        let batch_json = serde_json::to_string_pretty(&batch)?;
+        std::fs::write(output_file, batch_json)
+            .with_context(|| format!("Failed to write batch file: {}", output_file))?;
+
+        println!("✓ Diff converted to batch specification: {}", output_file);
+        println!(
+            "  Apply with: gnawtreewriter batch {} --preview",
+            output_file
+        );
+
         Ok(())
     }
 
