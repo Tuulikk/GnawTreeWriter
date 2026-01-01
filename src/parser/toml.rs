@@ -4,6 +4,12 @@ use toml::Value;
 
 pub struct TomlParser;
 
+impl Default for TomlParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TomlParser {
     pub fn new() -> Self {
         Self
@@ -27,6 +33,7 @@ impl ParserEngine for TomlParser {
 }
 
 impl TomlParser {
+    #[allow(clippy::only_used_in_recursion)]
     fn build_value_node(
         &self,
         value: &Value,

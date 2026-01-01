@@ -7,12 +7,13 @@ use std::path::{Path, PathBuf};
 
 pub mod backup;
 pub mod batch;
+pub mod diff_parser;
 pub mod restoration_engine;
 pub mod tag_manager;
 pub mod transaction_log;
 pub mod undo_redo;
 
-pub use batch::Batch;
+pub use batch::{Batch, BatchEdit};
 pub use restoration_engine::{RestorationEngine, RestorationResult, RestorationStats};
 pub use tag_manager::TagManager;
 pub use transaction_log::{
@@ -94,12 +95,6 @@ impl GnawTreeWriter {
             .context(format!("Failed to write backup: {}", backup_path.display()))?;
 
         Ok(backup_path)
-    }
-
-    fn get_backup_dir(&self) -> Result<PathBuf> {
-        // Deprecated/Modified in create_backup but kept for potential other uses
-        let project_root = find_project_root(Path::new(&self.file_path));
-        Ok(project_root.join(".gnawtreewriter_backups"))
     }
 
     pub fn analyze(&self) -> &TreeNode {
@@ -199,6 +194,7 @@ impl GnawTreeWriter {
         }
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn find_node<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode> {
         if tree.path == path {
             return Some(tree);
@@ -263,11 +259,7 @@ impl GnawTreeWriter {
                     last_prop_line
                 } else {
                     // Fallback to top (after brace if exists)
-                    if parent.content.trim_start().starts_with('{') {
-                        parent.start_line
-                    } else {
-                        parent.start_line
-                    }
+                    parent.start_line
                 }
             }
             _ => return Err(anyhow::anyhow!("Invalid position: {}", position)),

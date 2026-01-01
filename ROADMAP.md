@@ -13,10 +13,12 @@ GnawTreeWriter is a tree-based code editor optimized for LLM-assisted editing. T
 - **Smart Indentation**: Automatic preservation of code style during insertions.
 - **Syntax Validation**: In-memory re-parsing before saving changes.
 - **QML Intents**: Dedicated commands for `add-property` and `add-component`.
-- **Diff Preview**: Visual unified diff display using the `similar` library.
-- **Automatic Backups**: Non-git safety net creating JSON snapshots before every edit
+- **Diff Preview**: Visual unified diff display using `similar` library.
+- **Automatic Backups**: Non-git safety net creating JSON snapshots before every edit.
 - **XML Support**: Implemented stable XML parsing using `xmltree` (declaration, DOCTYPE, comments, CDATA, attributes, nested elements) with line-number mapping and unit tests.
 - **Batch Operations**: Atomic multi-file editing via JSON specification with in-memory validation, unified diff preview, automatic rollback on failure, and per-file transaction logging. Ideal for AI agent workflows and coordinated refactoring.
+- **Quick Command**: Fast, low-overhead edits supporting node-edit mode (AST-based) and find/replace mode (text-based) with preview, backup, and parser validation.
+- **Diff-to-Batch**: Converts unified diffs (git diff format) to batch operation specifications for safe, atomic application with full validation and rollback support.
 
 ---
 
@@ -741,3 +743,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 ### 🔮 **Planned Next Steps**
 - [ ] Named References (Priority #4): Implement `tag` support and CLI tooling to create, list and remove named references to node paths (improves script resilience)
 - [ ] LSP Add-ons: Explore LSP integration as optional add-ons (semantic analysis, completions and diagnostics) — envisioned as separate, opt-in add-on(s) rather than core functionality
+- [ ] Diff Enhancements: Improve diff-to-batch with AST-aware conversion (use node paths instead of line numbers), multi-file batch support in single JSON, and conflict detection
+- [ ] Quick Command Enhancements: Add `--first` flag for single occurrence replacement in find/replace mode, more specific error messages for AST-related failures

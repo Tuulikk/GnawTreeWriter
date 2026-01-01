@@ -238,7 +238,6 @@ impl UndoRedoManager {
     /// Placeholder implementations for other operation types
     /// These would need to be implemented based on the specific backup format
     /// and restoration logic for each operation type
-
     fn undo_insert(&self, transaction: &Transaction) -> Result<UndoRedoResult> {
         // Try to restore using before_hash first
         if let Some(backup_path) =
@@ -1009,7 +1008,7 @@ mod tests {
 
         // Log a previous transaction whose after_hash matches "prev_state"
         let mut tlog = TransactionLog::load(tmp.path())?;
-        let prev_id = tlog.log_transaction(
+        let _prev_id = tlog.log_transaction(
             OperationType::Edit,
             file_path.clone(),
             None,

@@ -4,6 +4,12 @@ use regex::Regex;
 
 pub struct CssParser;
 
+impl Default for CssParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CssParser {
     pub fn new() -> Self {
         Self

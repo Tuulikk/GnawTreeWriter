@@ -4,6 +4,12 @@ use xmltree::{Element, XMLNode};
 
 pub struct XmlParser;
 
+impl Default for XmlParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl XmlParser {
     pub fn new() -> Self {
         Self
@@ -141,6 +147,7 @@ impl ParserEngine for XmlParser {
 }
 
 impl XmlParser {
+    #[allow(clippy::only_used_in_recursion)]
     fn element_to_treenode_with_span(
         &self,
         el: &Element,
