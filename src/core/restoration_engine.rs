@@ -1,14 +1,13 @@
 use crate::core::transaction_log::{ProjectRestorationPlan, Transaction, TransactionLog};
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
-use serde_json::Value;
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Engine for executing file and project restoration operations
 pub struct RestorationEngine {
-    project_root: PathBuf,
+    _project_root: PathBuf,
     backup_dir: PathBuf,
     transaction_log: TransactionLog,
 }
@@ -41,7 +40,7 @@ impl RestorationEngine {
         }
 
         Ok(Self {
-            project_root,
+            _project_root: project_root,
             backup_dir,
             transaction_log,
         })
@@ -322,110 +321,43 @@ impl RestorationEngine {
             .min_by_key(|t| t.timestamp))
     }
 
-    /// Find backup file by content hash
+    /// Find backup file by content hash (delegates to core::backup)
     fn find_backup_by_content_hash(&self, content_hash: &str) -> Result<Option<BackupFile>> {
-        let backups = self.list_backup_files()?;
-
-        for backup in backups {
-            if let Some(hash) = &backup.content_hash {
-                if hash == content_hash {
-                    return Ok(Some(backup));
-                }
-            }
+        if let Some(b) =
+            crate::core::backup::find_backup_by_content_hash(&self.backup_dir, content_hash)?
+        {
+            return Ok(Some(BackupFile {
+                path: b.path,
+                timestamp: b.timestamp,
+                original_file_path: b.original_file_path,
+                content_hash: b.content_hash,
+            }));
         }
 
         Ok(None)
     }
 
-    /// List all backup files in the backup directory
+    /// List all backup files in the backup directory (delegates to core::backup)
     fn list_backup_files(&self) -> Result<Vec<BackupFile>> {
-        let mut backups = Vec::new();
-
-        if !self.backup_dir.exists() {
-            return Ok(backups);
-        }
-
-        let entries = fs::read_dir(&self.backup_dir).context("Failed to read backup directory")?;
-
-        for entry in entries {
-            let entry = entry.context("Failed to read directory entry")?;
-            let path = entry.path();
-
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "json") {
-                if let Ok(backup_file) = self.parse_backup_file(&path) {
-                    backups.push(backup_file);
-                }
-            }
-        }
-
-        // Sort by timestamp (newest first)
-        backups.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-
-        Ok(backups)
+        let backups = crate::core::backup::list_backup_files(&self.backup_dir)?;
+        Ok(backups
+            .into_iter()
+            .map(|b| BackupFile {
+                path: b.path,
+                timestamp: b.timestamp,
+                original_file_path: b.original_file_path,
+                content_hash: b.content_hash,
+            })
+            .collect())
     }
 
-    /// Parse a backup file and extract metadata
-    fn parse_backup_file(&self, backup_path: &Path) -> Result<BackupFile> {
-        let content = fs::read_to_string(backup_path).context(format!(
-            "Failed to read backup file: {}",
-            backup_path.display()
-        ))?;
+    // `parse_backup_file` removed. Use the helpers in `crate::core::backup`
+    // (e.g. `crate::core::backup::parse_backup_file`) directly where needed.
 
-        let json: Value = serde_json::from_str(&content).context(format!(
-            "Failed to parse backup JSON: {}",
-            backup_path.display()
-        ))?;
-
-        // Extract file path from backup
-        let original_file_path = json["file_path"]
-            .as_str()
-            .ok_or_else(|| anyhow!("Backup file missing file_path"))?;
-
-        // Extract timestamp
-        let timestamp_str = json["timestamp"]
-            .as_str()
-            .ok_or_else(|| anyhow!("Backup file missing timestamp"))?;
-        let timestamp = DateTime::parse_from_rfc3339(timestamp_str)
-            .context("Failed to parse timestamp")?
-            .with_timezone(&Utc);
-
-        // Calculate content hash from source code
-        let source_code = json["source_code"]
-            .as_str()
-            .ok_or_else(|| anyhow!("Backup file missing source_code"))?;
-        let content_hash = Some(crate::core::calculate_content_hash(source_code));
-
-        Ok(BackupFile {
-            path: backup_path.to_path_buf(),
-            timestamp,
-            original_file_path: PathBuf::from(original_file_path),
-            content_hash,
-        })
-    }
-
-    /// Restore file from a backup file
+    /// Restore file from a backup file (delegates to core::backup)
     fn restore_from_backup(&self, target_path: &Path, backup_path: &Path) -> Result<PathBuf> {
-        // Read backup file
-        let backup_content = fs::read_to_string(backup_path).context(format!(
-            "Failed to read backup file: {}",
-            backup_path.display()
-        ))?;
-
-        let json: Value =
-            serde_json::from_str(&backup_content).context("Failed to parse backup JSON")?;
-
-        // Extract source code
-        let source_code = json["source_code"]
-            .as_str()
-            .ok_or_else(|| anyhow!("Backup file missing source_code"))?;
-
-        // Write to target file
-        fs::write(target_path, source_code).context(format!(
-            "Failed to write restored file: {}",
-            target_path.display()
-        ))?;
-
-        Ok(target_path.to_path_buf())
+        // Note: core::backup::restore_from_backup expects (backup_path, target_path)
+        crate::core::backup::restore_from_backup(backup_path, target_path)
     }
 
     /// Get restoration statistics
@@ -497,7 +429,7 @@ mod tests {
         let engine = RestorationEngine::new(temp_dir.path()).unwrap();
 
         assert!(engine.backup_dir.exists());
-        assert_eq!(engine.project_root, temp_dir.path());
+        assert_eq!(engine._project_root, temp_dir.path());
     }
 
     #[test]

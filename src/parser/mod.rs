@@ -15,7 +15,7 @@ pub mod typescript;
 pub mod xml;
 pub mod yaml;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 

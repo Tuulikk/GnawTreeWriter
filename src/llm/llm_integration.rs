@@ -86,7 +86,7 @@ pub fn process_llm_request(request: LLMEditRequest) -> Result<LLMResponse> {
             content,
         } => {
             let tree = writer.analyze();
-            let parent_path = find_parent_path(&tree, &node_path)
+            let parent_path = find_parent_path(tree, &node_path)
                 .ok_or_else(|| anyhow::anyhow!("Could not find parent for node: {}", node_path))?;
             writer.edit(EditOperation::Insert {
                 parent_path,
@@ -104,7 +104,7 @@ pub fn process_llm_request(request: LLMEditRequest) -> Result<LLMResponse> {
             content,
         } => {
             let tree = writer.analyze();
-            let parent_path = find_parent_path(&tree, &node_path)
+            let parent_path = find_parent_path(tree, &node_path)
                 .ok_or_else(|| anyhow::anyhow!("Could not find parent for node: {}", node_path))?;
             writer.edit(EditOperation::Insert {
                 parent_path,
@@ -152,11 +152,11 @@ pub fn get_node_context(file_path: &str, node_path: &str) -> Result<NodeContext>
     let writer = GnawTreeWriter::new(file_path)?;
     let tree = writer.analyze();
 
-    let node = find_node(&tree, node_path)
+    let node = find_node(tree, node_path)
         .ok_or_else(|| anyhow::anyhow!("Node not found: {}", node_path))?;
 
-    let parent_path = find_parent_path(&tree, node_path);
-    let sibling_context = get_sibling_content(&tree, node_path);
+    let parent_path = find_parent_path(tree, node_path);
+    let sibling_context = get_sibling_content(tree, node_path);
 
     Ok(NodeContext {
         path: node_path.to_string(),

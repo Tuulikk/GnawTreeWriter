@@ -1,1 +1,5 @@
-[files]
+[files."test.py".tags]
+main_func = "0"
+
+[files."test.qml".tags]
+mainRect = "1.1"

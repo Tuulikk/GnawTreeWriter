@@ -3,6 +3,12 @@ use anyhow::Result;
 
 pub struct RustParser;
 
+impl Default for RustParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RustParser {
     pub fn new() -> Self {
         Self
@@ -12,13 +18,15 @@ impl RustParser {
 impl ParserEngine for RustParser {
     fn parse(&self, code: &str) -> Result<TreeNode> {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_rust::language())
+        parser
+            .set_language(&tree_sitter_rust::language())
             .expect("Failed to load Rust grammar");
-        
-        let tree = parser.parse(code, None)
+
+        let tree = parser
+            .parse(code, None)
             .ok_or_else(|| anyhow::anyhow!("Failed to parse Rust"))?;
-        
-        Ok(Self::build_tree(&tree.root_node(), code, "".to_string())?)
+
+        Self::build_tree(&tree.root_node(), code, "".to_string())
     }
 
     fn get_supported_extensions(&self) -> Vec<&'static str> {
@@ -30,7 +38,7 @@ impl RustParser {
     fn build_tree(node: &tree_sitter::Node, source: &str, path: String) -> Result<TreeNode> {
         let start_byte = node.start_byte();
         let end_byte = node.end_byte();
-        let content = if let Ok(s) = std::str::from_utf8(&source.as_bytes()[start_byte..end_byte]) {
+        let content = if let Some(s) = source.get(start_byte..end_byte) {
             s.to_string()
         } else {
             String::new()

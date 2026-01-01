@@ -4,6 +4,12 @@ use serde_yaml::Value;
 
 pub struct YamlParser;
 
+impl Default for YamlParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl YamlParser {
     pub fn new() -> Self {
         Self
@@ -26,6 +32,7 @@ impl ParserEngine for YamlParser {
 }
 
 impl YamlParser {
+    #[allow(clippy::only_used_in_recursion)]
     fn build_value_node(
         &self,
         value: &Value,

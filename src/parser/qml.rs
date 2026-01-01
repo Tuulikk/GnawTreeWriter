@@ -3,6 +3,12 @@ use anyhow::Result;
 
 pub struct QmlParser;
 
+impl Default for QmlParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl QmlParser {
     pub fn new() -> Self {
         Self
@@ -40,7 +46,7 @@ impl ParserEngine for QmlParser {
                     children: Vec::new(),
                 });
             } else if trimmed.ends_with("{") {
-                let component_name = trimmed[..trimmed.len() - 1].trim();
+                let component_name = trimmed.strip_suffix('{').unwrap().trim();
                 if !component_name.is_empty() {
                     let component = TreeNode {
                         id: format!("root.{}", root.children.len()),
@@ -51,11 +57,11 @@ impl ParserEngine for QmlParser {
                         end_line: i + 1,
                         children: Vec::new(),
                     };
-                    
+
                     if let Some((comp, props)) = current_component {
                         component_stack.push((comp, props, depth));
                     }
-                    
+
                     current_component = Some((component, Vec::new()));
                 }
             } else if trimmed.starts_with("}") {

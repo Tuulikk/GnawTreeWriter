@@ -4,6 +4,12 @@ use serde_json::Value;
 
 pub struct JsonParser;
 
+impl Default for JsonParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JsonParser {
     pub fn new() -> Self {
         Self
@@ -26,6 +32,7 @@ impl ParserEngine for JsonParser {
 }
 
 impl JsonParser {
+    #[allow(clippy::only_used_in_recursion)]
     fn build_value_node(
         &self,
         value: &Value,

@@ -1,5 +1,5 @@
-pub mod llm;
 pub mod batch;
+pub mod llm_integration;
 
-pub use llm::*;
 pub use batch::*;
+pub use llm_integration::*;

@@ -288,6 +288,11 @@ Supports Local time (system default) and UTC (RFC3339).
 
 ```bash
 # Restore entire project to specific timestamp (Local time assumed)
+# Restore a single file to the state produced by a transaction (transaction ID from `history` output)
+# Preview a single-file restore:
+gnawtreewriter restore path/to/file.rs <transaction_id> --preview
+# Apply a single-file restore:
+gnawtreewriter restore path/to/file.rs <transaction_id>
 gnawtreewriter restore-project "2025-12-27 15:30:00" --preview
 
 # Restore using precise UTC timestamp
@@ -397,6 +402,84 @@ gnawtreewriter batch ops.json
 }
 ```
 
+**See [BATCH_USAGE.md](BATCH_USAGE.md) for complete documentation and more examples.**
+
+### quick
+Perform fast, safe edits with minimal overhead. Supports two modes: AST-based node editing and text-based find/replace.
+
+**Node-Edit Mode:**
+```bash
+# Preview AST-based edit
+gnawtreewriter quick app.py --node "0.1.0" --content "def new_function():" --preview
+
+# Apply AST-based edit
+gnawtreewriter quick app.py --node "0.1.0" --content "def new_function():"
+```
+
+**Find/Replace Mode:**
+```bash
+# Preview text replacement
+gnawtreewriter quick app.py --find "old_function" --replace "new_function" --preview
+
+# Apply text replacement (global by default)
+gnawtreewriter quick app.py --find "old_function" --replace "new_function"
+```
+
+**Features:**
+- `--preview`: Show diff without applying changes
+- Automatic backup before apply
+- Parser validation for supported file types
+- Transaction logging for undo/redo support
+- Global replacement in find/replace mode
+
+**Use Cases:**
+- Single-line edits via node paths
+- Simple text replacements
+- Fast prototyping with preview
+- Quick fixes without full batch overhead
+
+### diff-to-batch
+Convert unified diffs (git diff format) to batch operation specifications. Enables AI agents and users to provide diffs that can be safely previewed and applied.
+
+```bash
+# Parse diff and show preview
+gnawtreewriter diff-to-batch changes.patch
+
+# Convert diff to batch JSON
+gnawtreewriter diff-to-batch changes.patch --output batch.json
+
+# Preview both diff and batch
+gnawtreewriter diff-to-batch changes.patch --preview
+
+# Apply the generated batch
+gnawtreewriter batch batch.json --preview
+gnawtreewriter batch batch.json
+```
+
+**Features:**
+- Parses unified diff format with full hunk support
+- Converts diffs to BatchEdit operations
+- Validates in-memory before applying
+- Shows diff statistics (files, hunks, +/- lines)
+- Generates JSON batch specification
+- Integrates with existing batch validation and rollback
+
+**Workflow:**
+1. Generate diff (git diff, AI agent output, etc.)
+2. Convert to batch: `gnawtreewriter diff-to-batch changes.patch --output ops.json`
+3. Review batch preview: `gnawtreewriter batch ops.json --preview`
+4. Apply with safety: `gnawtreewriter batch ops.json`
+
+**Example diff (changes.patch):**
+```diff
+--- a/test.py
++++ b/test.py
+@@ -1,3 +1,3 @@
+ def foo():
+-    return "old"
++    return "new"
+     print("hello")
+```
 **Operation Types:**
 - `edit` - Replace node content
 - `insert` - Add new content (position: 0=top, 1=bottom, 2=after properties)

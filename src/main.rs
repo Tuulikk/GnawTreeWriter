@@ -1,7 +1,7 @@
 pub mod cli;
 pub mod core;
-pub mod parser;
 pub mod llm;
+pub mod parser;
 
 use anyhow::Result;
 use clap::Parser;

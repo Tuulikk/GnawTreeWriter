@@ -4,6 +4,12 @@ use regex::Regex;
 
 pub struct CssParser;
 
+impl Default for CssParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CssParser {
     pub fn new() -> Self {
         Self
@@ -45,7 +51,7 @@ impl CssParser {
 
         while current_pos < code.len() {
             let remaining = &code[current_pos..];
-            let remaining_start = current_pos;
+            let _remaining_start = current_pos;
 
             // Skip whitespace and newlines
             if remaining.trim().is_empty() {
@@ -211,6 +217,7 @@ impl CssParser {
         Err(anyhow::anyhow!("Unmatched brace in CSS"))
     }
 
+    #[allow(dead_code)]
     fn count_lines(&self, text: &str) -> usize {
         text.lines().count().max(1)
     }
@@ -228,7 +235,7 @@ impl CssParser {
 
             let child_path = format!("{}.{}", path, i);
 
-            let mut decl_children = vec![
+            let decl_children = vec![
                 TreeNode {
                     id: format!("{}.property", child_path),
                     path: format!("{}.property", child_path),

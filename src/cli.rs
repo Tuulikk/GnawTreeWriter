@@ -1,9 +1,10 @@
 use crate::core::{
-    find_project_root, EditOperation, GnawTreeWriter, RestorationEngine, TagManager,
+    find_project_root, EditOperation, GnawTreeWriter, OperationType, RestorationEngine, TagManager,
     TransactionLog, UndoRedoManager,
 };
 use crate::parser::TreeNode;
 use anyhow::{Context, Result};
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use similar::{ChangeTag, TextDiff};
@@ -202,11 +203,40 @@ enum Commands {
         /// Preview changes without applying
         preview: bool,
     },
+    /// Convert a unified diff to a batch operation specification
+    ///
+    /// Parses a git diff format file and converts it to a batch JSON file.
+    /// This allows AI agents and users to provide diffs that can be previewed and applied atomically.
+    ///
+    /// Examples:
+    ///   gnawtreewriter diff-to-batch changes.patch
+    ///   gnawtreewriter diff-to-batch changes.patch --output batch.json
+    ///   gnawtreewriter diff-to-batch changes.patch --preview
+    DiffToBatch {
+        /// Diff file in unified format (git diff output)
+        diff_file: String,
+        #[arg(short, long)]
+        /// Output JSON file for batch specification (default: batch.json)
+        output: Option<String>,
+        #[arg(short, long)]
+        /// Preview the converted batch without writing to file
+        preview: bool,
+    },
     /// Restore file to a specific transaction state
     Restore {
         file_path: String,
         transaction_id: String,
-        #[arg(short, long)]
+        preview: bool,
+    },
+    /// Quick replace: simple search-and-replace in a file with preview and automatic backup
+    QuickReplace {
+        /// File to operate on
+        file: String,
+        /// Search pattern (literal string)
+        search: String,
+        /// Replacement text
+        replace: String,
+        /// Show preview but don't apply
         preview: bool,
     },
     /// Start a new session (clears current session history)
@@ -469,8 +499,7 @@ impl Cli {
                     })?
                 } else if let Some(p) = node_path {
                     // Support inline 'tag:<name>' syntax in the positional node_path
-                    if p.starts_with("tag:") {
-                        let tag_name = &p["tag:".len()..];
+                    if let Some(tag_name) = p.strip_prefix("tag:") {
                         let current_dir = std::env::current_dir()?;
                         let project_root = find_project_root(&current_dir);
                         let mgr = TagManager::load(&project_root)?;
@@ -517,8 +546,7 @@ impl Cli {
                         anyhow::anyhow!("Tag '{}' not found for {}", tag_name, file_path)
                     })?
                 } else if let Some(p) = parent_path {
-                    if p.starts_with("tag:") {
-                        let tag_name = &p["tag:".len()..];
+                    if let Some(tag_name) = p.strip_prefix("tag:") {
                         let current_dir = std::env::current_dir()?;
                         let project_root = find_project_root(&current_dir);
                         let mgr = TagManager::load(&project_root)?;
@@ -560,8 +588,7 @@ impl Cli {
                         anyhow::anyhow!("Tag '{}' not found for {}", tag_name, file_path)
                     })?
                 } else if let Some(p) = node_path {
-                    if p.starts_with("tag:") {
-                        let tag_name = &p["tag:".len()..];
+                    if let Some(tag_name) = p.strip_prefix("tag:") {
                         let current_dir = std::env::current_dir()?;
                         let project_root = find_project_root(&current_dir);
                         let mgr = TagManager::load(&project_root)?;
@@ -650,6 +677,14 @@ impl Cli {
             } => {
                 Self::handle_restore(&file_path, &transaction_id, preview)?;
             }
+            Commands::QuickReplace {
+                file,
+                search,
+                replace,
+                preview,
+            } => {
+                Self::handle_quick_replace(&file, &search, &replace, preview)?;
+            }
             Commands::SessionStart => {
                 Self::handle_session_start()?;
             }
@@ -714,6 +749,13 @@ impl Cli {
             }
             Commands::Batch { file, preview } => {
                 Self::handle_batch(&file, preview)?;
+            }
+            Commands::DiffToBatch {
+                diff_file,
+                output,
+                preview,
+            } => {
+                Self::handle_diff_to_batch(&diff_file, output.as_deref(), preview)?;
             }
         }
         Ok(())
@@ -869,15 +911,15 @@ impl Cli {
                 let json = serde_json::to_string_pretty(&history)?;
                 println!("{}", json);
             }
-            "table" | _ => {
+            _ => {
                 if history.is_empty() {
                     println!("No transaction history found");
                     return Ok(());
                 }
 
                 println!(
-                    "{:<20} {:<10} {:<30} {:<15} {}",
-                    "Timestamp", "Operation", "File", "Node Path", "Description"
+                    "{:<20} {:<10} {:<30} {:<15} Description",
+                    "Timestamp", "Operation", "File", "Node Path"
                 );
                 println!("{}", "=".repeat(90));
 
@@ -922,12 +964,17 @@ impl Cli {
             println!("  Description: {}", transaction.description);
             println!("\nUse --no-preview to actually perform the restore");
         } else {
-            // TODO: Implement actual restore logic
-            println!("Restore functionality not yet implemented");
-            println!(
-                "Would restore {} using transaction {}",
-                file_path, transaction_id
-            );
+            // Perform the restore using the RestorationEngine
+            let engine = RestorationEngine::new(&project_root)?;
+
+            match engine.restore_file_to_transaction(transaction_id) {
+                Ok(restored_path) => {
+                    println!("✓ Restored: {}", restored_path.display());
+                }
+                Err(e) => {
+                    println!("❌ Restore failed: {}", e);
+                }
+            }
         }
 
         Ok(())
@@ -943,6 +990,45 @@ impl Cli {
             batch.apply()?;
             println!("✓ Batch applied");
         }
+        Ok(())
+    }
+
+    fn handle_diff_to_batch(diff_file: &str, output: Option<&str>, preview: bool) -> Result<()> {
+        use crate::core::diff_parser::{diff_to_batch, parse_diff_file, preview_diff};
+
+        // Parse the diff file
+        let parsed = parse_diff_file(diff_file)
+            .with_context(|| format!("Failed to parse diff file: {}", diff_file))?;
+
+        // Show preview of what the diff contains
+        println!("{}", preview_diff(&parsed));
+
+        // Convert to batch operation
+        let batch =
+            diff_to_batch(&parsed).with_context(|| "Failed to convert diff to batch operation")?;
+
+        if preview {
+            // Show what the batch will do
+            println!("\n=== Batch Preview ===");
+            println!("{}", batch.preview_text()?);
+            println!("\nUse --no-preview to write batch file");
+            return Ok(());
+        }
+
+        // Determine output file path
+        let output_file = output.unwrap_or("batch.json");
+
+        // Write batch specification to JSON
+        let batch_json = serde_json::to_string_pretty(&batch)?;
+        std::fs::write(output_file, batch_json)
+            .with_context(|| format!("Failed to write batch file: {}", output_file))?;
+
+        println!("✓ Diff converted to batch specification: {}", output_file);
+        println!(
+            "  Apply with: gnawtreewriter batch {} --preview",
+            output_file
+        );
+
         Ok(())
     }
 
@@ -1228,6 +1314,64 @@ impl Cli {
                 println!();
                 println!("See BATCH_USAGE.md for complete documentation and examples.");
             }
+            Some("quick") => {
+                println!("⚡ QUICK COMMAND EXAMPLES");
+                println!("=========================");
+                println!();
+                println!("1. Node-edit mode (AST-based):");
+                println!("   gnawtreewriter quick app.py --node \"0.1.0\" --content 'def new_func():' --preview");
+                println!(
+                    "   gnawtreewriter quick app.py --node \"0.1.0\" --content 'def new_func():'"
+                );
+                println!();
+                println!("2. Find/replace mode (text-based):");
+                println!("   gnawtreewriter quick app.py --find 'old_function' --replace 'new_function' --preview");
+                println!(
+                    "   gnawtreewriter quick app.py --find 'old_function' --replace 'new_function'"
+                );
+                println!();
+                println!("3. Safety features:");
+                println!("   --preview: Show diff without applying changes");
+                println!("   Automatic backup before apply");
+                println!("   Parser validation for supported file types");
+                println!("   Transaction logging for undo/redo");
+                println!();
+                println!("**Use Cases:**");
+                println!("  ✅ Quick single-line edits");
+                println!("  ✅ Simple text replacements");
+                println!("  ✅ Fast prototyping with preview");
+            }
+            Some("diff") => {
+                println!("📝 DIFF-TO-BATCH EXAMPLES");
+                println!("===========================");
+                println!();
+                println!("1. Convert unified diff to batch:");
+                println!("   git diff > changes.patch");
+                println!("   gnawtreewriter diff-to-batch changes.patch");
+                println!();
+                println!("2. Preview before conversion:");
+                println!("   gnawtreewriter diff-to-batch changes.patch --preview");
+                println!("   # Shows diff statistics and batch preview");
+                println!();
+                println!("3. Specify output file:");
+                println!("   gnawtreewriter diff-to-batch changes.patch --output ops.json");
+                println!();
+                println!("4. Apply the batch:");
+                println!("   gnawtreewriter batch ops.json --preview");
+                println!("   gnawtreewriter batch ops.json");
+                println!();
+                println!("**Workflow:**");
+                println!("  1. Generate diff (git diff, AI agent output, etc.)");
+                println!("  2. Convert to batch with preview");
+                println!("  3. Review batch preview");
+                println!("  4. Apply with validation and rollback");
+                println!();
+                println!("**Features:**");
+                println!("  ✅ Multi-file diff support");
+                println!("  ✅ In-memory validation");
+                println!("  ✅ Atomic rollback on failure");
+                println!("  ✅ Transaction logging");
+            }
             Some("workflow") => {
                 println!("🔄 COMMON WORKFLOWS");
                 println!("==================");
@@ -1259,6 +1403,10 @@ impl Cli {
                 println!("  gnawtreewriter examples --topic restoration  # Time travel features");
                 println!(
                     "  gnawtreewriter examples --topic batch        # Multi-file batch operations"
+                );
+                println!("  gnawtreewriter examples --topic quick        # Quick edits (node + find/replace)");
+                println!(
+                    "  gnawtreewriter examples --topic diff         # Convert diffs to batch ops"
                 );
                 println!("  gnawtreewriter examples --topic workflow     # Complete workflows");
                 println!();
@@ -1348,6 +1496,52 @@ impl Cli {
                 println!();
                 println!("💡 Always use --preview first to see what will change!");
             }
+            Some("batch") => {
+                println!("📦 BATCH OPERATIONS WIZARD");
+                println!("=========================");
+                println!();
+                println!("Batch operations allow you to apply multiple changes atomically:");
+                println!();
+                println!("A) Create batch JSON from diff:");
+                println!("   git diff > changes.patch");
+                println!("   gnawtreewriter diff-to-batch changes.patch");
+                println!();
+                println!("B) Apply batch operations:");
+                println!("   gnawtreewriter batch ops.json --preview");
+                println!("   gnawtreewriter batch ops.json");
+                println!();
+                println!("C) Batch with tags:");
+                println!("   gnawtreewriter tag add file.py \"0.1\" helper");
+                println!("   # Use '0.1' in batch operations");
+                println!();
+                println!("💡 Perfect for:");
+                println!("  • Multi-file refactoring");
+                println!("  • AI agent workflows");
+                println!("  • Coordinated changes");
+            }
+            Some("quick") => {
+                println!("⚡ QUICK COMMAND WIZARD");
+                println!("=======================");
+                println!();
+                println!("Quick command for fast, safe edits:");
+                println!();
+                println!("A) Node-edit mode:");
+                println!("   gnawtreewriter quick file.py --node \"0.1.0\" --content 'new code' --preview");
+                println!("   # Uses AST-based editing");
+                println!();
+                println!("B) Find/replace mode:");
+                println!("   gnawtreewriter quick file.py --find 'old' --replace 'new' --preview");
+                println!("   # Global text replacement");
+                println!();
+                println!("C) Apply changes:");
+                println!("   gnawtreewriter quick file.py --node \"0.1.0\" --content 'new code'");
+                println!("   # Creates backup, logs transaction");
+                println!();
+                println!("💡 Perfect for:");
+                println!("  • Single-line edits");
+                println!("  • Simple replacements");
+                println!("  • Quick prototyping");
+            }
             Some("troubleshooting") => {
                 println!("🔍 TROUBLESHOOTING WIZARD");
                 println!("========================");
@@ -1386,6 +1580,10 @@ impl Cli {
                 println!("  gnawtreewriter wizard --task first-time        # New user guide");
                 println!("  gnawtreewriter wizard --task editing           # How to edit code");
                 println!("  gnawtreewriter wizard --task restoration       # Time travel features");
+                println!("  gnawtreewriter wizard --task batch            # Multi-file operations");
+                println!(
+                    "  gnawtreewriter wizard --task quick            # Fast edits (node + replace)"
+                );
                 println!("  gnawtreewriter wizard --task troubleshooting   # Fix common problems");
                 println!();
                 println!("Quick help:");
@@ -1457,7 +1655,7 @@ impl Cli {
                     }
                 }
             }
-            "json" | _ => {
+            _ => {
                 println!("{}", serde_json::to_string_pretty(&results)?);
             }
         }
@@ -1491,6 +1689,62 @@ impl Cli {
             }
         }
         Ok(files)
+    }
+
+    fn handle_quick_replace(file: &str, search: &str, replace: &str, preview: bool) -> Result<()> {
+        use std::path::Path;
+
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        let path = Path::new(file);
+
+        // Read original content
+        let original = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file, e))?;
+
+        // Prepare modified content (simple global replace)
+        let modified = original.replace(search, replace);
+
+        // Validate with parser (if available for the file type)
+        if let Err(e) = crate::parser::get_parser(path).and_then(|parser| parser.parse(&modified)) {
+            return Err(anyhow::anyhow!(
+                "Validation failed: {}. Change NOT applied.",
+                e
+            ));
+        }
+
+        if preview {
+            println!("--- QuickReplace preview for: {}", file);
+            print_diff(&original, &modified);
+            println!("\nUse --no-preview to actually apply the change.");
+            return Ok(());
+        }
+
+        // Apply: create backup, log transaction, write file
+        let writer = GnawTreeWriter::new(file)?;
+        // create backup (method in core writer)
+        writer.create_backup()?;
+
+        let before_hash = crate::core::calculate_content_hash(&original);
+        let after_hash = crate::core::calculate_content_hash(&modified);
+
+        let mut tlog = TransactionLog::load(&project_root)?;
+        let txid = tlog.log_transaction(
+            OperationType::Edit,
+            PathBuf::from(file),
+            None,
+            Some(before_hash),
+            Some(after_hash),
+            format!("Quick replace '{}' -> '{}'", search, replace),
+            std::collections::HashMap::new(),
+        )?;
+
+        std::fs::write(path, modified)
+            .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", file, e))?;
+
+        println!("✓ QuickReplace applied (txn {})", txid);
+
+        Ok(())
     }
 
     fn handle_lint(paths: &[String], format: &str, recursive: bool) -> Result<()> {
@@ -1545,7 +1799,7 @@ impl Cli {
                 });
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
-            "text" | _ => {
+            _ => {
                 if issues.is_empty() {
                     println!("✅ No issues found in {} files", total_files);
                 } else {
@@ -1654,4 +1908,136 @@ fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>
     })?;
 
     Ok(local_dt.with_timezone(&Utc))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::transaction_log::OperationType;
+    use anyhow::Result;
+    use chrono::Utc;
+    use std::collections::HashMap;
+    use std::env;
+    use std::fs;
+    use std::sync::Mutex;
+    use tempfile::tempdir;
+
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn test_handle_restore_cli() -> Result<()> {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        // Setup a temporary project root and current working directory
+        let tmp = tempdir()?;
+        let project_root = tmp.path();
+
+        // Create .git directory to mark project root
+        fs::create_dir(project_root.join(".git"))?;
+
+        let orig_dir = env::current_dir()?;
+        env::set_current_dir(project_root)?;
+
+        // Create a file that will be restored
+        let file_path = project_root.join("example.py");
+        fs::write(&file_path, "original")?;
+
+        // Create a backup that contains the 'modified' content (simulating a later backup)
+        let backup_dir = project_root.join(".gnawtreewriter_backups");
+        fs::create_dir_all(&backup_dir)?;
+        let backup_file = backup_dir.join("backup_modified.json");
+        let backup_json = serde_json::json!({
+            "file_path": file_path.to_string_lossy(),
+            "timestamp": Utc::now().to_rfc3339(),
+            "tree": {},
+            "source_code": "modified"
+        });
+        fs::write(&backup_file, serde_json::to_string_pretty(&backup_json)?)?;
+
+        // Log a transaction that has after_hash matching the 'modified' backup
+        let mut tlog = TransactionLog::load(&project_root)?;
+        let after_hash = crate::core::calculate_content_hash("modified");
+        let before_hash = crate::core::calculate_content_hash("original");
+        let txn_id = tlog.log_transaction(
+            OperationType::Edit,
+            file_path.clone(),
+            None,
+            Some(before_hash),
+            Some(after_hash),
+            "Edit for test".to_string(),
+            HashMap::new(),
+        )?;
+
+        // Sanity: file is still the original pre-restore
+        assert_eq!(fs::read_to_string(&file_path)?, "original");
+
+        // Preview should not alter the file
+        Cli::handle_restore(file_path.to_str().unwrap(), &txn_id, true)?;
+        assert_eq!(fs::read_to_string(&file_path)?, "original");
+
+        // Actual restore should replace file content with 'modified'
+        Cli::handle_restore(file_path.to_str().unwrap(), &txn_id, false)?;
+        assert_eq!(fs::read_to_string(&file_path)?, "modified");
+
+        // Restore original cwd
+        env::set_current_dir(orig_dir)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_quick_replace_preview() -> Result<()> {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let tmp = tempdir()?;
+        let project_root = tmp.path();
+
+        // Create .git directory to mark project root
+        fs::create_dir(project_root.join(".git"))?;
+
+        let orig_dir = std::env::current_dir()?;
+        std::env::set_current_dir(project_root)?;
+
+        let file_path = project_root.join("quick_preview.txt");
+        fs::write(&file_path, "hello foo world")?;
+
+        // Preview should not apply the change
+        Cli::handle_quick_replace(file_path.to_str().unwrap(), "foo", "bar", true)?;
+        assert_eq!(fs::read_to_string(&file_path)?, "hello foo world");
+
+        std::env::set_current_dir(orig_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_quick_replace_apply() -> Result<()> {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let tmp = tempdir()?;
+        let project_root = tmp.path();
+
+        // Create .git directory to mark project root
+        fs::create_dir(project_root.join(".git"))?;
+
+        let orig_dir = std::env::current_dir()?;
+        std::env::set_current_dir(project_root)?;
+
+        let file_path = project_root.join("quick_apply.txt");
+        fs::write(&file_path, "hello foo world")?;
+
+        // Apply should change the file, create a backup and log a transaction
+        Cli::handle_quick_replace(file_path.to_str().unwrap(), "foo", "bar", false)?;
+
+        // Verify file content changed
+        assert_eq!(fs::read_to_string(&file_path)?, "hello bar world");
+
+        // Verify a backup directory exists
+        let backup_dir = project_root.join(".gnawtreewriter_backups");
+        assert!(backup_dir.exists());
+
+        // Verify there's at least one transaction for the file
+        let tlog = TransactionLog::load(&project_root)?;
+        let history = tlog.get_file_history(&file_path)?;
+        assert!(!history.is_empty());
+
+        std::env::set_current_dir(orig_dir)?;
+        Ok(())
+    }
 }
