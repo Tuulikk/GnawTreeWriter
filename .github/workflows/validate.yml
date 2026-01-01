@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       reason:
-        description: 'Manual run reason (optional)'
+        description: "Manual run reason (optional)"
         required: false
 
 jobs:
@@ -57,7 +57,7 @@ jobs:
               [ -n "$f" ] || continue
               echo "  -> Checking $f"
               if ! gnawtreewriter analyze "$f" >/dev/null 2>&1; then
-                echo "  ❌ Parse failed: $f"
+                echo "❌ Parse failed: $f"
                 exit 1
               fi
               checked=$((checked + 1))
@@ -67,10 +67,10 @@ jobs:
 
       - name: Lint (optional)
         if: env.CARGO_LINT == 'true'
-        run: |
-          # Example: run lint command if configured
-          gnawtreewriter lint . --recursive --format json || true
+          run: |
+            # Example: run lint command if configured
+            gnawtreewriter lint . --recursive --format json || true
 
       - name: Report manual run reason
         if: github.event_name == 'workflow_dispatch'
-          run: echo "Manual run: ${{ inputs.reason }}"
+          run: echo "Manual run: ${{ github.event.inputs.reason }}"
