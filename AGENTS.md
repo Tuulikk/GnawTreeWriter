@@ -235,6 +235,68 @@ gnawtreewriter undo --steps 3
 - ✅ Single transaction history for coordinated changes
 - ✅ Perfect for multi-agent workflows and refactoring
 
+#### Quick Command (Fast, Single-File Edits)
+
+**Scenario**: Make a quick edit to a single file with minimal overhead
+
+```bash
+# Node-edit mode (AST-based)
+gnawtreewriter quick app.py --node "0.1.0" --content "def new_function():" --preview
+gnawtreewriter quick app.py --node "0.1.0" --content "def new_function():"
+
+# Find/replace mode (text-based)
+gnawtreewriter quick app.py --find "old_function" --replace "new_function" --preview
+gnawtreewriter quick app.py --find "old_function" --replace "new_function"
+```
+
+**Key Benefits for AI Agents:**
+- ✅ Lower overhead than full batch operations
+- ✅ Perfect for single-line or simple edits
+- ✅ Preview mode for safe exploration
+- ✅ Automatic backup and transaction logging
+- ✅ Parser validation for supported file types
+
+#### Diff-to-Batch (AI Agent Integration)
+
+**Scenario**: Convert a unified diff (from git or AI agent) to a safe batch operation
+
+```bash
+# Step 1: Generate or receive a diff
+git diff > changes.patch
+# OR AI agent produces diff as output
+
+# Step 2: Preview the diff
+gnawtreewriter diff-to-batch changes.patch
+
+# Step 3: Convert to batch JSON
+gnawtreewriter diff-to-batch changes.patch --output batch.json
+
+# Step 4: Review batch preview
+gnawtreewriter batch batch.json --preview
+
+# Step 5: Apply with safety
+gnawtreewriter batch batch.json
+```
+
+**Example diff (changes.patch):**
+```diff
+--- a/test.py
++++ b/test.py
+@@ -1,3 +1,3 @@
+ def foo():
+-    return "old"
++    return "new"
+     print("hello")
+```
+
+**Key Benefits for AI Agents:**
+- ✅ AI agents can output standard unified diffs
+- ✅ Automatic conversion to safe batch operations
+- ✅ Full validation before application
+- ✅ Atomic rollback if diff fails to apply
+- ✅ Transaction logging for undo/redo
+- ✅ Preview mode to review before applying
+
 ---
 
 ## 🤝 Contribution Areas
