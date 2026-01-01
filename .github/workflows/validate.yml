@@ -3,11 +3,6 @@ name: Validate
 on:
   push:
   pull_request:
-  workflow_dispatch:
-    inputs:
-      reason:
-        description: "Manual run reason (optional) - v2"
-        required: false
 
 jobs:
   validate:
@@ -68,7 +63,3 @@ jobs:
         run: |
           # Example: run lint command if configured
           gnawtreewriter lint . --recursive --format json || true
-
-      - name: Report manual run reason
-        if: github.event_name == 'workflow_dispatch'
-        run: echo "Manual run: ${{ github.event.inputs.reason }}"
