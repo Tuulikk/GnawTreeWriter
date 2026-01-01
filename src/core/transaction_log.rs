@@ -21,7 +21,7 @@ pub struct Transaction {
     pub metadata: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OperationType {
     Edit,
     Insert,
@@ -271,13 +271,13 @@ impl TransactionLog {
         let mut files: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
 
         for transaction in full_history {
-            if transaction.session_id == session_id {
-                if matches!(
+            if transaction.session_id == session_id
+                && matches!(
                     transaction.operation,
                     OperationType::Edit | OperationType::Insert | OperationType::Delete
-                ) {
-                    files.insert(transaction.file_path);
-                }
+                )
+            {
+                files.insert(transaction.file_path);
             }
         }
 

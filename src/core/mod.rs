@@ -96,12 +96,6 @@ impl GnawTreeWriter {
         Ok(backup_path)
     }
 
-    fn get_backup_dir(&self) -> Result<PathBuf> {
-        // Deprecated/Modified in create_backup but kept for potential other uses
-        let project_root = find_project_root(Path::new(&self.file_path));
-        Ok(project_root.join(".gnawtreewriter_backups"))
-    }
-
     pub fn analyze(&self) -> &TreeNode {
         &self.tree
     }
@@ -263,11 +257,7 @@ impl GnawTreeWriter {
                     last_prop_line
                 } else {
                     // Fallback to top (after brace if exists)
-                    if parent.content.trim_start().starts_with('{') {
-                        parent.start_line
-                    } else {
-                        parent.start_line
-                    }
+                    parent.start_line
                 }
             }
             _ => return Err(anyhow::anyhow!("Invalid position: {}", position)),

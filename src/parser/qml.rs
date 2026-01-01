@@ -40,7 +40,7 @@ impl ParserEngine for QmlParser {
                     children: Vec::new(),
                 });
             } else if trimmed.ends_with("{") {
-                let component_name = trimmed[..trimmed.len() - 1].trim();
+                let component_name = trimmed.strip_suffix('{').unwrap().trim();
                 if !component_name.is_empty() {
                     let component = TreeNode {
                         id: format!("root.{}", root.children.len()),

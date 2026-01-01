@@ -44,7 +44,7 @@ pub fn list_backup_files<P: AsRef<Path>>(backup_dir: P) -> Result<Vec<BackupFile
         let entry = entry.context("Failed to read directory entry")?;
         let path = entry.path();
 
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "json") {
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
             match parse_backup_file(&path) {
                 Ok(b) => backups.push(b),
                 Err(_) => {

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 /// Engine for executing file and project restoration operations
 pub struct RestorationEngine {
-    project_root: PathBuf,
+    _project_root: PathBuf,
     backup_dir: PathBuf,
     transaction_log: TransactionLog,
 }
@@ -40,7 +40,7 @@ impl RestorationEngine {
         }
 
         Ok(Self {
-            project_root,
+            _project_root: project_root,
             backup_dir,
             transaction_log,
         })
@@ -429,7 +429,7 @@ mod tests {
         let engine = RestorationEngine::new(temp_dir.path()).unwrap();
 
         assert!(engine.backup_dir.exists());
-        assert_eq!(engine.project_root, temp_dir.path());
+        assert_eq!(engine._project_root, temp_dir.path());
     }
 
     #[test]

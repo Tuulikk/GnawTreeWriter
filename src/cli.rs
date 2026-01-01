@@ -1,9 +1,10 @@
 use crate::core::{
-    find_project_root, EditOperation, GnawTreeWriter, RestorationEngine, TagManager,
+    find_project_root, EditOperation, GnawTreeWriter, OperationType, RestorationEngine, TagManager,
     TransactionLog, UndoRedoManager,
 };
 use crate::parser::TreeNode;
 use anyhow::{Context, Result};
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use similar::{ChangeTag, TextDiff};
@@ -479,8 +480,7 @@ impl Cli {
                     })?
                 } else if let Some(p) = node_path {
                     // Support inline 'tag:<name>' syntax in the positional node_path
-                    if p.starts_with("tag:") {
-                        let tag_name = &p["tag:".len()..];
+                    if let Some(tag_name) = p.strip_prefix("tag:") {
                         let current_dir = std::env::current_dir()?;
                         let project_root = find_project_root(&current_dir);
                         let mgr = TagManager::load(&project_root)?;
@@ -527,8 +527,7 @@ impl Cli {
                         anyhow::anyhow!("Tag '{}' not found for {}", tag_name, file_path)
                     })?
                 } else if let Some(p) = parent_path {
-                    if p.starts_with("tag:") {
-                        let tag_name = &p["tag:".len()..];
+                    if let Some(tag_name) = p.strip_prefix("tag:") {
                         let current_dir = std::env::current_dir()?;
                         let project_root = find_project_root(&current_dir);
                         let mgr = TagManager::load(&project_root)?;
@@ -570,8 +569,7 @@ impl Cli {
                         anyhow::anyhow!("Tag '{}' not found for {}", tag_name, file_path)
                     })?
                 } else if let Some(p) = node_path {
-                    if p.starts_with("tag:") {
-                        let tag_name = &p["tag:".len()..];
+                    if let Some(tag_name) = p.strip_prefix("tag:") {
                         let current_dir = std::env::current_dir()?;
                         let project_root = find_project_root(&current_dir);
                         let mgr = TagManager::load(&project_root)?;
@@ -887,15 +885,15 @@ impl Cli {
                 let json = serde_json::to_string_pretty(&history)?;
                 println!("{}", json);
             }
-            "table" | _ => {
+            _ => {
                 if history.is_empty() {
                     println!("No transaction history found");
                     return Ok(());
                 }
 
                 println!(
-                    "{:<20} {:<10} {:<30} {:<15} {}",
-                    "Timestamp", "Operation", "File", "Node Path", "Description"
+                    "{:<20} {:<10} {:<30} {:<15} Description",
+                    "Timestamp", "Operation", "File", "Node Path"
                 );
                 println!("{}", "=".repeat(90));
 
@@ -1480,7 +1478,7 @@ impl Cli {
                     }
                 }
             }
-            "json" | _ => {
+            _ => {
                 println!("{}", serde_json::to_string_pretty(&results)?);
             }
         }
@@ -1514,6 +1512,62 @@ impl Cli {
             }
         }
         Ok(files)
+    }
+
+    fn handle_quick_replace(file: &str, search: &str, replace: &str, preview: bool) -> Result<()> {
+        use std::path::Path;
+
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        let path = Path::new(file);
+
+        // Read original content
+        let original = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file, e))?;
+
+        // Prepare modified content (simple global replace)
+        let modified = original.replace(search, replace);
+
+        // Validate with parser (if available for the file type)
+        if let Err(e) = crate::parser::get_parser(path).and_then(|parser| parser.parse(&modified)) {
+            return Err(anyhow::anyhow!(
+                "Validation failed: {}. Change NOT applied.",
+                e
+            ));
+        }
+
+        if preview {
+            println!("--- QuickReplace preview for: {}", file);
+            print_diff(&original, &modified);
+            println!("\nUse --no-preview to actually apply the change.");
+            return Ok(());
+        }
+
+        // Apply: create backup, log transaction, write file
+        let writer = GnawTreeWriter::new(file)?;
+        // create backup (method in core writer)
+        writer.create_backup()?;
+
+        let before_hash = crate::core::calculate_content_hash(&original);
+        let after_hash = crate::core::calculate_content_hash(&modified);
+
+        let mut tlog = TransactionLog::load(&project_root)?;
+        let txid = tlog.log_transaction(
+            OperationType::Edit,
+            PathBuf::from(file),
+            None,
+            Some(before_hash),
+            Some(after_hash),
+            format!("Quick replace '{}' -> '{}'", search, replace),
+            std::collections::HashMap::new(),
+        )?;
+
+        std::fs::write(path, modified)
+            .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", file, e))?;
+
+        println!("✓ QuickReplace applied (txn {})", txid);
+
+        Ok(())
     }
 
     fn handle_lint(paths: &[String], format: &str, recursive: bool) -> Result<()> {
@@ -1568,7 +1622,7 @@ impl Cli {
                 });
                 println!("{}", serde_json::to_string_pretty(&result)?);
             }
-            "text" | _ => {
+            _ => {
                 if issues.is_empty() {
                     println!("✅ No issues found in {} files", total_files);
                 } else {
@@ -1679,64 +1733,6 @@ fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>
     Ok(local_dt.with_timezone(&Utc))
 }
 
-fn handle_quick_replace(file: &str, search: &str, replace: &str, preview: bool) -> Result<()> {
-    use std::path::Path;
-
-    let current_dir = std::env::current_dir()?;
-    let project_root = find_project_root(&current_dir);
-    let path = Path::new(file);
-
-    // Read original content
-    let original = std::fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file, e))?;
-
-    // Prepare modified content (simple global replace)
-    let modified = original.replace(search, replace);
-
-    // Validate with parser (if available for the file type)
-    if let Err(e) = crate::parser::get_parser(path)
-        .and_then(|parser| parser.parse(&modified).map_err(|err| err.into()))
-    {
-        return Err(anyhow::anyhow!(
-            "Validation failed: {}. Change NOT applied.",
-            e
-        ));
-    }
-
-    if preview {
-        println!("--- QuickReplace preview for: {}", file);
-        print_diff(&original, &modified);
-        println!("\nUse --no-preview to actually apply the change.");
-        return Ok(());
-    }
-
-    // Apply: create backup, log transaction, write file
-    let writer = GnawTreeWriter::new(file)?;
-    // create backup (method in core writer)
-    writer.create_backup()?;
-
-    let before_hash = crate::core::calculate_content_hash(&original);
-    let after_hash = crate::core::calculate_content_hash(&modified);
-
-    let mut tlog = TransactionLog::load(&project_root)?;
-    let txid = tlog.log_transaction(
-        OperationType::Edit,
-        PathBuf::from(file),
-        None,
-        Some(before_hash),
-        Some(after_hash),
-        format!("Quick replace '{}' -> '{}'", search, replace),
-        std::collections::HashMap::new(),
-    )?;
-
-    std::fs::write(path, modified)
-        .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", file, e))?;
-
-    println!("✓ QuickReplace applied (txn {})", txid);
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1746,13 +1742,21 @@ mod tests {
     use std::collections::HashMap;
     use std::env;
     use std::fs;
+    use std::sync::Mutex;
     use tempfile::tempdir;
+
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_handle_restore_cli() -> Result<()> {
+        let _guard = TEST_MUTEX.lock().unwrap();
         // Setup a temporary project root and current working directory
         let tmp = tempdir()?;
         let project_root = tmp.path();
+
+        // Create .git directory to mark project root
+        fs::create_dir(project_root.join(".git"))?;
+
         let orig_dir = env::current_dir()?;
         env::set_current_dir(project_root)?;
 
@@ -1805,8 +1809,13 @@ mod tests {
 
     #[test]
     fn test_quick_replace_preview() -> Result<()> {
+        let _guard = TEST_MUTEX.lock().unwrap();
         let tmp = tempdir()?;
         let project_root = tmp.path();
+
+        // Create .git directory to mark project root
+        fs::create_dir(project_root.join(".git"))?;
+
         let orig_dir = std::env::current_dir()?;
         std::env::set_current_dir(project_root)?;
 
@@ -1823,8 +1832,13 @@ mod tests {
 
     #[test]
     fn test_quick_replace_apply() -> Result<()> {
+        let _guard = TEST_MUTEX.lock().unwrap();
         let tmp = tempdir()?;
         let project_root = tmp.path();
+
+        // Create .git directory to mark project root
+        fs::create_dir(project_root.join(".git"))?;
+
         let orig_dir = std::env::current_dir()?;
         std::env::set_current_dir(project_root)?;
 

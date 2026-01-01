@@ -74,11 +74,7 @@ impl TagManager {
         node_path: &str,
         force: bool,
     ) -> Result<()> {
-        let file_entry = self
-            .tags
-            .files
-            .entry(file_path.to_string())
-            .or_insert_with(FileTags::default);
+        let file_entry = self.tags.files.entry(file_path.to_string()).or_default();
 
         if file_entry.tags.contains_key(name) && !force {
             anyhow::bail!(

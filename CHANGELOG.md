@@ -2,6 +2,37 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.3.1] - 2025-12-31 (Unreleased)
+
+### Added
+- **Test Robustness**: Added mutex-based CWD protection to CLI tests to prevent race conditions when changing directories
+- **Test Environment**: Created `.git` directory mock in test temporary directories for proper project root detection
+
+### Changed
+- **Code Quality**: Reduced clippy warnings from 46 to 23 through systematic cleanup
+- **Parser Improvements**: Fixed string slicing in multiple parsers (go, html, php, python, rust, typescript) using `source.get()` instead of `as_bytes()` + `from_utf8()`
+- **Module Structure**: Renamed `src/llm/llm.rs` to `src/llm/llm_integration.rs` to resolve module inception warning
+- **Backup Directory Renaming**: Renamed unused `project_root` field to `_project_root` in `RestorationEngine`
+
+### Fixed
+- **Clippy Warnings**: 
+  - Removed unused imports (Context) from parser module
+  - Removed dead code (get_backup_dir, unused add function)
+  - Fixed manual_strip warnings using strip_prefix
+  - Fixed wildcard_in_or_patterns warnings
+  - Fixed print_literal warnings in CLI output
+  - Removed useless conversions (.into())
+  - Fixed if_same_then_else warnings
+  - Fixed collapsible_if warnings
+  - Replaced map_or(false, ...) with is_some_and(...)
+  - Removed empty line after doc comment
+  - Fixed unnecessary map of identity function
+  - Fixed needless_borrow warnings in LLM module
+  - Removed unnecessary Ok(?) wrapping in multiple parsers
+  - Fixed manual suffix stripping using strip_suffix in QML parser
+- **CLI Quick Command**: Fixed handle_quick_replace function placement and integration
+- **Test Failures**: All 27 tests now passing after fixing test environment setup
+
 ## [0.3.0] - 2025-12-28
 
 ### Added
