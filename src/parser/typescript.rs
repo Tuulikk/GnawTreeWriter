@@ -3,6 +3,12 @@ use anyhow::Result;
 
 pub struct TypeScriptParser;
 
+impl Default for TypeScriptParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TypeScriptParser {
     pub fn new() -> Self {
         Self

@@ -223,7 +223,7 @@ pub fn diff_to_batch(diff: &ParsedDiff) -> Result<Batch> {
 
                 file_operations
                     .entry(file_path.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(batch_edit);
             }
         } else if !additions.is_empty() {
@@ -248,7 +248,7 @@ pub fn diff_to_batch(diff: &ParsedDiff) -> Result<Batch> {
 
                 file_operations
                     .entry(file_path.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(batch_edit);
             }
         }
@@ -256,11 +256,11 @@ pub fn diff_to_batch(diff: &ParsedDiff) -> Result<Batch> {
 
     // Convert to Batch structure
     let mut batch = Batch::new();
-    for (file_path, operations) in file_operations {
+    if let Some((file_path, operations)) = file_operations.into_iter().next() {
         // Note: We're creating a separate Batch for each file
         // This is simplified - a real implementation might merge them
         batch = Batch::with_file(file_path.to_string_lossy().to_string(), operations);
-        break; // For MVP, just handle first file
+        // For MVP, just handle first file
     }
 
     Ok(batch)
@@ -288,10 +288,7 @@ pub fn preview_diff(diff: &ParsedDiff) -> String {
 
     let mut file_hunks: HashMap<&PathBuf, Vec<&DiffHunk>> = HashMap::new();
     for hunk in &diff.hunks {
-        file_hunks
-            .entry(&hunk.file_path)
-            .or_insert_with(Vec::new)
-            .push(hunk);
+        file_hunks.entry(&hunk.file_path).or_default().push(hunk);
     }
 
     for (file_path, hunks) in file_hunks {

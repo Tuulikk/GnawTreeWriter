@@ -135,6 +135,7 @@ impl TransactionLog {
     }
 
     /// Log a new transaction
+    #[allow(clippy::too_many_arguments)]
     pub fn log_transaction(
         &mut self,
         operation: OperationType,

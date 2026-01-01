@@ -3,6 +3,12 @@ use anyhow::Result;
 
 pub struct PhpParser;
 
+impl Default for PhpParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PhpParser {
     pub fn new() -> Self {
         Self

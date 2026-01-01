@@ -3,6 +3,12 @@ use anyhow::Result;
 
 pub struct RustParser;
 
+impl Default for RustParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RustParser {
     pub fn new() -> Self {
         Self

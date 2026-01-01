@@ -4,6 +4,12 @@ use tree_sitter::{Language, Parser};
 
 pub struct GoParser;
 
+impl Default for GoParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GoParser {
     pub fn new() -> Self {
         Self

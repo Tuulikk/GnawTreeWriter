@@ -194,6 +194,7 @@ impl GnawTreeWriter {
         }
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn find_node<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode> {
         if tree.path == path {
             return Some(tree);

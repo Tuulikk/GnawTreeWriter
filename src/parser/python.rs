@@ -4,6 +4,12 @@ use tree_sitter::Parser;
 
 pub struct PythonParser;
 
+impl Default for PythonParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PythonParser {
     pub fn new() -> Self {
         Self

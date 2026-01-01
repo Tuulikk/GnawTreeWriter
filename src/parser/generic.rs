@@ -12,6 +12,12 @@ pub const GENERIC_NODE_TYPE: &str = "generic";
 /// a dedicated AST parser.
 pub struct GenericParser;
 
+impl Default for GenericParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GenericParser {
     pub fn new() -> Self {
         Self {}

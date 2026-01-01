@@ -3,6 +3,12 @@ use anyhow::Result;
 
 pub struct QmlParser;
 
+impl Default for QmlParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl QmlParser {
     pub fn new() -> Self {
         Self

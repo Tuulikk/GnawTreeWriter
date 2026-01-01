@@ -76,7 +76,7 @@ pub struct FileDiff {
     pub after: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Default)]
 pub struct Batch {
     pub description: Option<String>,
     pub operations: Vec<BatchOp>,
@@ -85,10 +85,7 @@ pub struct Batch {
 impl Batch {
     /// Create a new empty batch
     pub fn new() -> Self {
-        Self {
-            description: None,
-            operations: Vec::new(),
-        }
+        Self::default()
     }
 
     /// Create a batch with operations for a single file

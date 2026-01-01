@@ -3,6 +3,12 @@ use anyhow::Result;
 
 pub struct QmlTreeSitterParser;
 
+impl Default for QmlTreeSitterParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl QmlTreeSitterParser {
     pub fn new() -> Self {
         Self
