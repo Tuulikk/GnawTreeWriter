@@ -187,7 +187,7 @@ pub fn diff_to_batch(diff: &ParsedDiff) -> Result<Batch> {
 
         if !deletions.is_empty() {
             // Extract deleted content
-            let deleted_content: String = deletions
+            let _deleted_content: String = deletions
                 .iter()
                 .map(|l| match l {
                     DiffLine::Deletion(s) => s.as_str(),

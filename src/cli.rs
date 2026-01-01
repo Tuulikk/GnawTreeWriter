@@ -1314,6 +1314,64 @@ impl Cli {
                 println!();
                 println!("See BATCH_USAGE.md for complete documentation and examples.");
             }
+            Some("quick") => {
+                println!("⚡ QUICK COMMAND EXAMPLES");
+                println!("=========================");
+                println!();
+                println!("1. Node-edit mode (AST-based):");
+                println!("   gnawtreewriter quick app.py --node \"0.1.0\" --content 'def new_func():' --preview");
+                println!(
+                    "   gnawtreewriter quick app.py --node \"0.1.0\" --content 'def new_func():'"
+                );
+                println!();
+                println!("2. Find/replace mode (text-based):");
+                println!("   gnawtreewriter quick app.py --find 'old_function' --replace 'new_function' --preview");
+                println!(
+                    "   gnawtreewriter quick app.py --find 'old_function' --replace 'new_function'"
+                );
+                println!();
+                println!("3. Safety features:");
+                println!("   --preview: Show diff without applying changes");
+                println!("   Automatic backup before apply");
+                println!("   Parser validation for supported file types");
+                println!("   Transaction logging for undo/redo");
+                println!();
+                println!("**Use Cases:**");
+                println!("  ✅ Quick single-line edits");
+                println!("  ✅ Simple text replacements");
+                println!("  ✅ Fast prototyping with preview");
+            }
+            Some("diff") => {
+                println!("📝 DIFF-TO-BATCH EXAMPLES");
+                println!("===========================");
+                println!();
+                println!("1. Convert unified diff to batch:");
+                println!("   git diff > changes.patch");
+                println!("   gnawtreewriter diff-to-batch changes.patch");
+                println!();
+                println!("2. Preview before conversion:");
+                println!("   gnawtreewriter diff-to-batch changes.patch --preview");
+                println!("   # Shows diff statistics and batch preview");
+                println!();
+                println!("3. Specify output file:");
+                println!("   gnawtreewriter diff-to-batch changes.patch --output ops.json");
+                println!();
+                println!("4. Apply the batch:");
+                println!("   gnawtreewriter batch ops.json --preview");
+                println!("   gnawtreewriter batch ops.json");
+                println!();
+                println!("**Workflow:**");
+                println!("  1. Generate diff (git diff, AI agent output, etc.)");
+                println!("  2. Convert to batch with preview");
+                println!("  3. Review batch preview");
+                println!("  4. Apply with validation and rollback");
+                println!();
+                println!("**Features:**");
+                println!("  ✅ Multi-file diff support");
+                println!("  ✅ In-memory validation");
+                println!("  ✅ Atomic rollback on failure");
+                println!("  ✅ Transaction logging");
+            }
             Some("workflow") => {
                 println!("🔄 COMMON WORKFLOWS");
                 println!("==================");
@@ -1345,6 +1403,10 @@ impl Cli {
                 println!("  gnawtreewriter examples --topic restoration  # Time travel features");
                 println!(
                     "  gnawtreewriter examples --topic batch        # Multi-file batch operations"
+                );
+                println!("  gnawtreewriter examples --topic quick        # Quick edits (node + find/replace)");
+                println!(
+                    "  gnawtreewriter examples --topic diff         # Convert diffs to batch ops"
                 );
                 println!("  gnawtreewriter examples --topic workflow     # Complete workflows");
                 println!();
@@ -1434,6 +1496,52 @@ impl Cli {
                 println!();
                 println!("💡 Always use --preview first to see what will change!");
             }
+            Some("batch") => {
+                println!("📦 BATCH OPERATIONS WIZARD");
+                println!("=========================");
+                println!();
+                println!("Batch operations allow you to apply multiple changes atomically:");
+                println!();
+                println!("A) Create batch JSON from diff:");
+                println!("   git diff > changes.patch");
+                println!("   gnawtreewriter diff-to-batch changes.patch");
+                println!();
+                println!("B) Apply batch operations:");
+                println!("   gnawtreewriter batch ops.json --preview");
+                println!("   gnawtreewriter batch ops.json");
+                println!();
+                println!("C) Batch with tags:");
+                println!("   gnawtreewriter tag add file.py \"0.1\" helper");
+                println!("   # Use '0.1' in batch operations");
+                println!();
+                println!("💡 Perfect for:");
+                println!("  • Multi-file refactoring");
+                println!("  • AI agent workflows");
+                println!("  • Coordinated changes");
+            }
+            Some("quick") => {
+                println!("⚡ QUICK COMMAND WIZARD");
+                println!("=======================");
+                println!();
+                println!("Quick command for fast, safe edits:");
+                println!();
+                println!("A) Node-edit mode:");
+                println!("   gnawtreewriter quick file.py --node \"0.1.0\" --content 'new code' --preview");
+                println!("   # Uses AST-based editing");
+                println!();
+                println!("B) Find/replace mode:");
+                println!("   gnawtreewriter quick file.py --find 'old' --replace 'new' --preview");
+                println!("   # Global text replacement");
+                println!();
+                println!("C) Apply changes:");
+                println!("   gnawtreewriter quick file.py --node \"0.1.0\" --content 'new code'");
+                println!("   # Creates backup, logs transaction");
+                println!();
+                println!("💡 Perfect for:");
+                println!("  • Single-line edits");
+                println!("  • Simple replacements");
+                println!("  • Quick prototyping");
+            }
             Some("troubleshooting") => {
                 println!("🔍 TROUBLESHOOTING WIZARD");
                 println!("========================");
@@ -1472,6 +1580,10 @@ impl Cli {
                 println!("  gnawtreewriter wizard --task first-time        # New user guide");
                 println!("  gnawtreewriter wizard --task editing           # How to edit code");
                 println!("  gnawtreewriter wizard --task restoration       # Time travel features");
+                println!("  gnawtreewriter wizard --task batch            # Multi-file operations");
+                println!(
+                    "  gnawtreewriter wizard --task quick            # Fast edits (node + replace)"
+                );
                 println!("  gnawtreewriter wizard --task troubleshooting   # Fix common problems");
                 println!();
                 println!("Quick help:");
