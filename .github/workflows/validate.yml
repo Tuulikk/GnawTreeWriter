@@ -67,10 +67,10 @@ jobs:
 
       - name: Lint (optional)
         if: env.CARGO_LINT == 'true'
-          run: |
-            # Example: run lint command if configured
-            gnawtreewriter lint . --recursive --format json || true
+        run: |
+          # Example: run lint command if configured
+          gnawtreewriter lint . --recursive --format json || true
 
       - name: Report manual run reason
         if: github.event_name == 'workflow_dispatch'
-          run: echo "Manual run: ${{ github.event.inputs.reason }}"
+        run: echo "Manual run: ${{ github.event.inputs.reason }}"
