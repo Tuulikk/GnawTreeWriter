@@ -41,8 +41,11 @@ GnawTreeWriter/
 ### Supported Languages
 - Python (`.py`)
 - Rust (`.rs`)
+- C (`.c`, `.h`)
+- C++ (`.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx`, `.h++`)
 - TypeScript (`.ts`, `.tsx`)
 - JavaScript (`.js`, `.jsx`)
+- Bash (`.sh`, `.bash`)
 - PHP (`.php`)
 - HTML (`.html`)
 - QML (`.qml`)
@@ -51,6 +54,7 @@ GnawTreeWriter/
 - YAML (`.yaml`, `.yml`)
 - TOML (`.toml`)
 - XML (`.xml`)
+- Markdown (`.md`, `.markdown`)
 
 ---
 
@@ -108,36 +112,40 @@ gnawtreewriter fuzzy-edit src/main.rs "Commands::Edit" 'Commands::Validate { fil
 
 #### Implementing a New Parser
 
-**Scenario**: Add support for a new language (e.g., C++)
+**Scenario**: Add support for a new language (e.g., Java)
 
 ```bash
 # Step 1: Create new parser file
-cat > src/parser/cpp.rs << 'EOF'
+cat > src/parser/java.rs << 'EOF'
 use crate::parser::ParserEngine;
 use anyhow::Result;
-use tree_sitter::{Parser, Language};
+use tree_sitter::Parser;
 
-pub struct CppParser;
+pub struct JavaParser;
 
-impl ParserEngine for CppParser {
+impl ParserEngine for JavaParser {
     fn parse(&self, code: &str) -> Result<crate::core::TreeNode> {
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_cpp::language())?;
+        let language = unsafe {
+            std::mem::transmute::<tree_sitter_language::LanguageFn, fn() -> tree_sitter::Language>(
+                tree_sitter_java::LANGUAGE,
+            )()
+        };
+        parser.set_language(&language)?;
         // Implementation details...
     }
     
     fn get_supported_extensions(&self) -> Vec<&'static str> {
-        vec!["cpp", "cc", "cxx", "h", "hpp"]
+        vec!["java"]
     }
 }
 EOF
 
 # Step 2: Update Cargo.toml to add dependency
-gnawtreewriter fuzzy-edit Cargo.toml "tree-sitter" 'tree-sitter-cpp = "0.22"' --preview
+gnawtreewriter fuzzy-edit Cargo.toml "tree-sitter-bash" 'tree-sitter-java = "0.23"' --preview
 
-# Step 3: Update main.rs to register the parser
-gnawtreewriter list src/main.rs --filter-type function_definition
-gnawtreewriter fuzzy-edit src/main.rs "register_parsers" 'parsers.push(Box::new(parser::cpp::CppParser));' --preview
+# Step 3: Update parser/mod.rs to register the parser
+gnawtreewriter fuzzy-edit src/parser/mod.rs '"go" => Ok' '"java" => Ok(Box::new(java::JavaParser::new())),' --preview
 ```
 
 #### Adding Tests
@@ -304,7 +312,7 @@ gnawtreewriter batch batch.json
 AI agents can contribute to several areas of the project:
 
 ### 1. Parser Development
-- Add support for new languages (C++, Java, Kotlin, etc.)
+- Add support for new languages (Java, Kotlin, Swift, etc.)
 - Improve existing parsers (better AST representation, edge cases)
 - Optimize parser performance
 

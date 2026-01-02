@@ -2,6 +2,36 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.3.4] - 2025-01-03
+
+### Added
+- **C Language Support**: Full TreeSitter-based parser for C (`.c`, `.h`)
+- **C++ Language Support**: Full TreeSitter-based parser for C++ (`.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx`, `.h++`)
+- **Bash Language Support**: Full TreeSitter-based parser for Bash (`.sh`, `.bash`)
+- **Example Files**: Added example files for C, C++, and Bash in `examples/` directory
+
+### Changed
+- **TreeSitter Upgrade**: Upgraded core `tree-sitter` from 0.24 to 0.26.3 (latest)
+- **Parser Updates**: Updated all language parser crates to latest compatible versions:
+  - `tree-sitter-python`: 0.25.0
+  - `tree-sitter-rust`: 0.24.0
+  - `tree-sitter-go`: 0.25.0
+  - `tree-sitter-php`: 0.24.2
+  - `tree-sitter-bash`: 0.25.1
+  - `tree-sitter-c`: 0.24.1
+  - `tree-sitter-cpp`: 0.23.4
+  - `tree-sitter-html`: 0.23.2
+  - `tree-sitter-typescript`: 0.23.2
+  - `tree-sitter-javascript`: 0.25.0
+- **Parser API**: Updated all parser implementations to use tree-sitter 0.26 API with LanguageFn
+- **Documentation**: Updated README with new language support (C, C++, Bash)
+
+### Fixed
+- **Clippy Warnings**: Fixed all 4 remaining clippy warnings:
+  - Removed duplicated `#[cfg(test)]` attribute in undo_redo.rs
+  - Removed needless borrows in cli.rs TransactionLog::load calls
+  - Replaced `find().is_some()` with `any()` in xml.rs for cleaner iterator usage
+
 ## [0.3.3] - 2025-01-02
 
 ### Changed
