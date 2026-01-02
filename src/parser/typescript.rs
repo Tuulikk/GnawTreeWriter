@@ -18,9 +18,12 @@ impl TypeScriptParser {
 impl ParserEngine for TypeScriptParser {
     fn parse(&self, code: &str) -> Result<TreeNode> {
         let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_typescript::language_tsx())
-            .expect("Failed to load TypeScript grammar");
+        let language = unsafe {
+            std::mem::transmute::<tree_sitter_language::LanguageFn, fn() -> tree_sitter::Language>(
+                tree_sitter_typescript::LANGUAGE_TSX,
+            )()
+        };
+        parser.set_language(&language)?;
 
         let tree = parser
             .parse(code, None)

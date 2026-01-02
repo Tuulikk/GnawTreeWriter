@@ -1,3 +1,6 @@
+pub mod bash;
+pub mod c;
+pub mod cpp;
 pub mod css;
 pub mod generic;
 pub mod go;
@@ -48,6 +51,9 @@ pub fn get_parser(file_path: &Path) -> Result<Box<dyn ParserEngine>> {
         "php" => Ok(Box::new(php::PhpParser::new())),
         "html" | "htm" => Ok(Box::new(html::HtmlParser::new())),
         "go" => Ok(Box::new(go::GoParser::new())),
+        "c" | "h" => Ok(Box::new(c::CParser::new())),
+        "cpp" | "hpp" | "cc" | "cxx" | "hxx" | "h++" => Ok(Box::new(cpp::CppParser::new())),
+        "sh" | "bash" => Ok(Box::new(bash::BashParser::new())),
         "css" => Ok(Box::new(css::CssParser::new())),
         "xml" | "svg" | "xsl" | "xsd" | "rss" | "atom" => Ok(Box::new(xml::XmlParser::new())),
         "md" | "markdown" => Ok(Box::new(markdown::MarkdownParser::new())),

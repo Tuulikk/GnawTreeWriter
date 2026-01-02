@@ -19,9 +19,12 @@ impl PythonParser {
 impl ParserEngine for PythonParser {
     fn parse(&self, code: &str) -> Result<TreeNode> {
         let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_python::language())
-            .expect("Failed to load Python grammar");
+        let language = unsafe {
+            std::mem::transmute::<tree_sitter_language::LanguageFn, fn() -> tree_sitter::Language>(
+                tree_sitter_python::LANGUAGE,
+            )()
+        };
+        parser.set_language(&language)?;
         let tree = parser
             .parse(code, None)
             .ok_or_else(|| anyhow::anyhow!("Failed to parse Python"))?;

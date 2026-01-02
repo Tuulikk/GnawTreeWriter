@@ -1,43 +1,24 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use crate::parser::{ParserEngine, TreeNode};
 use anyhow::Result;
+use tree_sitter::Parser;
 
-pub struct HtmlParser;
+pub struct CppParser;
 
-impl Default for HtmlParser {
+impl Default for CppParser {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl HtmlParser {
+impl CppParser {
     pub fn new() -> Self {
         Self
     }
-}
 
-impl ParserEngine for HtmlParser {
-    fn parse(&self, code: &str) -> Result<TreeNode> {
-        let mut parser = tree_sitter::Parser::new();
-        let language = unsafe {
-            std::mem::transmute::<tree_sitter_language::LanguageFn, fn() -> tree_sitter::Language>(
-                tree_sitter_html::LANGUAGE,
-            )()
-        };
-        parser.set_language(&language)?;
-
-        let tree = parser
-            .parse(code, None)
-            .ok_or_else(|| anyhow::anyhow!("Failed to parse HTML"))?;
-
-        Self::build_tree(&tree.root_node(), code, "".to_string())
-    }
-
-    fn get_supported_extensions(&self) -> Vec<&'static str> {
-        vec!["html", "htm"]
-    }
-}
-
-impl HtmlParser {
     fn build_tree(node: &tree_sitter::Node, source: &str, path: String) -> Result<TreeNode> {
         let start_byte = node.start_byte();
         let end_byte = node.end_byte();
@@ -74,5 +55,27 @@ impl HtmlParser {
             end_line,
             children,
         })
+    }
+}
+
+impl ParserEngine for CppParser {
+    fn parse(&self, source_code: &str) -> Result<TreeNode> {
+        let mut parser = Parser::new();
+        let language = unsafe {
+            std::mem::transmute::<tree_sitter_language::LanguageFn, fn() -> tree_sitter::Language>(
+                tree_sitter_cpp::LANGUAGE,
+            )()
+        };
+        parser.set_language(&language)?;
+
+        let tree = parser
+            .parse(source_code, None)
+            .ok_or_else(|| anyhow::anyhow!("Failed to parse C++ code"))?;
+
+        Self::build_tree(&tree.root_node(), source_code, String::new())
+    }
+
+    fn get_supported_extensions(&self) -> Vec<&'static str> {
+        vec!["cpp", "hpp", "cc", "cxx", "hxx", "h++"]
     }
 }

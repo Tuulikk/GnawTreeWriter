@@ -1,6 +1,6 @@
 use crate::parser::{ParserEngine, TreeNode};
 use anyhow::Result;
-use tree_sitter::{Language, Parser};
+use tree_sitter::Parser;
 
 pub struct GoParser;
 
@@ -57,7 +57,11 @@ impl GoParser {
 impl ParserEngine for GoParser {
     fn parse(&self, source_code: &str) -> Result<TreeNode> {
         let mut parser = Parser::new();
-        let language: Language = tree_sitter_go::language();
+        let language = unsafe {
+            std::mem::transmute::<tree_sitter_language::LanguageFn, fn() -> tree_sitter::Language>(
+                tree_sitter_go::LANGUAGE,
+            )()
+        };
         parser.set_language(&language)?;
 
         let tree = parser
