@@ -2,7 +2,12 @@
 
 All notable changes to GnawTreeWriter.
 
-## [0.3.2] - 2025-12-31 (Unreleased)
+## [0.3.3] - 2025-01-02
+
+### Changed
+- **Documentation**: Added Installation section at top of README for better GitHub visibility
+
+## [0.3.2] - 2025-12-31
 
 ### Added
 - **Diff-to-Batch**: New `gnawtreewriter diff-to-batch` command that converts unified diffs (git diff format) to batch operation specifications
