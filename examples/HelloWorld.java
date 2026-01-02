@@ -1,0 +1,48 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+public class HelloWorld {
+
+    public static void main(String[] args) {
+        System.out.println("Hello, World!");
+
+        sayHello("Java");
+
+        int sum = add(5, 3);
+        System.out.println("5 + 3 = " + sum);
+    }
+
+    public static void greet(String name) {
+        System.out.println("Hello, " + name + "!");
+    }
+
+    public static int add(int a, int b) {
+        return a + b;
+    }
+}
+
+class Calculator {
+
+    public int multiply(int a, int b) {
+        return a * b;
+    }
+
+    public int divide(int a, int b) {
+        if (b == 0) {
+            throw new IllegalArgumentException("Division by zero");
+        }
+        return a / b;
+    }
+}
+
+interface Greeter {
+    void greet(String name);
+}
+
+class SimpleGreeter implements Greeter {
+    @Override
+    public void greet(String name) {
+        System.out.println("Hi there, " + name + "!");
+    }
+}

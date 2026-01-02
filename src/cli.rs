@@ -23,6 +23,9 @@ use similar::{ChangeTag, TextDiff};
 pub struct Cli {
     #[command(subcommand)]
     command: Commands,
+    #[arg(long, global = true)]
+    /// Show what would happen without making any changes
+    dry_run: bool,
 }
 
 #[derive(Subcommand)]
@@ -240,15 +243,43 @@ enum Commands {
         search: String,
         /// Replacement text
         replace: String,
+        #[arg(short, long)]
         /// Show preview but don't apply
         preview: bool,
+        #[arg(long)]
+        /// Manually unescape \n sequences (useful for some shells)
+        unescape_newlines: bool,
     },
+    /// Refactor: rename symbols across files with AST-aware renaming
+    ///
+    /// Revolutionary AST-based renaming that understands code structure.
+    /// Rename functions, variables, classes with confidence - knows declarations from usages.
+    /// Perfect for large refactorings where search-and-replace would be dangerous.
+    ///
+    /// Examples:
+    ///   gnawtreewriter refactor rename myFunction newFunction app.py --preview
+    ///   gnawtreewriter refactor rename MyClass NewClass src/ --recursive
+    ///   gnawtreewriter refactor rename count increment main.rs
+    Rename {
+        /// Symbol name to rename (function, variable, class, etc.)
+        symbol_name: String,
+        /// New name for symbol
+        new_name: String,
+        /// Starting file or directory to search for symbol
+        path: String,
+        #[arg(short, long)]
+        /// Recursively search in directory
+        recursive: bool,
+        #[arg(short, long)]
+        /// Preview changes without applying them
+        preview: bool,
+    },
+    /// Debug hash calculation for troubleshooting
+    DebugHash { content: String },
     /// Start a new session (clears current session history)
     SessionStart,
     /// Show current undo/redo state
     Status,
-    /// Debug hash calculation for troubleshooting
-    DebugHash { content: String },
     /// Restore entire project to a specific point in time
     ///
     /// Revolutionary time-travel feature that restores all changed files
@@ -686,8 +717,18 @@ impl Cli {
                 search,
                 replace,
                 preview,
+                unescape_newlines,
             } => {
-                Self::handle_quick_replace(&file, &search, &replace, preview)?;
+                Self::handle_quick_replace(&file, &search, &replace, unescape_newlines, preview)?;
+            }
+            Commands::Rename {
+                symbol_name,
+                new_name,
+                path,
+                recursive,
+                preview,
+            } => {
+                Self::handle_rename(&symbol_name, &new_name, &path, recursive, preview)?;
             }
             Commands::SessionStart => {
                 Self::handle_session_start()?;
@@ -1695,7 +1736,13 @@ impl Cli {
         Ok(files)
     }
 
-    fn handle_quick_replace(file: &str, search: &str, replace: &str, preview: bool) -> Result<()> {
+    fn handle_quick_replace(
+        file: &str,
+        search: &str,
+        replace: &str,
+        unescape_newlines: bool,
+        preview: bool,
+    ) -> Result<()> {
         use std::path::Path;
 
         let current_dir = std::env::current_dir()?;
@@ -1706,10 +1753,17 @@ impl Cli {
         let original = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file, e))?;
 
-        // Prepare modified content (simple global replace)
-        let modified = original.replace(search, replace);
+        // Process replacement text if unescape_newlines is set
+        let replacement_text = if unescape_newlines {
+            replace.replace("\\n", "\n")
+        } else {
+            replace.to_string()
+        };
 
-        // Validate with parser (if available for the file type)
+        // Prepare modified content (simple global replace)
+        let modified = original.replace(search, &replacement_text);
+
+        // Validate with parser (if available for file type)
         if let Err(e) = crate::parser::get_parser(path).and_then(|parser| parser.parse(&modified)) {
             return Err(anyhow::anyhow!(
                 "Validation failed: {}. Change NOT applied.",
@@ -1726,7 +1780,6 @@ impl Cli {
 
         // Apply: create backup, log transaction, write file
         let writer = GnawTreeWriter::new(file)?;
-        // create backup (method in core writer)
         writer.create_backup()?;
 
         let before_hash = crate::core::calculate_content_hash(&original);
@@ -1747,6 +1800,94 @@ impl Cli {
             .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", file, e))?;
 
         println!("✓ QuickReplace applied (txn {})", txid);
+
+        Ok(())
+    }
+
+    fn handle_rename(
+        symbol_name: &str,
+        new_name: &str,
+        path: &str,
+        recursive: bool,
+        preview: bool,
+    ) -> Result<()> {
+        use crate::core::{format_refactor_results, RefactorEngine};
+
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+
+        println!("🔄 Refactoring: rename '{}' -> '{}'", symbol_name, new_name);
+
+        // Create refactor engine
+        let engine = RefactorEngine::new(project_root.clone());
+
+        if preview {
+            println!("--- Preview mode (dry run) ---\n");
+            let results = engine.preview_rename(symbol_name, new_name, path, recursive)?;
+            println!("{}", format_refactor_results(&results));
+            println!("\nUse --no-preview to actually apply the rename.");
+        } else {
+            // Validate new name doesn't clash with reserved keywords
+            // Check if path is a directory or file to determine language
+            let path_buf = std::path::PathBuf::from(path);
+            if path_buf.is_dir() {
+                println!("⚠️  Recursive renaming in directory - will check multiple languages");
+            } else if let Some(ext) = path_buf.extension() {
+                let lang = match ext.to_str() {
+                    Some("py") => "python",
+                    Some("rs") => "rust",
+                    Some("java") => "java",
+                    Some("kt") | Some("kts") => "kotlin",
+                    Some("cpp") | Some("hpp") => "cpp",
+                    Some("c") | Some("h") => "c",
+                    Some("go") => "go",
+                    Some("js") | Some("jsx") => "javascript",
+                    Some("ts") | Some("tsx") => "typescript",
+                    Some("php") => "php",
+                    Some("sh") | Some("bash") => "bash",
+                    _ => "generic",
+                };
+
+                if !engine.validate_symbol_name(new_name, lang)? {
+                    return Err(anyhow::anyhow!(
+                        "Invalid symbol name: '{}' is a reserved keyword in {}",
+                        new_name,
+                        lang
+                    ));
+                }
+            }
+
+            // Perform the rename
+            let results = engine.rename_symbol(symbol_name, new_name, path, recursive)?;
+            println!("{}", format_refactor_results(&results));
+
+            // Log transaction summary
+            let total_renamed: usize = results.iter().map(|r| r.occurrences_renamed).sum();
+            let mut tlog = TransactionLog::load(&project_root)?;
+
+            for result in &results {
+                if result.occurrences_renamed > 0 {
+                    let _ = tlog.log_transaction(
+                        OperationType::Edit,
+                        result.file_path.clone(),
+                        None,
+                        None,
+                        None,
+                        format!(
+                            "Rename '{}' -> '{}' ({} occurrences)",
+                            symbol_name, new_name, result.occurrences_renamed
+                        ),
+                        std::collections::HashMap::new(),
+                    );
+                }
+            }
+
+            println!(
+                "✓ Refactor complete: {} occurrences renamed across {} file(s)",
+                total_renamed,
+                results.len()
+            );
+        }
 
         Ok(())
     }
@@ -2003,8 +2144,8 @@ mod tests {
         let file_path = project_root.join("quick_preview.txt");
         fs::write(&file_path, "hello foo world")?;
 
-        // Preview should not apply the change
-        Cli::handle_quick_replace(file_path.to_str().unwrap(), "foo", "bar", true)?;
+        // Preview should not apply changes
+        Cli::handle_quick_replace(file_path.to_str().unwrap(), "foo", "bar", false, true)?;
         assert_eq!(fs::read_to_string(&file_path)?, "hello foo world");
 
         std::env::set_current_dir(orig_dir)?;
@@ -2027,10 +2168,18 @@ mod tests {
         fs::write(&file_path, "hello foo world")?;
 
         // Apply should change the file, create a backup and log a transaction
-        Cli::handle_quick_replace(file_path.to_str().unwrap(), "foo", "bar", false)?;
+        Cli::handle_quick_replace(file_path.to_str().unwrap(), "foo", "bar", false, false)?;
 
         // Verify file content changed
         assert_eq!(fs::read_to_string(&file_path)?, "hello bar world");
+
+        // Verify backup was created and transaction was logged
+        let backup_dir = project_root.join(".gnawtreewriter_backups");
+        assert!(backup_dir.exists());
+
+        let tlog = TransactionLog::load(&project_root)?;
+        let history = tlog.get_file_history(&file_path)?;
+        assert!(!history.is_empty());
 
         // Verify a backup directory exists
         let backup_dir = project_root.join(".gnawtreewriter_backups");
