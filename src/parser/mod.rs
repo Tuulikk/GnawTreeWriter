@@ -18,6 +18,7 @@ pub mod toml;
 pub mod typescript;
 pub mod xml;
 pub mod yaml;
+pub mod zig;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -56,6 +57,7 @@ pub fn get_parser(file_path: &Path) -> Result<Box<dyn ParserEngine>> {
         "cpp" | "hpp" | "cc" | "cxx" | "hxx" | "h++" => Ok(Box::new(cpp::CppParser::new())),
         "sh" | "bash" => Ok(Box::new(bash::BashParser::new())),
         "java" => Ok(Box::new(java::JavaParser::new())),
+        "zig" => Ok(Box::new(zig::ZigParser::new())),
         "css" => Ok(Box::new(css::CssParser::new())),
         "xml" | "svg" | "xsl" | "xsd" | "rss" | "atom" => Ok(Box::new(xml::XmlParser::new())),
         "md" | "markdown" => Ok(Box::new(markdown::MarkdownParser::new())),

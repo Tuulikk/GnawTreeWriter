@@ -1,10 +1,118 @@
 # GnawTreeWriter
 
-Tree-based code editor for LLM-assisted editing. Edit code files based on tree structure levels, avoiding bracket issues and structural problems from LLM code generation.
+**AI-native tree-based code editor** - Edit code files based on AST structure levels, avoiding bracket issues and structural problems from LLM code generation.
+
+## 🎉 First Public Release!
+
+We're excited to announce that GnawTreeWriter is now **public**! This release brings powerful new capabilities to make your AI-assisted development faster, safer, and more productive.
+
+### 🌍 What's New in v0.4.0
+
+**Java Language Support**
+- Full TreeSitter-based parser for Java (`.java`)
+- Support for classes, interfaces, methods, and all Java constructs
+- Complete example: `examples/HelloWorld.java`
+
+**Refactor/Rename Command**
+- AST-aware symbol renaming across files
+- Rename functions, variables, and classes with confidence
+- Distinguishes declarations from usages
+- Recursive directory search with `--recursive` flag
+- Validates new names against language-specific reserved keywords
+- Preview mode: `--preview` or `--dry-run`
+
+**Clone Operation**
+- Duplicate code nodes/structures within or between files
+- Clone functions, classes, or any AST node
+- Preview mode shows diff before applying
+- Perfect for creating similar components or duplicating boilerplate
+
+**Global Dry-Run**
+- `--dry-run` flag for all write operations
+- Preview changes before applying them
+- Increases safety across the entire tool
+
+### 🎯 What This Means
+
+GnawTreeWriter now provides:
+- **17 supported programming languages** (including Java and Zig!)
+- **AST-level precision editing** for LLMs
+- **Safe refactoring** that understands code structure (Rename + Clone)
+- **Time travel** with automatic backups
+- **Atomic multi-file operations** with rollback
+- **Validation-first approach** - check before writing
+
+### 📚 Try It Today
+
+```bash
+# Clone the repository
+git clone https://github.com/Tuulikk/GnawTreeWriter.git
+
+# Analyze a Java file
+gnawtreewriter analyze examples/HelloWorld.java
+
+# Preview refactoring a method
+gnawtreewriter rename greet sayHello examples/HelloWorld.java --preview
+
+# Actually apply the rename
+gnawtreewriter rename greet sayHello examples/HelloWorld.java
+
+# Clone a function (duplicate it)
+gnawtreewriter clone examples/hello.zig "3" examples/hello.zig "0" --preview
+
+# Use dry-run for any operation
+gnawtreewriter edit app.py "0.1" 'def new(): pass' --dry-run
+```
+
+### 🚀 Road Ahead
+
+Looking toward **v1.0**, we're planning:
+- 25+ supported languages
+- Complete refactoring suite (Move, Extract Method)
+- Semantic search
+- Interactive mode and progress indicators
+- Config file support
+
+Your feedback helps us get there faster!
+
+## About
+
+GnawTreeWriter is a revolutionary CLI tool designed specifically for AI-assisted development. It provides precise, safe, and structured code editing capabilities that traditional tools and AI assistants cannot match.
+
+### Key Features
+
+- **AST-Level Precision**: Edit code at the abstract syntax tree level, not as raw text - target functions, classes, variables with confidence
+- **Multi-Language Support**: 16 programming languages with TreeSitter-based parsers
+- **Temporal Control**: Project-wide time travel with automatic backups and session management
+- **Atomic Multi-File Operations**: Coordinated edits across multiple files with rollback on failure
+- **Safe by Design**: Preview all changes, validate syntax before applying, automatic undo/redo
+- **AI-Native Architecture**: Built from the ground up for LLM workflows, not retrofitted
+
+### Why GnawTreeWriter?
+
+Traditional code editing struggles with AI-generated code:
+- ❌ **Bracket mismatches** - LLMs often miss brackets
+- ❌ **Indentation errors** - Wrong spacing breaks builds
+- ❌ **Dangerous refactoring** - Search-and-replace can break unrelated code
+- ❌ **No safety net** - One mistake can corrupt files
+
+GnawTreeWriter solves these problems:
+- ✅ **Structure-aware editing** - Edit at AST level, brackets never get lost
+- ✅ **Context-rich operations** - Understand entire codebase, not just current file
+- ✅ **Safe refactoring** - Rename functions/classes with AST-aware symbol recognition
+- ✅ **Time travel** - Undo mistakes, restore entire project to any timestamp
+- ✅ **Validation-first** - All edits validated in memory before writing
+
+### Use Cases
+
+- **AI Agents**: Autonomous code generation with safe editing and rollback capabilities
+- **Developers**: Quick, precise edits with syntax validation
+- **Refactoring**: Rename symbols across entire codebases with confidence
+- **Code Review**: Understand code structure without reading entire files
 
 ## Features
 
-- **Multi-language support**: Python, Rust, C, C++, TypeScript/TSX, JavaScript, PHP, Bash, HTML, QML, Go, CSS, YAML, TOML, JSON, XML, Markdown
+- **Multi-language support**: Python, Rust, C, C++, Java, Zig, TypeScript/TSX, JavaScript, PHP, Bash, HTML, QML, Go, CSS, YAML, TOML, JSON, XML, Markdown
 - **Tree-based editing**: Work at AST level, not raw text
 - **Precise edits**: Target specific nodes with dot-notation paths
 - **LLM-optimized**: Structured edit requests and detailed context
@@ -18,6 +126,8 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 - **Session management**: Track and undo entire AI agent workflows
 - **Interactive help system**: Examples, wizards, and comprehensive guidance
 - **AI-native design**: Built specifically for AI-assisted development
+
+## Installation
 
 ## Installation
 
@@ -354,6 +464,7 @@ See [AI_AGENT_TEST_SCENARIOS.md](AI_AGENT_TEST_SCENARIOS.md) for comprehensive t
 | C | `.c`, `.h` | TreeSitter | ✅ Stable |
 | C++ | `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx`, `.h++` | TreeSitter | ✅ Stable |
 | Java | `.java` | TreeSitter | ✅ Stable |
+| Zig | `.zig` | TreeSitter | ✅ Stable |
 | TypeScript | `.ts`, `.tsx` | TreeSitter | ✅ Stable |
 | JavaScript | `.js`, `.jsx` | TreeSitter | ✅ Stable |
 | Bash | `.sh`, `.bash` | TreeSitter | ✅ Stable |

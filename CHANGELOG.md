@@ -2,6 +2,34 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.5.0] - 2025-01-06
+
+### Added
+- **Clone Operation**: Duplicate code nodes/structures within or between files
+  - Clone functions, classes, or any AST node with `gnawtreewriter clone`
+  - Preview mode shows diff before applying
+  - Supports same-file or cross-file cloning
+  - Perfect for creating similar components or duplicating boilerplate
+- **Zig Language Support**: Full TreeSitter-based parser for Zig (`.zig`)
+  - Support for functions, structs, tests, and all Zig constructs
+  - Added example file: `examples/hello.zig`
+
+### Examples
+```bash
+# Clone a function within same file
+gnawtreewriter clone app.py "0.1" app.py "0.2" --preview
+
+# Clone between files
+gnawtreewriter clone src.rs "1.0" dest.rs "2.0"
+
+# Analyze Zig code
+gnawtreewriter list examples/hello.zig --filter-type function_declaration
+```
+
+### Changed
+- Updated README with Zig language support
+- Updated AGENTS.md with Clone operation examples
+
 ## [0.4.0] - 2025-01-03
 
 ### Added

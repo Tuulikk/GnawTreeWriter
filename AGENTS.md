@@ -44,6 +44,7 @@ GnawTreeWriter/
 - C (`.c`, `.h`)
 - C++ (`.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx`, `.h++`)
 - Java (`.java`)
+- Zig (`.zig`)
 - TypeScript (`.ts`, `.tsx`)
 - JavaScript (`.js`, `.jsx`)
 - Bash (`.sh`, `.bash`)

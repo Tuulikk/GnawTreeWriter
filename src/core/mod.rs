@@ -37,6 +37,11 @@ pub enum EditOperation {
         node_path: String,
         content: String,
     },
+    Clone {
+        source_path: String,
+        target_path: String,
+        target_node: Option<String>,
+    },
     Insert {
         parent_path: String,
         position: usize,
@@ -125,6 +130,17 @@ impl GnawTreeWriter {
                 content,
             } => self.insert_node(&self.tree, parent_path, *position, content)?,
             EditOperation::Delete { node_path } => self.delete_node(&self.tree, node_path)?,
+            EditOperation::Clone {
+                source_path,
+                target_path,
+                target_node,
+            } => {
+                // Clone is handled in CLI layer, not in core edit
+                let _ = (source_path, target_path, target_node);
+                return Err(anyhow::anyhow!(
+                    "Clone operation should be handled in CLI layer"
+                ));
+            }
         };
 
         // VALIDATION: Try to parse the modified code in memory before saving
@@ -164,6 +180,16 @@ impl GnawTreeWriter {
                 Some(node_path.clone()),
                 format!("Deleted node at path: {}", node_path),
             ),
+            EditOperation::Clone {
+                source_path,
+                target_path,
+                target_node,
+            } => {
+                let _ = (source_path, target_path, target_node);
+                return Err(anyhow::anyhow!(
+                    "Clone operation should be handled in CLI layer"
+                ));
+            }
         };
 
         let _transaction_id = self.transaction_log.log_transaction(
@@ -193,6 +219,16 @@ impl GnawTreeWriter {
                 content,
             } => self.insert_node(&self.tree, &parent_path, position, &content),
             EditOperation::Delete { node_path } => self.delete_node(&self.tree, &node_path),
+            EditOperation::Clone {
+                source_path,
+                target_path,
+                target_node,
+            } => {
+                // Clone is handled in CLI layer, not core layer
+                // This is just a placeholder for preview
+                let _ = (source_path, target_path, target_node);
+                Ok(self.source_code.clone())
+            }
         }
     }
 

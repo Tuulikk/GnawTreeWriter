@@ -274,6 +274,30 @@ enum Commands {
         /// Preview changes without applying them
         preview: bool,
     },
+    /// Clone: duplicate code nodes or entire files
+    ///
+    /// Copy code structures (functions, classes, etc.) within or between files.
+    /// Perfect for creating similar components or duplicating boilerplate code.
+    ///
+    /// Examples:
+    ///   gnawtreewriter clone app.py "0.1" "0.2" --preview
+    ///   gnawtreewriter clone src.rs "1.0" dest.rs "2.0"
+    ///   gnawtreewriter clone main.py "0.1.2" utils.py "0.0" --preview
+    Clone {
+        /// Source file path
+        source_file: String,
+        /// Source node path (use 'list' to find paths)
+        source_path: String,
+        /// Target file path (can be same as source)
+        #[arg(required_unless_present = "target_path")]
+        target_file: Option<String>,
+        /// Target node path where to insert cloned content
+        #[arg(required_unless_present = "target_file")]
+        target_path: Option<String>,
+        #[arg(short, long)]
+        /// Preview changes without applying them
+        preview: bool,
+    },
     /// Debug hash calculation for troubleshooting
     DebugHash { content: String },
     /// Start a new session (clears current session history)
@@ -729,6 +753,21 @@ impl Cli {
                 preview,
             } => {
                 Self::handle_rename(&symbol_name, &new_name, &path, recursive, preview)?;
+            }
+            Commands::Clone {
+                source_file,
+                source_path,
+                target_file,
+                target_path,
+                preview,
+            } => {
+                Self::handle_clone(
+                    &source_file,
+                    &source_path,
+                    target_file.as_deref(),
+                    target_path.as_deref(),
+                    preview,
+                )?;
             }
             Commands::SessionStart => {
                 Self::handle_session_start()?;
@@ -1890,6 +1929,89 @@ impl Cli {
         }
 
         Ok(())
+    }
+
+    fn handle_clone(
+        source_file: &str,
+        source_path: &str,
+        target_file: Option<&str>,
+        target_path: Option<&str>,
+        preview: bool,
+    ) -> Result<()> {
+        use crate::parser::get_parser;
+
+        // Determine target file (default to source file if not specified)
+        let target_file_path = target_file.unwrap_or(source_file);
+
+        // Read source file and parse
+        let parser = get_parser(std::path::Path::new(source_file))?;
+        let source_code = std::fs::read_to_string(source_file)
+            .with_context(|| format!("Failed to read source file: {}", source_file))?;
+        let source_tree = parser
+            .parse(&source_code)
+            .with_context(|| format!("Failed to parse source file: {}", source_file))?;
+
+        // Find the source node to clone
+        let source_node = Self::find_node_by_path(&source_tree, source_path)
+            .ok_or_else(|| anyhow::anyhow!("Source node not found at path: {}", source_path))?;
+
+        println!("🔄 Cloning node from {} [{}]", source_file, source_path);
+        println!("  Node type: {}", source_node.node_type);
+        println!(
+            "  Lines: {}-{}",
+            source_node.start_line, source_node.end_line
+        );
+        println!("  Content length: {} characters", source_node.content.len());
+
+        // If no target path specified, we're doing a simple clone within same file
+        if target_path.is_none() {
+            return Err(anyhow::anyhow!(
+                "Target path must be specified. Use: gnawtreewriter clone {} {} <target_file> <target_path>",
+                source_file,
+                source_path
+            ));
+        }
+
+        let target_node_path = target_path.unwrap();
+
+        // Clone operation: Insert the cloned content at target location
+        let mut writer = GnawTreeWriter::new(target_file_path)?;
+        let op = EditOperation::Insert {
+            parent_path: target_node_path.to_string(),
+            position: 1, // Insert at bottom of parent
+            content: source_node.content.clone(),
+        };
+
+        if preview {
+            let modified = writer.preview_edit(op)?;
+            print_diff(writer.get_source(), &modified);
+            println!("\n✓ Preview complete");
+            println!(
+                "  Would clone to: {} [{}]",
+                target_file_path, target_node_path
+            );
+            println!("\nUse without --preview to apply the clone");
+        } else {
+            writer.edit(op)?;
+            println!(
+                "✓ Successfully cloned node to {} [{}]",
+                target_file_path, target_node_path
+            );
+        }
+
+        Ok(())
+    }
+
+    fn find_node_by_path<'a>(tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode> {
+        if tree.path == path {
+            return Some(tree);
+        }
+        for child in &tree.children {
+            if let Some(node) = Self::find_node_by_path(child, path) {
+                return Some(node);
+            }
+        }
+        None
     }
 
     fn handle_lint(paths: &[String], format: &str, recursive: bool) -> Result<()> {
