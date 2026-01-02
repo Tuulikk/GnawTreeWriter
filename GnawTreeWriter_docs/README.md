@@ -4,7 +4,7 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 
 ## Features
 
-- **Multi-language support**: Python, Rust, C, C++, TypeScript/TSX, JavaScript, PHP, Bash, HTML, QML, Go, CSS, YAML, TOML, JSON, XML, Markdown
+- **Multi-language support**: Python, Rust, C, C++, Java, TypeScript/TSX, JavaScript, PHP, Bash, HTML, QML, Go, CSS, YAML, TOML, JSON, XML, Markdown
 - **Tree-based editing**: Work at AST level, not raw text
 - **Precise edits**: Target specific nodes with dot-notation paths
 - **LLM-optimized**: Structured edit requests and detailed context
@@ -140,6 +140,7 @@ See [AI_AGENT_TEST_SCENARIOS.md](AI_AGENT_TEST_SCENARIOS.md) for comprehensive t
 | Rust | `.rs` | TreeSitter | ✅ Stable |
 | C | `.c`, `.h` | TreeSitter | ✅ Stable |
 | C++ | `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx`, `.h++` | TreeSitter | ✅ Stable |
+| Java | `.java` | TreeSitter | ✅ Stable |
 | TypeScript | `.ts`, `.tsx` | TreeSitter | ✅ Stable |
 | JavaScript | `.js`, `.jsx` | TreeSitter | ✅ Stable |
 | Bash | `.sh`, `.bash` | TreeSitter | ✅ Stable |

@@ -37,13 +37,11 @@ pub struct RenameChange {
 }
 
 /// Main refactor engine
-pub struct RefactorEngine {
-    project_root: PathBuf,
-}
+pub struct RefactorEngine {}
 
 impl RefactorEngine {
-    pub fn new(project_root: PathBuf) -> Self {
-        Self { project_root }
+    pub fn new(_project_root: PathBuf) -> Self {
+        Self {}
     }
 
     /// Find all occurrences of a symbol in the project

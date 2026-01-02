@@ -43,6 +43,7 @@ GnawTreeWriter/
 - Rust (`.rs`)
 - C (`.c`, `.h`)
 - C++ (`.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx`, `.h++`)
+- Java (`.java`)
 - TypeScript (`.ts`, `.tsx`)
 - JavaScript (`.js`, `.jsx`)
 - Bash (`.sh`, `.bash`)

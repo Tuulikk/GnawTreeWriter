@@ -353,6 +353,7 @@ See [AI_AGENT_TEST_SCENARIOS.md](AI_AGENT_TEST_SCENARIOS.md) for comprehensive t
 | Rust | `.rs` | TreeSitter | ✅ Stable |
 | C | `.c`, `.h` | TreeSitter | ✅ Stable |
 | C++ | `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx`, `.h++` | TreeSitter | ✅ Stable |
+| Java | `.java` | TreeSitter | ✅ Stable |
 | TypeScript | `.ts`, `.tsx` | TreeSitter | ✅ Stable |
 | JavaScript | `.js`, `.jsx` | TreeSitter | ✅ Stable |
 | Bash | `.sh`, `.bash` | TreeSitter | ✅ Stable |

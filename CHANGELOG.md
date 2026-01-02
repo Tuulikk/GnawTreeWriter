@@ -2,12 +2,49 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.4.0] - 2025-01-03
+
+### Added
+- **Java Language Support**: Full TreeSitter-based parser for Java (`.java`)
+  - AST parsing for classes, methods, interfaces, and all Java constructs
+  - Added example file: `examples/HelloWorld.java`
+- **Refactor/Rename Command**: AST-aware symbol renaming across files
+  - Rename functions, variables, classes with confidence
+  - Distinguishes declarations from usages
+  - Perfect for large refactorings where search-and-replace would be dangerous
+  - Recursively search directories with `--recursive` flag
+  - Preview mode with `--preview` flag
+  - Validates new symbol names against language-specific reserved keywords
+- **Dry-run Support**: Global `--dry-run` flag for all write operations
+  - Preview what would happen without making changes
+  - Increases safety across all commands
+
+### Changed
+- Updated README with Java and Refactor/Rename documentation
+- Updated AGENTS.md with new refactoring examples
+
+### Examples
+```bash
+# Rename a function in a single file
+gnawtreewriter rename myFunction newFunction app.py
+
+# Preview renaming a method across a Java file
+gnawtreewriter rename greet sayHello examples/HelloWorld.java --preview
+
+# Rename a class recursively across entire project
+gnawtreewriter rename MyClass NewClass src/ --recursive
+```
+
+### Fixed
+- Fixed QuickReplace test parameter handling to include all 5 parameters
+
 ## [0.3.4] - 2025-01-03
 
 ### Added
 - **C Language Support**: Full TreeSitter-based parser for C (`.c`, `.h`)
 - **C++ Language Support**: Full TreeSitter-based parser for C++ (`.cpp`, `.hpp`, `.cc`, `.cxx`, `.hxx`, `.h++`)
 - **Bash Language Support**: Full TreeSitter-based parser for Bash (`.sh`, `.bash`)
+- **Java Language Support**: Full TreeSitter-based parser for Java (`.java`)
 - **Example Files**: Added example files for C, C++, and Bash in `examples/` directory
 
 ### Changed
