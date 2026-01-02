@@ -1123,8 +1123,6 @@ The Mozilla Public License 2.0 ensures that:
 
 This means if you improve the parser or core functionality, those improvements benefit everyone. But you can still build proprietary integrations and commercial products around it.
 
-**Note:** As the sole copyright holder, Gnaw Software changed the license from MIT/Apache-2.0 to MPL-2.0 (January 2, 2025) to better protect the project from proprietary forks while maintaining commercial viability.
-
 ### Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you shall be under the terms of the Mozilla Public License 2.0, without any additional terms or conditions.
