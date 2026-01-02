@@ -19,6 +19,42 @@ Tree-based code editor for LLM-assisted editing. Edit code files based on tree s
 - **Interactive help system**: Examples, wizards, and comprehensive guidance
 - **AI-native design**: Built specifically for AI-assisted development
 
+## Installation
+
+### From Source (Recommended)
+
+```bash
+# Clone the repository
+git clone https://github.com/Tuulikk/GnawTreeWriter.git
+cd GnawTreeWriter
+
+# Build and install
+cargo install --path .
+```
+
+After installation, verify it works:
+```bash
+gnawtreewriter --version
+```
+
+### Prerequisites
+
+- **Rust**: Install from [rustup.rs](https://rustup.rs/)
+- **Git**: For cloning the repository
+
+### Quick Start
+
+```bash
+# Analyze a file structure
+gnawtreewriter analyze your_file.py
+
+# Make an edit
+gnawtreewriter edit your_file.py "0.1" 'new_content = "hello"'
+
+# Preview changes before applying
+gnawtreewriter edit your_file.py "0.1" 'new_content = "hello"' --preview
+```
+
 ## Why Use GnawTreeWriter?
 
 ### Problems with Traditional LLM Code Editing
