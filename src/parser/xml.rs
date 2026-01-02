@@ -536,8 +536,7 @@ mod tests {
         let found_text = to_elem
             .children
             .iter()
-            .find(|c| c.node_type == "text" && c.content == "Tove")
-            .is_some();
+            .any(|c| c.node_type == "text" && c.content == "Tove");
         assert!(found_text, "Expected text 'Tove' inside <to>");
 
         // Check CDATA body was captured as cdata or text, and that the cdata node has correct lines

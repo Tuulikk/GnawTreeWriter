@@ -863,7 +863,6 @@ pub struct UndoRedoState {
 }
 
 #[cfg(test)]
-#[cfg(test)]
 mod tests {
     use super::*;
     use chrono::Utc;

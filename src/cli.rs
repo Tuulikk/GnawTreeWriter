@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 use crate::core::{
     find_project_root, EditOperation, GnawTreeWriter, OperationType, RestorationEngine, TagManager,
     TransactionLog, UndoRedoManager,
@@ -1959,7 +1958,7 @@ mod tests {
         fs::write(&backup_file, serde_json::to_string_pretty(&backup_json)?)?;
 
         // Log a transaction that has after_hash matching the 'modified' backup
-        let mut tlog = TransactionLog::load(&project_root)?;
+        let mut tlog = TransactionLog::load(project_root)?;
         let after_hash = crate::core::calculate_content_hash("modified");
         let before_hash = crate::core::calculate_content_hash("original");
         let txn_id = tlog.log_transaction(
@@ -2038,7 +2037,7 @@ mod tests {
         assert!(backup_dir.exists());
 
         // Verify there's at least one transaction for the file
-        let tlog = TransactionLog::load(&project_root)?;
+        let tlog = TransactionLog::load(project_root)?;
         let history = tlog.get_file_history(&file_path)?;
         assert!(!history.is_empty());
 
