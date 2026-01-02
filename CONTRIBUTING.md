@@ -103,6 +103,37 @@ For LLM contributors, please document:
 }
 ```
 
+## Release Process
+
+For detailed instructions on creating releases and managing versions, see **[RELEASE_PROCESS.md](RELEASE_PROCESS.md)**.
+
+### Quick Release Checklist
+
+When creating a new release:
+
+- [ ] Determine version number (follow [Semantic Versioning](https://semver.org/))
+- [ ] Update `Cargo.toml` version field
+- [ ] Update `CHANGELOG.md` with new section
+- [ ] Create `RELEASE_NOTES_vX.Y.Z.md`
+- [ ] Run full test suite: `cargo clean && cargo test`
+- [ ] Build release: `cargo build --release`
+- [ ] Verify version: `./target/release/gnawtreewriter --version`
+- [ ] Commit: `git commit -m "chore(release): bump version to X.Y.Z"`
+- [ ] Push: `git push origin master`
+- [ ] Create tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
+- [ ] Push tag: `git push origin vX.Y.Z`
+- [ ] Create GitHub Release: `gh release create vX.Y.Z --title "vX.Y.Z - Title" --notes-file RELEASE_NOTES_vX.Y.Z.md`
+- [ ] Verify GitHub shows new version as "Latest"
+
+### Version Synchronization
+
+Every release must keep these synchronized:
+1. `Cargo.toml` → `version = "X.Y.Z"`
+2. `CHANGELOG.md` → `## [X.Y.Z] - DATE`
+3. Git tag → `vX.Y.Z`
+4. GitHub Release → "Latest"
+5. CLI output → `gnawtreewriter --version`
+
 ## For Human Contributors
 
 ### Code Style
@@ -159,19 +190,21 @@ Update relevant documentation when making changes:
 
 ### Commit Message Convention
 
-Use semantic commit messages:
+Use semantic commit messages following [Conventional Commits](https://www.conventionalcommits.org/):
+
 - `feat:` New features
 - `fix:` Bug fixes
 - `docs:` Documentation changes
 - `refactor:` Code refactoring (no behavior change)
 - `test:` Adding or updating tests
-- `chore:` Maintenance tasks
+- `chore:` Maintenance tasks (builds, releases, dependencies)
 
 Examples:
 ```
 feat(python): support async function parsing
 fix(qml): handle nested components correctly
 docs: update LLM integration examples
+chore(release): bump version to 0.3.4
 ```
 
 ## Adding New Language Support
@@ -180,13 +213,14 @@ docs: update LLM integration examples
 
 - [ ] Created parser file `src/parser/{lang}.rs`
 - [ ] Implemented `ParserEngine` trait
-- [ ] Added TreeSitter dependency to Cargo.toml
+- [ ] Added TreeSitter dependency to `Cargo.toml`
 - [ ] Added extension to `get_parser()` in `mod.rs`
 - [ ] Created example file `examples/example.{ext}`
-- [ ] Updated README.md with new language
+- [ ] Updated `README.md` with new language
 - [ ] Tested basic operations (analyze, edit, insert, delete)
-- [ ] Added example to LLM_INTEGRATION.md
-- [ ] Updated CHANGELOG.md
+- [ ] Added example to `LLM_INTEGRATION.md`
+- [ ] Updated `CHANGELOG.md`
+- [ ] Added tests in `tests/` directory
 
 ### Template
 
@@ -298,6 +332,13 @@ impl NewLanguageParser {
    - Colored output
    - Progress indicators
    - Configuration file support
+
+## Additional Resources
+
+- **[RELEASE_PROCESS.md](RELEASE_PROCESS.md)** - Complete release management guide
+- **[AGENTS.md](AGENTS.md)** - Guide for AI agents contributing to the project
+- **[README.md](README.md)** - Project overview and usage
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Technical architecture
 
 ## Getting Help
 

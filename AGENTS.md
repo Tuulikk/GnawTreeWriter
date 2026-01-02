@@ -609,6 +609,201 @@ Leave clear comments and docstrings:
 
 ---
 
+## 🚀 Release Process for Contributors
+
+When contributing changes to GnawTreeWriter, follow these steps to ensure proper version management and releases.
+
+### For Regular Commits (No Version Change)
+
+Use this checklist for bug fixes, documentation updates, or minor changes that don't warrant a version bump:
+
+```bash
+# 1. Make your changes using GnawTreeWriter
+gnawtreewriter edit src/file.rs "path" 'content'
+
+# 2. Run tests
+cargo test
+
+# 3. Check for warnings
+cargo clippy
+
+# 4. Build release version
+cargo build --release
+
+# 5. Stage and commit
+git add .
+git commit -m "type(scope): description"
+
+# 6. Push to GitHub
+git push origin master
+```
+
+**Commit message format**: Follow [Conventional Commits](https://www.conventionalcommits.org/)
+- `feat:` - New feature
+- `fix:` - Bug fix
+- `docs:` - Documentation only
+- `chore:` - Maintenance tasks
+- `test:` - Adding tests
+- `refactor:` - Code refactoring
+
+### For Version Releases (Patch, Minor, Major)
+
+Use this checklist when you're ready to create a new release:
+
+#### Step 1: Determine Version Number
+
+Follow [Semantic Versioning](https://semver.org/):
+- **Patch** (0.3.2 → 0.3.3): Bug fixes, documentation improvements
+- **Minor** (0.3.3 → 0.4.0): New features, backward compatible
+- **Major** (0.4.0 → 1.0.0): Breaking changes
+
+#### Step 2: Update Version Files
+
+```bash
+# 1. Update Cargo.toml
+gnawtreewriter edit Cargo.toml "version" '"0.3.4"'
+
+# 2. Update CHANGELOG.md (add new section at top)
+gnawtreewriter insert CHANGELOG.md "0" '
+## [0.3.4] - 2025-01-02
+
+### Added
+- Feature description
+
+### Changed
+- Change description
+
+### Fixed
+- Fix description
+'
+
+# 3. Mark previous "Unreleased" as released (if any)
+# Use gnawtreewriter edit to remove "(Unreleased)" tags
+```
+
+#### Step 3: Build and Test
+
+```bash
+# Clean build
+cargo clean
+cargo build --release
+
+# Run all tests
+cargo test
+
+# Verify version
+./target/release/gnawtreewriter --version
+# Should show: gnawtreewriter 0.3.4
+```
+
+#### Step 4: Create Release Notes
+
+```bash
+# Create release notes file
+cat > RELEASE_NOTES_v0.3.4.md << 'EOF'
+# GnawTreeWriter — Release Notes (v0.3.4)
+
+**Date:** 2025-01-02
+**Type:** Patch/Minor/Major Release
+
+## Summary
+Brief description of what this release includes.
+
+## Changes
+- List key changes
+- New features
+- Bug fixes
+
+## Upgrade Instructions
+How to upgrade from previous version.
+
+EOF
+```
+
+#### Step 5: Commit Version Changes
+
+```bash
+# Stage all version-related files
+git add Cargo.toml Cargo.lock CHANGELOG.md RELEASE_NOTES_v0.3.4.md
+
+# Commit with version bump message
+git commit -m "chore(release): bump version to 0.3.4"
+
+# Push to GitHub
+git push origin master
+```
+
+#### Step 6: Create Git Tag
+
+```bash
+# Create annotated tag
+git tag -a v0.3.4 -m "Release v0.3.4: Brief description"
+
+# Push tag to GitHub
+git push origin v0.3.4
+```
+
+#### Step 7: Create GitHub Release
+
+```bash
+# Using GitHub CLI (recommended)
+gh release create v0.3.4 \
+  --title "v0.3.4 - Release Title" \
+  --notes-file RELEASE_NOTES_v0.3.4.md
+
+# Verify release was created
+gh release list
+# Should show v0.3.4 as Latest
+```
+
+**Manual alternative**: Go to https://github.com/Tuulikk/GnawTreeWriter/releases/new
+
+### Quick Release Checklist
+
+Use this as a quick reference:
+
+- [ ] Determine version number (semver)
+- [ ] Update `Cargo.toml` version
+- [ ] Update `CHANGELOG.md`
+- [ ] Create `RELEASE_NOTES_vX.Y.Z.md`
+- [ ] Run `cargo clean && cargo build --release`
+- [ ] Run `cargo test` (all pass)
+- [ ] Verify `--version` output
+- [ ] Commit: `chore(release): bump version to X.Y.Z`
+- [ ] Push to master
+- [ ] Create git tag: `git tag -a vX.Y.Z -m "message"`
+- [ ] Push tag: `git push origin vX.Y.Z`
+- [ ] Create GitHub Release with notes
+- [ ] Verify GitHub shows new version as "Latest"
+
+### Common Pitfalls
+
+**❌ Don't:**
+- Skip version bumps in Cargo.toml
+- Forget to update CHANGELOG.md
+- Create releases without tags
+- Push code without running tests
+- Use manual version strings in code (use Cargo.toml)
+
+**✅ Do:**
+- Always test before releasing
+- Keep CHANGELOG.md up to date
+- Use semantic versioning
+- Create annotated tags (`-a` flag)
+- Write clear release notes
+- Verify GitHub Release shows as "Latest"
+
+### Version Synchronization
+
+Ensure these are always in sync:
+1. `Cargo.toml` → `version = "X.Y.Z"`
+2. `CHANGELOG.md` → `## [X.Y.Z] - DATE`
+3. Git tag → `vX.Y.Z`
+4. GitHub Release → `vX.Y.Z` marked as Latest
+5. CLI output → `gnawtreewriter --version` shows X.Y.Z
+
+---
+
 ## 📚 Additional Resources
 
 - **[README.md](README.md)** - Project overview and usage
