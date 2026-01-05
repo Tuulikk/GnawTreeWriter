@@ -124,7 +124,7 @@ pub struct AiManager {
 
 impl AiManager {
     #[cfg(feature = "modernbert")]
-    fn get_candle_device(&self, device_type: &DeviceType) -> Result<Device> {
+    fn get_candledevice(&self, device_type: &DeviceType) -> Result<Device> {
         match device_type {
             DeviceType::Cpu => Ok(Device::Cpu),
             DeviceType::Cuda => {
@@ -151,7 +151,7 @@ impl AiManager {
             anyhow::bail!("Model files missing. Run 'gnawtreewriter ai setup' first.");
         }
 
-        let device = self.get_candle_device(&device_type)?;
+        let device = self.get_candledevice(&device_type)?;
 
         let config_str = fs::read_to_string(config_path)?;
         let config: Config = serde_json::from_str(&config_str)?;
@@ -180,7 +180,7 @@ impl AiManager {
     }
 
     /// Setup and download a model
-    pub async fn setup(&self, model: AiModel, device: DeviceType, _force: bool) -> Result<()> {
+    pub async fn setup(&self, model: AiModel, device: DeviceType, force: bool) -> Result<()> {
         println!("🤖 Initializing setup for {:?} on {:?}...", model, device);
 
         #[cfg(not(feature = "modernbert"))]
@@ -270,7 +270,7 @@ impl AiManager {
             .exists();
 
         // Detect available hardware
-        let available_devices = vec![DeviceType::Cpu];
+        let mut available_devices = vec![DeviceType::Cpu];
 
         // Mock detection logic
         #[cfg(feature = "cuda")]
@@ -289,8 +289,8 @@ impl AiManager {
     /// Suggest refactorings based on code semantics
     pub async fn suggest_refactor(
         &self,
-        _file_path: &str,
-        _node_path: Option<&str>,
+        file_path: &str,
+        node_path: Option<&str>,
     ) -> Result<Vec<RefactorSuggestion>> {
         #[cfg(not(feature = "modernbert"))]
         {
@@ -326,16 +326,16 @@ impl AiManager {
 
             // Flatten tree to get nodes
             let mut nodes = Vec::new();
-            fn collect_nodes(
+            fn collectnodes(
                 node: &crate::parser::TreeNode,
                 acc: &mut Vec<crate::parser::TreeNode>,
             ) {
                 acc.push(node.clone());
                 for child in &node.children {
-                    collect_nodes(child, acc);
+                    collectnodes(child, acc);
                 }
             }
-            collect_nodes(&tree, &mut nodes);
+            collectnodes(&tree, &mut nodes);
 
             let mut suggestions = Vec::new();
 
@@ -387,8 +387,8 @@ impl AiManager {
     /// Get context-aware code completion suggestions
     pub async fn complete_code(
         &self,
-        _file_path: &str,
-        _node_path: &str,
+        file_path: &str,
+        node_path: &str,
     ) -> Result<Vec<CompletionSuggestion>> {
         #[cfg(not(feature = "modernbert"))]
         {
@@ -479,8 +479,8 @@ impl AiManager {
     /// Suggest a coordinated batch of edits based on a high-level intent
     pub async fn suggest_batch_edits(
         &self,
-        _file_path: &str,
-        _intent: &str,
+        file_path: &str,
+        intent: &str,
     ) -> Result<Vec<RefactorSuggestion>> {
         #[cfg(not(feature = "modernbert"))]
         {
@@ -514,16 +514,16 @@ impl AiManager {
 
             // Flatten tree
             let mut nodes = Vec::new();
-            fn collect_nodes(
+            fn collectnodes(
                 node: &crate::parser::TreeNode,
                 acc: &mut Vec<crate::parser::TreeNode>,
             ) {
                 acc.push(node.clone());
                 for child in &node.children {
-                    collect_nodes(child, acc);
+                    collectnodes(child, acc);
                 }
             }
-            collect_nodes(&tree, &mut nodes);
+            collectnodes(&tree, &mut nodes);
 
             // Use semantic search logic to find nodes matching the intent
             let search_results = self
@@ -557,9 +557,9 @@ impl AiManager {
     /// Perform semantic search across a set of nodes
     pub async fn semantic_search(
         &self,
-        _query: &str,
-        _nodes: &[crate::parser::TreeNode],
-        _device: DeviceType,
+        query: &str,
+        nodes: &[crate::parser::TreeNode],
+        device: DeviceType,
     ) -> Result<Vec<SearchResult>> {
         #[cfg(not(feature = "modernbert"))]
         {
