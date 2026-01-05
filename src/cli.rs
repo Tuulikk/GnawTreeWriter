@@ -1456,6 +1456,31 @@ impl Cli {
                 println!("  ✅ Atomic rollback on failure");
                 println!("  ✅ Transaction logging");
             }
+            Some("ai") => {
+                println!("🤖 LOCAL AI EXAMPLES");
+                println!("====================");
+                println!();
+                println!("1. Setup and Status:");
+                println!("   gnawtreewriter ai setup --device cpu");
+                println!("   gnawtreewriter ai status");
+                println!();
+                println!("2. Semantic Search:");
+                println!("   gnawtreewriter find --semantic \"database connection logic\"");
+                println!("   gnawtreewriter find --semantic \"error handling in rust\" src/");
+                println!();
+                println!("3. AI Refactoring:");
+                println!("   gnawtreewriter ai refactor src/main.rs");
+                println!("   gnawtreewriter ai refactor app.py --node-path \"0.1\"");
+                println!();
+                println!("4. Code Completion:");
+                println!("   gnawtreewriter ai complete src/core.rs \"0.2.1\"");
+                println!();
+                println!("**Key Benefits:**");
+                println!("  ✅ 100% Local - No data leaves your machine");
+                println!("  ✅ Privacy First - Works offline with ModernBERT");
+                println!("  ✅ AST-Aware - Understands code structure, not just text");
+                println!("  ✅ Hardware Accelerated - Supports CUDA and Metal");
+            }
             Some("workflow") => {
                 println!("🔄 COMMON WORKFLOWS");
                 println!("==================");
@@ -1648,6 +1673,28 @@ impl Cli {
                 println!("   • Use timestamp-based restoration as fallback");
                 println!();
                 println!("❌ Can't find the right node:");
+            }
+            Some("ai") => {
+                println!("🤖 LOCAL AI WIZARD (ModernBERT)");
+                println!("===============================");
+                println!();
+                println!("Step 1: Setup the model");
+                println!("  gnawtreewriter ai setup --device cpu");
+                println!("  (Use --device cuda or --device metal for GPU acceleration)");
+                println!();
+                println!("Step 2: Verify installation");
+                println!("  gnawtreewriter ai status");
+                println!();
+                println!("Step 3: Use semantic search");
+                println!("  gnawtreewriter find --semantic \"your natural language query\"");
+                println!();
+                println!("Step 4: Get refactoring suggestions");
+                println!("  gnawtreewriter ai refactor <file_path>");
+                println!();
+                println!("Step 5: Context-aware completion");
+                println!("  gnawtreewriter ai complete <file_path> <node_path>");
+                println!();
+                println!("💡 Note: All AI features run 100% locally for privacy and speed.");
                 println!("   • Use: gnawtreewriter list <file> --filter-type <type>");
                 println!("   • Try: gnawtreewriter analyze <file> for overview");
                 println!("   • Look for node types like 'function_item', 'class_definition'");

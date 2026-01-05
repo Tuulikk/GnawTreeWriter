@@ -2,3 +2,7 @@
 **/*.rs.bk
 .DS_Store
 .gnawtreewriter_backups/
+.gnawtreewriter_ai/
+.gnawtreewriter_session.json
+.gnawtreewriter_session_id
+.gnawtreewriter-tags.toml

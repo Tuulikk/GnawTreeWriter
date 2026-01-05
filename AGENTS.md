@@ -16,7 +16,7 @@ This document explains how AI agents can contribute to the GnawTreeWriter projec
 
 GnawTreeWriter is a tree-based code editor written in Rust that works at the AST (Abstract Syntax Tree) level. It uses TreeSitter parsers to support multiple programming languages.
 
-### Tech Stack
+### Tech StackJ
 - **Language**: Rust (Edition 2021)
 - **Parsers**: TreeSitter with language-specific grammars
 - **CLI**: Clap 4.5

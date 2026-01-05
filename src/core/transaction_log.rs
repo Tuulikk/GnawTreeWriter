@@ -43,6 +43,10 @@ pub struct TransactionLog {
 }
 
 impl TransactionLog {
+    pub fn get_current_session_id(&self) -> &str {
+        &self.session_id
+    }
+
     /// Create a new transaction log
     pub fn new<P: AsRef<Path>>(project_root: P) -> Result<Self> {
         let log_file = project_root.as_ref().join(".gnawtreewriter_session.json");

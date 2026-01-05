@@ -5,6 +5,11 @@ All notable changes to GnawTreeWriter.
 ## [0.5.0] - 2025-01-06
 
 ### Added
+- **ModernBERT AI Integration**: Local, privacy-focused AI features using Candle
+  - **Semantic Search**: Find code by meaning, not just text, with `gnawtreewriter find --semantic`
+  - **AI Refactoring**: Identify complex code and get refactoring suggestions with `gnawtreewriter ai refactor`
+  - **Context-Aware Completion**: AST-based code completion using `gnawtreewriter ai complete`
+  - **Local Inference**: Runs entirely on your machine using Rust-native Candle (CPU/CUDA/Metal)
 - **Clone Operation**: Duplicate code nodes/structures within or between files
   - Clone functions, classes, or any AST node with `gnawtreewriter clone`
   - Preview mode shows diff before applying
@@ -16,6 +21,12 @@ All notable changes to GnawTreeWriter.
 
 ### Examples
 ```bash
+# Semantic search for login logic
+gnawtreewriter find --semantic "authentication and login"
+
+# Get AI refactoring suggestions for a file
+gnawtreewriter ai refactor src/main.rs
+
 # Clone a function within same file
 gnawtreewriter clone app.py "0.1" app.py "0.2" --preview
 

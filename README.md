@@ -831,7 +831,7 @@ gnawtreewriter list <file_path> --filter-type Property
 ```
 
 ### find
-Find nodes matching criteria across files.
+Find nodes matching criteria across files, including semantic search using local AI.
 
 ```bash
 # Find by node type
@@ -840,8 +840,31 @@ gnawtreewriter find <file_path> --node-type Property
 # Find by content
 gnawtreewriter find <file_path> --content "mainToolbar"
 
-# Find in directory
-gnawtreewriter find app/ui/qml/ --content "width:"
+# Semantic search (requires 'ai setup')
+gnawtreewriter find --semantic "where is the database connection?"
+
+# Semantic search in specific directory
+gnawtreewriter find --semantic "authentication logic" src/ --device cpu
+```
+
+### ai
+Manage local AI models for semantic understanding and smart editing.
+
+```bash
+# Setup and download ModernBERT
+gnawtreewriter ai setup --model modernbert --device cpu
+
+# Check status of installed models
+gnawtreewriter ai status
+
+# Semantic search across the project
+gnawtreewriter find --semantic "authentication logic"
+
+# AI-powered refactoring suggestions
+gnawtreewriter ai refactor src/main.rs
+
+# Context-aware code completion
+gnawtreewriter ai complete src/main.rs "0.1.2"
 ```
 
 ### lint
@@ -1186,6 +1209,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 - [ ] Context-aware suggestions
 - [ ] VSCode extension
 - [ ] Python API/SDK
+
+### v0.5.0 (AI Integration)
+- [x] CLI structure for local AI (ModernBERT)
+- [x] Local inference engine using Candle (Rust-native)
+- [ ] Semantic search and node discovery
+- [ ] Intent-based edit suggestions
 
 ### Future
 - [ ] More languages (Java, C++, C#, etc.)
