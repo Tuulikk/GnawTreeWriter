@@ -180,6 +180,7 @@ impl AiManager {
     }
 
     /// Setup and download a model
+    #[allow(unused_variables, unreachable_code)]
     pub async fn setup(&self, model: AiModel, device: DeviceType, force: bool) -> Result<()> {
         println!("🤖 Initializing setup for {:?} on {:?}...", model, device);
 
@@ -263,6 +264,7 @@ impl AiManager {
     }
 
     /// Get status of installed models
+    #[allow(unused_mut)]
     pub fn get_status(&self) -> Result<AiStatus> {
         let modern_bert_installed = self
             .get_model_path(&AiModel::ModernBert)
@@ -287,6 +289,7 @@ impl AiManager {
     }
 
     /// Suggest refactorings based on code semantics
+    #[allow(unused_variables, unreachable_code)]
     pub async fn suggest_refactor(
         &self,
         file_path: &str,
@@ -385,6 +388,7 @@ impl AiManager {
     }
 
     /// Get context-aware code completion suggestions
+    #[allow(unused_variables, unreachable_code)]
     pub async fn complete_code(
         &self,
         file_path: &str,
@@ -477,6 +481,7 @@ impl AiManager {
     }
 
     /// Suggest a coordinated batch of edits based on a high-level intent
+    #[allow(unused_variables, unreachable_code)]
     pub async fn suggest_batch_edits(
         &self,
         file_path: &str,
@@ -555,6 +560,7 @@ impl AiManager {
     }
 
     /// Perform semantic search across a set of nodes
+    #[allow(unused_variables, unreachable_code)]
     pub async fn semantic_search(
         &self,
         query: &str,
