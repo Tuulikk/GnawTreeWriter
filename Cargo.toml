@@ -1,6 +1,6 @@
 [package]
 name = "gnawtreewriter"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 authors = ["Gnaw Software"]
 description = "Tree-based code editor for LLM-assisted editing"
