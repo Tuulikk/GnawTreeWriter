@@ -180,7 +180,7 @@ impl AiManager {
     }
 
     /// Setup and download a model
-    pub async fn setup(&self, model: AiModel, device: DeviceType, force: bool) -> Result<()> {
+    pub async fn setup(&self, model: AiModel, device: DeviceType, _force: bool) -> Result<()> {
         println!("🤖 Initializing setup for {:?} on {:?}...", model, device);
 
         #[cfg(not(feature = "modernbert"))]
@@ -289,8 +289,8 @@ impl AiManager {
     /// Suggest refactorings based on code semantics
     pub async fn suggest_refactor(
         &self,
-        file_path: &str,
-        node_path: Option<&str>,
+        _file_path: &str,
+        _node_path: Option<&str>,
     ) -> Result<Vec<RefactorSuggestion>> {
         #[cfg(not(feature = "modernbert"))]
         {
@@ -387,8 +387,8 @@ impl AiManager {
     /// Get context-aware code completion suggestions
     pub async fn complete_code(
         &self,
-        file_path: &str,
-        node_path: &str,
+        _file_path: &str,
+        _node_path: &str,
     ) -> Result<Vec<CompletionSuggestion>> {
         #[cfg(not(feature = "modernbert"))]
         {
@@ -479,8 +479,8 @@ impl AiManager {
     /// Suggest a coordinated batch of edits based on a high-level intent
     pub async fn suggest_batch_edits(
         &self,
-        file_path: &str,
-        intent: &str,
+        _file_path: &str,
+        _intent: &str,
     ) -> Result<Vec<RefactorSuggestion>> {
         #[cfg(not(feature = "modernbert"))]
         {
@@ -557,9 +557,9 @@ impl AiManager {
     /// Perform semantic search across a set of nodes
     pub async fn semantic_search(
         &self,
-        query: &str,
-        nodes: &[crate::parser::TreeNode],
-        device: DeviceType,
+        _query: &str,
+        _nodes: &[crate::parser::TreeNode],
+        _device: DeviceType,
     ) -> Result<Vec<SearchResult>> {
         #[cfg(not(feature = "modernbert"))]
         {

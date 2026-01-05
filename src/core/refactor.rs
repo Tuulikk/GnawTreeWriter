@@ -132,7 +132,7 @@ impl RefactorEngine {
         // Check if current node matches the symbol
         if node.content == symbol_name {
             // Determine if this is a relevant identifier node type
-            let relevant_types = vec![
+            let relevant_types = [
                 "identifier",
                 "function_name",
                 "variable_name",
@@ -210,7 +210,7 @@ impl RefactorEngine {
         for symbol in symbols {
             file_groups
                 .entry(symbol.file_path.to_string_lossy().to_string())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(symbol);
         }
 
@@ -334,7 +334,7 @@ pub fn format_refactor_results(results: &[RefactorResult]) -> String {
     let total_found: usize = results.iter().map(|r| r.occurrences_found).sum();
     let total_renamed: usize = results.iter().map(|r| r.occurrences_renamed).sum();
 
-    output.push_str(&format!("Refactor Results:\n"));
+    output.push_str("Refactor Results:\n");
     output.push_str(&format!("  Total occurrences found: {}\n", total_found));
     output.push_str(&format!(
         "  Total occurrences renamed: {}\n\n",
