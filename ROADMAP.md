@@ -57,10 +57,50 @@ The foundation that makes GnawTreeWriter bulletproof and independent of Git for 
 
 ---
 
-## Phase 2: AI Agent Integration (Open Source)
+## Phase 2: MCP Integration & Daemon
 **Target: v0.7.0 - Q2 2025**
 
-Core AI integration features that enhance the editing experience for everyone.
+Core MCP and daemon features that make GnawTreeWriter usable by AI agents and IDEs.
+
+### **MCP Server** (Priority #1)
+
+- [ ] **Basic MCP Tool Server**:
+  - Run GnawTreeWriter as an MCP server: `gnawtreewriter mcp serve`
+  - Expose all core operations as MCP tools (analyze, edit, batch, undo, etc.)
+  - Stateless request/response model for simple integration
+  - Works with Claude Desktop, Cursor, and other MCP clients
+
+- [ ] **MCP Tool Definitions**:
+  - `gnawtreewriter_analyze` - Parse and return AST structure
+  - `gnawtreewriter_edit` - Edit a specific node
+  - `gnawtreewriter_batch` - Execute atomic multi-file operations
+  - `gnawtreewriter_undo` / `gnawtreewriter_redo` - Navigate history
+  - `gnawtreewriter_restore` - Time travel to specific point
+
+### **Local File Watcher Daemon**
+
+- [ ] **Project Monitoring Daemon**:
+  - `gnawtreewriter daemon start [--project <path>]` - Start background watcher
+  - Real-time file change detection (even from external editors)
+  - Automatic backup on every save (extends current backup system)
+  - Conflict detection: "File changed outside GnawTreeWriter"
+  
+- [ ] **Daemon Features**:
+  - Watch multiple projects simultaneously
+  - Event streaming for connected clients
+  - Low resource footprint (inotify/fsevents based)
+  - Graceful shutdown and restart
+
+> 🔧 **Architecture Note**: The boundary between built-in daemon and plugin is still being designed. Community input welcome!
+
+> 💡 **Premium Note**: Multi-project coordination, centralized server, and team synchronization available in [Premium Phase 1](#phase-1-multi-project--team-collaboration).
+
+---
+
+## Phase 3: AI-Enhanced Editing
+**Target: v0.8.0 - Q3 2025**
+
+AI features that enhance the editing experience for everyone.
 
 ### **Smart Semantic Targeting**
 
@@ -86,8 +126,8 @@ Core AI integration features that enhance the editing experience for everyone.
 
 ---
 
-## Phase 3: Language & Parser Expansion
-**Target: v0.8.0 - Q3 2025**
+## Phase 4: Language & Parser Expansion
+**Target: v0.9.0 - Q4 2025**
 
 Expand language support and parser capabilities.
 
@@ -107,8 +147,8 @@ Expand language support and parser capabilities.
 
 ---
 
-## Phase 4: Universal Tree Platform
-**Target: v1.0.0 - Q4 2025**
+## Phase 5: Universal Tree Platform
+**Target: v1.0.0 - 2026**
 
 Expand beyond code to all hierarchical systems.
 
@@ -162,6 +202,7 @@ Simple scripts for personal workflows.
 │  ┌──────────┬───────────────┬──────────────────┐       │
 │  │ AST Edit │ Time Travel   │ Sessions & Tags  │       │
 │  │ Batch Ops│ Multi-Lang    │ AI (ModernBERT)  │       │
+│  │ MCP Serve│ Local Daemon  │ File Watcher     │       │
 │  └──────────┴───────────────┴──────────────────┘       │
 └─────────────────────────────────────────────────────────┘
                           ▲
@@ -170,7 +211,7 @@ Simple scripts for personal workflows.
 ┌─────────────┬─────────────┬─────────────┬─────────────┐
 │ Official    │ Community   │ User        │ Premium     │
 │ Plugins     │ Plugins     │ Scripts     │ Add-ons     │
-│ (LSP, UI)   │ (Profiler)  │ (Batch)     │ (MCP, etc.) │
+│ (LSP, UI)   │ (Profiler)  │ (Batch)     │ (Server)    │
 └─────────────┴─────────────┴─────────────┴─────────────┘
 ```
 
@@ -211,14 +252,27 @@ Transform from single-project tool to multi-project team platform.
 - [ ] **Team Transaction History**: Shared timeline across team members
 - [ ] **Basic Conflict Resolution**: Handle concurrent edits gracefully
 
-### **MCP Server Implementation**
+### **Coordination Server** (Self-Hosted or SaaS)
 
-- [ ] **Native Model Context Protocol**: Built-in MCP tool support
-- [ ] **Tool Definitions**: All major operations as MCP tools
-- [ ] **Batch MCP Calls**: Multiple edits in single request
-- [ ] **Agent Coordination**: Multi-agent workflow management
+- [ ] **GnawTreeWriter Server**:
+  - Deployable on your own infrastructure OR available as managed service
+  - Coordinates multiple GnawTreeWriter daemons across machines
+  - Centralized project registry and configuration
+  - WebSocket-based real-time synchronization
 
-> 💡 **Open Source Note**: Basic single-project MCP support planned for Open Source. Team coordination and multi-project features are Premium-only.
+- [ ] **Multi-Agent Coordination**:
+  - Agent session management and conflict prevention
+  - Work queue distribution across AI agents
+  - Rollback coordination for multi-agent failures
+  - Agent activity dashboard and monitoring
+
+- [ ] **Team Dashboard**:
+  - Real-time view of all project activity
+  - Transaction history across all team members
+  - Backup status and health monitoring
+  - Usage analytics and reporting
+
+> 💡 **Open Source Note**: Basic MCP server and single-project daemon are available in [Open Source Phase 2](#phase-2-mcp-integration--daemon). Premium adds multi-project coordination, centralized server, and team features.
 
 ---
 
@@ -310,15 +364,18 @@ Always-on enterprise development infrastructure.
 
 ### Open Source Priorities
 1. ✅ Transaction logging and time travel (Phase 1 - DONE)
-2. 🔄 Semantic targeting improvements (Phase 2)
-3. 📅 Language expansion (Phase 3)
-4. 📅 Infrastructure as Code support (Phase 4)
+2. 🔥 **MCP Server** - Run as MCP tool (Phase 2 - NEXT)
+3. 🔥 **Local Daemon** - File watching and backup (Phase 2)
+4. 🔄 Semantic targeting improvements (Phase 3)
+5. 📅 Language expansion (Phase 4)
+6. 📅 Infrastructure as Code support (Phase 5)
 
 ### Premium Priorities
-1. 📅 Multi-project architecture (Premium Phase 1)
-2. 📅 MCP daemon and team coordination (Premium Phase 1)
-3. 📅 Cross-project AI intelligence (Premium Phase 2)
-4. 📅 Enterprise compliance features (Premium Phase 3)
+1. 📅 **Coordination Server** - Self-hosted or SaaS (Premium Phase 1)
+2. 📅 Multi-project architecture (Premium Phase 1)
+3. 📅 Team synchronization and dashboards (Premium Phase 1)
+4. 📅 Cross-project AI intelligence (Premium Phase 2)
+5. 📅 Enterprise compliance features (Premium Phase 3)
 
 ---
 
