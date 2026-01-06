@@ -6,7 +6,13 @@
 
 We're excited to announce that GnawTreeWriter is now **public**! This release brings powerful new capabilities to make your AI-assisted development faster, safer, and more productive.
 
-### 🌍 What's New in v0.4.0
+### 🌍 What's New in v0.6.0
+
+**CI/CD & Code Quality Improvements**
+- Fixed GitHub Actions build failures for ModernBERT AI features
+- All builds now pass with `-D warnings` flag
+- Improved conditional compilation handling for `modernbert` feature
+- Extensive dogfooding: all fixes made using GnawTreeWriter itself!
 
 **Java Language Support**
 - Full TreeSitter-based parser for Java (`.java`)

@@ -2,6 +2,23 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.6.0] - 2025-01-05
+
+### Fixed
+- **CI/CD Robustness**: Fixed GitHub Actions build failures for ModernBERT AI features
+  - Added `#[allow(unused_variables, unreachable_code)]` attributes to handle cfg-conditional compilation
+  - Fixed parameter naming consistency in AI functions (`force`, `file_path`, `node_path`, etc.)
+  - All builds now pass with `-D warnings` flag (warnings treated as errors)
+- **Conditional Compilation**: Improved handling of `modernbert` feature flag
+  - Functions now compile cleanly with or without the feature enabled
+  - Proper `#[allow(unused_mut)]` for `get_status()` function
+
+### Changed
+- Improved code quality in `src/llm/ai_manager.rs`
+- All changes made using GnawTreeWriter dogfooding (eating our own dog food!)
+
+---
+
 ## [0.5.0] - 2025-01-06
 
 ### Added
