@@ -48,6 +48,40 @@ GnawTreeWriter now provides:
 - **Atomic multi-file operations** with rollback
 - **Validation-first approach** - check before writing
 
+### 📦 Installation Options
+
+GnawTreeWriter can be built with optional features. Choose what you need:
+
+```bash
+# Core only (minimal build)
+cargo install --path .
+
+# With AI features (ModernBERT)
+cargo install --path . --features modernbert
+
+# With AI features + NVIDIA GPU support
+cargo install --path . --features modernbert --features cuda
+
+# With AI features + Apple Silicon support
+cargo install --path . --features modernbert --features metal
+
+# With MCP server support (optional feature)
+cargo install --path . --features mcp
+
+# With all features (AI + MCP + GPU support)
+cargo install --path . --features modernbert,mcp,cuda
+```
+
+**Optional Features:**
+- `modernbert`: Local AI with ModernBERT (semantic search, refactoring, completion)
+- `mcp`: MCP server and daemon for AI agent coordination (Phase 2 feature)
+- `cuda`: NVIDIA GPU support for ModernBERT acceleration
+- `metal`: Apple Silicon GPU support for ModernBERT acceleration
+
+> 💡 **Tip**: Build only what you need. The core is lightweight and fully functional without any optional features.
+
+---
+
 ### 📚 Try It Today
 
 ```bash

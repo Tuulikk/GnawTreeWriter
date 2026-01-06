@@ -62,11 +62,33 @@ The foundation that makes GnawTreeWriter bulletproof and independent of Git for 
 
 Core MCP and daemon features that make GnawTreeWriter usable by AI agents and IDEs.
 
-### **MCP Server** (Priority #1)
+### **Optional Features**
+
+> 📦 **Note**: Both MCP server and local daemon are **optional features** that must be enabled at compile time, similar to the `modernbert` AI feature.
+
+### **MCP Server** (Optional Feature)
+
+**Installation Options:**
+
+```bash
+# Core only (minimal build)
+cargo install --path .
+
+# With AI features (ModernBERT)
+cargo install --path . --features modernbert
+
+# With MCP server and daemon
+cargo install --path . --features mcp
+
+# With all features (AI + MCP + CUDA)
+cargo install --path . --features modernbert,mcp,cuda
+```
+
+**All features are optional** - build exactly what you need!
 
 - [ ] **Basic MCP Tool Server**:
-  - Run GnawTreeWriter as an MCP server: `gnawtreewriter mcp serve`
-  - Expose all core operations as MCP tools (analyze, edit, batch, undo, etc.)
+  - `gnawtreewriter mcp serve` - Run as MCP server
+  - Expose all core operations as MCP tools (analyze, edit, batch, undo, restore)
   - Stateless request/response model for simple integration
   - Works with Claude Desktop, Cursor, and other MCP clients
 
@@ -77,7 +99,15 @@ Core MCP and daemon features that make GnawTreeWriter usable by AI agents and ID
   - `gnawtreewriter_undo` / `gnawtreewriter_redo` - Navigate history
   - `gnawtreewriter_restore` - Time travel to specific point
 
-### **Local File Watcher Daemon**
+### **Local File Watcher Daemon** (Optional Feature)
+
+**Installation:**
+```bash
+# Install with daemon support
+cargo install --path . --features mcp
+
+# Daemon works independently of MCP server
+```
 
 - [ ] **Project Monitoring Daemon**:
   - `gnawtreewriter daemon start [--project <path>]` - Start background watcher
@@ -94,6 +124,10 @@ Core MCP and daemon features that make GnawTreeWriter usable by AI agents and ID
 > 🔧 **Architecture Note**: The boundary between built-in daemon and plugin is still being designed. Community input welcome!
 
 > 💡 **Premium Note**: Multi-project coordination, centralized server, and team synchronization available in [Premium Phase 1](#phase-1-multi-project--team-collaboration).
+
+---
+
+## Phase 3: AI-Enhanced Editing
 
 ---
 
