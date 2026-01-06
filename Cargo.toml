@@ -54,8 +54,10 @@ tokenizers = { version = "0.21", optional = true }
 [features]
 default = []
 modernbert = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "tokenizers"]
+mcp = ["tokio-server", "hyper", "serde_json"]
 cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
+all = ["modernbert", "mcp", "cuda", "metal"]
 
 # tree-sitter-xml = "0.7"  # Using custom parser to avoid version conflicts
 # tree-sitter-css = "0.25"  # Using custom parser to avoid version conflicts
