@@ -57,7 +57,7 @@ impl RefactorEngine {
             .with_context(|| format!("Failed to parse file: {}", file_path))?;
 
         // Search through the tree for matching symbols
-        self.find_symbols_in_tree(&tree, file_path, symbol_name, String::new(), &mut symbols);
+        Self::find_symbols_in_tree(&tree, file_path, symbol_name, String::new(), &mut symbols);
 
         Ok(symbols)
     }
@@ -67,14 +67,13 @@ impl RefactorEngine {
         let mut symbols = Vec::new();
         let dir_path = PathBuf::from(directory);
 
-        self.find_symbols_in_directory(&dir_path, symbol_name, &mut symbols)?;
+        Self::find_symbols_in_directory(&dir_path, symbol_name, &mut symbols)?;
 
         Ok(symbols)
     }
 
     /// Recursively search for symbols in a directory
     fn find_symbols_in_directory(
-        &self,
         dir_path: &Path,
         symbol_name: &str,
         symbols: &mut Vec<Symbol>,
@@ -97,14 +96,14 @@ impl RefactorEngine {
                         continue;
                     }
                 }
-                self.find_symbols_in_directory(&path, symbol_name, symbols)?;
+                Self::find_symbols_in_directory(&path, symbol_name, symbols)?;
             } else if path.is_file() {
                 // Try to parse the file
                 if let Ok(parser) = get_parser(&path) {
                     if let Ok(source_code) = std::fs::read_to_string(&path) {
                         if let Ok(tree) = parser.parse(&source_code) {
                             let file_path_str = path.to_string_lossy().to_string();
-                            self.find_symbols_in_tree(
+                            Self::find_symbols_in_tree(
                                 &tree,
                                 &file_path_str,
                                 symbol_name,
@@ -122,7 +121,6 @@ impl RefactorEngine {
 
     /// Recursive search for symbols in the AST
     fn find_symbols_in_tree(
-        &self,
         node: &TreeNode,
         file_path: &str,
         symbol_name: &str,
@@ -162,7 +160,7 @@ impl RefactorEngine {
             } else {
                 format!("{}.{}", node_path, i)
             };
-            self.find_symbols_in_tree(child, file_path, symbol_name, child_path, symbols);
+            Self::find_symbols_in_tree(child, file_path, symbol_name, child_path, symbols);
         }
     }
 

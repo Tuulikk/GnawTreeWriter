@@ -33,7 +33,7 @@ impl RestorationEngine {
     pub fn new<P: AsRef<Path>>(project_root: P) -> Result<Self> {
         let project_root = project_root.as_ref().to_path_buf();
         let backup_dir = project_root.join(".gnawtreewriter_backups");
-        let transaction_log = TransactionLog::load(&project_root)?;
+        let transaction_log = TransactionLog::load(project_root.clone())?;
 
         if !backup_dir.exists() {
             fs::create_dir_all(&backup_dir).context("Failed to create backup directory")?;
