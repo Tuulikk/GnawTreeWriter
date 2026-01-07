@@ -11,6 +11,20 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+
+#[derive(Subcommand)]
+enum McpSubcommands {
+    /// Start MCP server
+    Serve {
+        /// Address to bind (default: 127.0.0.1:8080)
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        addr: String,
+        #[arg(long)]
+        /// Optional bearer token for simple auth
+        token: Option<String>,
+    },
+}
+
 use similar::{ChangeTag, TextDiff};
 
 #[derive(Parser)]
@@ -18,7 +32,11 @@ use similar::{ChangeTag, TextDiff};
 #[command(version)]
 #[command(about = "AI-native temporal code editor for tree-based editing")]
 #[command(
-    long_about = "GnawTreeWriter is a revolutionary tree-based code editor designed for AI-assisted development.\nIt provides temporal project management, multi-file restoration, and session-based rollback capabilities.\n\nQuick start: gnawtreewriter analyze <file> to see the structure, then edit specific nodes safely.\nFor help with specific commands, use: gnawtreewriter <command> --help"
+    long_about = "GnawTreeWriter is a revolutionary tree-based code editor designed for AI-assisted development.
+It provides temporal project management, multi-file restoration, and session-based rollback capabilities.
+
+Quick start: gnawtreewriter analyze <file> to see the structure, then edit specific nodes safely.
+For help with specific commands, use: gnawtreewriter <command> --help"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -304,6 +322,11 @@ enum Commands {
     SessionStart,
     /// Show current undo/redo state
     Status,
+    /// Manage MCP server and daemon
+    Mcp {
+        #[command(subcommand)]
+        command: McpSubcommands,
+    },
     /// Restore entire project to a specific point in time
     ///
     /// Revolutionary time-travel feature that restores all changed files
@@ -512,7 +535,6 @@ enum TagSubcommands {
         force: bool,
     },
 }
-
 impl Cli {
     pub async fn run(self) -> Result<()> {
         match self.command {
@@ -704,8 +726,17 @@ impl Cli {
             } => {
                 let mut writer = GnawTreeWriter::new(&file_path)?;
                 let component_code = match content {
-                    Some(c) => format!("{} {{\n    {}\n}}", name, c),
-                    None => format!("{} {{}}\n", name),
+                    Some(c) => format!(
+                        "{} {{
+    {}
+}}",
+                        name, c
+                    ),
+                    None => format!(
+                        "{} {{}}
+",
+                        name
+                    ),
                 };
                 let op = EditOperation::Insert {
                     parent_path: target_path.clone(),
@@ -775,6 +806,22 @@ impl Cli {
             Commands::Status => {
                 Self::handle_status()?;
             }
+            Commands::Mcp { command } => match command {
+                McpSubcommands::Serve { addr, token } => {
+                    #[cfg(not(feature = "mcp"))]
+                    {
+                        let _ = addr;
+                        let _ = token;
+                        let _ = std::env::var("MCP_TOKEN");
+                        anyhow::bail!("MCP feature is not enabled. Recompile with --features mcp");
+                    }
+                    #[cfg(feature = "mcp")]
+                    {
+                        let token = token.or_else(|| std::env::var("MCP_TOKEN").ok());
+                        crate::mcp::mcp_server::serve(&addr, token).await?;
+                    }
+                }
+            },
             Commands::Examples { topic } => {
                 Self::handle_examples(topic.as_deref())?;
             }
@@ -944,7 +991,8 @@ impl Cli {
 
         let state = undo_manager.get_state();
         println!(
-            "\nUndo/Redo state: {} undo, {} redo available",
+            "
+Undo/Redo state: {} undo, {} redo available",
             state.undo_available, state.redo_available
         );
 
@@ -976,7 +1024,8 @@ impl Cli {
 
         let state = undo_manager.get_state();
         println!(
-            "\nUndo/Redo state: {} undo, {} redo available",
+            "
+Undo/Redo state: {} undo, {} redo available",
             state.undo_available, state.redo_available
         );
 
@@ -986,7 +1035,7 @@ impl Cli {
     fn handle_history(limit: usize, format: &str) -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
-        let transaction_log = TransactionLog::load(&project_root)?;
+        let transaction_log = TransactionLog::load(project_root)?;
 
         let history = transaction_log.get_last_n_transactions(limit)?;
 
@@ -1031,7 +1080,7 @@ impl Cli {
     fn handle_restore(file_path: &str, transaction_id: &str, preview: bool) -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
-        let transaction_log = TransactionLog::load(&project_root)?;
+        let transaction_log = TransactionLog::load(project_root.clone())?;
 
         let transaction = transaction_log
             .find_transaction(transaction_id)?
@@ -1046,7 +1095,10 @@ impl Cli {
             );
             println!("  Operation: {:?}", transaction.operation);
             println!("  Description: {}", transaction.description);
-            println!("\nUse --no-preview to actually perform the restore");
+            println!(
+                "
+Use --no-preview to actually perform the restore"
+            );
         } else {
             // Perform the restore using the RestorationEngine
             let engine = RestorationEngine::new(&project_root)?;
@@ -1093,9 +1145,15 @@ impl Cli {
 
         if preview {
             // Show what the batch will do
-            println!("\n=== Batch Preview ===");
+            println!(
+                "
+=== Batch Preview ==="
+            );
             println!("{}", batch.preview_text()?);
-            println!("\nUse --no-preview to write batch file");
+            println!(
+                "
+Use --no-preview to write batch file"
+            );
             return Ok(());
         }
 
@@ -1119,7 +1177,7 @@ impl Cli {
     fn handle_session_start() -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
-        let mut transaction_log = TransactionLog::load(&project_root)?;
+        let mut transaction_log = TransactionLog::load(project_root)?;
 
         transaction_log.start_new_session()?;
 
@@ -1150,11 +1208,14 @@ impl Cli {
         }
 
         // Show recent history
-        let transaction_log = TransactionLog::load(&project_root)?;
+        let transaction_log = TransactionLog::load(project_root)?;
         let recent = transaction_log.get_last_n_transactions(5)?;
 
         if !recent.is_empty() {
-            println!("\nRecent transactions:");
+            println!(
+                "
+Recent transactions:"
+            );
             for transaction in recent.iter().rev().take(3) {
                 let timestamp = transaction.timestamp.format("%H:%M:%S").to_string();
                 println!(
@@ -1170,7 +1231,7 @@ impl Cli {
     fn handle_restore_project(timestamp: &str, preview: bool) -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
-        let transaction_log = TransactionLog::load(&project_root)?;
+        let transaction_log = TransactionLog::load(project_root.clone())?;
 
         // Parse timestamp (supports Local and UTC/RFC3339)
         let restore_to = parse_user_timestamp(timestamp)?;
@@ -1189,7 +1250,10 @@ impl Cli {
             println!("Project Restoration Plan:");
             println!("=========================");
             println!("{}", plan.get_summary());
-            println!("\nFiles to be restored:");
+            println!(
+                "
+Files to be restored:"
+            );
             for file_plan in &plan.affected_files {
                 println!(
                     "  {} ({} modifications since {})",
@@ -1198,7 +1262,10 @@ impl Cli {
                     restore_to.format("%Y-%m-%d %H:%M:%S")
                 );
             }
-            println!("\nUse --no-preview to perform the restoration");
+            println!(
+                "
+Use --no-preview to perform the restoration"
+            );
         } else {
             let engine = RestorationEngine::new(&project_root)?;
             let result = engine.execute_project_restoration(&plan)?;
@@ -1211,7 +1278,7 @@ impl Cli {
     fn handle_restore_files(since: &str, file_patterns: &[String], preview: bool) -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
-        let transaction_log = TransactionLog::load(&project_root)?;
+        let transaction_log = TransactionLog::load(project_root.clone())?;
 
         // Parse timestamp (supports Local and UTC/RFC3339)
         let since_time = parse_user_timestamp(since)?;
@@ -1253,11 +1320,17 @@ impl Cli {
                 filtered_files.len(),
                 since_time.format("%Y-%m-%d %H:%M:%S UTC")
             );
-            println!("\nFiles to be restored:");
+            println!(
+                "
+Files to be restored:"
+            );
             for file in &filtered_files {
                 println!("  {}", file.display());
             }
-            println!("\nUse --no-preview to perform the restoration");
+            println!(
+                "
+Use --no-preview to perform the restoration"
+            );
         } else {
             let engine = RestorationEngine::new(&project_root)?;
             let result = engine.restore_files_before_timestamp(&filtered_files, since_time)?;
@@ -1270,7 +1343,7 @@ impl Cli {
     fn handle_restore_session(session_id: &str, preview: bool) -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
-        let transaction_log = TransactionLog::load(&project_root)?;
+        let transaction_log = TransactionLog::load(project_root.clone())?;
 
         let session_files = transaction_log.get_session_files(session_id)?;
 
@@ -1287,7 +1360,10 @@ impl Cli {
             for file in &session_files {
                 println!("  {}", file.display());
             }
-            println!("\nUse --no-preview to perform the restoration");
+            println!(
+                "
+Use --no-preview to perform the restoration"
+            );
         } else {
             let engine = RestorationEngine::new(&project_root)?;
             let result = engine.restore_session(session_id)?;
@@ -1745,8 +1821,13 @@ impl Cli {
                     all_files.extend(Self::find_supported_files(&path_buf)?);
                 } else {
                     return Err(anyhow::anyhow!(
-                        "Directory '{}' requires --recursive flag for safety.\n\nTo analyze this directory: gnawtreewriter analyze {} --recursive\nTo analyze specific files: gnawtreewriter analyze {}/*.ext",
-                        path, path, path
+                        "Directory '{}' requires --recursive flag for safety.
+
+To analyze this directory: gnawtreewriter analyze {} --recursive
+To analyze specific files: gnawtreewriter analyze {}/*.ext",
+                        path,
+                        path,
+                        path
                     ));
                 }
             } else {
@@ -1841,7 +1922,11 @@ impl Cli {
 
         // Process replacement text if unescape_newlines is set
         let replacement_text = if unescape_newlines {
-            replace.replace("\\n", "\n")
+            replace.replace(
+                "\
+", "
+",
+            )
         } else {
             replace.to_string()
         };
@@ -1860,7 +1945,10 @@ impl Cli {
         if preview {
             println!("--- QuickReplace preview for: {}", file);
             print_diff(&original, &modified);
-            println!("\nUse --no-preview to actually apply the change.");
+            println!(
+                "
+Use --no-preview to actually apply the change."
+            );
             return Ok(());
         }
 
@@ -1908,10 +1996,16 @@ impl Cli {
         let engine = RefactorEngine::new(project_root.clone());
 
         if preview {
-            println!("--- Preview mode (dry run) ---\n");
+            println!(
+                "--- Preview mode (dry run) ---
+"
+            );
             let results = engine.preview_rename(symbol_name, new_name, path, recursive)?;
             println!("{}", format_refactor_results(&results));
-            println!("\nUse --no-preview to actually apply the rename.");
+            println!(
+                "
+Use --no-preview to actually apply the rename."
+            );
         } else {
             // Validate new name doesn't clash with reserved keywords
             // Check if path is a directory or file to determine language
@@ -2032,12 +2126,18 @@ impl Cli {
         if preview {
             let modified = writer.preview_edit(op)?;
             print_diff(writer.get_source(), &modified);
-            println!("\n✓ Preview complete");
+            println!(
+                "
+✓ Preview complete"
+            );
             println!(
                 "  Would clone to: {} [{}]",
                 target_file_path, target_node_path
             );
-            println!("\nUse without --preview to apply the clone");
+            println!(
+                "
+Use without --preview to apply the clone"
+            );
         } else {
             writer.edit(op)?;
             println!(
@@ -2074,8 +2174,13 @@ impl Cli {
                     all_files.extend(Self::find_supported_files(&path_buf)?);
                 } else {
                     return Err(anyhow::anyhow!(
-                        "Directory '{}' requires --recursive flag for safety.\n\nTo lint this directory: gnawtreewriter lint {} --recursive\nTo lint specific files: gnawtreewriter lint {}/*.ext",
-                        path, path, path
+                        "Directory '{}' requires --recursive flag for safety.
+
+To lint this directory: gnawtreewriter lint {} --recursive
+To lint specific files: gnawtreewriter lint {}/*.ext",
+                        path,
+                        path,
+                        path
                     ));
                 }
             } else {
@@ -2194,7 +2299,11 @@ fn resolve_content(
     };
 
     if unescape_newlines {
-        final_content = final_content.replace("\\n", "\n");
+        final_content = final_content.replace(
+            "\
+", "
+",
+        );
     }
 
     Ok(final_content)
@@ -2213,7 +2322,12 @@ fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>
     // We try common formats: "YYYY-MM-DD HH:MM:SS" and "YYYY-MM-DDTHH:MM:SS"
     let naive = NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S")
         .or_else(|_| NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%dT%H:%M:%S"))
-        .context("Invalid timestamp format. \nSupported formats:\n  - Local time: \"YYYY-MM-DD HH:MM:SS\"\n  - RFC3339:    \"YYYY-MM-DDTHH:MM:SSZ\" (or with offset)")?;
+        .context(
+            "Invalid timestamp format.
+Supported formats:
+  - Local time: \"YYYY-MM-DD HH:MM:SS\"
+  - RFC3339:    \"YYYY-MM-DDTHH:MM:SSZ\" (or with offset)",
+        )?;
 
     // Convert Local Naive -> UTC
     // Local::from_local_datetime returns a LocalResult (None, Single, or Ambiguous)
@@ -2346,7 +2460,7 @@ mod tests {
         let backup_dir = project_root.join(".gnawtreewriter_backups");
         assert!(backup_dir.exists());
 
-        let tlog = TransactionLog::load(&project_root)?;
+        let tlog = TransactionLog::load(project_root)?;
         let history = tlog.get_file_history(&file_path)?;
         assert!(!history.is_empty());
 

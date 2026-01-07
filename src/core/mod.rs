@@ -64,7 +64,7 @@ impl GnawTreeWriter {
         // Initialize transaction log for the project root
         // Use find_project_root to ensure we log to the correct centralized location
         let project_root = find_project_root(path);
-        let transaction_log = TransactionLog::load(&project_root)?;
+        let transaction_log = TransactionLog::load(project_root)?;
 
         Ok(Self {
             file_path: file_path.to_string(),

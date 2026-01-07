@@ -262,7 +262,7 @@ impl Batch {
 
             // Log transaction for this file (one transaction per file in MVP)
             let project_root = find_project_root(Path::new(&fd.file));
-            let mut transaction_log = TransactionLog::load(&project_root)
+            let mut transaction_log = TransactionLog::load(project_root)
                 .with_context(|| format!("Failed to load transaction log for {}", fd.file))?;
 
             let before_hash = Some(calculate_content_hash(&fd.before));

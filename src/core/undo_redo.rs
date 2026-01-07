@@ -26,7 +26,7 @@ impl UndoRedoManager {
             fs::create_dir_all(&backup_dir).context("Failed to create backup directory")?;
         }
 
-        let transaction_log = TransactionLog::load(&project_root)?;
+        let transaction_log = TransactionLog::load(project_root.clone())?;
 
         // Populate undo stack from transaction log history
         let mut undo_stack = Vec::new();

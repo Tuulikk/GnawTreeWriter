@@ -1,7 +1,11 @@
 use anyhow::Result;
-use gnawtreewriter::llm::{AiManager, DeviceType};
+use gnawtreewriter::llm::AiManager;
+#[cfg(feature = "modernbert")]
+use gnawtreewriter::llm::DeviceType;
+#[cfg(feature = "modernbert")]
 use std::fs;
 use std::path::Path;
+#[cfg(feature = "modernbert")]
 use tempfile::tempdir;
 
 /// Helper to check if ModernBERT is actually installed before running heavy tests

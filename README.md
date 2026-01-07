@@ -104,6 +104,49 @@ gnawtreewriter clone examples/hello.zig "3" examples/hello.zig "0" --preview
 gnawtreewriter edit app.py "0.1" 'def new(): pass' --dry-run
 ```
 
+### MCP Server (experimental)
+
+GnawTreeWriter includes a lightweight MCP (Model Context Protocol) server for AI agent coordination. It is feature-gated behind the `mcp` feature.
+
+- Build and install with the MCP feature:
+
+```bash
+cargo install --path . --features mcp
+```
+
+- Run the server via the CLI:
+
+```bash
+gnawtreewriter mcp serve --addr 127.0.0.1:8080 --token secret
+```
+
+You can also set the `MCP_TOKEN` environment variable and omit `--token`.
+
+The server exposes a JSON-RPC 2.0 HTTP endpoint at `/` (POST). Supported methods (MVP):
+- `initialize` - negotiate protocol version and capabilities
+- `tools/list` - list available tools
+- `tools/call` - call a tool (e.g., `analyze`)
+
+Example: Initialize
+
+```bash
+curl -X POST http://127.0.0.1:8080/ \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer secret" \
+  -d '{"jsonrpc":"2.0","method":"initialize","id":1}'
+```
+
+Example: Analyze a file
+
+```bash
+curl -X POST http://127.0.0.1:8080/ \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer secret" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"analyze","arguments":{"file_path":"path/to/file"}}}'
+```
+
+This server is experimental (MVP). See `src/mcp/mod.rs` and `tests/mcp_integration.rs` for examples and tests.
+
 ### 🚀 Road Ahead
 
 Looking toward **v1.0**, we're planning:
