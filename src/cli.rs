@@ -13,14 +13,24 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 #[derive(Subcommand)]
+/// Manage the MCP server (Model Context Protocol).
+///
+/// Use the `serve` subcommand to run a minimal JSON-RPC HTTP endpoint locally.
+/// Examples:
+///   gnawtreewriter mcp serve --addr 127.0.0.1:8080 --token secret
+///   MCP_TOKEN=secret gnawtreewriter mcp serve --addr 0.0.0.0:8080
 enum McpSubcommands {
-    /// Start MCP server
+    /// Start the MCP server (JSON-RPC over HTTP).
+    ///
+    /// Options:
+    ///   --addr <ADDR>    Address to bind (default: 127.0.0.1:8080)
+    ///   --token <TOKEN>  Optional Bearer token for basic auth (can also be set via MCP_TOKEN)
     Serve {
         /// Address to bind (default: 127.0.0.1:8080)
         #[arg(long, default_value = "127.0.0.1:8080")]
         addr: String,
         #[arg(long)]
-        /// Optional bearer token for simple auth
+        /// Optional bearer token for basic auth. If omitted, the `MCP_TOKEN` environment variable will be used.
         token: Option<String>,
     },
 }
@@ -322,7 +332,11 @@ enum Commands {
     SessionStart,
     /// Show current undo/redo state
     Status,
-    /// Manage MCP server and daemon
+    /// Manage the MCP server (Model Context Protocol).
+    ///
+    /// Examples:
+    ///   gnawtreewriter mcp serve --addr 127.0.0.1:8080 --token secret
+    ///   MCP_TOKEN=secret gnawtreewriter mcp serve --addr 0.0.0.0:8080
     Mcp {
         #[command(subcommand)]
         command: McpSubcommands,

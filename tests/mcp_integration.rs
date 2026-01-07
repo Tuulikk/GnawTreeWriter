@@ -82,6 +82,171 @@ async fn integration_mcp_auth() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[tokio::test]
+async fn integration_mcp_tools_list() -> Result<(), Box<dyn std::error::Error>> {
+    // Bind to ephemeral port
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+
+    // oneshot channel to signal server shutdown
+    let (tx, rx) = oneshot::channel::<()>();
+    let token = Some("secret".to_string());
+
+    // Spawn the server; it will run until we send on `tx`
+    let server_handle = tokio::spawn(async move {
+        let shutdown_fut = async move {
+            let _ = rx.await;
+        };
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
+            .await
+            .unwrap();
+    });
+
+    let url = format!("http://{}/", addr);
+    let client = Client::new();
+    let body = json!({"jsonrpc":"2.0","method":"tools/list","id":3});
+
+    // Wait for server to become available (connection retries)
+    let mut ready = false;
+    for _ in 0..40 {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                ready = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_connect() {
+                    sleep(Duration::from_millis(50)).await;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(ready, "server did not become ready in time");
+
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&body)
+        .send()
+        .await?;
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let v: serde_json::Value = resp.json().await?;
+    assert!(v.get("result").is_some(), "expected JSON-RPC result field");
+    let tools = v
+        .get("result")
+        .unwrap()
+        .get("tools")
+        .and_then(|t| t.as_array());
+    assert!(
+        tools.is_some()
+            && tools
+                .unwrap()
+                .iter()
+                .any(|t| t.get("name").and_then(|n| n.as_str()) == Some("analyze"))
+    );
+
+    // Shutdown server
+    let _ = tx.send(());
+    server_handle.await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn integration_mcp_tools_call_missing_args() -> Result<(), Box<dyn std::error::Error>> {
+    // Bind to ephemeral port
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+
+    // oneshot channel to signal server shutdown
+    let (tx, rx) = oneshot::channel::<()>();
+    let token = Some("secret".to_string());
+
+    // Spawn the server; it will run until we send on `tx`
+    let server_handle = tokio::spawn(async move {
+        let shutdown_fut = async move {
+            let _ = rx.await;
+        };
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
+            .await
+            .unwrap();
+    });
+
+    let url = format!("http://{}/", addr);
+    let client = Client::new();
+    let body = json!({
+        "jsonrpc":"2.0",
+        "method":"tools/call",
+        "id":4,
+        "params": {"name":"analyze"}
+    });
+
+    // Wait for server to become available (connection retries)
+    let mut ready = false;
+    for _ in 0..40 {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                ready = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_connect() {
+                    sleep(Duration::from_millis(50)).await;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(ready, "server did not become ready in time");
+
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&body)
+        .send()
+        .await?;
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let v: serde_json::Value = resp.json().await?;
+    assert!(v.get("result").is_some(), "expected JSON-RPC result field");
+    let result = v.get("result").unwrap();
+    assert!(result.get("isError").and_then(|b| b.as_bool()) == Some(true));
+    let content_text = result
+        .get("content")
+        .and_then(|c| c.get(0))
+        .and_then(|e| e.get("text"))
+        .and_then(|t| t.as_str())
+        .unwrap_or("");
+    assert!(
+        content_text.contains("missing 'file_path' parameter")
+            || content_text.contains("Analyze failed"),
+        "unexpected error message: {}",
+        content_text
+    );
+
+    // Shutdown server
+    let _ = tx.send(());
+    server_handle.await?;
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn integration_mcp_tools_call_analyze() -> Result<(), Box<dyn std::error::Error>> {
     // Bind to ephemeral port
     let listener = TcpListener::bind("127.0.0.1:0").await?;

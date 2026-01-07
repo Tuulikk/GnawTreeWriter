@@ -145,7 +145,7 @@ curl -X POST http://127.0.0.1:8080/ \
   -d '{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"analyze","arguments":{"file_path":"path/to/file"}}}'
 ```
 
-This server is experimental (MVP). See `src/mcp/mod.rs` and `tests/mcp_integration.rs` for examples and tests.
+This server is experimental (MVP). See [docs/MCP.md](docs/MCP.md) for detailed documentation and examples; the implementation lives in `src/mcp/mod.rs` and the integration tests are in `tests/mcp_integration.rs`.
 
 ### 🚀 Road Ahead
 
