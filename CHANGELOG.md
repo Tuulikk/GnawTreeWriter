@@ -2,6 +2,46 @@
 
 All notable changes to GnawTreeWriter.
 
+## Unreleased
+
+### Added
+- **MCP Documentation**: Added comprehensive MCP server documentation in `docs/MCP.md`
+  - Detailed protocol documentation, supported methods, authentication, and examples
+  - Guide for adding new tools and testing the server
+- **MCP Example Clients**: Added Python and Rust example clients for interacting with MCP server
+  - `examples/python_mcp_client.py`: Full-featured Python CLI with `init`, `list`, `analyze`, and `call` commands
+  - `examples/mcp_client.rs`: Rust example using `reqwest` and `tokio`
+  - Both clients demonstrate JSON-RPC 2.0 request/response handling and error checking
+- **MCP Integration Tests**: Added comprehensive integration tests for MCP server
+  - Test for `tools/list` to verify tool discovery
+  - Test for `tools/call` with missing arguments (error handling)
+  - Test for authentication flow (unauthorized vs authorized)
+  - Test for `tools/call` analyze with temporary file
+- **MCP CI Testing**: Added GitHub Actions workflow to test MCP examples on CI
+  - `.github/workflows/mcp-examples.yml`: Builds with MCP feature and runs example clients
+  - Starts MCP server in background, tests both Python and Rust clients
+- **MCP CLI Help**: Improved CLI help text for MCP commands
+  - Enhanced documentation for `gnawtreewriter mcp serve` with examples and token usage
+
+### Fixed
+- **MCP Test Compilation**: Fixed MCP test compilation errors
+  - Corrected imports (`axum::http::Request`, `tower::util::ServiceExt`)
+  - Added `tower = "0.5"` to dev-dependencies
+  - Fixed unused variable warnings and dead code warnings
+- **MCP Clippy Errors**: Resolved clippy warnings in MCP and related code
+  - Made `find_symbols_in_tree` and `find_symbols_in_directory` static methods to avoid recursion warnings
+  - Fixed needless borrows in `TransactionLog::load` calls (use `.clone()` where needed)
+  - Removed unused imports in test files (conditionally imported with `#[cfg(feature)]`)
+  - Added `#[allow(dead_code)]` for unused `jsonrpc` field in `JsonRpcRequest`
+
+### Changed
+- **MCP README**: Updated `README.md` with MCP server documentation
+  - Added usage examples and link to detailed `docs/MCP.md`
+  - Documented token usage and environment variable (`MCP_TOKEN`)
+- **Cleanup**: Removed temporary and untracked files
+  - Removed `.gnawtreewriter_session.json` from version control (gitignored)
+  - Removed temporary files: `src/cli.rs.tmp`, `src/llm/ai_manager_minimal.rs`
+
 ## [0.6.0] - 2025-01-05
 
 ### Fixed
