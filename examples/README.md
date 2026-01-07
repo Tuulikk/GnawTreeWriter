@@ -61,6 +61,35 @@ Notes:
 
 ---
 
+## Node.js example
+
+File: `examples/node_mcp_client.js`
+
+Requirements:
+- Node 18+ (has global fetch). If you use an older Node version, install `node-fetch`:
+  `npm install node-fetch`
+
+Usage:
+```bash
+# List tools
+node examples/node_mcp_client.js --url http://127.0.0.1:8080/ --token secret list
+
+# Initialize (handshake)
+node examples/node_mcp_client.js --url http://127.0.0.1:8080/ --token secret init
+
+# Call analyze for a file
+node examples/node_mcp_client.js --url http://127.0.0.1:8080/ --token secret analyze examples/foo.py
+
+# Generic tool call with JSON-encoded parameters
+node examples/node_mcp_client.js --url http://127.0.0.1:8080/ --token secret call analyze '{"file_path":"examples/foo.py"}'
+```
+
+Notes:
+- The script accepts `--url` and `--token`. If `--token` is omitted, it checks `MCP_TOKEN` environment variable.
+- The client waits for server readiness before making calls and reports both JSON-RPC and tool-level errors clearly.
+
+---
+
 ## Rust example
 
 File: `examples/mcp_client.rs`

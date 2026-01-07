@@ -22,11 +22,16 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install Python dependencies
         run: |
           pip install requests
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -79,6 +84,13 @@ jobs:
           echo "Server did not become ready"
           cat /tmp/mcp-test/server.log
           exit 1
+
+      - name: Test Node client
+        run: |
+          node --version || true
+          node examples/node_mcp_client.js --url http://127.0.0.1:0 --token testtoken init
+          node examples/node_mcp_client.js --url http://127.0.0.1:0 --token testtoken list
+          node examples/node_mcp_client.js --url http://127.0.0.1:0 --token testtoken analyze /tmp/mcp-test/test.py
 
       - name: Test Python client
         run: |
