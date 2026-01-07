@@ -1,0 +1,108 @@
+name: Test MCP Examples
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  test-mcp-examples:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install requests
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build with MCP feature
+        run: |
+          cargo build --release --features mcp
+
+      - name: Run MCP tests
+        run: |
+          cargo test --features mcp --no-fail-fast
+
+      - name: Create temporary directory
+        run: |
+          mkdir -p /tmp/mcp-test
+          echo 'def foo(): return 42' > /tmp/mcp-test/test.py
+
+      - name: Start MCP server in background
+        run: |
+          cargo run --release --features mcp -- mcp serve --addr 127.0.0.1:0 --token testtoken > /tmp/mcp-test/server.log 2>&1 &
+          echo $! > /tmp/mcp-test/server.pid
+          echo "Server PID: $(cat /tmp/mcp-test/server.pid)"
+          sleep 3
+
+      - name: Wait for server readiness
+        run: |
+          for i in {1..30}; do
+            if curl -s http://127.0.0.1:0/ -H "Authorization: Bearer testtoken" -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"initialize","id":1}' > /dev/null 2>&1; then
+              echo "Server is ready"
+              exit 0
+            fi
+            echo "Waiting for server... ($i/30)"
+            sleep 1
+          done
+          echo "Server did not become ready"
+          cat /tmp/mcp-test/server.log
+          exit 1
+
+      - name: Test Python client
+        run: |
+          python examples/python_mcp_client.py --url http://127.0.0.1:0 --token testtoken init
+          python examples/python_mcp_client.py --url http://127.0.0.1:0 --token testtoken list
+          python examples/python_mcp_client.py --url http://127.0.0.1:0 --token testtoken analyze /tmp/mcp-test/test.py
+
+      - name: Test Rust client
+        run: |
+          cargo run --features mcp --example mcp_client -- --url http://127.0.0.1:0 --token testtoken init
+          cargo run --features mcp --example mcp_client -- --url http://127.0.0.1:0 --token testtoken list
+
+      - name: Server logs on failure
+        if: failure()
+        run: |
+          echo "=== Server logs ==="
+          cat /tmp/mcp-test/server.log
+
+      - name: Stop MCP server
+        if: always()
+        run: |
+          if [ -f /tmp/mcp-test/server.pid ]; then
+            pid=$(cat /tmp/mcp-test/server.pid)
+            echo "Stopping server PID: $pid"
+            kill $pid 2>/dev/null || true
+            rm /tmp/mcp-test/server.pid
+          fi
