@@ -1,0 +1,40 @@
+# Minimal extension manifest for exposing GnawTreeWriter as a Context Server in Zed.
+# See https://zed.dev/docs/extensions/mcp-extensions for extension development details.
+#
+# NOTES:
+# - This file is a lightweight skeleton / hint manifest. The actual command to start the MCP
+#   server is provided programmatically by the extension's Rust implementation via
+#   the `context_server_command` method (see docs).
+# - Customize the `authors`, `homepage` and any fields below to match your project details.
+
+[package]
+name = "gnaw-zed-mcp"
+version = "0.1.0"
+display_name = "GnawTreeWriter (MCP) — Dev"
+description = "A small dev extension that exposes a local GnawTreeWriter MCP server as a context server in Zed."
+authors = ["Tuulikk <tuulikk@example.com>"]
+homepage = "https://github.com/Tuulikk/GnawTreeWriter"
+license = "MPL-2.0"
+
+# Register the context server that will appear in Zed's Agent/Context Server panel.
+# The key name (gnawtreewriter) is the context server id used by the extension implementation.
+[context_servers.gnawtreewriter]
+title = "GnawTreeWriter (local)"
+description = "Starts a local GnawTreeWriter MCP server for project analysis and examples."
+
+# Optional: developer hint about a default command. The real executable/args are returned
+# from the extension's `context_server_command`. This line is only informational/helpful.
+# Example (not executed automatically from this manifest):
+# command = ["./scripts/mcp-serve.sh", "--addr", "127.0.0.1:8080", "--token", "secret"]
+#
+# Configuration note:
+# - A good extension implementation will allow configuring addr/token via project settings
+#   or environment variables so users can adapt to their environment.
+#
+# Testing:
+# - Follow Zed docs to install the extension as a dev extension and verify that the server
+#   can be started from the Agent Panel (the extension should return the startup command).
+#
+# Implementation pointer:
+# - Implement `context_server_command` in Rust and return a `zed::Command` with `command`,
+#   `args` and `env` fields. See: https://zed.dev/docs/extensions/mcp-extensions
