@@ -187,7 +187,7 @@ async fn main() -> Result<()> {
     println!("Connecting to {}...", url);
     wait_for_server(&client, &url, token, 20, 250).await?;
 
-    let mut id_counter = 2u64;
+    let id_counter = 2u64;
 
     match args.command.as_str() {
         "init" => {
@@ -230,7 +230,6 @@ async fn main() -> Result<()> {
             let params =
                 serde_json::json!({ "name": "analyze", "arguments": { "file_path": file_path } });
             let req = build_request("tools/call", id_counter, Some(params));
-            id_counter += 1;
             let resp = send_request(&client, &url, token, &req).await?;
 
             if let Some(err) = resp.error {
