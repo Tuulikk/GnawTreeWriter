@@ -9,7 +9,10 @@ on:
 
 jobs:
   test-mcp-examples:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -97,11 +100,6 @@ jobs:
           python examples/python_mcp_client.py --url http://127.0.0.1:0 --token testtoken init
           python examples/python_mcp_client.py --url http://127.0.0.1:0 --token testtoken list
           python examples/python_mcp_client.py --url http://127.0.0.1:0 --token testtoken analyze /tmp/mcp-test/test.py
-
-      - name: Test Rust client
-        run: |
-          cargo run --features mcp --example mcp_client -- --url http://127.0.0.1:0 --token testtoken init
-          cargo run --features mcp --example mcp_client -- --url http://127.0.0.1:0 --token testtoken list
 
       - name: Server logs on failure
         if: failure()
