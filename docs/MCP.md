@@ -8,7 +8,8 @@ This document describes the minimal MCP (Model Context Protocol) server implemen
 
 Table of contents
 - Overview
-- Running the server (CLI & env)
+- Running server (CLI & env)
+- Checking server status
 - JSON-RPC: request/response shape
 - Supported methods
   - initialize
@@ -17,7 +18,7 @@ Table of contents
 - Authentication
 - Examples (curl & code)
 - Testing (unit & integration)
-- Extending the MCP server (add a tool)
+- Extending MCP server (add a tool)
 - Security & deployment recommendations
 - Troubleshooting and tips
 
@@ -36,6 +37,53 @@ The server is compiled only when `--features mcp` is enabled.
 
 ---
 
+## Checking server status
+
+The `mcp status` command queries a running MCP server to display server information and available tools.
+
+```bash
+gnawtreewriter mcp status --url <URL> [--token <TOKEN>]
+```
+
+**Options:**
+- `--url <URL>`: Server URL (default: `http://127.0.0.1:8080/`)
+- `--token <TOKEN>`: Optional bearer token (can also be set via `MCP_TOKEN` env var)
+
+**Output includes:**
+- Server name and version
+- MCP protocol version
+- Server capabilities
+- List of available tools with descriptions
+
+**Example output:**
+```
+=== MCP Server Status ===
+Name: gnawtreewriter
+Version: 0.6.0
+Protocol: 2025-11-25
+
+Capabilities:
+  - tools: {"listChanged":true}
+
+=== Available Tools ===
+
+  • analyze
+    Title: Analyze file
+    Description: Analyze a file and return a small summary of its AST.
+
+  • batch
+    Title: Apply batch
+    Description: Execute a batch of operations atomically.
+
+  • undo
+    Title: Undo
+    Description: Undo recent operations.
+
+=== Server is responding correctly ===
+```
+
+---
+
 ## Running the server
 
 You can run the server via the CLI subcommand:
@@ -45,13 +93,22 @@ You can run the server via the CLI subcommand:
 cargo install --path . --features mcp
 ```
 
-- Run via the included CLI (example):
+- Run via included CLI (example):
 ```bash
 # Run with explicit token
 gnawtreewriter mcp serve --addr 127.0.0.1:8080 --token secret
 
 # Or use an environment variable
 MCP_TOKEN=secret gnawtreewriter mcp serve --addr 127.0.0.1:8080
+```
+
+- Check server status (requires server running):
+```bash
+# Check status with explicit token
+gnawtreewriter mcp status --url http://127.0.0.1:8080/ --token secret
+
+# Or use environment variable
+MCP_TOKEN=secret gnawtreewriter mcp status --url http://127.0.0.1:8080/
 ```
 
 The server binds to the address you provide and begins accepting JSON-RPC POSTs at `/`.

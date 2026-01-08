@@ -360,6 +360,111 @@ pub mod mcp_server {
         .await
     }
 
+    pub async fn status(url: &str, token: Option<String>) -> Result<()> {
+        use reqwest::Client;
+
+        let client = Client::new();
+
+        println!("Querying MCP server at {}...", url);
+
+        // Initialize handshake
+        let init_body = json!({"jsonrpc":"2.0","method":"initialize","id":1});
+        let mut init_req = client.post(url);
+        if let Some(t) = &token {
+            init_req = init_req.header("Authorization", format!("Bearer {}", t));
+        }
+        let resp = init_req.json(&init_body).send().await;
+
+        let resp = match resp {
+            Ok(r) => r,
+            Err(e) => {
+                anyhow::bail!("Failed to connect to server: {}", e);
+            }
+        };
+
+        if !resp.status().is_success() {
+            anyhow::bail!("Server returned error status: {}", resp.status());
+        }
+
+        let v: serde_json::Value = resp.json().await?;
+
+        if let Some(err) = v.get("error") {
+            anyhow::bail!("Server error: {}", err);
+        }
+
+        let result = v.get("result").context("No result in response")?;
+
+        println!("\n=== MCP Server Status ===");
+
+        if let Some(server_info) = result.get("serverInfo") {
+            println!(
+                "Name: {}",
+                server_info
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("unknown")
+            );
+            println!(
+                "Version: {}",
+                server_info
+                    .get("version")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+            );
+        }
+
+        if let Some(protocol) = result.get("protocolVersion") {
+            println!("Protocol: {}", protocol.as_str().unwrap_or("unknown"));
+        }
+
+        if let Some(caps) = result.get("capabilities") {
+            println!("\nCapabilities:");
+            if caps.as_object().is_some() {
+                for (key, val) in caps.as_object().unwrap() {
+                    println!("  - {}: {}", key, val);
+                }
+            }
+        }
+
+        // List tools
+        let tools_body = json!({"jsonrpc":"2.0","method":"tools/list","id":2});
+        let mut tools_req = client.post(url);
+        if let Some(t) = &token {
+            tools_req = tools_req.header("Authorization", format!("Bearer {}", t));
+        }
+        let tools_resp = tools_req.json(&tools_body).send().await?;
+
+        if tools_resp.status().is_success() {
+            let tools_v: serde_json::Value = tools_resp.json().await?;
+            if let Some(tools_obj) = tools_v.get("result") {
+                if let Some(tools_array) = tools_obj.get("tools").and_then(|t| t.as_array()) {
+                    println!("\n=== Available Tools ===");
+                    for tool in tools_array {
+                        let name = tool
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("unknown");
+                        let title = tool.get("title").and_then(|t| t.as_str()).unwrap_or("");
+                        let desc = tool
+                            .get("description")
+                            .and_then(|d| d.as_str())
+                            .unwrap_or("");
+                        println!("\n  • {}", name);
+                        if !title.is_empty() {
+                            println!("    Title: {}", title);
+                        }
+                        if !desc.is_empty() {
+                            println!("    Description: {}", desc);
+                        }
+                    }
+                }
+            }
+        }
+
+        println!("\n=== Server is responding correctly ===");
+        Ok(())
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;

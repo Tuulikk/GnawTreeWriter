@@ -20,7 +20,7 @@ use clap::{Parser, Subcommand};
 ///   gnawtreewriter mcp serve --addr 127.0.0.1:8080 --token secret
 ///   MCP_TOKEN=secret gnawtreewriter mcp serve --addr 0.0.0.0:8080
 enum McpSubcommands {
-    /// Start the MCP server (JSON-RPC over HTTP).
+    /// Start MCP server (JSON-RPC over HTTP).
     ///
     /// Options:
     ///   --addr <ADDR>    Address to bind (default: 127.0.0.1:8080)
@@ -30,7 +30,20 @@ enum McpSubcommands {
         #[arg(long, default_value = "127.0.0.1:8080")]
         addr: String,
         #[arg(long)]
-        /// Optional bearer token for basic auth. If omitted, the `MCP_TOKEN` environment variable will be used.
+        /// Optional bearer token for basic auth. If omitted, `MCP_TOKEN` environment variable will be used.
+        token: Option<String>,
+    },
+    /// Check MCP server status and list available tools.
+    ///
+    /// Options:
+    ///   --url <URL>     Server URL (default: http://127.0.0.1:8080/)
+    ///   --token <TOKEN>  Optional bearer token (can also be set via MCP_TOKEN)
+    Status {
+        /// Server URL (default: http://127.0.0.1:8080/)
+        #[arg(long, default_value = "http://127.0.0.1:8080/")]
+        url: String,
+        #[arg(long)]
+        /// Optional bearer token for basic auth. If omitted, `MCP_TOKEN` environment variable will be used.
         token: Option<String>,
     },
 }
@@ -833,6 +846,20 @@ impl Cli {
                     {
                         let token = token.or_else(|| std::env::var("MCP_TOKEN").ok());
                         crate::mcp::mcp_server::serve(&addr, token).await?;
+                    }
+                }
+                McpSubcommands::Status { url, token } => {
+                    #[cfg(not(feature = "mcp"))]
+                    {
+                        let _ = url;
+                        let _ = token;
+                        let _ = std::env::var("MCP_TOKEN");
+                        anyhow::bail!("MCP feature is not enabled. Recompile with --features mcp");
+                    }
+                    #[cfg(feature = "mcp")]
+                    {
+                        let token = token.or_else(|| std::env::var("MCP_TOKEN").ok());
+                        crate::mcp::mcp_server::status(&url, token).await?;
                     }
                 }
             },
