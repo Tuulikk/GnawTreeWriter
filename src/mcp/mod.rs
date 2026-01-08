@@ -46,6 +46,45 @@ pub mod mcp_server {
         result: Value,
     }
 
+    /// A helper to build JSON-RPC error responses.
+    #[derive(Debug, Serialize)]
+    struct JsonRpcError<'a> {
+        jsonrpc: &'a str,
+        id: Option<Value>,
+        error: serde_json::Value,
+    }
+
+    /// Standard JSON-RPC error codes
+    #[allow(dead_code)]
+    const INVALID_PARAMS_CODE: i32 = -32602;
+    #[allow(dead_code)]
+    const METHOD_NOT_FOUND_CODE: i32 = -32601;
+    #[allow(dead_code)]
+    const PARSE_ERROR_CODE: i32 = -32700;
+    #[allow(dead_code)]
+    const INTERNAL_ERROR_CODE: i32 = -32603;
+
+    /// Build a JSON-RPC error response
+    fn build_jsonrpc_error<'a>(
+        id: Option<Value>,
+        code: i32,
+        message: &str,
+        data: Option<Value>,
+    ) -> JsonRpcError<'a> {
+        let mut error_obj = json!({
+            "code": code,
+            "message": message
+        });
+        if let Some(d) = data {
+            error_obj["data"] = d;
+        }
+        JsonRpcError {
+            jsonrpc: "2.0",
+            id,
+            error: error_obj,
+        }
+    }
+
     async fn rpc_handler(
         State(state): State<Arc<AppState>>,
         headers: HeaderMap,
@@ -145,11 +184,46 @@ pub mod mcp_server {
                     .and_then(Value::as_str)
                     .unwrap_or_default();
 
+                // Validate tool name - return JSON-RPC error for unknown tools
+                if !matches!(name, "analyze" | "batch" | "undo") {
+                    let err = build_jsonrpc_error(
+                        req.id,
+                        METHOD_NOT_FOUND_CODE,
+                        "Unknown tool",
+                        Some(json!(format!(
+                            "'{}' is not a valid tool name. Available tools: analyze, batch, undo",
+                            name
+                        ))),
+                    );
+                    return (
+                        StatusCode::NOT_FOUND,
+                        Json(serde_json::to_value(err).unwrap()),
+                    );
+                }
+
                 let arguments = params
                     .get("arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
 
+                // Validate required parameters for analyze tool
+                if name == "analyze" && arguments.get("file_path").and_then(Value::as_str).is_none()
+                {
+                    let err = build_jsonrpc_error(
+                        req.id,
+                        INVALID_PARAMS_CODE,
+                        "Invalid parameters",
+                        Some(
+                            json!({"field": "file_path", "message": "Missing required parameter 'file_path'"}),
+                        ),
+                    );
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::to_value(err).unwrap()),
+                    );
+                }
+
+                // Execute tool - these return result with isError for tool-level failures
                 let result = match name {
                     "analyze" => handle_analyze(&arguments).unwrap_or_else(|e| {
                         json!({
@@ -163,12 +237,7 @@ pub mod mcp_server {
                     "undo" => {
                         json!({ "content": [{"type": "text", "text": "Undo executed (MVP)"}] })
                     }
-                    _ => {
-                        json!({
-                            "content": [{"type": "text", "text": format!("Unknown tool: {}", name)}],
-                            "isError": true
-                        })
-                    }
+                    _ => unreachable!("Unknown tool should have been caught above"),
                 };
 
                 let resp = JsonRpcSuccess {
@@ -191,13 +260,22 @@ pub mod mcp_server {
     }
 
     fn handle_analyze(arguments: &Value) -> Result<Value> {
+        // Note: file_path is validated before this function is called (JSON-RPC error if missing)
         let file_path = arguments
             .get("file_path")
             .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("missing 'file_path' parameter"))?;
+            .ok_or_else(|| anyhow!("missing 'file_path' parameter (this should not happen)"))?;
 
-        let content = fs::read_to_string(file_path)
-            .with_context(|| format!("Failed to read file: {}", file_path))?;
+        let content = match fs::read_to_string(file_path) {
+            Ok(c) => c,
+            Err(e) => {
+                // Tool-level error: file not found or permission denied
+                return Ok(json!({
+                    "content": [{"type": "text", "text": format!("IO error: {}", e)}],
+                    "isError": true
+                }));
+            }
+        };
 
         match crate::parser::get_parser(Path::new(file_path)) {
             Ok(parser) => match parser.parse(&content) {
@@ -222,15 +300,21 @@ pub mod mcp_server {
                         "structuredContent": { "node_count": node_count }
                     }))
                 }
-                Err(e) => Ok(json!({
-                    "content": [{"type": "text", "text": format!("Parser error: {}", e)}],
-                    "isError": true
-                })),
+                Err(e) => {
+                    // Tool-level error: syntax error in the file
+                    Ok(json!({
+                        "content": [{"type": "text", "text": format!("Parser error: {}", e)}],
+                        "isError": true
+                    }))
+                }
             },
-            Err(e) => Ok(json!({
-                "content": [{"type": "text", "text": format!("No parser available: {}", e)}],
-                "isError": true
-            })),
+            Err(e) => {
+                // Tool-level error: no parser available for this file type
+                Ok(json!({
+                    "content": [{"type": "text", "text": format!("No parser available: {}", e)}],
+                    "isError": true
+                }))
+            }
         }
     }
 
@@ -344,6 +428,102 @@ pub mod mcp_server {
                 .unwrap();
             let resp2 = app.oneshot(req2).await.unwrap();
             assert_eq!(resp2.status(), StatusCode::OK);
+        }
+
+        #[tokio::test]
+        async fn test_tools_call_unknown_tool() {
+            let app = build_router(None);
+            let req = Request::builder()
+                .method("POST")
+                .uri("/")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"jsonrpc":"2.0","method":"tools/call","params":{"name":"unknown_tool"},"id":1}).to_string(),
+                ))
+                .unwrap();
+
+            let response = app.oneshot(req).await.unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+            let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .unwrap();
+            let v: Value = serde_json::from_slice(&body).unwrap();
+
+            // Should be a JSON-RPC error, not a result with isError
+            assert!(v.get("error").is_some(), "Expected JSON-RPC error object");
+            assert!(v.get("result").is_none(), "Should not have result field");
+            assert_eq!(
+                v["error"]["code"], -32601,
+                "Error code should be METHOD_NOT_FOUND"
+            );
+            assert!(v["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Unknown tool"));
+        }
+
+        #[tokio::test]
+        async fn test_tools_call_missing_required_param() {
+            let app = build_router(None);
+            let req = Request::builder()
+                .method("POST")
+                .uri("/")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"jsonrpc":"2.0","method":"tools/call","params":{"name":"analyze","arguments":{}},"id":1}).to_string(),
+                ))
+                .unwrap();
+
+            let response = app.oneshot(req).await.unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+            let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .unwrap();
+            let v: Value = serde_json::from_slice(&body).unwrap();
+
+            // Should be a JSON-RPC error for invalid params
+            assert!(v.get("error").is_some(), "Expected JSON-RPC error object");
+            assert!(v.get("result").is_none(), "Should not have result field");
+            assert_eq!(
+                v["error"]["code"], -32602,
+                "Error code should be INVALID_PARAMS"
+            );
+            assert!(v["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Invalid parameters"));
+        }
+
+        #[tokio::test]
+        async fn test_tools_call_file_not_found() {
+            let app = build_router(None);
+            let req = Request::builder()
+                .method("POST")
+                .uri("/")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"jsonrpc":"2.0","method":"tools/call","params":{"name":"analyze","arguments":{"file_path":"/nonexistent/file.py"}},"id":1}).to_string(),
+                ))
+                .unwrap();
+
+            let response = app.oneshot(req).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+
+            let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .unwrap();
+            let v: Value = serde_json::from_slice(&body).unwrap();
+
+            // Should be a result with isError (tool-level error), not JSON-RPC error
+            assert!(v.get("result").is_some(), "Expected result object");
+            assert!(v.get("error").is_none(), "Should not have error field");
+            assert_eq!(v["result"]["isError"], true, "Should be marked as error");
+            assert!(v["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("IO error"));
         }
     }
 }

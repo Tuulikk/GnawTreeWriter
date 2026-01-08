@@ -90,6 +90,46 @@ Requests and responses follow JSON-RPC 2.0 basics.
 }
 ```
 
+### Error handling: JSON-RPC error vs tool error
+
+The server distinguishes between protocol-level errors and tool-level failures:
+
+**JSON-RPC `error` (protocol-level failures)**:
+- **Authentication failures** (`code`: -32001)
+- **Invalid JSON-RPC payload** (`code`: -32700)
+- **Unknown method** (`code`: -32601)
+- **Unknown tool name** (`code`: -32601) - e.g., calling "invalid_tool_name"
+- **Missing required parameters** (`code`: -32602) - e.g., `analyze` without `file_path`
+
+These errors indicate problems with the request itself and should not be retried without fixing the request.
+
+**`result.isError = true` (tool-level failures)**:
+- **File not found** - IO error when reading the specified file
+- **No parser available** - File extension not supported
+- **Tool execution errors** - Runtime failures during tool execution
+
+These errors indicate the request was valid but the tool encountered issues with the data or environment. These may be retryable after fixing the underlying issue (e.g., creating the file).
+
+**Client handling pattern**:
+```javascript
+// 1. Check for JSON-RPC protocol errors first
+if (response.error) {
+  // Protocol error - fix the request
+  console.error("Protocol error:", response.error.message);
+  return;
+}
+
+// 2. Check for tool-level errors
+if (response.result?.isError) {
+  // Tool error - may be retryable
+  console.error("Tool error:", response.result.content[0].text);
+  return;
+}
+
+// 3. Success
+console.log("Success:", response.result);
+```
+
 The server is forgiving (it first parses value into a `JsonRpcRequest` that only reads fields needed).
 
 ---
@@ -150,19 +190,48 @@ The server is forgiving (it first parses value into a `JsonRpcRequest` that only
 }
 ```
 
-- Error case for analyze when `file_path` is missing:
+- Error case for analyze when `file_path` is missing (JSON-RPC `error`):
 ```json
 {
   "jsonrpc":"2.0",
   "id":3,
+  "error": {
+    "code": -32602,
+    "message": "Invalid parameters",
+    "data": {
+      "field": "file_path",
+      "message": "Missing required parameter 'file_path'"
+    }
+  }
+}
+```
+
+- Error case for analyze when file is not found (tool-level `isError`):
+```json
+{
+  "jsonrpc":"2.0",
+  "id":4,
   "result": {
-    "content": [{"type":"text","text":"Analyze failed: missing 'file_path' parameter"}],
+    "content": [{"type":"text","text":"IO error: No such file or directory (os error 2)"}],
     "isError": true
   }
 }
 ```
 
-> Note: `tools/call` returns a result object even for tool-level errors so agents can receive a consistent payload. For protocol-level errors (invalid JSON-RPC), a JSON-RPC `error` object is returned.
+- Error case for unknown tool (JSON-RPC `error`):
+```json
+{
+  "jsonrpc":"2.0",
+  "id":5,
+  "error": {
+    "code": -32601,
+    "message": "Unknown tool",
+    "data": "'invalid_tool' is not a valid tool name. Available tools: analyze, batch, undo"
+  }
+}
+```
+
+> Note: See "Error handling" section above for the complete distinction between JSON-RPC errors and tool-level errors.
 
 ---
 
