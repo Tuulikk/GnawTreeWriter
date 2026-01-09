@@ -92,17 +92,29 @@ echo
 
 # Locate the compiled artifact(s)
 ARTIFACT=""
-# Look for common cdylib/binary patterns in target/release
+WASM_ARTIFACT=""
+# Look for native artifact in target/release
 while IFS= read -r f; do
   # prefer non-dbg artifacts
   ARTIFACT="$f"
   break
 done < <(find "$EXT_DIR/target/release" -maxdepth 1 -type f \( -name "lib${pkg_name}.*" -o -name "${pkg_name}.*" -o -name "${pkg_name}" \) 2>/dev/null | sort)
 
-if [[ -z "$ARTIFACT" ]]; then
-  echo "WARNING: No artifact matching '${pkg_name}' found in target/release. Including entire target/release directory instead."
+# Look for wasm artifact (wasm32 target)
+while IFS= read -r f; do
+  WASM_ARTIFACT="$f"
+  break
+done < <(find "$EXT_DIR/target/wasm32-unknown-unknown/release" -maxdepth 1 -type f -name "${pkg_name}.wasm" 2>/dev/null | sort)
+
+if [[ -z "$ARTIFACT" && -z "$WASM_ARTIFACT" ]]; then
+  echo "WARNING: No artifact matching '${pkg_name}' found in target/release or wasm target. Including entire target/release directory instead."
 else
-  echo "Found artifact: $ARTIFACT"
+  if [[ -n "$ARTIFACT" ]]; then
+    echo "Found artifact: $ARTIFACT"
+  fi
+  if [[ -n "$WASM_ARTIFACT" ]]; then
+    echo "Found wasm artifact: $WASM_ARTIFACT"
+  fi
 fi
 
 # Prepare staging directory structure
@@ -127,17 +139,29 @@ if [[ -d "$EXT_DIR/../..../scripts" ]]; then
   :
 fi
 
-# Prefer including the extension's own scripts folder if present
+# Prefer including the extension's own scripts folder if present, else fall back to repo-level scripts
 if [[ -d "$EXT_DIR/scripts" ]]; then
   mkdir -p "$STAGING/scripts"
   cp -a "$EXT_DIR/scripts/." "$STAGING/scripts/"
+elif [[ -d "$EXT_DIR/../../scripts" ]]; then
+  # defensive fallback: copy repo-level scripts into the package so the extension can run them
+  # Note: $EXT_DIR is the extension directory (examples/zed-extension-gnaw); repo root is $EXT_DIR/../..
+  mkdir -p "$STAGING/scripts"
+  cp -a "$EXT_DIR/../../scripts/." "$STAGING/scripts/"
 fi
 
-# Copy artifact if found
+# Copy artifacts if found
 if [[ -n "$ARTIFACT" && -f "$ARTIFACT" ]]; then
   cp "$ARTIFACT" "$STAGING/"
-else
-  # fallback: copy all relevant target/release files (non-debug)
+fi
+
+if [[ -n "$WASM_ARTIFACT" && -f "$WASM_ARTIFACT" ]]; then
+  mkdir -p "$STAGING/wasm"
+  cp "$WASM_ARTIFACT" "$STAGING/wasm/"
+fi
+
+if [[ -z "$ARTIFACT" && -z "$WASM_ARTIFACT" ]]; then
+  # fallback: copy all relevant target/release files (non-debug) so consumers have something to work with
   mkdir -p "$STAGING/target_release"
   cp -a "$EXT_DIR/target/release/." "$STAGING/target_release/" || true
 fi
