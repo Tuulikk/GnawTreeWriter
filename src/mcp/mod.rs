@@ -11,8 +11,8 @@ pub mod mcp_server {
     use crate::core::{EditOperation, GnawTreeWriter};
     use crate::parser::TreeNode;
     use anyhow::{Context, Result};
+    use axum::extract::{Json, State};
     use axum::{
-        extract::{Json, State},
         http::{HeaderMap, StatusCode},
         response::IntoResponse,
         routing::post,
@@ -116,13 +116,14 @@ pub mod mcp_server {
                         {
                             "name": "list_nodes",
                             "title": "List nodes in file",
-                            "description": "Get a flat list of nodes. Use max_depth to avoid huge outputs in large files.",
+                            "description": "Get a flat list of important nodes. Automatically filters out punctuation and extracts names for functions/classes.",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
                                     "file_path": { "type": "string" },
                                     "filter_type": { "type": "string", "description": "Optional filter for node type" },
-                                    "max_depth": { "type": "integer", "description": "Maximum recursion depth (0 = root only)" }
+                                    "max_depth": { "type": "integer", "description": "Maximum recursion depth (0 = root only)" },
+                                    "include_all": { "type": "boolean", "description": "If true, include punctuation and anonymous nodes" }
                                 },
                                 "required": ["file_path"]
                             }
@@ -230,7 +231,8 @@ pub mod mcp_server {
                             Ok(path) => {
                                 let filter = arguments.get("filter_type").and_then(Value::as_str);
                                 let max_depth = arguments.get("max_depth").and_then(Value::as_u64).map(|v| v as usize);
-                                handle_list_nodes(path, filter, max_depth)
+                                let include_all = arguments.get("include_all").and_then(Value::as_bool).unwrap_or(false);
+                                handle_list_nodes(path, filter, max_depth, include_all)
                             },
                             Err(e) => return Err(e),
                         }
@@ -281,7 +283,6 @@ pub mod mcp_server {
                 Ok(result)
             }
             "notifications/initialized" => {
-                // Client acknowledging initialization, just return empty result
                 Ok(json!({}))
             }
             _ => {
@@ -332,8 +333,7 @@ pub mod mcp_server {
                         (StatusCode::OK, Json(serde_json::to_value(resp).unwrap()))
                     }
                     Err(err_val) => {
-                         // err_val is already a constructed JSON-RPC error object
-                        (StatusCode::OK, Json(err_val)) // Start with 200 OK for RPC errors too, or 4xx/5xx depending on preference, but spec usually says 200 with error body
+                        (StatusCode::OK, Json(err_val))
                     }
                 }
             },
@@ -364,7 +364,6 @@ pub mod mcp_server {
                 continue;
             }
 
-            // Handle potential LSP headers (Content-Length)
             if trimmed.starts_with("Content-Length:") || trimmed.starts_with("Content-Type:") {
                 eprintln!("Ignored header: {}", trimmed);
                 continue;
@@ -372,7 +371,6 @@ pub mod mcp_server {
 
             eprintln!("Received raw: {}", trimmed);
 
-            // Parse request
             let req_val: Value = match serde_json::from_str(trimmed) {
                 Ok(v) => v,
                 Err(e) => {
@@ -382,9 +380,9 @@ pub mod mcp_server {
                         "id": null,
                         "error": { "code": PARSE_ERROR_CODE, "message": "Parse error" }
                     });
-                    serde_json::to_writer(&mut stdout, &err).unwrap();
-                    stdout.write_all(b"\n").unwrap();
-                    stdout.flush().unwrap();
+                    let _ = serde_json::to_writer(&mut stdout, &err);
+                    let _ = stdout.write_all(b"\n");
+                    let _ = stdout.flush();
                     continue;
                 }
             };
@@ -400,10 +398,8 @@ pub mod mcp_server {
             let id = req.id.clone();
             let is_notification = id.is_none();
             
-            // Process
             let result_op = process_request(req);
 
-            // Notifications must not generate a response
             if is_notification {
                 continue;
             }
@@ -419,10 +415,9 @@ pub mod mcp_server {
                 Err(err_val) => err_val,
             };
 
-            // Write response
-            serde_json::to_writer(&mut stdout, &response).unwrap();
-            stdout.write_all(b"\n").unwrap();
-            stdout.flush().unwrap();
+            let _ = serde_json::to_writer(&mut stdout, &response);
+            let _ = stdout.write_all(b"\n");
+            let _ = stdout.flush();
         }
         
         Ok(())
@@ -463,28 +458,61 @@ pub mod mcp_server {
         }
     }
 
-    fn handle_list_nodes(file_path: &str, filter_type: Option<&str>, max_depth: Option<usize>) -> Value {
+    /// Try to extract a name (identifier) from a node or its immediate children
+    fn try_extract_name(node: &TreeNode) -> Option<String> {
+        // If the node itself is an identifier, return its content
+        if node.node_type == "identifier" || node.node_type == "name" {
+            return Some(node.content.clone());
+        }
+        
+        // Look for common identifier-holding children in functions/classes
+        for child in &node.children {
+            if child.node_type == "identifier" || child.node_type == "name" {
+                return Some(child.content.clone());
+            }
+            // Dive one level deeper for complex declarators (common in C/JS)
+            for subchild in &child.children {
+                if subchild.node_type == "identifier" || subchild.node_type == "name" {
+                    return Some(subchild.content.clone());
+                }
+            }
+        }
+        None
+    }
+
+    /// Check if a node type is purely structural/punctuation
+    fn is_structural(node_type: &str) -> bool {
+        matches!(node_type, "{" | "}" | "(" | ")" | "[" | "]" | "," | ";" | "." | ":" | "=" | "\"" | "'" )
+    }
+
+    fn handle_list_nodes(file_path: &str, filter_type: Option<&str>, max_depth: Option<usize>, include_all: bool) -> Value {
          match GnawTreeWriter::new(file_path) {
             Ok(writer) => {
                 let tree = writer.analyze();
                 let mut nodes = Vec::new();
                 
-                fn collect_nodes(node: &TreeNode, acc: &mut Vec<serde_json::Value>, filter: Option<&str>, current_depth: usize, max_depth: Option<usize>) {
+                fn collect_nodes(node: &TreeNode, acc: &mut Vec<serde_json::Value>, filter: Option<&str>, current_depth: usize, max_depth: Option<usize>, include_all: bool) {
                     if let Some(md) = max_depth {
                         if current_depth > md {
                             return;
                         }
                     }
 
-                    let should_add = match filter {
+                    // Brusreducering: Skippa strukturella noder om inte explicit önskat
+                    let is_junk = is_structural(&node.node_type);
+                    let should_skip = !include_all && is_junk;
+
+                    let matches_filter = match filter {
                         Some(f) => node.node_type == f,
                         None => true,
                     };
                     
-                    if should_add {
+                    if !should_skip && matches_filter {
+                         let name = try_extract_name(node);
                          acc.push(json!({ 
                             "path": node.path,
                             "type": node.node_type,
+                            "name": name,
                             "start": node.start_line,
                             "end": node.end_line,
                             "preview": node.content.lines().next().unwrap_or("").chars().take(60).collect::<String>()
@@ -492,14 +520,14 @@ pub mod mcp_server {
                     }
                     
                     for child in &node.children {
-                        collect_nodes(child, acc, filter, current_depth + 1, max_depth);
+                        collect_nodes(child, acc, filter, current_depth + 1, max_depth, include_all);
                     }
                 }
                 
-                collect_nodes(tree, &mut nodes, filter_type, 0, max_depth);
+                collect_nodes(tree, &mut nodes, filter_type, 0, max_depth, include_all);
                 
                 tool_success(
-                    format!("Found {} nodes in {} (depth limit: {:?})", nodes.len(), file_path, max_depth),
+                    format!("Found {} important nodes in {} (depth limit: {:?})", nodes.len(), file_path, max_depth),
                     Some(json!({"nodes": nodes}))
                 )
             }
@@ -514,10 +542,16 @@ pub mod mcp_server {
                 let mut matches = Vec::new();
                 
                 fn find_matches(node: &TreeNode, acc: &mut Vec<serde_json::Value>, pattern: &str) {
-                    if node.content.contains(pattern) {
+                    // Check if node content or extracted name contains pattern
+                    let name = try_extract_name(node);
+                    let name_match = name.as_ref().map(|n| n.contains(pattern)).unwrap_or(false);
+                    let content_match = node.content.contains(pattern);
+
+                    if (name_match || content_match) && !is_structural(&node.node_type) {
                          acc.push(json!({ 
                             "path": node.path,
                             "type": node.node_type,
+                            "name": name,
                             "start": node.start_line,
                             "end": node.end_line,
                             "preview": node.content.lines().next().unwrap_or("").chars().take(80).collect::<String>()
@@ -531,7 +565,7 @@ pub mod mcp_server {
                 
                 find_matches(tree, &mut matches, pattern);
                 
-                // Sort by path length to get the most specific nodes first (deepest matches)
+                // Sort by path length to get the most specific nodes first
                 matches.sort_by(|a, b| {
                     let a_path = a.get("path").and_then(|v| v.as_str()).unwrap_or("");
                     let b_path = b.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -540,7 +574,7 @@ pub mod mcp_server {
 
                 tool_success(
                     format!("Found {} matching nodes in {}", matches.len(), file_path),
-                    Some(json!({"matches": matches.into_iter().take(50).collect::<Vec<_>>()})) // Limit to 50 results
+                    Some(json!({"matches": matches.into_iter().take(50).collect::<Vec<_>>()}))
                 )
             }
             Err(e) => tool_error(format!("Error: {}", e)),
@@ -591,8 +625,6 @@ pub mod mcp_server {
             Err(e) => tool_error(format!("File error: {}", e))
         }
     }
-
-    // --- Server Runners ---
 
     pub fn build_router(token: Option<String>) -> Router {
         let state = Arc::new(AppState { token });

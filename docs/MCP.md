@@ -37,15 +37,13 @@ The MCP server exposes the core "Gnaw" logic as tools that AI agents can use:
 | Tool | Purpose | Key Arguments |
 | :--- | :--- | :--- |
 | `analyze` | Get full AST structure | `file_path` |
-| `list_nodes` | Flat list of edit targets | `file_path`, `filter_type`, `max_depth` |
-| `search_nodes` | Find nodes by text content | `file_path`, `pattern` |
-| `read_node` | Get source of specific node | `file_path`, `node_path` |
-| `edit_node` | Surgical replacement of code | `file_path`, `node_path`, `content` |
-| `insert_node` | Add new code to parent | `file_path`, `parent_path`, `position`, `content` |
-| `ping` | Health check | - |
+| `list_nodes` | Flat list of edit targets | `file_path`, `filter_type`, `max_depth`, `include_all` |
+| `search_nodes` | Find nodes by text or name | `file_path`, `pattern` |
 
 ### Pro-tip for Large Files
-When working with large files (e.g., >1000 lines), use `list_nodes` with `max_depth: 1` to see only top-level classes and functions. Once you've identified the target, use `search_nodes` to find the exact sub-node path.
+- **Shallow Exploration:** Use `list_nodes` with `max_depth: 1` to see only top-level classes and functions. Important nodes now include a `name` field (e.g., function names) for easy identification.
+- **Noise Reduction:** By default, `list_nodes` filters out purely structural nodes (brackets, commas). Use `include_all: true` if you need the full AST.
+- **Find by Name:** Use `search_nodes` with a function or class name to find its exact path without listing the whole file. Results are sorted by specificity (deepest matches first).
 
 ### Success vs Error
 - **Protocol Error:** Returned as JSON-RPC error (e.g., invalid JSON, missing required param).
