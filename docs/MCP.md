@@ -37,11 +37,15 @@ The MCP server exposes the core "Gnaw" logic as tools that AI agents can use:
 | Tool | Purpose | Key Arguments |
 | :--- | :--- | :--- |
 | `analyze` | Get full AST structure | `file_path` |
-| `list_nodes` | Flat list of edit targets | `file_path`, `filter_type` |
+| `list_nodes` | Flat list of edit targets | `file_path`, `filter_type`, `max_depth` |
+| `search_nodes` | Find nodes by text content | `file_path`, `pattern` |
 | `read_node` | Get source of specific node | `file_path`, `node_path` |
 | `edit_node` | Surgical replacement of code | `file_path`, `node_path`, `content` |
 | `insert_node` | Add new code to parent | `file_path`, `parent_path`, `position`, `content` |
 | `ping` | Health check | - |
+
+### Pro-tip for Large Files
+When working with large files (e.g., >1000 lines), use `list_nodes` with `max_depth: 1` to see only top-level classes and functions. Once you've identified the target, use `search_nodes` to find the exact sub-node path.
 
 ### Success vs Error
 - **Protocol Error:** Returned as JSON-RPC error (e.g., invalid JSON, missing required param).

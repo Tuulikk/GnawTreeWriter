@@ -1,5 +1,5 @@
 //! Minimal MCP (Model Context Protocol) server implementation.
-//!
+//! 
 //! - Feature gated: only compiled when `--features mcp` is enabled.
 //! - Implements a JSON-RPC 2.0 endpoint over HTTP and Stdio.
 //! - Exposes core GnawTreeWriter functionality as tools.
@@ -10,7 +10,7 @@
 pub mod mcp_server {
     use crate::core::{EditOperation, GnawTreeWriter};
     use crate::parser::TreeNode;
-    use anyhow::{anyhow, Context, Result};
+    use anyhow::{Context, Result};
     use axum::{
         extract::{Json, State},
         http::{HeaderMap, StatusCode},
@@ -20,7 +20,7 @@ pub mod mcp_server {
     };
     use serde::{Deserialize, Serialize};
     use serde_json::{json, Value};
-    use std::{io::{self, BufRead, Write}, path::Path, sync::Arc};
+    use std::{io::{self, BufRead, Write}, sync::Arc};
     use tokio::net::TcpListener;
     use tokio::signal;
 
@@ -116,14 +116,28 @@ pub mod mcp_server {
                         {
                             "name": "list_nodes",
                             "title": "List nodes in file",
-                            "description": "Get a flat list of all nodes with their paths.",
+                            "description": "Get a flat list of nodes. Use max_depth to avoid huge outputs in large files.",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
                                     "file_path": { "type": "string" },
-                                    "filter_type": { "type": "string", "description": "Optional filter for node type" }
+                                    "filter_type": { "type": "string", "description": "Optional filter for node type" },
+                                    "max_depth": { "type": "integer", "description": "Maximum recursion depth (0 = root only)" }
                                 },
                                 "required": ["file_path"]
+                            }
+                        },
+                        {
+                            "name": "search_nodes",
+                            "title": "Search nodes by text",
+                            "description": "Find nodes containing specific text pattern. Perfect for finding functions or routes in large files.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" },
+                                    "pattern": { "type": "string", "description": "Text pattern to search for" }
+                                },
+                                "required": ["file_path", "pattern"]
                             }
                         },
                         {
@@ -215,7 +229,17 @@ pub mod mcp_server {
                         match validate_arg("file_path") {
                             Ok(path) => {
                                 let filter = arguments.get("filter_type").and_then(Value::as_str);
-                                handle_list_nodes(path, filter)
+                                let max_depth = arguments.get("max_depth").and_then(Value::as_u64).map(|v| v as usize);
+                                handle_list_nodes(path, filter, max_depth)
+                            },
+                            Err(e) => return Err(e),
+                        }
+                    },
+                    "search_nodes" => {
+                        match validate_arg("file_path") {
+                            Ok(path) => {
+                                let pattern = match validate_arg("pattern") { Ok(v) => v, Err(e) => return Err(e) };
+                                handle_search_nodes(path, pattern)
                             },
                             Err(e) => return Err(e),
                         }
@@ -246,7 +270,10 @@ pub mod mcp_server {
                             req.id,
                             METHOD_NOT_FOUND_CODE,
                             "Unknown tool",
-                            Some(json!(format!("'{}' is not a valid tool name.", name))),
+                            Some(json!(format!(
+                                "'{}' is not a valid tool name. Available tools: analyze, list_nodes, search_nodes, read_node, edit_node, insert_node, ping",
+                                name
+                            ))),
                         );
                         return Err(serde_json::to_value(err).unwrap());
                     }
@@ -355,9 +382,9 @@ pub mod mcp_server {
                         "id": null,
                         "error": { "code": PARSE_ERROR_CODE, "message": "Parse error" }
                     });
-                    serde_json::to_writer(&mut stdout, &err)?;
-                    stdout.write_all(b"\n")?;
-                    stdout.flush()?;
+                    serde_json::to_writer(&mut stdout, &err).unwrap();
+                    stdout.write_all(b"\n").unwrap();
+                    stdout.flush().unwrap();
                     continue;
                 }
             };
@@ -387,15 +414,15 @@ pub mod mcp_server {
                         jsonrpc: "2.0",
                         id,
                         result
-                    })?
+                    }).unwrap()
                 },
                 Err(err_val) => err_val,
             };
 
             // Write response
-            serde_json::to_writer(&mut stdout, &response)?;
-            stdout.write_all(b"\n")?;
-            stdout.flush()?;
+            serde_json::to_writer(&mut stdout, &response).unwrap();
+            stdout.write_all(b"\n").unwrap();
+            stdout.flush().unwrap();
         }
         
         Ok(())
@@ -436,13 +463,19 @@ pub mod mcp_server {
         }
     }
 
-    fn handle_list_nodes(file_path: &str, filter_type: Option<&str>) -> Value {
+    fn handle_list_nodes(file_path: &str, filter_type: Option<&str>, max_depth: Option<usize>) -> Value {
          match GnawTreeWriter::new(file_path) {
             Ok(writer) => {
                 let tree = writer.analyze();
                 let mut nodes = Vec::new();
                 
-                fn collect_nodes(node: &TreeNode, acc: &mut Vec<serde_json::Value>, filter: Option<&str>) {
+                fn collect_nodes(node: &TreeNode, acc: &mut Vec<serde_json::Value>, filter: Option<&str>, current_depth: usize, max_depth: Option<usize>) {
+                    if let Some(md) = max_depth {
+                        if current_depth > md {
+                            return;
+                        }
+                    }
+
                     let should_add = match filter {
                         Some(f) => node.node_type == f,
                         None => true,
@@ -453,20 +486,61 @@ pub mod mcp_server {
                             "path": node.path,
                             "type": node.node_type,
                             "start": node.start_line,
-                            "end": node.end_line
+                            "end": node.end_line,
+                            "preview": node.content.lines().next().unwrap_or("").chars().take(60).collect::<String>()
                         }));
                     }
                     
                     for child in &node.children {
-                        collect_nodes(child, acc, filter);
+                        collect_nodes(child, acc, filter, current_depth + 1, max_depth);
                     }
                 }
                 
-                collect_nodes(tree, &mut nodes, filter_type);
+                collect_nodes(tree, &mut nodes, filter_type, 0, max_depth);
                 
                 tool_success(
-                    format!("Found {} nodes in {}", nodes.len(), file_path),
+                    format!("Found {} nodes in {} (depth limit: {:?})", nodes.len(), file_path, max_depth),
                     Some(json!({"nodes": nodes}))
+                )
+            }
+            Err(e) => tool_error(format!("Error: {}", e)),
+        }
+    }
+
+    fn handle_search_nodes(file_path: &str, pattern: &str) -> Value {
+         match GnawTreeWriter::new(file_path) {
+            Ok(writer) => {
+                let tree = writer.analyze();
+                let mut matches = Vec::new();
+                
+                fn find_matches(node: &TreeNode, acc: &mut Vec<serde_json::Value>, pattern: &str) {
+                    if node.content.contains(pattern) {
+                         acc.push(json!({ 
+                            "path": node.path,
+                            "type": node.node_type,
+                            "start": node.start_line,
+                            "end": node.end_line,
+                            "preview": node.content.lines().next().unwrap_or("").chars().take(80).collect::<String>()
+                        }));
+                    }
+                    
+                    for child in &node.children {
+                        find_matches(child, acc, pattern);
+                    }
+                }
+                
+                find_matches(tree, &mut matches, pattern);
+                
+                // Sort by path length to get the most specific nodes first (deepest matches)
+                matches.sort_by(|a, b| {
+                    let a_path = a.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                    let b_path = b.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                    b_path.len().cmp(&a_path.len())
+                });
+
+                tool_success(
+                    format!("Found {} matching nodes in {}", matches.len(), file_path),
+                    Some(json!({"matches": matches.into_iter().take(50).collect::<Vec<_>>()})) // Limit to 50 results
                 )
             }
             Err(e) => tool_error(format!("Error: {}", e)),
@@ -550,17 +624,13 @@ pub mod mcp_server {
     }
 
     pub async fn status(url: &str, token: Option<String>) -> Result<()> {
-         // (Status logic kept same as before, omitted for brevity as it was already correct in previous file content
-         // but reusing the process_request logic would be cleaner in future refactoring)
-         // For now, assume previous status implementation is good or we can skip it for stdio context.
-         // RE-INSERTING simplified status check:
         use reqwest::Client;
         let client = Client::new();
         println!("Querying MCP server at {}...", url);
         let init_body = json!({"jsonrpc":"2.0","method":"initialize","id":1});
         let mut init_req = client.post(url);
         if let Some(t) = &token { init_req = init_req.header("Authorization", format!("Bearer {}", t)); }
-        let resp = init_req.json(&init_body).send().await?;
+        let resp = init_req.json(&init_body).send().await.context("Connect failed")?;
         if !resp.status().is_success() { anyhow::bail!("Status check failed: {}", resp.status()); }
         println!("✓ Server is ready");
         Ok(())
