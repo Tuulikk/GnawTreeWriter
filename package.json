@@ -3,7 +3,7 @@
   "version": "0.6.3",
   "description": "Tree-based code editor for LLM-assisted editing. Edit code files based on tree structure levels, avoiding bracket issues and structural problems from LLM code generation.",
   "author": "Gnaw Software",
-  "license": "MIT",
+  "license": "MPL-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/Tuulikk/GnawTreeWriter"

@@ -175,9 +175,9 @@ See **[CONTRIBUTING.md](../CONTRIBUTING.md)** in the main repository for guideli
 
 ---
 
-## 📄 **License**
+## License
 
-GnawTreeWriter is released under the MIT License. See **[LICENSE](../LICENSE)** for details.
+GnawTreeWriter is released under the Mozilla Public License 2.0 (MPL-2.0). See **[LICENSE](../LICENSE)** for details.
 
 Community Edition features are free forever. Commercial features require paid licenses for teams and enterprises.
 

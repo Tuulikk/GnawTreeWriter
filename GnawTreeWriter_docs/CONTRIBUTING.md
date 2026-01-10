@@ -318,6 +318,6 @@ For pull requests:
 
 We aim to review pull requests within 3-5 business days.
 
-## License
+### Licensing
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions will be licensed under the Mozilla Public License 2.0 (MPL-2.0).
