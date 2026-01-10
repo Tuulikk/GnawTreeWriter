@@ -18,15 +18,17 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0"
-# The `zed` extension API crate — replace the wildcard with the appropriate version or a local path
-# depending on your Zed development setup.
-zed = "*"
+zed_extension_api = { version = "0.7", optional = true }
 
 # Optional: add useful development/test deps
 # tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+which = "4"
+
 [features]
-default = []
+default = ["zed"]
+zed = ["zed_extension_api"]
 
 [package.metadata]
 # Notes for local dev:

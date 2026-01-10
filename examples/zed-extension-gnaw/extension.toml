@@ -17,3 +17,14 @@ description = "Start a local GnawTreeWriter MCP server for project analysis and 
 # programmatically by the extension's `context_server_command` implementation in Rust.
 # This is only a hint and not used by Zed to launch the server automatically.
 command = ["./scripts/mcp-serve.sh", "--addr", "127.0.0.1:8080", "--token", "secret"]
+
+# Slash commands exposed by this extension (available via the Assistant / Command Palette)
+# These provide terminal-like controls for operators and guarantee the extension attempts to
+# run and produce logs/output that are visible to the user.
+[slash_commands.toggle]
+description = "Toggle the GnawTreeWriter MCP server (if running, stop; otherwise, start)."
+requires_argument = false
+
+[slash_commands.diagnose]
+description = "Run diagnostics (check script presence, permissions, and show recent log lines)."
+requires_argument = false
