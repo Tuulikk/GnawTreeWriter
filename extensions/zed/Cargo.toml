@@ -30,6 +30,11 @@ which = "4"
 default = ["zed"]
 zed = ["zed_extension_api"]
 
+# Configure wasm32-wasip2 target for WebAssembly Component support
+# This is required for Zed's MCP extension system
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz", "--enable-mutable-globals"]
+
 [package.metadata]
 # Notes for local dev:
 # - Build in this folder: `cargo build --release`

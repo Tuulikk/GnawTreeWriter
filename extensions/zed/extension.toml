@@ -1,0 +1,15 @@
+id = "gnaw-treewriter"
+name = "GnawTreeWriter"
+version = "0.6.2"
+schema_version = 1
+authors = ["Gnaw Software"]
+description = "Surgical tree-based code editing and analysis via MCP."
+repository = "https://github.com/gnawSoftware/GnawTreeWriter"
+license = "MPL-2.0"
+
+[lib]
+kind = "Rust"
+
+[context_servers.gnawtreewriter]
+title = "GnawTreeWriter"
+description = "AST-aware code editing and analysis."

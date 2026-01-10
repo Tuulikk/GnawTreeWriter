@@ -18,9 +18,19 @@ cd examples/zed-extension-gnaw
 cargo build --release
 ```
 
-2. Installera som dev‑extension i Zed (se Zed‑dokumentationen):
+2. Se till att `gnawtreewriter` är installerat och tillgängligt på PATH:
+```bash
+# Installera från projektet
+cargo install --path .
+
+# Eller använd binären som redan finns i target/release/
+cargo build --release
+export PATH=$PATH:$(pwd)/target/release
+```
+
+3. Installera som dev‑extension i Zed (se Zed‑dokumentationen):
 - Se: https://zed.dev/docs/extensions/mcp-extensions
-- I dokumentationen finns instruktioner för hur du installerar dev‑extensions i din lokala Zed‑utvecklingsinstans.
+- I dokumentationen finns instruktioner för hur du installerar dev‑extensions i din lokala Zed‑utvecklingsinställning.
 
 3. Starta extensionens context server från Zed (Agent/Context server panel) eller via skript:
 - Från Zed: välj din extension / context server och klicka “Start”.
@@ -58,22 +68,24 @@ Tanken är att `context_server_command` ska returnera exakt det kommando (med ar
 ## Hur fungerar `context_server_command` (koncept)
 I Rust‑extensionen implementerar du metoden ungefär så (pseudo/Rust‑liknande):
 
-```GnawTreeWriter/examples/zed-extension-gnaw/src/lib.rs#L1-40
+```rust
 impl zed::Extension for GnawExtension {
     fn context_server_command(
         &mut self,
         _context_server_id: &zed::ContextServerId,
         _project: &zed::Project,
     ) -> Result<zed::Command> {
-        // Exempel: antingen "gnawtreewriter mcp serve ..." eller "sh -c ./scripts/mcp-serve.sh ..."
+        // Extensionen använder gnawtreewriter binären direkt från PATH
         Ok(zed::Command {
-            command: "sh".into(),
-            args: vec!["-c".into(), "./scripts/mcp-serve.sh --addr 127.0.0.1:8080 --token secret".into()],
+            command: "gnawtreewriter".into(),
+            args: vec!["mcp".into(), "serve".into(), "--addr".into(), "127.0.0.1:8080".into(), "--token".into(), "secret".into()],
             env: HashMap::new(),
         })
     }
 }
 ```
+
+**Viktigt**: Eftersom extensionen byggts som wasm32 kan den inte söka i PATH via `which`. Därför antar extensionen att `gnawtreewriter` är installerat och tillgängligt på PATH. Script‑fallback har tagits bort eftersom Zed kör extensionen från en annan working directory än projektets rot.
 
 (Notera: anpassa imports och version efter den `zed` crate‑version du använder. Se Zed‑docs för exakta typer.)
 
@@ -83,7 +95,12 @@ impl zed::Extension for GnawExtension {
 - Adresse & token: i exemplet används `127.0.0.1:8080` och token `secret`. Du bör:
   - göra dem konfigurerbara via projektinställningar, eller
   - läsa från miljövariabler (t.ex. `MCP_TOKEN`) så du inte hårdkodar hemligheter i koden.
-- Fallback‑strategi: extensionen bör föredra ett installerat `gnawtreewriter` binärt om tillgängligt, annars köra det lokala skriptet.
+- **Krav**: `gnawtreewriter` måste vara installerat och tillgängligt på PATH. Installera med:
+  ```bash
+  cargo install --path .  # från GnawTreeWriter-projektet
+  # eller
+  export PATH=$PATH:/path/to/gnawtreewriter/target/release
+  ```
 - Om du behöver ladda ner en binär (t.ex. från GitHub Releases), kan extensionen göra det dynamiskt enligt Zed‑docs.
 
 ---
@@ -98,13 +115,21 @@ impl zed::Extension for GnawExtension {
 ---
 
 ## Felsökning
-- Serveren startar inte:
-  - Kontrollera loggfilen (`.mcp-server.log`), byggfejl, eller permission‑problem på skriptet (`chmod +x scripts/*.sh`).
-  - Kör med `--foreground` för att se live‑output: `./scripts/mcp-serve.sh --foreground`.
+- Servern startar inte:
+  - Kontrollera att `gnawtreewriter` är på PATH: `which gnawtreewriter`
+  - Kontrollera att MCP-feature är aktiverad: `gnawtreewriter mcp serve --help` (ska inte ge "feature not enabled" fel)
+  - Testa manuellt: `gnawtreewriter mcp serve --addr 127.0.0.1:8080 --token secret`
 - 401 Unauthorized:
   - Kontrollera att klient och server använder samma token (`--token` eller `MCP_TOKEN`).
-- Om du valde `:0` (ephemeral port), kolla loggen för den faktiska porten servern valde.
+- Port redan upptagen:
+  ```bash
+  # Hitta process som använder porten
+  lsof -i :8080
+  # Döda processen
+  kill <PID>
+  ```
 - Om Zed inte hittar extension: kontrollera att `extension.toml` innehåller korrekta metadata och att du följt Zed:s instruktioner för dev‑extensions.
+- "Command not found" eller liknande fel: se till att gnawtreewriter är installerat och på PATH
 
 ---
 
