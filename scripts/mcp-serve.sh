@@ -14,6 +14,36 @@
 #   ./scripts/mcp-serve.sh --addr 127.0.0.1:0 --log /tmp/mcp.log
 set -euo pipefail
 
+# Diagnostic logging for Zed dev extensions:
+# This records invocation attempts (timestamp, cwd, user, argv and a masked token preview)
+# into a file named `.mcp-serve-invocations.log` in the extension working directory.
+# To disable diagnostic logging, set DIAGFILE="" in the environment when invoking the script.
+DIAGFILE="${DIAGFILE:-.mcp-serve-invocations.log}"
+if [ -n "$DIAGFILE" ]; then
+  {
+    printf '---\n'
+    printf 'timestamp: %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    printf 'cwd: %s\n' "$(pwd -P)"
+    printf 'user: %s\n' "$(id -un 2>/dev/null || echo unknown)"
+    printf 'uid: %s\n' "$(id -u 2>/dev/null || echo unknown)"
+    printf 'pid: %s\n' "$$"
+    printf 'argv:'
+    for a in "$@"; do printf ' %q' "$a"; done
+    printf '\n'
+    if [ -n "${MCP_TOKEN:-}" ]; then
+      # Mask token for privacy
+      token_preview="${MCP_TOKEN:0:4}****"
+      printf 'env.MCP_TOKEN: %s\n' "$token_preview"
+    else
+      printf 'env.MCP_TOKEN: <not set>\n'
+    fi
+    printf 'script_exists: %s\n' "[ -f ./scripts/mcp-serve.sh ]"
+    printf '---\n'
+  } >>"$DIAGFILE" 2>/dev/null || true
+  # Ensure file permissions are restricted for the user
+  chmod 600 "$DIAGFILE" 2>/dev/null || true
+fi
+
 # Defaults
 ADDR="127.0.0.1:8080"
 TOKEN="secret"
@@ -41,6 +71,43 @@ EOF
 }
 
 # Parse args
+# Normalize concatenated/compact args so we accept:
+#   --addr127.0.0.1:8080   or  --addr=127.0.0.1:8080
+#   --tokensecret          or  --token=secret
+#   --pid/path             or  --pid=/some/path
+#
+# This lets users paste arguments without whitespace and still have them parsed
+# correctly. We keep order and leave already-correct args intact.
+normalized_args=()
+for arg in "$@"; do
+  if [[ "$arg" =~ ^--addr=(.+)$ ]]; then
+    normalized_args+=(--addr "${BASH_REMATCH[1]}")
+  elif [[ "$arg" =~ ^--addr(.+)$ ]]; then
+    normalized_args+=(--addr "${BASH_REMATCH[1]}")
+  elif [[ "$arg" =~ ^--token=(.+)$ ]]; then
+    normalized_args+=(--token "${BASH_REMATCH[1]}")
+  elif [[ "$arg" =~ ^--token(.+)$ ]]; then
+    normalized_args+=(--token "${BASH_REMATCH[1]}")
+  elif [[ "$arg" =~ ^--pid=(.+)$ ]]; then
+    normalized_args+=(--pid "${BASH_REMATCH[1]}")
+  elif [[ "$arg" =~ ^--pid(.+)$ ]]; then
+    normalized_args+=(--pid "${BASH_REMATCH[1]}")
+  elif [[ "$arg" =~ ^--log=(.+)$ ]]; then
+    normalized_args+=(--log "${BASH_REMATCH[1]}")
+  elif [[ "$arg" =~ ^--log(.+)$ ]]; then
+    normalized_args+=(--log "${BASH_REMATCH[1]}")
+  elif [[ "$arg" =~ ^--foreground=(true|false)$ ]]; then
+    # honor --foreground=true/false
+    if [[ "${BASH_REMATCH[1]}" == "true" ]]; then
+      normalized_args+=(--foreground)
+    fi
+  else
+    normalized_args+=("$arg")
+  fi
+done
+# Replace positional args with normalized list for the existing parser
+set -- "${normalized_args[@]}"
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --addr) ADDR="$2"; shift 2 ;;

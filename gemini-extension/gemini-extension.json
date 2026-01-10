@@ -1,0 +1,14 @@
+{
+  "name": "gnawtreewriter",
+  "description": "AI-native temporal code editor via MCP",
+  "version": "0.6.2",
+  "mcpServers": {
+    "gnawtreewriter": {
+      "command": "/mnt/content/dev/Gnaw-Software/GnawTreeWriter/target/release/gnawtreewriter",
+      "args": [
+        "mcp",
+        "stdio"
+      ]
+    }
+  }
+}

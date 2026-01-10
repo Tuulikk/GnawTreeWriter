@@ -33,6 +33,9 @@ enum McpSubcommands {
         /// Optional bearer token for basic auth. If omitted, `MCP_TOKEN` environment variable will be used.
         token: Option<String>,
     },
+    /// Start MCP server over Stdio (Standard Input/Output).
+    /// Recommended for local integration with Claude Desktop, Zed, or Gemini CLI.
+    Stdio,
     /// Check MCP server status and list available tools.
     ///
     /// Options:
@@ -846,6 +849,16 @@ impl Cli {
                     {
                         let token = token.or_else(|| std::env::var("MCP_TOKEN").ok());
                         crate::mcp::mcp_server::serve(&addr, token).await?;
+                    }
+                }
+                McpSubcommands::Stdio => {
+                    #[cfg(not(feature = "mcp"))]
+                    {
+                        anyhow::bail!("MCP feature is not enabled. Recompile with --features mcp");
+                    }
+                    #[cfg(feature = "mcp")]
+                    {
+                        crate::mcp::mcp_server::serve_stdio()?;
                     }
                 }
                 McpSubcommands::Status { url, token } => {
