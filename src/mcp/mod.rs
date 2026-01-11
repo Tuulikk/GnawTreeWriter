@@ -10,9 +10,9 @@
 pub mod mcp_server {
     use crate::core::{EditOperation, GnawTreeWriter};
     use crate::parser::TreeNode;
-    use anyhow::{Context, Result};
-    use axum::extract::{Json, State};
+    use anyhow::Result;
     use axum::{
+        extract::{Json, State},
         http::{HeaderMap, StatusCode},
         response::IntoResponse,
         routing::post,
@@ -20,7 +20,10 @@ pub mod mcp_server {
     };
     use serde::{Deserialize, Serialize};
     use serde_json::{json, Value};
-    use std::{io::{self, BufRead, Write}, sync::Arc};
+    use std::{{
+        io::{self, BufRead, Write},
+        sync::Arc
+    }};
     use tokio::net::TcpListener;
     use tokio::signal;
 
@@ -129,9 +132,22 @@ pub mod mcp_server {
                             }
                         },
                         {
+                            "name": "get_skeleton",
+                            "title": "Get skeletal view",
+                            "description": "Get a high-level hierarchical overview of definitions (classes, functions). Perfect for navigating very large files.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" },
+                                    "max_depth": { "type": "integer", "description": "Depth of hierarchy to show (default: 2)" }
+                                },
+                                "required": ["file_path"]
+                            }
+                        },
+                        {
                             "name": "search_nodes",
                             "title": "Search nodes by text",
-                            "description": "Find nodes containing specific text pattern. Perfect for finding functions or routes in large files.",
+                            "description": "Find nodes containing specific text pattern. Search results include extracted names and paths.",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
@@ -237,6 +253,15 @@ pub mod mcp_server {
                             Err(e) => return Err(e),
                         }
                     },
+                    "get_skeleton" => {
+                        match validate_arg("file_path") {
+                            Ok(path) => {
+                                let max_depth = arguments.get("max_depth").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(2);
+                                handle_get_skeleton(path, max_depth)
+                            },
+                            Err(e) => return Err(e),
+                        }
+                    },
                     "search_nodes" => {
                         match validate_arg("file_path") {
                             Ok(path) => {
@@ -273,7 +298,7 @@ pub mod mcp_server {
                             METHOD_NOT_FOUND_CODE,
                             "Unknown tool",
                             Some(json!(format!(
-                                "'{}' is not a valid tool name. Available tools: analyze, list_nodes, search_nodes, read_node, edit_node, insert_node, ping",
+                                "'{}' is not a valid tool name. Available tools: analyze, list_nodes, get_skeleton, search_nodes, read_node, edit_node, insert_node, ping",
                                 name
                             ))),
                         );
@@ -460,17 +485,14 @@ pub mod mcp_server {
 
     /// Try to extract a name (identifier) from a node or its immediate children
     fn try_extract_name(node: &TreeNode) -> Option<String> {
-        // If the node itself is an identifier, return its content
         if node.node_type == "identifier" || node.node_type == "name" {
             return Some(node.content.clone());
         }
         
-        // Look for common identifier-holding children in functions/classes
         for child in &node.children {
             if child.node_type == "identifier" || child.node_type == "name" {
                 return Some(child.content.clone());
             }
-            // Dive one level deeper for complex declarators (common in C/JS)
             for subchild in &child.children {
                 if subchild.node_type == "identifier" || subchild.node_type == "name" {
                     return Some(subchild.content.clone());
@@ -482,7 +504,16 @@ pub mod mcp_server {
 
     /// Check if a node type is purely structural/punctuation
     fn is_structural(node_type: &str) -> bool {
-        matches!(node_type, "{" | "}" | "(" | ")" | "[" | "]" | "," | ";" | "." | ":" | "=" | "\"" | "'" )
+        matches!(node_type, "{{" | "}}" | "(" | ")" | "[" | "]" | "," | ";" | "." | ":" | "=" | "\"" | "'" )
+    }
+
+    /// Check if a node type is a high-level definition
+    fn is_definition(node_type: &str) -> bool {
+        let nt = node_type.to_lowercase();
+        nt.contains("definition") || 
+        nt.contains("declaration") || 
+        nt.contains("item") ||
+        matches!(nt.as_str(), "module" | "class" | "function" | "method" | "ui_object_definition")
     }
 
     fn handle_list_nodes(file_path: &str, filter_type: Option<&str>, max_depth: Option<usize>, include_all: bool) -> Value {
@@ -498,7 +529,6 @@ pub mod mcp_server {
                         }
                     }
 
-                    // Brusreducering: Skippa strukturella noder om inte explicit önskat
                     let is_junk = is_structural(&node.node_type);
                     let should_skip = !include_all && is_junk;
 
@@ -535,6 +565,45 @@ pub mod mcp_server {
         }
     }
 
+    fn handle_get_skeleton(file_path: &str, max_depth: usize) -> Value {
+         match GnawTreeWriter::new(file_path) {
+            Ok(writer) => {
+                let tree = writer.analyze();
+                let mut skeleton = String::new();
+                
+                fn build_skeleton(node: &TreeNode, out: &mut String, depth: usize, max_depth: usize) {
+                    if depth > max_depth {
+                        return;
+                    }
+
+                    let is_def = is_definition(&node.node_type);
+                    let has_def_child = node.children.iter().any(|c| is_definition(&c.node_type));
+
+                    if depth == 0 || is_def || has_def_child {
+                        let indent = "  ".repeat(depth);
+                        let name = try_extract_name(node).unwrap_or_else(|| "_".to_string());
+                        let line_info = format!("(L{}-L{})", node.start_line, node.end_line);
+                        
+                        out.push_str(&format!("{}{} [{}] {} {}
+", indent, node.path, node.node_type, name, line_info));
+                        
+                        for child in &node.children {
+                            build_skeleton(child, out, depth + 1, max_depth);
+                        }
+                    }
+                }
+                
+                build_skeleton(tree, &mut skeleton, 0, max_depth);
+                
+                tool_success(
+                    format!("Skeletal view of {} (max_depth: {})", file_path, max_depth),
+                    Some(json!({"skeleton": skeleton}))
+                )
+            }
+            Err(e) => tool_error(format!("Error: {}", e)),
+        }
+    }
+
     fn handle_search_nodes(file_path: &str, pattern: &str) -> Value {
          match GnawTreeWriter::new(file_path) {
             Ok(writer) => {
@@ -542,7 +611,6 @@ pub mod mcp_server {
                 let mut matches = Vec::new();
                 
                 fn find_matches(node: &TreeNode, acc: &mut Vec<serde_json::Value>, pattern: &str) {
-                    // Check if node content or extracted name contains pattern
                     let name = try_extract_name(node);
                     let name_match = name.as_ref().map(|n| n.contains(pattern)).unwrap_or(false);
                     let content_match = node.content.contains(pattern);
@@ -565,7 +633,6 @@ pub mod mcp_server {
                 
                 find_matches(tree, &mut matches, pattern);
                 
-                // Sort by path length to get the most specific nodes first
                 matches.sort_by(|a, b| {
                     let a_path = a.get("path").and_then(|v| v.as_str()).unwrap_or("");
                     let b_path = b.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -626,6 +693,8 @@ pub mod mcp_server {
         }
     }
 
+    // --- Server Runners ---
+
     pub fn build_router(token: Option<String>) -> Router {
         let state = Arc::new(AppState { token });
         Router::new()
@@ -635,8 +704,7 @@ pub mod mcp_server {
 
     pub async fn serve(addr: &str, token: Option<String>) -> Result<()> {
         let listener = TcpListener::bind(addr)
-            .await
-            .context(format!("Failed to bind to {}", addr))?;
+            .await?;
         println!("Starting MCP server on http://{}", listener.local_addr()?);
 
         if token.is_some() {
@@ -647,11 +715,10 @@ pub mod mcp_server {
 
         let app = build_router(token);
         axum::serve(listener, app)
-            .with_graceful_shutdown(async {
+            .with_graceful_shutdown(async {{
                 let _ = signal::ctrl_c().await;
-            })
-            .await
-            .context("Server error")?;
+            }})
+            .await?;
         Ok(())
     }
 
@@ -662,7 +729,7 @@ pub mod mcp_server {
         let init_body = json!({"jsonrpc":"2.0","method":"initialize","id":1});
         let mut init_req = client.post(url);
         if let Some(t) = &token { init_req = init_req.header("Authorization", format!("Bearer {}", t)); }
-        let resp = init_req.json(&init_body).send().await.context("Connect failed")?;
+        let resp = init_req.json(&init_body).send().await?;
         if !resp.status().is_success() { anyhow::bail!("Status check failed: {}", resp.status()); }
         println!("✓ Server is ready");
         Ok(())
