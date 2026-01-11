@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 #[cfg(feature = "modernbert")]
 use candle_core::{DType, Device, Tensor};
 #[cfg(feature = "modernbert")]
@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "modernbert")]
 use tokenizers::Tokenizer;
-use crate::core::LabelManager;
+
 
 /// Supported AI models for local execution
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -89,7 +89,7 @@ impl AiManager {
 
     #[cfg(feature = "modernbert")]
     pub async fn generate_semantic_report(&self, file_path: &str) -> Result<SemanticReport> {
-        let model = self.load_model(AiModel::ModernBert, DeviceType::Cpu)?;
+        let _model = self.load_model(AiModel::ModernBert, DeviceType::Cpu)?;
         let mut label_mgr = LabelManager::load(&self.project_root)?;
         
         let content = fs::read_to_string(file_path)?;
@@ -108,7 +108,6 @@ impl AiManager {
         for node in &nodes {
             if node.content.len() < 30 || node.content.len() > 5000 { continue; }
             
-            // Brace density detector
             let braces = node.content.chars().filter(|&c| c == '{' || c == '}').count();
             let density = braces as f32 / node.content.len() as f32;
             if density > 0.15 && node.content.len() > 100 {
@@ -118,7 +117,6 @@ impl AiManager {
                     severity: "Warning".into(),
                     message: msg.clone(),
                 });
-                // PERSIST as label
                 let _ = label_mgr.add_label(file_path, &node.content, "quality:high-brace-density");
             }
         }
@@ -126,21 +124,21 @@ impl AiManager {
         Ok(SemanticReport {
             file_path: file_path.to_string(),
             findings,
-            summary: format!("Analyzed {} nodes. Labels updated in background.", nodes.len()),
+            summary: format!("Analyzed {} nodes.", nodes.len()),
         })
     }
 
-    pub async fn setup(&self, model: AiModel, device: DeviceType, force: bool) -> Result<()> {
+    pub async fn setup(&self, _model: AiModel, _device: DeviceType, _force: bool) -> Result<()> {
         #[cfg(feature = "modernbert")]
         {
             let model_id = "answerdotai/ModernBERT-base";
             let api = hf_hub::api::sync::ApiBuilder::new().with_progress(true).build()?;
             let repo = api.repo(Repo::new(model_id.to_string(), RepoType::Model));
-            let model_dir = self.get_model_path(&model);
+            let model_dir = self.get_model_path(&AiModel::ModernBert);
             if !model_dir.exists() { fs::create_dir_all(&model_dir)?; }
             for file in ["config.json", "model.safetensors", "tokenizer.json"] {
                 let dest = model_dir.join(file);
-                if !dest.exists() || force {
+                if !dest.exists() || _force {
                     fs::copy(&repo.get(file)?, &dest)?;
                 }
             }

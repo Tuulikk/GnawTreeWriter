@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -14,7 +14,6 @@ pub struct LabelInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LabelStore {
-    // Maps relative_file_path -> Map<node_content_hash -> LabelInfo>
     pub files: HashMap<String, HashMap<String, LabelInfo>>,
 }
 
