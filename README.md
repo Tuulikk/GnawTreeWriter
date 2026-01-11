@@ -1154,7 +1154,7 @@ See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed technical documentation
 
 - [Recipes](docs/RECIPES.md) - Common tasks and workflows
 - [QML Examples](docs/QML_EXAMPLES.md) - Step-by-step QML editing examples
-- [LLM Integration](docs/LLM_INTEGRATION.md) - Guide for language model integration
+- [Temporal Demo](examples/temporal-demo/) - Step-by-step development flow with history snapshots
 - [Testing](docs/TESTING.md) - Testing strategies and examples
 - [Developer Report](docs/DEVELOPER_REPORT.md) - Feedback and improvement roadmap
 

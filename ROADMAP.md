@@ -49,6 +49,7 @@ The foundation that makes GnawTreeWriter bulletproof and independent of Git for 
 - [x] **Undo & Redo Commands**: Navigate backup history without Git dependency.
 - [x] **Enhanced Restore System**: Point-in-time recovery with preview.
 - [x] **Interactive Help System**: `examples` and `wizard` commands for guided learning.
+- [x] **Temporal Demo Project**: A complete micro-project showing the evolution of a tool with history snapshots.
 - [x] **AI Agent Testing Framework**: Comprehensive test scenarios for AI agents.
 
 ---
