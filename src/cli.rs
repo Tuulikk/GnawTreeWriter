@@ -858,7 +858,7 @@ impl Cli {
                     }
                     #[cfg(feature = "mcp")]
                     {
-                        crate::mcp::mcp_server::serve_stdio()?;
+                        crate::mcp::mcp_server::serve_stdio().await?;
                     }
                 }
                 McpSubcommands::Status { url, token } => {

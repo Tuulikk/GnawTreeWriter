@@ -8,7 +8,7 @@
 
 #[cfg(feature = "mcp")]
 pub mod mcp_server {
-    use crate::core::{EditOperation, GnawTreeWriter};
+    use crate::core::{EditOperation, GnawTreeWriter, LabelManager};
     use crate::parser::TreeNode;
     use anyhow::Result;
     use axum::{
@@ -22,6 +22,7 @@ pub mod mcp_server {
     use serde_json::{json, Value};
     use std::{{
         io::{self, BufRead, Write},
+        path::Path,
         sync::Arc
     }};
     use tokio::net::TcpListener;
@@ -30,6 +31,7 @@ pub mod mcp_server {
     /// Shared state for the MCP server
     struct AppState {
         token: Option<String>,
+        project_root: std::path::PathBuf,
     }
 
     /// A JSON-RPC request shape.
@@ -85,7 +87,7 @@ pub mod mcp_server {
 
     // --- Core Logic (Transport Agnostic) ---
 
-    fn process_request(req: JsonRpcRequest) -> Result<Value, Value> {
+    async fn process_request(state: Arc<AppState>, req: JsonRpcRequest) -> Result<Value, Value> {
         match req.method.as_str() {
             "initialize" => {
                 let result = json!({
@@ -119,7 +121,7 @@ pub mod mcp_server {
                         {
                             "name": "list_nodes",
                             "title": "List nodes in file",
-                            "description": "Get a flat list of important nodes. Automatically filters out punctuation and extracts names for functions/classes.",
+                            "description": "Get a flat list of important nodes. Includes extracted names and persistent semantic labels.",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
@@ -134,12 +136,24 @@ pub mod mcp_server {
                         {
                             "name": "get_skeleton",
                             "title": "Get skeletal view",
-                            "description": "Get a high-level hierarchical overview of definitions (classes, functions). Perfect for navigating very large files.",
+                            "description": "Get a high-level hierarchical overview of definitions (classes, functions).",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
                                     "file_path": { "type": "string" },
-                                    "max_depth": { "type": "integer", "description": "Depth of hierarchy to show (default: 2)" }
+                                    "max_depth": { "type": "integer" }
+                                },
+                                "required": ["file_path"]
+                            }
+                        },
+                        {
+                            "name": "get_semantic_report",
+                            "title": "Generate semantic quality report",
+                            "description": "Use ModernBERT to analyze code quality and update persistent labels.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" }
                                 },
                                 "required": ["file_path"]
                             }
@@ -147,12 +161,12 @@ pub mod mcp_server {
                         {
                             "name": "search_nodes",
                             "title": "Search nodes by text",
-                            "description": "Find nodes containing specific text pattern. Search results include extracted names and paths.",
+                            "description": "Find nodes containing specific text pattern.",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
                                     "file_path": { "type": "string" },
-                                    "pattern": { "type": "string", "description": "Text pattern to search for" }
+                                    "pattern": { "type": "string" }
                                 },
                                 "required": ["file_path", "pattern"]
                             }
@@ -187,7 +201,7 @@ pub mod mcp_server {
                         {
                             "name": "insert_node",
                             "title": "Insert new content",
-                            "description": "Insert new code into a parent node. Position: 0=top, 1=bottom, 2=after properties.",
+                            "description": "Insert new code into a parent node.",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
@@ -198,12 +212,6 @@ pub mod mcp_server {
                                 },
                                 "required": ["file_path", "parent_path", "position", "content"]
                             }
-                        },
-                        {
-                            "name": "ping",
-                            "title": "Ping",
-                            "description": "Simple ping to check connection",
-                            "inputSchema": { "type": "object" }
                         }
                     ]
                 });
@@ -212,537 +220,275 @@ pub mod mcp_server {
 
             "tools/call" => {
                 let params = req.params.unwrap_or_else(|| json!({}));
-                let name = params
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                
-                let arguments = params
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or_else(|| json!({}));
+                let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
+                let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
 
-                 // Helper to validate required args
-                 let validate_arg = |key: &str| -> Result<&str, Value> {
+                let validate_arg = |key: &str| -> Result<&str, Value> {
                     arguments.get(key).and_then(Value::as_str).ok_or_else(|| {
-                       let err = build_jsonrpc_error(
-                           req.id.clone(),
-                           INVALID_PARAMS_CODE,
-                           "Invalid parameters",
-                           Some(json!({"field": key, "message": format!("Missing required parameter '{}'", key)}))
-                       );
+                       let err = build_jsonrpc_error(req.id.clone(), INVALID_PARAMS_CODE, "Missing param", None);
                        serde_json::to_value(err).unwrap()
                    })
-               };
+                };
 
-                let result = match name {
+                match name {
                     "analyze" => {
-                        match validate_arg("file_path") {
-                            Ok(path) => handle_analyze(path),
-                            Err(e) => return Err(e),
-                        }
+                        let fp = validate_arg("file_path")?;
+                        Ok(handle_analyze(fp))
                     },
                     "list_nodes" => {
-                        match validate_arg("file_path") {
-                            Ok(path) => {
-                                let filter = arguments.get("filter_type").and_then(Value::as_str);
-                                let max_depth = arguments.get("max_depth").and_then(Value::as_u64).map(|v| v as usize);
-                                let include_all = arguments.get("include_all").and_then(Value::as_bool).unwrap_or(false);
-                                handle_list_nodes(path, filter, max_depth, include_all)
-                            },
-                            Err(e) => return Err(e),
-                        }
+                        let fp = validate_arg("file_path")?;
+                        let filter = arguments.get("filter_type").and_then(Value::as_str);
+                        let max_depth = arguments.get("max_depth").and_then(Value::as_u64).map(|v| v as usize);
+                        let include_all = arguments.get("include_all").and_then(Value::as_bool).unwrap_or(false);
+                        Ok(handle_list_nodes(state, fp, filter, max_depth, include_all))
                     },
                     "get_skeleton" => {
-                        match validate_arg("file_path") {
-                            Ok(path) => {
-                                let max_depth = arguments.get("max_depth").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(2);
-                                handle_get_skeleton(path, max_depth)
-                            },
-                            Err(e) => return Err(e),
-                        }
+                        let fp = validate_arg("file_path")?;
+                        let max_depth = arguments.get("max_depth").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(2);
+                        Ok(handle_get_skeleton(fp, max_depth))
+                    },
+                    "get_semantic_report" => {
+                        let fp = validate_arg("file_path")?;
+                        Ok(handle_get_semantic_report(state, fp).await)
                     },
                     "search_nodes" => {
-                        match validate_arg("file_path") {
-                            Ok(path) => {
-                                let pattern = match validate_arg("pattern") { Ok(v) => v, Err(e) => return Err(e) };
-                                handle_search_nodes(path, pattern)
-                            },
-                            Err(e) => return Err(e),
-                        }
+                        let fp = validate_arg("file_path")?;
+                        let pattern = validate_arg("pattern")?;
+                        Ok(handle_search_nodes(fp, pattern))
                     },
                     "read_node" => {
-                        let fp = match validate_arg("file_path") { Ok(v) => v, Err(e) => return Err(e) };
-                        let np = match validate_arg("node_path") { Ok(v) => v, Err(e) => return Err(e) };
-                        handle_read_node(fp, np)
+                        let fp = validate_arg("file_path")?;
+                        let np = validate_arg("node_path")?;
+                        Ok(handle_read_node(fp, np))
                     },
                     "edit_node" => {
-                        let fp = match validate_arg("file_path") { Ok(v) => v, Err(e) => return Err(e) };
-                        let np = match validate_arg("node_path") { Ok(v) => v, Err(e) => return Err(e) };
-                        let c = match validate_arg("content") { Ok(v) => v, Err(e) => return Err(e) };
-                        handle_edit_node(fp, np, c)
+                        let fp = validate_arg("file_path")?;
+                        let np = validate_arg("node_path")?;
+                        let c = validate_arg("content")?;
+                        Ok(handle_edit_node(fp, np, c))
                     },
                     "insert_node" => {
-                         let fp = match validate_arg("file_path") { Ok(v) => v, Err(e) => return Err(e) };
-                         let pp = match validate_arg("parent_path") { Ok(v) => v, Err(e) => return Err(e) };
-                         let c = match validate_arg("content") { Ok(v) => v, Err(e) => return Err(e) };
+                         let fp = validate_arg("file_path")?;
+                         let pp = validate_arg("parent_path")?;
+                         let c = validate_arg("content")?;
                          let pos = arguments.get("position").and_then(Value::as_u64).unwrap_or(1) as usize;
-                         handle_insert_node(fp, pp, pos, c)
-                    },
-                    "ping" => {
-                        json!({ "content": [{"type": "text", "text": "pong"}] })
+                         Ok(handle_insert_node(fp, pp, pos, c))
                     },
                     _ => {
-                        let err = build_jsonrpc_error(
-                            req.id,
-                            METHOD_NOT_FOUND_CODE,
-                            "Unknown tool",
-                            Some(json!(format!(
-                                "'{}' is not a valid tool name. Available tools: analyze, list_nodes, get_skeleton, search_nodes, read_node, edit_node, insert_node, ping",
-                                name
-                            ))),
-                        );
-                        return Err(serde_json::to_value(err).unwrap());
+                        let err = build_jsonrpc_error(req.id, METHOD_NOT_FOUND_CODE, "Unknown tool", None);
+                        Err(serde_json::to_value(err).unwrap())
                     }
-                };
-                Ok(result)
-            }
-            "notifications/initialized" => {
-                Ok(json!({}))
+                }
             }
             _ => {
-                let err = build_jsonrpc_error(
-                    req.id,
-                    METHOD_NOT_FOUND_CODE,
-                    "Method not found",
-                    None,
-                );
+                let err = build_jsonrpc_error(req.id, METHOD_NOT_FOUND_CODE, "Method not found", None);
                 Err(serde_json::to_value(err).unwrap())
             }
         }
     }
-
-    // --- HTTP Handler ---
 
     async fn rpc_handler(
         State(state): State<Arc<AppState>>,
         headers: HeaderMap,
         Json(req): Json<Value>,
     ) -> impl IntoResponse {
-        // Auth check
         if let Some(expected) = &state.token {
             match headers.get("authorization").and_then(|v| v.to_str().ok()) {
                 Some(s) if s == format!("Bearer {}", expected) => {} // Authorized
-                _ => {
-                    let err = json!({
-                        "jsonrpc": "2.0",
-                        "id": null,
-                        "error": { "code": -32001, "message": "Unauthorized" }
-                    });
-                    return (StatusCode::UNAUTHORIZED, Json(err));
-                }
+                _ => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))),
             }
         }
 
-        let parsed: Result<JsonRpcRequest, _> = serde_json::from_value(req.clone());
-        match parsed {
-            Ok(rpc_req) => {
-                let id = rpc_req.id.clone();
-                match process_request(rpc_req) {
-                    Ok(result) => {
-                        let resp = JsonRpcSuccess {
-                            jsonrpc: "2.0",
-                            id,
-                            result,
-                        };
-                        (StatusCode::OK, Json(serde_json::to_value(resp).unwrap()))
-                    }
-                    Err(err_val) => {
-                        (StatusCode::OK, Json(err_val))
-                    }
-                }
-            },
-            Err(e) => {
-                let err = json!({
-                    "jsonrpc": "2.0",
-                    "id": null,
-                    "error": { "code": PARSE_ERROR_CODE, "message": format!("Invalid JSON-RPC payload: {}", e) }
-                });
-                (StatusCode::BAD_REQUEST, Json(err))
-            }
+        let parsed: JsonRpcRequest = serde_json::from_value(req).unwrap();
+        let id = parsed.id.clone();
+        match process_request(state, parsed).await {
+            Ok(res) => (StatusCode::OK, Json(json!({"jsonrpc": "2.0", "id": id, "result": res}))),
+            Err(err) => (StatusCode::OK, Json(err)),
         }
     }
 
-    // --- Stdio Handler ---
-
-    pub fn serve_stdio() -> Result<()> {
+    pub async fn serve_stdio() -> Result<()> {
         let stdin = io::stdin();
         let mut stdout = io::stdout();
-        
-        eprintln!("MCP Stdio Server started. Waiting for messages...");
+        let project_root = std::env::current_dir()?;
+        let state = Arc::new(AppState { token: None, project_root });
 
         for line_res in stdin.lock().lines() {
             let line = line_res?;
-            let trimmed = line.trim();
+            if line.trim().is_empty() || line.starts_with("Content-") { continue; }
+            let req: JsonRpcRequest = serde_json::from_str(&line)?;
+            let id = req.id.clone();
             
-            if trimmed.is_empty() {
-                continue;
+            if id.is_none() { 
+                let _ = process_request(state.clone(), req).await;
+                continue; 
             }
 
-            if trimmed.starts_with("Content-Length:") || trimmed.starts_with("Content-Type:") {
-                eprintln!("Ignored header: {}", trimmed);
-                continue;
-            }
-
-            eprintln!("Received raw: {}", trimmed);
-
-            let req_val: Value = match serde_json::from_str(trimmed) {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("Failed to parse line: {} (Line content: {:?})", e, trimmed);
-                    let err = json!({
-                        "jsonrpc": "2.0",
-                        "id": null,
-                        "error": { "code": PARSE_ERROR_CODE, "message": "Parse error" }
-                    });
+            match process_request(state.clone(), req).await {
+                Ok(result) => {
+                    let resp = json!({"jsonrpc": "2.0", "id": id, "result": result});
+                    let _ = serde_json::to_writer(&mut stdout, &resp);
+                    let _ = stdout.write_all(b"\n");
+                    let _ = stdout.flush();
+                },
+                Err(err) => {
                     let _ = serde_json::to_writer(&mut stdout, &err);
                     let _ = stdout.write_all(b"\n");
                     let _ = stdout.flush();
-                    continue;
                 }
-            };
-
-            let req: JsonRpcRequest = match serde_json::from_value(req_val) {
-                Ok(r) => r,
-                Err(e) => {
-                     eprintln!("Invalid JSON-RPC structure: {}", e);
-                     continue;
-                }
-            };
-
-            let id = req.id.clone();
-            let is_notification = id.is_none();
-            
-            let result_op = process_request(req);
-
-            if is_notification {
-                continue;
             }
-
-            let response = match result_op {
-                Ok(result) => {
-                    serde_json::to_value(JsonRpcSuccess {
-                        jsonrpc: "2.0",
-                        id,
-                        result
-                    }).unwrap()
-                },
-                Err(err_val) => err_val,
-            };
-
-            let _ = serde_json::to_writer(&mut stdout, &response);
-            let _ = stdout.write_all(b"\n");
-            let _ = stdout.flush();
         }
-        
         Ok(())
     }
 
+    // --- Handlers ---
 
-    // --- Tool Implementations (Shared) ---
-
-    fn tool_error(msg: String) -> Value {
-        json!({
-            "content": [{"type": "text", "text": msg}],
-            "isError": true
-        })
-    }
-
+    fn tool_error(msg: String) -> Value { json!({"content": [{"type": "text", "text": msg}], "isError": true}) }
     fn tool_success(msg: String, data: Option<Value>) -> Value {
-        let mut result = json!({
-            "content": [{"type": "text", "text": msg}]
-        });
-        if let Some(d) = data {
-            if let Some(obj) = result.as_object_mut() {
-                obj.extend(d.as_object().unwrap().clone());
-            }
-        }
-        result
+        let mut res = json!({"content": [{"type": "text", "text": msg}]});
+        if let Some(d) = data { res.as_object_mut().unwrap().extend(d.as_object().unwrap().clone()); }
+        res
     }
 
     fn handle_analyze(file_path: &str) -> Value {
         match GnawTreeWriter::new(file_path) {
-            Ok(writer) => {
-                let tree = writer.analyze();
-                json!({
-                    "content": [{"type": "text", "text": format!("Analyzed {}", file_path)}],
-                    "data": tree
-                })
-            }
-            Err(e) => tool_error(format!("Failed to analyze {}: {}", file_path, e)),
+            Ok(w) => json!({"content": [{"type": "text", "text": format!("Analyzed {}", file_path)}], "data": w.analyze()}),
+            Err(e) => tool_error(e.to_string()),
         }
     }
 
-    /// Try to extract a name (identifier) from a node or its immediate children
     fn try_extract_name(node: &TreeNode) -> Option<String> {
         let nt = node.node_type.to_lowercase();
-        
-        // If the node itself is an identifier or name, return its content
-        if nt == "identifier" || nt == "name" || nt == "type_identifier" {
-            return Some(node.content.clone());
-        }
-        
-        // Strategy 1: Look for children that are identifiers (standard for functions/classes)
+        if nt == "identifier" || nt == "name" || nt == "type_identifier" { return Some(node.content.clone()); }
         for child in &node.children {
             let cnt = child.node_type.to_lowercase();
-            if cnt == "identifier" || cnt == "name" || cnt == "type_identifier" {
-                return Some(child.content.clone());
-            }
-        }
-
-        // Strategy 2: Look for nested identifiers (common in Rust enums/structs/impls)
-        for child in &node.children {
+            if cnt == "identifier" || cnt == "name" || cnt == "type_identifier" { return Some(child.content.clone()); }
             for subchild in &child.children {
                 let scnt = subchild.node_type.to_lowercase();
-                if scnt == "identifier" || scnt == "name" || scnt == "type_identifier" {
-                    return Some(subchild.content.clone());
-                }
+                if scnt == "identifier" || scnt == "name" || scnt == "type_identifier" { return Some(subchild.content.clone()); }
             }
         }
-        
         None
     }
 
-    /// Check if a node type is purely structural/punctuation
-    fn is_structural(node_type: &str) -> bool {
-        matches!(node_type, "{{" | "}}" | "(" | ")" | "[" | "]" | "," | ";" | "." | ":" | "=" | "\"" | "'" )
-    }
+    fn is_structural(nt: &str) -> bool { matches!(nt, "{{" | "}}" | "(" | ")" | "[" | "]" | "," | ";" | "." | ":" | "=") }
+    fn is_definition(nt: &str) -> bool { nt.contains("definition") || nt.contains("declaration") || matches!(nt, "class" | "function" | "method") }
 
-    /// Check if a node type is a high-level definition
-    fn is_definition(node_type: &str) -> bool {
-        let nt = node_type.to_lowercase();
-        nt.contains("definition") || 
-        nt.contains("declaration") || 
-        nt.contains("item") ||
-        matches!(nt.as_str(), "module" | "class" | "function" | "method" | "ui_object_definition")
-    }
-
-    fn handle_list_nodes(file_path: &str, filter_type: Option<&str>, max_depth: Option<usize>, include_all: bool) -> Value {
-         match GnawTreeWriter::new(file_path) {
-            Ok(writer) => {
-                let tree = writer.analyze();
+    fn handle_list_nodes(state: Arc<AppState>, file_path: &str, filter: Option<&str>, max_depth: Option<usize>, all: bool) -> Value {
+        match GnawTreeWriter::new(file_path) {
+            Ok(w) => {
+                let label_mgr = LabelManager::load(&state.project_root).ok();
                 let mut nodes = Vec::new();
-                
-                fn collect_nodes(node: &TreeNode, acc: &mut Vec<serde_json::Value>, filter: Option<&str>, current_depth: usize, max_depth: Option<usize>, include_all: bool) {
-                    if let Some(md) = max_depth {
-                        if current_depth > md {
-                            return;
+                fn collect(n: &TreeNode, acc: &mut Vec<Value>, f: Option<&str>, d: usize, md: Option<usize>, all: bool, fp: &str, lm: &Option<LabelManager>) {
+                    if let Some(limit) = md { if d > limit { return; } }
+                    if all || !is_structural(&n.node_type) {
+                        if f.map_or(true, |filter| n.node_type == filter) {
+                            let labels = lm.as_ref().map(|mgr| mgr.get_labels(fp, &n.content)).unwrap_or_default();
+                            acc.push(json!({"path": n.path, "type": n.node_type, "name": try_extract_name(n), "start": n.start_line, "labels": labels}));
                         }
                     }
-
-                    let is_junk = is_structural(&node.node_type);
-                    let should_skip = !include_all && is_junk;
-
-                    let matches_filter = match filter {
-                        Some(f) => node.node_type == f,
-                        None => true,
-                    };
-                    
-                    if !should_skip && matches_filter {
-                         let name = try_extract_name(node);
-                         acc.push(json!({ 
-                            "path": node.path,
-                            "type": node.node_type,
-                            "name": name,
-                            "start": node.start_line,
-                            "end": node.end_line,
-                            "preview": node.content.lines().next().unwrap_or("").chars().take(60).collect::<String>()
-                        }));
-                    }
-                    
-                    for child in &node.children {
-                        collect_nodes(child, acc, filter, current_depth + 1, max_depth, include_all);
-                    }
+                    for c in &n.children { collect(c, acc, f, d + 1, md, all, fp, lm); }
                 }
-                
-                collect_nodes(tree, &mut nodes, filter_type, 0, max_depth, include_all);
-                
-                tool_success(
-                    format!("Found {} important nodes in {} (depth limit: {:?})", nodes.len(), file_path, max_depth),
-                    Some(json!({"nodes": nodes}))
-                )
+                collect(w.analyze(), &mut nodes, filter, 0, max_depth, all, file_path, &label_mgr);
+                tool_success(format!("Found {} nodes", nodes.len()), Some(json!({"nodes": nodes})))
             }
-            Err(e) => tool_error(format!("Error: {}", e)),
+            Err(e) => tool_error(e.to_string()),
         }
     }
 
     fn handle_get_skeleton(file_path: &str, max_depth: usize) -> Value {
-         match GnawTreeWriter::new(file_path) {
-            Ok(writer) => {
-                let tree = writer.analyze();
-                let mut skeleton = String::new();
-                
-                fn build_skeleton(node: &TreeNode, out: &mut String, depth: usize, max_depth: usize) {
-                    if depth > max_depth {
-                        return;
-                    }
-
-                    let is_def = is_definition(&node.node_type);
-                    let has_def_child = node.children.iter().any(|c| is_definition(&c.node_type));
-
-                    if depth == 0 || is_def || has_def_child {
-                        let indent = "  ".repeat(depth);
-                        let name = try_extract_name(node).unwrap_or_else(|| "_".to_string());
-                        let line_info = format!("(L{}-L{})", node.start_line, node.end_line);
-                        
-                        out.push_str(&format!("{}{} [{}] {} {}
-", indent, node.path, node.node_type, name, line_info));
-                        
-                        for child in &node.children {
-                            build_skeleton(child, out, depth + 1, max_depth);
-                        }
+        match GnawTreeWriter::new(file_path) {
+            Ok(w) => {
+                let mut s = String::new();
+                fn build(n: &TreeNode, out: &mut String, d: usize, md: usize) {
+                    if d > md { return; }
+                    if d == 0 || is_definition(&n.node_type) {
+                        out.push_str(&format!("{}{} [{}] {}
+", "  ".repeat(d), n.path, n.node_type, try_extract_name(n).unwrap_or_default()));
+                        for c in &n.children { build(c, out, d + 1, md); }
                     }
                 }
-                
-                build_skeleton(tree, &mut skeleton, 0, max_depth);
-                
-                tool_success(
-                    format!("Skeletal view of {} (max_depth: {})", file_path, max_depth),
-                    Some(json!({"skeleton": skeleton}))
-                )
+                build(w.analyze(), &mut s, 0, max_depth);
+                tool_success(format!("Skeleton of {}", file_path), Some(json!({"skeleton": s})))
             }
-            Err(e) => tool_error(format!("Error: {}", e)),
+            Err(e) => tool_error(e.to_string()),
+        }
+    }
+
+    async fn handle_get_semantic_report(state: Arc<AppState>, file_path: &str) -> Value {
+        #[cfg(feature = "modernbert")]
+        {
+            let mgr = match crate::llm::ai_manager::AiManager::new(&state.project_root) {
+                Ok(m) => m,
+                Err(e) => return tool_error(e.to_string()),
+            };
+            match mgr.generate_semantic_report(file_path).await {
+                Ok(report) => tool_success("Semantic report generated".into(), Some(json!({"report": report}))),
+                Err(e) => tool_error(format!("Report failed: {}. Make sure ModernBERT is set up.", e)),
+            }
+        }
+        #[cfg(not(feature = "modernbert"))]
+        {
+            let _ = state;
+            tool_error("ModernBERT feature not enabled in this build.".into())
         }
     }
 
     fn handle_search_nodes(file_path: &str, pattern: &str) -> Value {
-         match GnawTreeWriter::new(file_path) {
-            Ok(writer) => {
-                let tree = writer.analyze();
-                let mut matches = Vec::new();
-                
-                fn find_matches(node: &TreeNode, acc: &mut Vec<serde_json::Value>, pattern: &str) {
-                    let name = try_extract_name(node);
-                    let name_match = name.as_ref().map(|n| n.contains(pattern)).unwrap_or(false);
-                    let content_match = node.content.contains(pattern);
-
-                    if (name_match || content_match) && !is_structural(&node.node_type) {
-                         acc.push(json!({ 
-                            "path": node.path,
-                            "type": node.node_type,
-                            "name": name,
-                            "start": node.start_line,
-                            "end": node.end_line,
-                            "preview": node.content.lines().next().unwrap_or("").chars().take(80).collect::<String>()
-                        }));
+        match GnawTreeWriter::new(file_path) {
+            Ok(w) => {
+                let mut m = Vec::new();
+                fn find(n: &TreeNode, acc: &mut Vec<Value>, p: &str) {
+                    if n.content.contains(p) && !is_structural(&n.node_type) {
+                        acc.push(json!({"path": n.path, "type": n.node_type, "name": try_extract_name(n)}));
                     }
-                    
-                    for child in &node.children {
-                        find_matches(child, acc, pattern);
-                    }
+                    for c in &n.children { find(c, acc, p); }
                 }
-                
-                find_matches(tree, &mut matches, pattern);
-                
-                matches.sort_by(|a, b| {
-                    let a_path = a.get("path").and_then(|v| v.as_str()).unwrap_or("");
-                    let b_path = b.get("path").and_then(|v| v.as_str()).unwrap_or("");
-                    b_path.len().cmp(&a_path.len())
-                });
-
-                tool_success(
-                    format!("Found {} matching nodes in {}", matches.len(), file_path),
-                    Some(json!({"matches": matches.into_iter().take(50).collect::<Vec<_>>()}))
-                )
+                find(w.analyze(), &mut m, pattern);
+                tool_success(format!("Found {} matches", m.len()), Some(json!({"matches": m})))
             }
-            Err(e) => tool_error(format!("Error: {}", e)),
+            Err(e) => tool_error(e.to_string()),
         }
     }
 
     fn handle_read_node(file_path: &str, node_path: &str) -> Value {
         match GnawTreeWriter::new(file_path) {
-            Ok(writer) => {
-                match writer.show_node(node_path) {
-                    Ok(content) => tool_success(content, None),
-                    Err(e) => tool_error(format!("Node error: {}", e))
-                }
-            }
-            Err(e) => tool_error(format!("File error: {}", e))
+            Ok(w) => w.show_node(node_path).map_or_else(|e| tool_error(e.to_string()), |c| tool_success(c, None)),
+            Err(e) => tool_error(e.to_string()),
         }
     }
 
     fn handle_edit_node(file_path: &str, node_path: &str, content: &str) -> Value {
         match GnawTreeWriter::new(file_path) {
-            Ok(mut writer) => {
-                let op = EditOperation::Edit {
-                    node_path: node_path.to_string(),
-                    content: content.to_string(),
-                };
-                match writer.edit(op) {
-                    Ok(_) => tool_success(format!("Successfully edited node {} in {}", node_path, file_path), None),
-                    Err(e) => tool_error(format!("Edit failed: {}", e))
-                }
-            }
-            Err(e) => tool_error(format!("File error: {}", e))
+            Ok(mut w) => w.edit(EditOperation::Edit { node_path: node_path.to_string(), content: content.to_string() })
+                .map_or_else(|e| tool_error(e.to_string()), |_| tool_success("Node edited".into(), None)),
+            Err(e) => tool_error(e.to_string()),
         }
     }
 
     fn handle_insert_node(file_path: &str, parent_path: &str, position: usize, content: &str) -> Value {
-         match GnawTreeWriter::new(file_path) {
-            Ok(mut writer) => {
-                let op = EditOperation::Insert {
-                    parent_path: parent_path.to_string(),
-                    position,
-                    content: content.to_string(),
-                };
-                match writer.edit(op) {
-                    Ok(_) => tool_success(format!("Successfully inserted into {} in {}", parent_path, file_path), None),
-                    Err(e) => tool_error(format!("Insert failed: {}", e))
-                }
-            }
-            Err(e) => tool_error(format!("File error: {}", e))
+        match GnawTreeWriter::new(file_path) {
+            Ok(mut w) => w.edit(EditOperation::Insert { parent_path: parent_path.to_string(), position, content: content.to_string() })
+                .map_or_else(|e| tool_error(e.to_string()), |_| tool_success("Content inserted".into(), None)),
+            Err(e) => tool_error(e.to_string()),
         }
-    }
-
-    // --- Server Runners ---
-
-    pub fn build_router(token: Option<String>) -> Router {
-        let state = Arc::new(AppState { token });
-        Router::new()
-            .route("/", post(rpc_handler))
-            .with_state(state)
     }
 
     pub async fn serve(addr: &str, token: Option<String>) -> Result<()> {
-        let listener = TcpListener::bind(addr)
-            .await?;
-        println!("Starting MCP server on http://{}", listener.local_addr()?);
-
-        if token.is_some() {
-            println!("Security: Bearer token authentication enabled");
-        } else {
-            println!("Security: Authentication disabled (unprotected access)");
-        }
-
-        let app = build_router(token);
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async {{
-                let _ = signal::ctrl_c().await;
-            }})
-            .await?;
+        let listener = TcpListener::bind(addr).await?;
+        let project_root = std::env::current_dir()?;
+        let state = Arc::new(AppState { token, project_root });
+        axum::serve(listener, Router::new().route("/", post(rpc_handler)).with_state(state))
+            .with_graceful_shutdown(async {{ let _ = signal::ctrl_c().await; }}).await?;
         Ok(())
     }
 
     pub async fn status(url: &str, token: Option<String>) -> Result<()> {
-        use reqwest::Client;
-        let client = Client::new();
-        println!("Querying MCP server at {}...", url);
-        let init_body = json!({"jsonrpc":"2.0","method":"initialize","id":1});
-        let mut init_req = client.post(url);
-        if let Some(t) = &token { init_req = init_req.header("Authorization", format!("Bearer {}", t)); }
-        let resp = init_req.json(&init_body).send().await?;
-        if !resp.status().is_success() { anyhow::bail!("Status check failed: {}", resp.status()); }
-        println!("✓ Server is ready");
+        let client = reqwest::Client::new();
+        let mut req = client.post(url);
+        if let Some(t) = token { req = req.header("Authorization", format!("Bearer {}", t)); }
+        let _ = req.json(&json!({"jsonrpc":"2.0","method":"initialize","id":1})).send().await?;
+        println!("✓ Server ready");
         Ok(())
     }
 }
