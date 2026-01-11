@@ -485,20 +485,31 @@ pub mod mcp_server {
 
     /// Try to extract a name (identifier) from a node or its immediate children
     fn try_extract_name(node: &TreeNode) -> Option<String> {
-        if node.node_type == "identifier" || node.node_type == "name" {
+        let nt = node.node_type.to_lowercase();
+        
+        // If the node itself is an identifier or name, return its content
+        if nt == "identifier" || nt == "name" || nt == "type_identifier" {
             return Some(node.content.clone());
         }
         
+        // Strategy 1: Look for children that are identifiers (standard for functions/classes)
         for child in &node.children {
-            if child.node_type == "identifier" || child.node_type == "name" {
+            let cnt = child.node_type.to_lowercase();
+            if cnt == "identifier" || cnt == "name" || cnt == "type_identifier" {
                 return Some(child.content.clone());
             }
+        }
+
+        // Strategy 2: Look for nested identifiers (common in Rust enums/structs/impls)
+        for child in &node.children {
             for subchild in &child.children {
-                if subchild.node_type == "identifier" || subchild.node_type == "name" {
+                let scnt = subchild.node_type.to_lowercase();
+                if scnt == "identifier" || scnt == "name" || scnt == "type_identifier" {
                     return Some(subchild.content.clone());
                 }
             }
         }
+        
         None
     }
 
