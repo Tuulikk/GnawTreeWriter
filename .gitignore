@@ -6,3 +6,15 @@
 .gnawtreewriter_session.json
 .gnawtreewriter_session_id
 .gnawtreewriter-tags.toml
+
+# Local development and sandboxing
+playground/
+local_test/
+mcp_debug.log
+mcp_output.log
+mcp_test.log
+*.json
+!Cargo.toml
+!package.json
+!*batch.json
+

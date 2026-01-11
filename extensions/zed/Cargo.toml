@@ -1,0 +1,43 @@
+# Cargo.toml for a Zed dev extension skeleton that exposes GnawTreeWriter as an MCP context server.
+# Adjust authors, versions and dependency pins as appropriate for your environment.
+
+[package]
+name = "zed_gnaw_extension"
+version = "0.1.0"
+authors = ["Your Name <you@example.com>"]
+edition = "2021"
+description = "Zed dev extension: expose a local GnawTreeWriter MCP server as a context server (skeleton)"
+license = "MPL-2.0"
+# This is a development helper; generally not intended to be published to crates.io
+publish = false
+
+[lib]
+# For Zed extensions it's common to build a dynamic library that the host can load.
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1.0"
+zed_extension_api = { version = "0.7", optional = true }
+
+# Optional: add useful development/test deps
+# tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+which = "4"
+
+[features]
+default = ["zed"]
+zed = ["zed_extension_api"]
+
+# Configure wasm32-wasip2 target for WebAssembly Component support
+# This is required for Zed's MCP extension system
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz", "--enable-mutable-globals"]
+
+[package.metadata]
+# Notes for local dev:
+# - Build in this folder: `cargo build --release`
+# - See Zed docs for installing dev extensions: https://zed.dev/docs/extensions/mcp-extensions
+# - The extension should implement `context_server_command` and return a `zed::Command`
+#   that starts the MCP server (e.g. invoking `./scripts/mcp-serve.sh --addr ... --token ...`).

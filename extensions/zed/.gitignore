@@ -1,0 +1,4 @@
+target/
+dist/
+.mcp-server.log
+.mcp-server.pid

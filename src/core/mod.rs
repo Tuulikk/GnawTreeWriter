@@ -11,6 +11,7 @@ pub mod diff_parser;
 pub mod refactor;
 pub mod restoration_engine;
 pub mod tag_manager;
+pub mod label_manager;
 pub mod transaction_log;
 pub mod undo_redo;
 
@@ -18,6 +19,7 @@ pub use batch::{Batch, BatchEdit};
 pub use refactor::{format_refactor_results, RefactorEngine, RefactorResult};
 pub use restoration_engine::{RestorationEngine, RestorationResult, RestorationStats};
 pub use tag_manager::TagManager;
+pub use label_manager::LabelManager;
 pub use transaction_log::{
     calculate_content_hash, FileRestorationPlan, OperationType, ProjectRestorationPlan,
     Transaction, TransactionLog,

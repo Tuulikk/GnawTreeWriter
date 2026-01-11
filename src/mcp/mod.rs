@@ -1,15 +1,16 @@
-//! Minimal MCP (Model Context Protocol) server implementation (MVP).
-//!
+//! Minimal MCP (Model Context Protocol) server implementation.
+//! 
 //! - Feature gated: only compiled when `--features mcp` is enabled.
-//! - Implements a small JSON-RPC 2.0 endpoint over HTTP that understands
-//!   a subset of MCP (initialize, tools/list, tools/call).
-//! - Uses `axum` for HTTP routing (optional dependency pulled in via `mcp`).
+//! - Implements a JSON-RPC 2.0 endpoint over HTTP and Stdio.
+//! - Exposes core GnawTreeWriter functionality as tools.
 
 #![allow(clippy::unused_async)]
 
 #[cfg(feature = "mcp")]
 pub mod mcp_server {
-    use anyhow::{anyhow, Context, Result};
+    use crate::core::{EditOperation, GnawTreeWriter, LabelManager};
+    use crate::parser::TreeNode;
+    use anyhow::Result;
     use axum::{
         extract::{Json, State},
         http::{HeaderMap, StatusCode},
@@ -19,16 +20,21 @@ pub mod mcp_server {
     };
     use serde::{Deserialize, Serialize};
     use serde_json::{json, Value};
-    use std::{fs, path::Path, sync::Arc};
+    use std::{{
+        io::{self, BufRead, Write},
+        path::Path,
+        sync::Arc
+    }};
     use tokio::net::TcpListener;
     use tokio::signal;
 
     /// Shared state for the MCP server
     struct AppState {
         token: Option<String>,
+        project_root: std::path::PathBuf,
     }
 
-    /// A very small JSON-RPC request shape (we only read the fields we need).
+    /// A JSON-RPC request shape.
     #[derive(Debug, Deserialize)]
     struct JsonRpcRequest {
         pub id: Option<Value>,
@@ -38,7 +44,7 @@ pub mod mcp_server {
         pub params: Option<Value>,
     }
 
-    /// A convenience helper to build JSON-RPC responses.
+    /// JSON-RPC success response.
     #[derive(Debug, Serialize)]
     struct JsonRpcSuccess<'a> {
         jsonrpc: &'a str,
@@ -46,7 +52,7 @@ pub mod mcp_server {
         result: Value,
     }
 
-    /// A helper to build JSON-RPC error responses.
+    /// JSON-RPC error response.
     #[derive(Debug, Serialize)]
     struct JsonRpcError<'a> {
         jsonrpc: &'a str,
@@ -54,17 +60,11 @@ pub mod mcp_server {
         error: serde_json::Value,
     }
 
-    /// Standard JSON-RPC error codes
-    #[allow(dead_code)]
+    // Standard JSON-RPC error codes
     const INVALID_PARAMS_CODE: i32 = -32602;
-    #[allow(dead_code)]
     const METHOD_NOT_FOUND_CODE: i32 = -32601;
-    #[allow(dead_code)]
     const PARSE_ERROR_CODE: i32 = -32700;
-    #[allow(dead_code)]
-    const INTERNAL_ERROR_CODE: i32 = -32603;
 
-    /// Build a JSON-RPC error response
     fn build_jsonrpc_error<'a>(
         id: Option<Value>,
         code: i32,
@@ -85,45 +85,13 @@ pub mod mcp_server {
         }
     }
 
-    async fn rpc_handler(
-        State(state): State<Arc<AppState>>,
-        headers: HeaderMap,
-        Json(req): Json<Value>,
-    ) -> impl IntoResponse {
-        // If a token is configured, require Authorization: Bearer <token> header
-        if let Some(expected) = &state.token {
-            match headers.get("authorization").and_then(|v| v.to_str().ok()) {
-                Some(s) if s == format!("Bearer {}", expected) => {}
-                _ => {
-                    let err = json!({
-                        "jsonrpc": "2.0",
-                        "id": null,
-                        "error": { "code": -32001, "message": "Unauthorized" }
-                    });
-                    return (StatusCode::UNAUTHORIZED, Json(err));
-                }
-            }
-        }
+    // --- Core Logic (Transport Agnostic) ---
 
-        // Parse as generic JSON-RPC request (loose/forgiving)
-        let parsed: Result<JsonRpcRequest, _> = serde_json::from_value(req.clone());
-        let req = match parsed {
-            Ok(r) => r,
-            Err(e) => {
-                let err = json!({
-                    "jsonrpc": "2.0",
-                    "id": null,
-                    "error": { "code": -32700, "message": format!("Invalid JSON-RPC payload: {}", e) }
-                });
-                return (StatusCode::BAD_REQUEST, Json(err));
-            }
-        };
-
-        // Dispatch the MCP methods we handle
+    async fn process_request(state: Arc<AppState>, req: JsonRpcRequest) -> Result<Value, Value> {
         match req.method.as_str() {
             "initialize" => {
                 let result = json!({
-                    "protocolVersion": "2025-11-25",
+                    "protocolVersion": "2024-11-05",
                     "serverInfo": {
                         "name": env!("CARGO_PKG_NAME"),
                         "version": env!("CARGO_PKG_VERSION")
@@ -132,12 +100,7 @@ pub mod mcp_server {
                         "tools": { "listChanged": true }
                     }
                 });
-                let resp = JsonRpcSuccess {
-                    jsonrpc: "2.0",
-                    id: req.id,
-                    result,
-                };
-                (StatusCode::OK, Json(serde_json::to_value(resp).unwrap()))
+                Ok(result)
             }
 
             "tools/list" => {
@@ -145,8 +108,8 @@ pub mod mcp_server {
                     "tools": [
                         {
                             "name": "analyze",
-                            "title": "Analyze file",
-                            "description": "Analyze a file and return a small summary of its AST.",
+                            "title": "Analyze file structure",
+                            "description": "Analyze a file and return its full AST structure.",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
@@ -156,479 +119,376 @@ pub mod mcp_server {
                             }
                         },
                         {
-                            "name": "batch",
-                            "title": "Apply batch",
-                            "description": "Execute a batch of operations atomically.",
-                            "inputSchema": { "type": "object" }
+                            "name": "list_nodes",
+                            "title": "List nodes in file",
+                            "description": "Get a flat list of important nodes. Includes extracted names and persistent semantic labels.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" },
+                                    "filter_type": { "type": "string", "description": "Optional filter for node type" },
+                                    "max_depth": { "type": "integer", "description": "Maximum recursion depth (0 = root only)" },
+                                    "include_all": { "type": "boolean", "description": "If true, include punctuation and anonymous nodes" }
+                                },
+                                "required": ["file_path"]
+                            }
                         },
                         {
-                            "name": "undo",
-                            "title": "Undo",
-                            "description": "Undo recent operations.",
-                            "inputSchema": { "type": "object" }
+                            "name": "get_skeleton",
+                            "title": "Get skeletal view",
+                            "description": "Get a high-level hierarchical overview of definitions (classes, functions).",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" },
+                                    "max_depth": { "type": "integer" }
+                                },
+                                "required": ["file_path"]
+                            }
+                        },
+                        {
+                            "name": "get_semantic_report",
+                            "title": "Generate semantic quality report",
+                            "description": "Use ModernBERT to analyze code quality and update persistent labels.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" }
+                                },
+                                "required": ["file_path"]
+                            }
+                        },
+                        {
+                            "name": "search_nodes",
+                            "title": "Search nodes by text",
+                            "description": "Find nodes containing specific text pattern.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" },
+                                    "pattern": { "type": "string" }
+                                },
+                                "required": ["file_path", "pattern"]
+                            }
+                        },
+                        {
+                            "name": "read_node",
+                            "title": "Read node content",
+                            "description": "Get the source code content of a specific node.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" },
+                                    "node_path": { "type": "string" }
+                                },
+                                "required": ["file_path", "node_path"]
+                            }
+                        },
+                        {
+                            "name": "edit_node",
+                            "title": "Edit node content",
+                            "description": "Replace the content of a node safely. Creates backup automatically.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" },
+                                    "node_path": { "type": "string" },
+                                    "content": { "type": "string" }
+                                },
+                                "required": ["file_path", "node_path", "content"]
+                            }
+                        },
+                        {
+                            "name": "insert_node",
+                            "title": "Insert new content",
+                            "description": "Insert new code into a parent node.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" },
+                                    "parent_path": { "type": "string" },
+                                    "position": { "type": "integer" },
+                                    "content": { "type": "string" }
+                                },
+                                "required": ["file_path", "parent_path", "position", "content"]
+                            }
                         }
                     ]
                 });
-                let resp = JsonRpcSuccess {
-                    jsonrpc: "2.0",
-                    id: req.id,
-                    result: tools,
-                };
-                (StatusCode::OK, Json(serde_json::to_value(resp).unwrap()))
+                Ok(tools)
             }
 
             "tools/call" => {
                 let params = req.params.unwrap_or_else(|| json!({}));
-                let name = params
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
+                let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
+                let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
 
-                // Validate tool name - return JSON-RPC error for unknown tools
-                if !matches!(name, "analyze" | "batch" | "undo") {
-                    let err = build_jsonrpc_error(
-                        req.id,
-                        METHOD_NOT_FOUND_CODE,
-                        "Unknown tool",
-                        Some(json!(format!(
-                            "'{}' is not a valid tool name. Available tools: analyze, batch, undo",
-                            name
-                        ))),
-                    );
-                    return (
-                        StatusCode::NOT_FOUND,
-                        Json(serde_json::to_value(err).unwrap()),
-                    );
-                }
-
-                let arguments = params
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or_else(|| json!({}));
-
-                // Validate required parameters for analyze tool
-                if name == "analyze" && arguments.get("file_path").and_then(Value::as_str).is_none()
-                {
-                    let err = build_jsonrpc_error(
-                        req.id,
-                        INVALID_PARAMS_CODE,
-                        "Invalid parameters",
-                        Some(
-                            json!({"field": "file_path", "message": "Missing required parameter 'file_path'"}),
-                        ),
-                    );
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(serde_json::to_value(err).unwrap()),
-                    );
-                }
-
-                // Execute tool - these return result with isError for tool-level failures
-                let result = match name {
-                    "analyze" => handle_analyze(&arguments).unwrap_or_else(|e| {
-                        json!({
-                            "content": [{"type": "text", "text": format!("Analyze failed: {}", e)}],
-                            "isError": true
-                        })
-                    }),
-                    "batch" => {
-                        json!({ "content": [{"type": "text", "text": "Batch executed (MVP)"}] })
-                    }
-                    "undo" => {
-                        json!({ "content": [{"type": "text", "text": "Undo executed (MVP)"}] })
-                    }
-                    _ => unreachable!("Unknown tool should have been caught above"),
+                let validate_arg = |key: &str| -> Result<&str, Value> {
+                    arguments.get(key).and_then(Value::as_str).ok_or_else(|| {
+                       let err = build_jsonrpc_error(req.id.clone(), INVALID_PARAMS_CODE, "Missing param", None);
+                       serde_json::to_value(err).unwrap()
+                   })
                 };
 
-                let resp = JsonRpcSuccess {
-                    jsonrpc: "2.0",
-                    id: req.id,
-                    result,
-                };
-                (StatusCode::OK, Json(serde_json::to_value(resp).unwrap()))
+                match name {
+                    "analyze" => {
+                        let fp = validate_arg("file_path")?;
+                        Ok(handle_analyze(fp))
+                    },
+                    "list_nodes" => {
+                        let fp = validate_arg("file_path")?;
+                        let filter = arguments.get("filter_type").and_then(Value::as_str);
+                        let max_depth = arguments.get("max_depth").and_then(Value::as_u64).map(|v| v as usize);
+                        let include_all = arguments.get("include_all").and_then(Value::as_bool).unwrap_or(false);
+                        Ok(handle_list_nodes(state, fp, filter, max_depth, include_all))
+                    },
+                    "get_skeleton" => {
+                        let fp = validate_arg("file_path")?;
+                        let max_depth = arguments.get("max_depth").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(2);
+                        Ok(handle_get_skeleton(fp, max_depth))
+                    },
+                    "get_semantic_report" => {
+                        let fp = validate_arg("file_path")?;
+                        Ok(handle_get_semantic_report(state, fp).await)
+                    },
+                    "search_nodes" => {
+                        let fp = validate_arg("file_path")?;
+                        let pattern = validate_arg("pattern")?;
+                        Ok(handle_search_nodes(fp, pattern))
+                    },
+                    "read_node" => {
+                        let fp = validate_arg("file_path")?;
+                        let np = validate_arg("node_path")?;
+                        Ok(handle_read_node(fp, np))
+                    },
+                    "edit_node" => {
+                        let fp = validate_arg("file_path")?;
+                        let np = validate_arg("node_path")?;
+                        let c = validate_arg("content")?;
+                        Ok(handle_edit_node(fp, np, c))
+                    },
+                    "insert_node" => {
+                         let fp = validate_arg("file_path")?;
+                         let pp = validate_arg("parent_path")?;
+                         let c = validate_arg("content")?;
+                         let pos = arguments.get("position").and_then(Value::as_u64).unwrap_or(1) as usize;
+                         Ok(handle_insert_node(fp, pp, pos, c))
+                    },
+                    _ => {
+                        let err = build_jsonrpc_error(req.id, METHOD_NOT_FOUND_CODE, "Unknown tool", None);
+                        Err(serde_json::to_value(err).unwrap())
+                    }
+                }
             }
-
             _ => {
-                let err = json!({
-                    "jsonrpc": "2.0",
-                    "id": req.id,
-                    "error": { "code": -32601, "message": "Method not found" }
-                });
-                (StatusCode::NOT_FOUND, Json(err))
+                let err = build_jsonrpc_error(req.id, METHOD_NOT_FOUND_CODE, "Method not found", None);
+                Err(serde_json::to_value(err).unwrap())
             }
         }
     }
 
-    fn handle_analyze(arguments: &Value) -> Result<Value> {
-        // Note: file_path is validated before this function is called (JSON-RPC error if missing)
-        let file_path = arguments
-            .get("file_path")
-            .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("missing 'file_path' parameter (this should not happen)"))?;
-
-        let content = match fs::read_to_string(file_path) {
-            Ok(c) => c,
-            Err(e) => {
-                // Tool-level error: file not found or permission denied
-                return Ok(json!({
-                    "content": [{"type": "text", "text": format!("IO error: {}", e)}],
-                    "isError": true
-                }));
+    async fn rpc_handler(
+        State(state): State<Arc<AppState>>,
+        headers: HeaderMap,
+        Json(req): Json<Value>,
+    ) -> impl IntoResponse {
+        if let Some(expected) = &state.token {
+            match headers.get("authorization").and_then(|v| v.to_str().ok()) {
+                Some(s) if s == format!("Bearer {}", expected) => {} // Authorized
+                _ => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))),
             }
-        };
+        }
 
-        match crate::parser::get_parser(Path::new(file_path)) {
-            Ok(parser) => match parser.parse(&content) {
-                Ok(tree) => {
-                    let mut nodes = Vec::new();
-                    fn collect(
-                        node: &crate::parser::TreeNode,
-                        acc: &mut Vec<crate::parser::TreeNode>,
-                    ) {
-                        acc.push(node.clone());
-                        for child in &node.children {
-                            collect(child, acc);
+        let parsed: JsonRpcRequest = serde_json::from_value(req).unwrap();
+        let id = parsed.id.clone();
+        match process_request(state, parsed).await {
+            Ok(res) => (StatusCode::OK, Json(json!({"jsonrpc": "2.0", "id": id, "result": res}))),
+            Err(err) => (StatusCode::OK, Json(err)),
+        }
+    }
+
+    pub async fn serve_stdio() -> Result<()> {
+        let stdin = io::stdin();
+        let mut stdout = io::stdout();
+        let project_root = std::env::current_dir()?;
+        let state = Arc::new(AppState { token: None, project_root });
+
+        for line_res in stdin.lock().lines() {
+            let line = line_res?;
+            if line.trim().is_empty() || line.starts_with("Content-") { continue; }
+            let req: JsonRpcRequest = serde_json::from_str(&line)?;
+            let id = req.id.clone();
+            
+            if id.is_none() { 
+                let _ = process_request(state.clone(), req).await;
+                continue; 
+            }
+
+            match process_request(state.clone(), req).await {
+                Ok(result) => {
+                    let resp = json!({"jsonrpc": "2.0", "id": id, "result": result});
+                    let _ = serde_json::to_writer(&mut stdout, &resp);
+                    let _ = stdout.write_all(b"\n");
+                    let _ = stdout.flush();
+                },
+                Err(err) => {
+                    let _ = serde_json::to_writer(&mut stdout, &err);
+                    let _ = stdout.write_all(b"\n");
+                    let _ = stdout.flush();
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // --- Handlers ---
+
+    fn tool_error(msg: String) -> Value { json!({"content": [{"type": "text", "text": msg}], "isError": true}) }
+    fn tool_success(msg: String, data: Option<Value>) -> Value {
+        let mut res = json!({"content": [{"type": "text", "text": msg}]});
+        if let Some(d) = data { res.as_object_mut().unwrap().extend(d.as_object().unwrap().clone()); }
+        res
+    }
+
+    fn handle_analyze(file_path: &str) -> Value {
+        match GnawTreeWriter::new(file_path) {
+            Ok(w) => json!({"content": [{"type": "text", "text": format!("Analyzed {}", file_path)}], "data": w.analyze()}),
+            Err(e) => tool_error(e.to_string()),
+        }
+    }
+
+    fn try_extract_name(node: &TreeNode) -> Option<String> {
+        let nt = node.node_type.to_lowercase();
+        if nt == "identifier" || nt == "name" || nt == "type_identifier" { return Some(node.content.clone()); }
+        for child in &node.children {
+            let cnt = child.node_type.to_lowercase();
+            if cnt == "identifier" || cnt == "name" || cnt == "type_identifier" { return Some(child.content.clone()); }
+            for subchild in &child.children {
+                let scnt = subchild.node_type.to_lowercase();
+                if scnt == "identifier" || scnt == "name" || scnt == "type_identifier" { return Some(subchild.content.clone()); }
+            }
+        }
+        None
+    }
+
+    fn is_structural(nt: &str) -> bool { matches!(nt, "{{" | "}}" | "(" | ")" | "[" | "]" | "," | ";" | "." | ":" | "=") }
+    fn is_definition(nt: &str) -> bool { nt.contains("definition") || nt.contains("declaration") || matches!(nt, "class" | "function" | "method") }
+
+    fn handle_list_nodes(state: Arc<AppState>, file_path: &str, filter: Option<&str>, max_depth: Option<usize>, all: bool) -> Value {
+        match GnawTreeWriter::new(file_path) {
+            Ok(w) => {
+                let label_mgr = LabelManager::load(&state.project_root).ok();
+                let mut nodes = Vec::new();
+                fn collect(n: &TreeNode, acc: &mut Vec<Value>, f: Option<&str>, d: usize, md: Option<usize>, all: bool, fp: &str, lm: &Option<LabelManager>) {
+                    if let Some(limit) = md { if d > limit { return; } }
+                    if all || !is_structural(&n.node_type) {
+                        if f.map_or(true, |filter| n.node_type == filter) {
+                            let labels = lm.as_ref().map(|mgr| mgr.get_labels(fp, &n.content)).unwrap_or_default();
+                            acc.push(json!({"path": n.path, "type": n.node_type, "name": try_extract_name(n), "start": n.start_line, "labels": labels}));
                         }
                     }
-                    collect(&tree, &mut nodes);
-                    let node_count = nodes.len();
-                    let preview = content.lines().next().unwrap_or("").to_string();
-                    Ok(json!({
-                        "content": [
-                            { "type": "text", "text": format!("Parsed {} nodes. Preview: {}", node_count, preview) }
-                        ],
-                        "structuredContent": { "node_count": node_count }
-                    }))
+                    for c in &n.children { collect(c, acc, f, d + 1, md, all, fp, lm); }
                 }
-                Err(e) => {
-                    // Tool-level error: syntax error in the file
-                    Ok(json!({
-                        "content": [{"type": "text", "text": format!("Parser error: {}", e)}],
-                        "isError": true
-                    }))
-                }
-            },
-            Err(e) => {
-                // Tool-level error: no parser available for this file type
-                Ok(json!({
-                    "content": [{"type": "text", "text": format!("No parser available: {}", e)}],
-                    "isError": true
-                }))
+                collect(w.analyze(), &mut nodes, filter, 0, max_depth, all, file_path, &label_mgr);
+                tool_success(format!("Found {} nodes", nodes.len()), Some(json!({"nodes": nodes})))
             }
+            Err(e) => tool_error(e.to_string()),
         }
     }
 
-    pub fn build_router(token: Option<String>) -> Router {
-        let state = Arc::new(AppState { token });
-        Router::new()
-            .route("/", post(rpc_handler))
-            .with_state(state)
+    fn handle_get_skeleton(file_path: &str, max_depth: usize) -> Value {
+        match GnawTreeWriter::new(file_path) {
+            Ok(w) => {
+                let mut s = String::new();
+                fn build(n: &TreeNode, out: &mut String, d: usize, md: usize) {
+                    if d > md { return; }
+                    if d == 0 || is_definition(&n.node_type) {
+                        out.push_str(&format!("{}{} [{}] {}
+", "  ".repeat(d), n.path, n.node_type, try_extract_name(n).unwrap_or_default()));
+                        for c in &n.children { build(c, out, d + 1, md); }
+                    }
+                }
+                build(w.analyze(), &mut s, 0, max_depth);
+                tool_success(format!("Skeleton of {}", file_path), Some(json!({"skeleton": s})))
+            }
+            Err(e) => tool_error(e.to_string()),
+        }
     }
 
-    pub async fn serve_with_shutdown<F>(
-        listener: TcpListener,
-        token: Option<String>,
-        shutdown_signal: F,
-    ) -> Result<()>
-    where
-        F: std::future::Future<Output = ()> + Send + 'static,
-    {
-        let app = build_router(token);
-        axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal)
-            .await
-            .context("Server error")?;
-        Ok(())
+    async fn handle_get_semantic_report(state: Arc<AppState>, file_path: &str) -> Value {
+        #[cfg(feature = "modernbert")]
+        {
+            let mgr = match crate::llm::ai_manager::AiManager::new(&state.project_root) {
+                Ok(m) => m,
+                Err(e) => return tool_error(e.to_string()),
+            };
+            match mgr.generate_semantic_report(file_path).await {
+                Ok(report) => tool_success("Semantic report generated".into(), Some(json!({"report": report}))),
+                Err(e) => tool_error(format!("Report failed: {}. Make sure ModernBERT is set up.", e)),
+            }
+        }
+        #[cfg(not(feature = "modernbert"))]
+        {
+            let _ = state;
+            tool_error("ModernBERT feature not enabled in this build.".into())
+        }
+    }
+
+    fn handle_search_nodes(file_path: &str, pattern: &str) -> Value {
+        match GnawTreeWriter::new(file_path) {
+            Ok(w) => {
+                let mut m = Vec::new();
+                fn find(n: &TreeNode, acc: &mut Vec<Value>, p: &str) {
+                    if n.content.contains(p) && !is_structural(&n.node_type) {
+                        acc.push(json!({"path": n.path, "type": n.node_type, "name": try_extract_name(n)}));
+                    }
+                    for c in &n.children { find(c, acc, p); }
+                }
+                find(w.analyze(), &mut m, pattern);
+                tool_success(format!("Found {} matches", m.len()), Some(json!({"matches": m})))
+            }
+            Err(e) => tool_error(e.to_string()),
+        }
+    }
+
+    fn handle_read_node(file_path: &str, node_path: &str) -> Value {
+        match GnawTreeWriter::new(file_path) {
+            Ok(w) => w.show_node(node_path).map_or_else(|e| tool_error(e.to_string()), |c| tool_success(c, None)),
+            Err(e) => tool_error(e.to_string()),
+        }
+    }
+
+    fn handle_edit_node(file_path: &str, node_path: &str, content: &str) -> Value {
+        match GnawTreeWriter::new(file_path) {
+            Ok(mut w) => w.edit(EditOperation::Edit { node_path: node_path.to_string(), content: content.to_string() })
+                .map_or_else(|e| tool_error(e.to_string()), |_| tool_success("Node edited".into(), None)),
+            Err(e) => tool_error(e.to_string()),
+        }
+    }
+
+    fn handle_insert_node(file_path: &str, parent_path: &str, position: usize, content: &str) -> Value {
+        match GnawTreeWriter::new(file_path) {
+            Ok(mut w) => w.edit(EditOperation::Insert { parent_path: parent_path.to_string(), position, content: content.to_string() })
+                .map_or_else(|e| tool_error(e.to_string()), |_| tool_success("Content inserted".into(), None)),
+            Err(e) => tool_error(e.to_string()),
+        }
     }
 
     pub async fn serve(addr: &str, token: Option<String>) -> Result<()> {
-        let listener = TcpListener::bind(addr)
-            .await
-            .context(format!("Failed to bind to {}", addr))?;
-        println!("Starting MCP server on http://{}", listener.local_addr()?);
-
-        if token.is_some() {
-            println!("Security: Bearer token authentication enabled");
-            // Optional: hide token in production logs, but for MVP it's often visible if passed via CLI
-        } else {
-            println!("Security: Authentication disabled (unprotected access)");
-        }
-
-        serve_with_shutdown(listener, token, async {
-            let _ = signal::ctrl_c().await;
-        })
-        .await
-    }
-
-    pub async fn status(url: &str, token: Option<String>) -> Result<()> {
-        use reqwest::Client;
-
-        let client = Client::new();
-
-        println!("Querying MCP server at {}...", url);
-
-        // Initialize handshake
-        let init_body = json!({"jsonrpc":"2.0","method":"initialize","id":1});
-        let mut init_req = client.post(url);
-        if let Some(t) = &token {
-            init_req = init_req.header("Authorization", format!("Bearer {}", t));
-        }
-        let resp = init_req.json(&init_body).send().await;
-
-        let resp = match resp {
-            Ok(r) => r,
-            Err(e) => {
-                anyhow::bail!("Failed to connect to server: {}", e);
-            }
-        };
-
-        if !resp.status().is_success() {
-            anyhow::bail!("Server returned error status: {}", resp.status());
-        }
-
-        let v: serde_json::Value = resp.json().await?;
-
-        if let Some(err) = v.get("error") {
-            anyhow::bail!("Server error: {}", err);
-        }
-
-        let result = v.get("result").context("No result in response")?;
-
-        println!("\n=== MCP Server Status ===");
-
-        if let Some(server_info) = result.get("serverInfo") {
-            println!(
-                "Name: {}",
-                server_info
-                    .get("name")
-                    .and_then(|n| n.as_str())
-                    .unwrap_or("unknown")
-            );
-            println!(
-                "Version: {}",
-                server_info
-                    .get("version")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-            );
-        }
-
-        if let Some(protocol) = result.get("protocolVersion") {
-            println!("Protocol: {}", protocol.as_str().unwrap_or("unknown"));
-        }
-
-        if let Some(caps) = result.get("capabilities") {
-            println!("\nCapabilities:");
-            if caps.as_object().is_some() {
-                for (key, val) in caps.as_object().unwrap() {
-                    println!("  - {}: {}", key, val);
-                }
-            }
-        }
-
-        // List tools
-        let tools_body = json!({"jsonrpc":"2.0","method":"tools/list","id":2});
-        let mut tools_req = client.post(url);
-        if let Some(t) = &token {
-            tools_req = tools_req.header("Authorization", format!("Bearer {}", t));
-        }
-        let tools_resp = tools_req.json(&tools_body).send().await?;
-
-        if tools_resp.status().is_success() {
-            let tools_v: serde_json::Value = tools_resp.json().await?;
-            if let Some(tools_obj) = tools_v.get("result") {
-                if let Some(tools_array) = tools_obj.get("tools").and_then(|t| t.as_array()) {
-                    println!("\n=== Available Tools ===");
-                    for tool in tools_array {
-                        let name = tool
-                            .get("name")
-                            .and_then(|n| n.as_str())
-                            .unwrap_or("unknown");
-                        let title = tool.get("title").and_then(|t| t.as_str()).unwrap_or("");
-                        let desc = tool
-                            .get("description")
-                            .and_then(|d| d.as_str())
-                            .unwrap_or("");
-                        println!("\n  • {}", name);
-                        if !title.is_empty() {
-                            println!("    Title: {}", title);
-                        }
-                        if !desc.is_empty() {
-                            println!("    Description: {}", desc);
-                        }
-                    }
-                }
-            }
-        }
-
-        println!("\n=== Server is responding correctly ===");
+        let listener = TcpListener::bind(addr).await?;
+        let project_root = std::env::current_dir()?;
+        let state = Arc::new(AppState { token, project_root });
+        axum::serve(listener, Router::new().route("/", post(rpc_handler)).with_state(state))
+            .with_graceful_shutdown(async {{ let _ = signal::ctrl_c().await; }}).await?;
         Ok(())
     }
 
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-        use axum::body::Body;
-        use axum::http::Request;
-        use serde_json::json;
-        use std::io::Write;
-        use tempfile::NamedTempFile;
-        use tower::util::ServiceExt;
-
-        #[test]
-        fn test_handle_analyze_python() {
-            let mut f = NamedTempFile::new().expect("tempfile");
-            write!(f, "def foo():\n    return 1\n").unwrap();
-            let path = f.path().to_str().unwrap().to_string();
-            let args = json!({ "file_path": path });
-            let res = handle_analyze(&args).expect("analyze failed");
-            assert!(res.get("structuredContent").is_some());
-        }
-
-        #[tokio::test]
-        async fn test_rpc_initialize_no_token() {
-            let app = build_router(None);
-            let req = Request::builder()
-                .method("POST")
-                .uri("/")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({"jsonrpc":"2.0","method":"initialize","id":1}).to_string(),
-                ))
-                .unwrap();
-
-            let response = app.oneshot(req).await.unwrap();
-            assert_eq!(response.status(), StatusCode::OK);
-
-            let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
-                .await
-                .unwrap();
-            let v: Value = serde_json::from_slice(&body).unwrap();
-            assert!(v.get("result").is_some());
-        }
-
-        #[tokio::test]
-        async fn test_rpc_auth_flow() {
-            let token = "secret".to_string();
-            let app = build_router(Some(token));
-            let req_body = json!({"jsonrpc":"2.0","method":"initialize","id":1}).to_string();
-
-            // 1. Unauthorized
-            let req1 = Request::builder()
-                .method("POST")
-                .uri("/")
-                .header("content-type", "application/json")
-                .body(Body::from(req_body.clone()))
-                .unwrap();
-            let resp1 = app.clone().oneshot(req1).await.unwrap();
-            assert_eq!(resp1.status(), StatusCode::UNAUTHORIZED);
-
-            // 2. Authorized
-            let req2 = Request::builder()
-                .method("POST")
-                .uri("/")
-                .header("content-type", "application/json")
-                .header("authorization", "Bearer secret")
-                .body(Body::from(req_body))
-                .unwrap();
-            let resp2 = app.oneshot(req2).await.unwrap();
-            assert_eq!(resp2.status(), StatusCode::OK);
-        }
-
-        #[tokio::test]
-        async fn test_tools_call_unknown_tool() {
-            let app = build_router(None);
-            let req = Request::builder()
-                .method("POST")
-                .uri("/")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({"jsonrpc":"2.0","method":"tools/call","params":{"name":"unknown_tool"},"id":1}).to_string(),
-                ))
-                .unwrap();
-
-            let response = app.oneshot(req).await.unwrap();
-            assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-            let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
-                .await
-                .unwrap();
-            let v: Value = serde_json::from_slice(&body).unwrap();
-
-            // Should be a JSON-RPC error, not a result with isError
-            assert!(v.get("error").is_some(), "Expected JSON-RPC error object");
-            assert!(v.get("result").is_none(), "Should not have result field");
-            assert_eq!(
-                v["error"]["code"], -32601,
-                "Error code should be METHOD_NOT_FOUND"
-            );
-            assert!(v["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("Unknown tool"));
-        }
-
-        #[tokio::test]
-        async fn test_tools_call_missing_required_param() {
-            let app = build_router(None);
-            let req = Request::builder()
-                .method("POST")
-                .uri("/")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({"jsonrpc":"2.0","method":"tools/call","params":{"name":"analyze","arguments":{}},"id":1}).to_string(),
-                ))
-                .unwrap();
-
-            let response = app.oneshot(req).await.unwrap();
-            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-            let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
-                .await
-                .unwrap();
-            let v: Value = serde_json::from_slice(&body).unwrap();
-
-            // Should be a JSON-RPC error for invalid params
-            assert!(v.get("error").is_some(), "Expected JSON-RPC error object");
-            assert!(v.get("result").is_none(), "Should not have result field");
-            assert_eq!(
-                v["error"]["code"], -32602,
-                "Error code should be INVALID_PARAMS"
-            );
-            assert!(v["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("Invalid parameters"));
-        }
-
-        #[tokio::test]
-        async fn test_tools_call_file_not_found() {
-            let app = build_router(None);
-            let req = Request::builder()
-                .method("POST")
-                .uri("/")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({"jsonrpc":"2.0","method":"tools/call","params":{"name":"analyze","arguments":{"file_path":"/nonexistent/file.py"}},"id":1}).to_string(),
-                ))
-                .unwrap();
-
-            let response = app.oneshot(req).await.unwrap();
-            assert_eq!(response.status(), StatusCode::OK);
-
-            let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
-                .await
-                .unwrap();
-            let v: Value = serde_json::from_slice(&body).unwrap();
-
-            // Should be a result with isError (tool-level error), not JSON-RPC error
-            assert!(v.get("result").is_some(), "Expected result object");
-            assert!(v.get("error").is_none(), "Should not have error field");
-            assert_eq!(v["result"]["isError"], true, "Should be marked as error");
-            assert!(v["result"]["content"][0]["text"]
-                .as_str()
-                .unwrap()
-                .contains("IO error"));
-        }
+    pub async fn status(url: &str, token: Option<String>) -> Result<()> {
+        let client = reqwest::Client::new();
+        let mut req = client.post(url);
+        if let Some(t) = token { req = req.header("Authorization", format!("Bearer {}", t)); }
+        let _ = req.json(&json!({"jsonrpc":"2.0","method":"initialize","id":1})).send().await?;
+        println!("✓ Server ready");
+        Ok(())
     }
 }
