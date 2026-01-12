@@ -20,6 +20,7 @@ pub mod mcp_server {
     };
     use serde::{Deserialize, Serialize};
     use serde_json::{json, Value};
+    use similar::{ChangeTag, TextDiff};
     use std::{io::{self, BufRead, Write}, sync::Arc};
     use tokio::net::TcpListener;
     use tokio::signal;
@@ -195,6 +196,35 @@ pub mod mcp_server {
                                 "required": ["file_path", "parent_path", "position", "content"]
                             }
                         },
+                        {
+                            "name": "insert_node",
+                            "title": "Insert new content",
+                            "description": "Insert code into a parent node.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" },
+                                    "parent_path": { "type": "string" },
+                                    "position": { "type": "integer" },
+                                    "content": { "type": "string" }
+                                },
+                                "required": ["file_path", "parent_path", "position", "content"]
+                            }
+                        },
+                        {
+                            "name": "preview_edit",
+                            "title": "Preview edit",
+                            "description": "Show a diff of what an edit would change without applying it.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" },
+                                    "node_path": { "type": "string" },
+                                    "content": { "type": "string" }
+                                },
+                                "required": ["file_path", "node_path", "content"]
+                            }
+                        },
                         { "name": "batch", "description": "Apply batch", "inputSchema": {"type":"object"} },
                         { "name": "undo", "description": "Undo", "inputSchema": {"type":"object"} }
                     ]
@@ -250,6 +280,12 @@ pub mod mcp_server {
                         let np = validate_arg("node_path")?;
                         let c = validate_arg("content")?;
                         Ok(handle_edit_node(fp, np, c))
+                    },
+                    "preview_edit" => {
+                        let fp = validate_arg("file_path")?;
+                        let np = validate_arg("node_path")?;
+                        let c = validate_arg("content")?;
+                        Ok(handle_preview_edit(fp, np, c))
                     },
                     "insert_node" => {
                          let fp = validate_arg("file_path")?;
@@ -446,18 +482,63 @@ pub mod mcp_server {
         }
     }
 
+    fn generate_diff_string(old: &str, new: &str) -> String {
+        let diff = TextDiff::from_lines(old, new);
+        let mut output = String::new();
+        for change in diff.iter_all_changes() {
+            let sign = match change.tag() {
+                ChangeTag::Delete => "-",
+                ChangeTag::Insert => "+",
+                ChangeTag::Equal => " ",
+            };
+            output.push_str(&format!("{}{}", sign, change));
+        }
+        output
+    }
+
+    fn handle_preview_edit(file_path: &str, node_path: &str, content: &str) -> Value {
+        match GnawTreeWriter::new(file_path) {
+            Ok(writer) => {
+                let old_source = writer.get_source().to_string();
+                let op = EditOperation::Edit { node_path: node_path.to_string(), content: content.to_string() };
+                match writer.preview_edit(op) {
+                    Ok(new_source) => {
+                        let diff = generate_diff_string(&old_source, &new_source);
+                        tool_success(format!("Preview of edit:\n{}", diff), Some(json!({"diff": diff})))
+                    },
+                    Err(e) => tool_error(e.to_string()),
+                }
+            },
+            Err(e) => tool_error(format!("IO error: {}", e)),
+        }
+    }
+
     fn handle_edit_node(file_path: &str, node_path: &str, content: &str) -> Value {
         match GnawTreeWriter::new(file_path) {
-            Ok(mut w) => w.edit(EditOperation::Edit { node_path: node_path.to_string(), content: content.to_string() })
-                .map_or_else(|e| tool_error(e.to_string()), |_| tool_success("Node edited".into(), None)),
-            Err(e) => tool_error(format!("IO error: {}", e)), // Corrected: escaped curly brace
+            Ok(mut w) => {
+                let old_source = w.get_source().to_string();
+                let op = EditOperation::Edit { node_path: node_path.to_string(), content: content.to_string() };
+                if let Err(e) = w.edit(op) { return tool_error(e.to_string()); }
+                
+                let new_source_loaded = std::fs::read_to_string(file_path).unwrap_or_default();
+                let diff = generate_diff_string(&old_source, &new_source_loaded);
+                tool_success(format!("Node edited.\nDiff:\n{}", diff), Some(json!({"diff": diff})))
+            },
+            Err(e) => tool_error(format!("IO error: {}", e)),
         }
     }
 
     fn handle_insert_node(file_path: &str, parent_path: &str, position: usize, content: &str) -> Value {
         match GnawTreeWriter::new(file_path) {
-            Ok(mut w) => w.edit(EditOperation::Insert { parent_path: parent_path.to_string(), position, content: content.to_string() })
-                .map_or_else(|e| tool_error(e.to_string()), |_| tool_success("Content inserted".into(), None)),
+            Ok(mut w) => {
+                let old_source = w.get_source().to_string();
+                let op = EditOperation::Insert { parent_path: parent_path.to_string(), position, content: content.to_string() };
+                if let Err(e) = w.edit(op) { return tool_error(e.to_string()); }
+                
+                let new_source_loaded = std::fs::read_to_string(file_path).unwrap_or_default();
+                let diff = generate_diff_string(&old_source, &new_source_loaded);
+                tool_success(format!("Content inserted.\nDiff:\n{}", diff), Some(json!({"diff": diff})))
+            },
             Err(e) => tool_error(format!("IO error: {}", e)), // Corrected: escaped curly brace
         }
     }

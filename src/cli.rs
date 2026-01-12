@@ -2293,14 +2293,15 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
 
 fn print_diff(old: &str, new: &str) {
     let diff = TextDiff::from_lines(old, new);
+    println!("\x1b[1m--- Preview of changes ---\x1b[0m");
     for change in diff.iter_all_changes() {
-        let sign = match change.tag() {
-            ChangeTag::Delete => "-",
-            ChangeTag::Insert => "+",
-            ChangeTag::Equal => " ",
+        match change.tag() {
+            ChangeTag::Delete => print!("\x1b[31m-{}\x1b[0m", change),
+            ChangeTag::Insert => print!("\x1b[32m+{}\x1b[0m", change),
+            ChangeTag::Equal => print!(" {}", change),
         };
-        print!("{}{}", sign, change);
     }
+    println!("\x1b[1m--- End of preview ---\x1b[0m");
 }
 
 fn list_nodes(tree: &TreeNode, filter_type: Option<&str>) {

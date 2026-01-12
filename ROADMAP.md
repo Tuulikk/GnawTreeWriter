@@ -10,13 +10,14 @@ The roadmap is divided into two sections:
 
 ---
 
-## Current Status: v0.6.4 (Released 2026-01-11)
+## Current Status: v0.6.5 (Released 2026-01-11)
 
 ### ✅ Completed Features
 
+- **Intelligence Loop**: Integrated `LabelManager` and `SemanticReport` for persistent AI-driven code analysis.
+- **Robust MCP Server**: Fixed JSON-RPC compliance, added support for both Stdio and HTTP, and ensured stability for agents.
 - **Scalable MCP Tools**: Skeletal mapping (`get_skeleton`) and pattern-based discovery (`search_nodes`) for large files.
 - **Context Management**: Depth-limited listing and automatic noise reduction in AST views.
-- **Full MCP Support**: Stdio and HTTP transport layers for AI agent integration.
 - **Native Extensions**: Official support for Gemini CLI and Zed extensions.
 - **Multi-language support**: Python, Rust, TypeScript, JavaScript, PHP, HTML, QML, Go, Java, Zig, C, C++, Bash, XML, YAML, TOML, CSS, Markdown.
 - **TreeSitter Foundation**: Robust parsing for all core languages.
@@ -62,6 +63,7 @@ All features in this section are and will remain **free and open source** under 
 ### **Smart Semantic Targeting**
 - [x] **Skeletal Mapping**: High-level definition overview for token efficiency.
 - [x] **Node Discovery**: Search for nodes by name or content without counting indexes.
+- [ ] **Contextual Usage Hints**: Just-in-Time learning tips in CLI stderr to guide users and agents (e.g., suggesting 'undo' after edits).
 - [ ] **Semantic Selection**: `--function "name"` targeting instead of raw paths.
 - [ ] **Context Truncation**: Smart summary generation for very large AST branches.
 
@@ -91,6 +93,16 @@ All features in this section are and will remain **free and open source** under 
 ---
 
 ## Recent Progress
+
+### v0.6.6 (2026-01-11)
+- ✅ **Colored Diff Preview**: Added ANSI color support for CLI previews.
+- ✅ **MCP Diff Feedback**: Edit and Insert tools now return context-aware unified diffs.
+- ✅ **Preview Tool**: Added `preview_edit` to MCP for "dry run" capabilities.
+
+### v0.6.5 (2026-01-11)
+- ✅ **Intelligence Loop**: Integrated LabelManager and Semantic Reporting.
+- ✅ **Robust MCP**: Fixed JSON-RPC syntax and added stdio/http stability.
+- ✅ **Clean Imports**: Optimized dependency usage in core modules.
 
 ### v0.6.4 (2026-01-11)
 - ✅ **Skeletal Mapping**: Added `get_skeleton` for high-level definition overviews.
