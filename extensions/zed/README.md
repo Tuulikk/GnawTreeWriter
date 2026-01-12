@@ -119,6 +119,7 @@ impl zed::Extension for GnawExtension {
   - Kontrollera att `gnawtreewriter` är på PATH: `which gnawtreewriter`
   - Kontrollera att MCP-feature är aktiverad: `gnawtreewriter mcp serve --help` (ska inte ge "feature not enabled" fel)
   - Testa manuellt: `gnawtreewriter mcp serve --addr 127.0.0.1:8080 --token secret`
+- **Flatpak-specifikt**: Om du kör Zed via Flatpak, använd `flatpak-spawn --host` i din `settings.json` (se `docs/ZED_SNIPPET.md` för detaljer).
 - 401 Unauthorized:
   - Kontrollera att klient och server använder samma token (`--token` eller `MCP_TOKEN`).
 - Port redan upptagen:

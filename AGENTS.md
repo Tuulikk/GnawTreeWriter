@@ -837,6 +837,46 @@ These contributions demonstrate that AI agents, when used appropriately and foll
 
 ---
 
+## 🧠 The Gnaw Mental Model: Avoiding Common AI Pitfalls
+
+As an AI agent, your standard "mental model" for editing files often involves overwriting the whole file or using `sed`-like string replacement. In the GnawTreeWriter ecosystem, this can lead to disastrous (and expensive) results. Follow these rules to remain a "well-behaved" agent.
+
+### 1. The Double-Brace Trap (Rust & JSON Macros)
+Many AI agents (and their tool-calling layers) automatically "escape" curly braces when generating shell commands.
+- **Problem**: You try to inject `json!({"a": 1})`, but the shell call becomes `gnawtreewriter edit ... 'json!({{ "a": 1 }})'`.
+- **Result**: Broken Rust code that won't compile.
+- **Solution**: **NEVER** pass complex code snippets as direct command-line arguments. Use **STDIN** or **Source Files**.
+  ```bash
+  # INCORRECT (Risk of double-braces via shell)
+  gnawtreewriter edit app.rs "0.1" 'json!({"a":1})' 
+  
+  # CORRECT (Safe from shell escaping)
+  echo 'json!({"a":1})' | gnawtreewriter edit app.rs "0.1" -
+  ```
+
+### 2. Don't Fight the Shell (Use `-` for STDIN)
+Standard `run_shell_command` utilities often use `bash -c`. Bash will try to interpret your quotes, dollars, and braces. 
+- **Rule**: If your code snippet is longer than 20 characters or contains any special symbols, pipe it into `gnawtreewriter` using the `-` (STDIN) argument. This bypasses Bash's parsing logic entirely.
+
+### 3. Operating in Sandboxes (Flatpak/Docker)
+If you find yourself running inside a sandboxed editor (like Zed via Flatpak), you might lose access to the host's `gnawtreewriter` binary.
+- **Problem**: `gnawtreewriter: command not found` even though it's installed.
+- **Solution**: Use `flatpak-spawn --host`.
+  ```bash
+  flatpak-spawn --host gnawtreewriter analyze main.rs
+  ```
+- **Context**: `flatpak-spawn` is a bridge that allows a sandboxed application to execute commands on the host system.
+
+### 4. Think in Nodes, Not Lines
+Stop looking for "line 45". Lines change constantly. 
+- **Best Practice**: Use `gnawtreewriter list` or `gnawtreewriter search_nodes` to find the **Path** (e.g., `1.3.12`) of the function you want to change. Targeting a Node Path is 100% stable regardless of how many lines are added above it.
+
+### 5. Validation is Mandatory
+Don't assume your edit is correct. GnawTreeWriter is a surgical tool; a single missing brace in a node edit can break the whole file's AST.
+- **Rule**: Always run `cargo check` or `gnawtreewriter analyze <file>` after an edit to ensure the file is still valid. If it fails, use `gnawtreewriter undo` immediately.
+
+---
+
 ## 🎓 Getting Help
 
 - **GitHub Issues**: https://github.com/Tuulikk/GnawTreeWriter/issues

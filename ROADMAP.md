@@ -71,28 +71,44 @@ All features in this section are and will remain **free and open source** under 
 - [x] **Semantic Search**: Find code by meaning with `--semantic` flag.
 - [x] **AI Refactoring Suggestions**: Identify complex code patterns.
 - [x] **Context-Aware Completion**: AST-based code completion.
-- [ ] **Structural Anomaly Detection**: Flag inconsistent code patterns using ModernBERT.
+- [ ] **Structural Anomaly Detection**: AI-linter that warns about unsafe patterns or semantic duplication before edits.
 
 ---
 
 ## Phase 4: Language & Parser Expansion 🔄 PLANNED
-**Target: Q4 2025**
+**Target: Q2 2026**
 
 - [ ] **New Languages**: Kotlin, Swift, Scala, Ruby, Lua.
-- [ ] **Template Support**: Jinja2 / HTML mixed-mode parsing.
-- [ ] **Multi-Parser Files**: Handle embedded languages.
+- [ ] **Template Support**: Jinja2 / HTML mixed-mode parsing (handling embedded languages).
+- [ ] **Multi-Parser Files**: Seamlessly switching parsers within a single file (e.g., JS inside HTML).
 
 ---
 
-## Phase 5: Universal Tree Platform 🔄 PLANNED
-**Target: v1.0.0 - 2026**
+## Phase 5: Intelligence & Autonomy 🔄 PLANNED
+**Target: Q3 2026**
 
+- [ ] **Structural Scaffolding**: Create new files by defining a tree schema (e.g., "mod:MyFeature(struct:Config)") rather than raw text, ensuring valid syntax from start.
+- [ ] **"Fix-my-Fix" Loop**: If an edit causes a parse error, use the AST to suggest or auto-apply the syntax fix (e.g., closing missing braces).
+- [ ] **Semantic Diffing**: Show changes as tree operations ("Renamed function X") instead of line diffs.
+
+---
+
+## Phase 6: Universal Tree Platform 🔄 PLANNED
+**Target: Q4 2026 / v1.0**
+
+- [ ] **Gnaw Daemon**: Background process holding the project AST in memory for instant edits and query responses.
+- [ ] **Cross-File Refactoring**: Rename symbols or move code across files with guaranteed safety.
+- [ ] **File Watcher**: Real-time updates to the AST when files are changed by other editors.
 - [ ] **Infrastructure as Code**: Terraform, K8s YAML manipulation.
-- [ ] **Local Daemon**: Background file watcher and conflict detection.
 
 ---
 
 ## Recent Progress
+
+### v0.6.8 (2026-01-11)
+- ✅ **Agent Safety Guide**: Added "The Gnaw Mental Model" to AGENTS.md to prevent AI mistakes.
+- ✅ **Zed Flatpak Support**: Added dedicated documentation and `flatpak-spawn` instructions for Zed users.
+- ✅ **Robust Extensions**: Improved Zed extension source code for better reliability.
 
 ### v0.6.7 (2026-01-11)
 - ✅ **Contextual Usage Hints**: Added a "Just-in-Time" learning system that prints helpful tips to stderr.

@@ -51,6 +51,28 @@ Ett typiskt kommandoobjekt (i pluginens GUI eller JSON‑fält) behöver i allm�
 
 ---
 
+## Speciellt för Flatpak-användare
+Om du kör Zed via Flatpak kan editorn inte nå binärer utanför sin sandbox direkt. Du måste använda `flatpak-spawn` för att bryta dig ut.
+
+Klistra in detta i din `settings.json` i Zed (`Ctrl+,`):
+
+```json
+{
+  "context_servers": {
+    "gnawtreewriter": {
+      "command": {
+        "program": "flatpak-spawn",
+        "args": ["--host", "gnawtreewriter", "mcp", "stdio"]
+      }
+    }
+  }
+}
+```
+
+*Krav: Du måste ha installerat gnawtreewriter globalt på din maskin med `cargo install --path .`.*
+
+---
+
 ## Snabbt: om du inte vill använda en plugin
 - Använd Zed:s integrerade terminal:
   - Starta server:
