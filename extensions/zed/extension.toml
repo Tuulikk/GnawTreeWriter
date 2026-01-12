@@ -1,6 +1,6 @@
 id = "gnaw-treewriter"
 name = "GnawTreeWriter"
-version = "0.6.2"
+version = "0.6.8"
 schema_version = 1
 authors = ["Gnaw Software"]
 description = "Surgical tree-based code editing and analysis via MCP."

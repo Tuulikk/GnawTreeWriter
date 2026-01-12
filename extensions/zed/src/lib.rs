@@ -20,17 +20,11 @@ impl zed::Extension for GnawExtension {
         _context_server_id: &zed::ContextServerId,
         _project: &zed::Project,
     ) -> std::result::Result<zed::process::Command, String> {
-        // Try to find the binary path from settings or environment
-        // For now, we use a simple fallback mechanism.
-        // In a real Zed extension, you can use `zed::settings::get_extension_settings` 
-        // if the API version supports it.
-        
-        // DEFAULT: Assume 'gnawtreewriter' is in PATH.
-        // If on Flatpak, user should configure this in settings.json 
-        // to use 'flatpak-spawn --host' or an absolute path.
+        // Use GNAW_BINARY env var if set, otherwise default to 'gnawtreewriter'
+        let command = std::env::var("GNAW_BINARY").unwrap_or_else(|_| "gnawtreewriter".to_string());
         
         Ok(zed::process::Command {
-            command: "gnawtreewriter".to_string(),
+            command,
             args: vec!["mcp".into(), "stdio".into()],
             env: Vec::new(),
         })
