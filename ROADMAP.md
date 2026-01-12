@@ -63,7 +63,7 @@ All features in this section are and will remain **free and open source** under 
 ### **Smart Semantic Targeting**
 - [x] **Skeletal Mapping**: High-level definition overview for token efficiency.
 - [x] **Node Discovery**: Search for nodes by name or content without counting indexes.
-- [ ] **Contextual Usage Hints**: Just-in-Time learning tips in CLI stderr to guide users and agents (e.g., suggesting 'undo' after edits).
+- [x] **Contextual Usage Hints**: Just-in-Time learning tips in CLI stderr to guide users and agents (e.g., suggesting 'undo' after edits).
 - [ ] **Semantic Selection**: `--function "name"` targeting instead of raw paths.
 - [ ] **Context Truncation**: Smart summary generation for very large AST branches.
 
@@ -93,6 +93,10 @@ All features in this section are and will remain **free and open source** under 
 ---
 
 ## Recent Progress
+
+### v0.6.7 (2026-01-11)
+- ✅ **Contextual Usage Hints**: Added a "Just-in-Time" learning system that prints helpful tips to stderr.
+- ✅ **Double-Brace Shield**: Hardened CLI and MCP outputs against common shell escaping issues.
 
 ### v0.6.6 (2026-01-11)
 - ✅ **Colored Diff Preview**: Added ANSI color support for CLI previews.

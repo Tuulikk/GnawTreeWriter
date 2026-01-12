@@ -634,6 +634,7 @@ impl Cli {
                     print_diff(writer.get_source(), &modified);
                 } else {
                     writer.edit(op)?;
+                    show_hint();
                 }
             }
             Commands::Insert {
@@ -682,6 +683,7 @@ impl Cli {
                     print_diff(writer.get_source(), &modified);
                 } else {
                     writer.edit(op)?;
+                    show_hint();
                 }
             }
             Commands::Delete {
@@ -722,6 +724,7 @@ impl Cli {
                     print_diff(writer.get_source(), &modified);
                 } else {
                     writer.edit(op)?;
+                    show_hint();
                 }
             }
             Commands::AddProperty {
@@ -745,6 +748,7 @@ impl Cli {
                 } else {
                     writer.edit(op)?;
                     println!("Successfully added property '{}' to {}", name, target_path);
+                    show_hint();
                 }
             }
             Commands::AddComponent {
@@ -779,6 +783,7 @@ impl Cli {
                 } else {
                     writer.edit(op)?;
                     println!("Successfully added component '{}' to {}", name, target_path);
+                    show_hint();
                 }
             }
             Commands::Undo { steps } => {
@@ -2302,6 +2307,33 @@ fn print_diff(old: &str, new: &str) {
         };
     }
     println!("\x1b[1m--- End of preview ---\x1b[0m");
+}
+
+fn show_hint() {
+    // Skip hints if GNAW_NO_HINTS is set
+    if std::env::var("GNAW_NO_HINTS").is_ok() {
+        return;
+    }
+
+    let hints = [
+        "Use '-' as content to read from STDIN and avoid shell escaping issues.",
+        "Mistake? Use 'gnawtreewriter undo' to revert your last change instantly.",
+        "Use 'gnawtreewriter get_skeleton' for a fast overview of large files.",
+        "You can target nodes by tag! Run 'gnawtreewriter tag --help' to learn more.",
+        "Use 'gnawtreewriter analyze --format summary' for a high-level file overview.",
+        "Searching for something? Try 'gnawtreewriter search_nodes' to find code patterns.",
+        "Want to see code quality? Try 'gnawtreewriter get_semantic_report' (requires ModernBERT).",
+    ];
+
+    // Simple pseudo-random selection based on time
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let index = (nanos % hints.len() as u128) as usize;
+
+    eprintln!("\x1b[2m[GnawTip]: {}\x1b[0m", hints[index]);
 }
 
 fn list_nodes(tree: &TreeNode, filter_type: Option<&str>) {
