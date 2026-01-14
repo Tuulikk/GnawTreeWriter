@@ -35,6 +35,37 @@ pub struct TreeNode {
     pub children: Vec<TreeNode>,
 }
 
+impl TreeNode {
+    /// Attempts to extract a descriptive name for this node (e.g., function name, class name).
+    /// It looks for common identifier-like children.
+    pub fn get_name(&self) -> Option<String> {
+        let nt = self.node_type.to_lowercase();
+        // If the node itself is an identifier, return its content
+        if nt == "identifier" || nt == "name" || nt == "type_identifier" || nt == "field_identifier" {
+            return Some(self.content.clone());
+        }
+        
+        // Look for identifiers in immediate children
+        for child in &self.children {
+            let cnt = child.node_type.to_lowercase();
+            if cnt == "identifier" || cnt == "name" || cnt == "type_identifier" || cnt == "field_identifier" {
+                return Some(child.content.clone());
+            }
+        }
+
+        // Look one level deeper if needed (common in some complex AST structures)
+        for child in &self.children {
+            for subchild in &child.children {
+                let scnt = subchild.node_type.to_lowercase();
+                if scnt == "identifier" || scnt == "name" || scnt == "type_identifier" || scnt == "field_identifier" {
+                    return Some(subchild.content.clone());
+                }
+            }
+        }
+        None
+    }
+}
+
 pub trait ParserEngine {
     fn parse(&self, code: &str) -> Result<TreeNode>;
     fn get_supported_extensions(&self) -> Vec<&'static str>;

@@ -112,8 +112,8 @@ impl GnawTreeWriter {
 
     pub fn show_node(&self, node_path: &str) -> Result<String> {
         let node = self
-            .find_node(&self.tree, node_path)
-            .context(format!("Node not found at path: {}", node_path))?;
+            .resolve_path(node_path)
+            .context(format!("Node not found: {}", node_path))?;
         Ok(node.content.clone())
     }
 
@@ -124,14 +124,24 @@ impl GnawTreeWriter {
 
         let modified_code = match &operation {
             EditOperation::Edit { node_path, content } => {
-                self.edit_node(&self.tree, node_path, content)?
+                let resolved = self.resolve_path(node_path)
+                    .context(format!("Could not resolve node path: {}", node_path))?;
+                self.edit_node_at_path(&resolved.path, content)?
             }
             EditOperation::Insert {
                 parent_path,
                 position,
                 content,
-            } => self.insert_node(&self.tree, parent_path, *position, content)?,
-            EditOperation::Delete { node_path } => self.delete_node(&self.tree, node_path)?,
+            } => {
+                let resolved = self.resolve_path(parent_path)
+                    .context(format!("Could not resolve parent path: {}", parent_path))?;
+                self.insert_node_at_path(&resolved.path, *position, content)?
+            },
+            EditOperation::Delete { node_path } => {
+                let resolved = self.resolve_path(node_path)
+                    .context(format!("Could not resolve node path: {}", node_path))?;
+                self.delete_node_at_path(&resolved.path)?
+            },
             EditOperation::Clone {
                 source_path,
                 target_path,
@@ -166,7 +176,7 @@ impl GnawTreeWriter {
             } => (
                 OperationType::Edit,
                 Some(node_path.clone()),
-                format!("Edited node at path: {}", node_path),
+                format!("Edited node: {}", node_path),
             ),
             EditOperation::Insert {
                 parent_path,
@@ -180,7 +190,7 @@ impl GnawTreeWriter {
             EditOperation::Delete { node_path } => (
                 OperationType::Delete,
                 Some(node_path.clone()),
-                format!("Deleted node at path: {}", node_path),
+                format!("Deleted node: {}", node_path),
             ),
             EditOperation::Clone {
                 source_path,
@@ -213,14 +223,24 @@ impl GnawTreeWriter {
     pub fn preview_edit(&self, operation: EditOperation) -> Result<String> {
         match operation {
             EditOperation::Edit { node_path, content } => {
-                self.edit_node(&self.tree, &node_path, &content)
+                let resolved = self.resolve_path(&node_path)
+                    .context(format!("Could not resolve node path: {}", node_path))?;
+                self.edit_node_at_path(&resolved.path, &content)
             }
             EditOperation::Insert {
                 parent_path,
                 position,
                 content,
-            } => self.insert_node(&self.tree, &parent_path, position, &content),
-            EditOperation::Delete { node_path } => self.delete_node(&self.tree, &node_path),
+            } => {
+                let resolved = self.resolve_path(&parent_path)
+                    .context(format!("Could not resolve parent path: {}", parent_path))?;
+                self.insert_node_at_path(&resolved.path, position, &content)
+            },
+            EditOperation::Delete { node_path } => {
+                let resolved = self.resolve_path(&node_path)
+                    .context(format!("Could not resolve node path: {}", node_path))?;
+                self.delete_node_at_path(&resolved.path)
+            },
             EditOperation::Clone {
                 source_path,
                 target_path,
@@ -234,14 +254,31 @@ impl GnawTreeWriter {
         }
     }
 
+    /// Resolves a path string which can be either a numeric path (1.2.3)
+    /// or a semantic query (@fn:name, @struct:name, @name).
+    fn resolve_path<'a>(&'a self, query: &str) -> Option<&'a TreeNode> {
+        if let Some(name_query) = query.strip_prefix('@') {
+            // Semantic search
+            if let Some((kind, name)) = name_query.split_once(':') {
+                self.find_node_by_name(&self.tree, name, Some(kind))
+            } else {
+                // Generic name search
+                self.find_node_by_name(&self.tree, name_query, None)
+            }
+        } else {
+            // Standard numeric path
+            self.find_node_by_path(&self.tree, query)
+        }
+    }
+
     #[allow(clippy::only_used_in_recursion)]
-    fn find_node<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode> {
+    fn find_node_by_path<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode> {
         if tree.path == path {
             return Some(tree);
         }
 
         for child in &tree.children {
-            if let Some(node) = self.find_node(child, path) {
+            if let Some(node) = self.find_node_by_path(child, path) {
                 return Some(node);
             }
         }
@@ -249,9 +286,43 @@ impl GnawTreeWriter {
         None
     }
 
-    fn edit_node(&self, tree: &TreeNode, node_path: &str, new_content: &str) -> Result<String> {
+    fn find_node_by_name<'a>(&self, tree: &'a TreeNode, name: &str, kind: Option<&str>) -> Option<&'a TreeNode> {
+        // Does this node match?
+        if let Some(node_name) = tree.get_name() {
+            if node_name == name {
+                // If kind is specified, check node type
+                if let Some(k) = kind {
+                    let nt = tree.node_type.to_lowercase();
+                    match k {
+                        "fn" | "func" | "function" | "method" => {
+                            if nt.contains("function") || nt.contains("method") { return Some(tree); }
+                        },
+                        "struct" | "class" | "type" => {
+                            if nt.contains("struct") || nt.contains("class") || nt.contains("type") { return Some(tree); }
+                        },
+                        _ => {
+                            if nt.contains(k) { return Some(tree); }
+                        }
+                    }
+                } else {
+                    return Some(tree);
+                }
+            }
+        }
+
+        // Recursively check children
+        for child in &tree.children {
+            if let Some(node) = self.find_node_by_name(child, name, kind) {
+                return Some(node);
+            }
+        }
+
+        None
+    }
+
+    fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String> {
         let node = self
-            .find_node(tree, node_path)
+            .find_node_by_path(&self.tree, node_path)
             .context(format!("Node not found at path: {}", node_path))?;
 
         let old_content = &node.content;
@@ -260,16 +331,15 @@ impl GnawTreeWriter {
         Ok(modified)
     }
 
-    fn insert_node(
+    fn insert_node_at_path(
         &self,
-        tree: &TreeNode,
-        parent_path: &str,
+        node_path: &str,
         position: usize,
         content: &str,
     ) -> Result<String> {
         let parent = self
-            .find_node(tree, parent_path)
-            .context(format!("Parent node not found at path: {}", parent_path))?;
+            .find_node_by_path(&self.tree, node_path)
+            .context(format!("Parent node not found at path: {}", node_path))?;
 
         let lines: Vec<&str> = self.source_code.lines().collect();
         let mut new_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
@@ -341,9 +411,9 @@ impl GnawTreeWriter {
         Ok(new_lines.join("\n"))
     }
 
-    fn delete_node(&self, tree: &TreeNode, node_path: &str) -> Result<String> {
+    fn delete_node_at_path(&self, node_path: &str) -> Result<String> {
         let node = self
-            .find_node(tree, node_path)
+            .find_node_by_path(&self.tree, node_path)
             .context(format!("Node not found at path: {}", node_path))?;
 
         let lines: Vec<&str> = self.source_code.lines().collect();

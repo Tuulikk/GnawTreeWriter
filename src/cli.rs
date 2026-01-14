@@ -2357,9 +2357,14 @@ fn print_node(node: &TreeNode, depth: usize, filter_type: Option<&str>) {
         }
     }
     let indent = "  ".repeat(depth);
+    let name_info = if let Some(name) = node.get_name() {
+        format!(" '{}'", name)
+    } else {
+        String::new()
+    };
     println!(
-        "{}{} [{}] (line {}-{})",
-        indent, node.path, node.node_type, node.start_line, node.end_line
+        "{}{} [{}] (line {}-{}){}",
+        indent, node.path, node.node_type, node.start_line, node.end_line, name_info
     );
 }
 

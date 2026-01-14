@@ -394,49 +394,41 @@ pub mod mcp_server {
         }
     }
 
-    fn try_extract_name(node: &TreeNode) -> Option<String> {
-        let nt = node.node_type.to_lowercase();
-        if nt == "identifier" || nt == "name" || nt == "type_identifier" { return Some(node.content.clone()); }
-        for child in &node.children {
-            let cnt = child.node_type.to_lowercase();
-            if cnt == "identifier" || cnt == "name" || cnt == "type_identifier" { return Some(child.content.clone()); }
-        }
-        None
-    }
+    
 
-    fn handle_list_nodes(state: Arc<AppState>, file_path: &str, _filter: Option<&str>, _max_depth: Option<usize>, _all: bool) -> Value {
+        fn handle_list_nodes(state: Arc<AppState>, file_path: &str, _filter: Option<&str>, _max_depth: Option<usize>, _all: bool) -> Value {
         match GnawTreeWriter::new(file_path) {
             Ok(w) => {
                 let label_mgr = LabelManager::load(&state.project_root).ok();
                 let mut nodes = Vec::new();
                 fn collect(n: &TreeNode, acc: &mut Vec<Value>, fp: &str, lm: &Option<LabelManager>) {
                     let labels = lm.as_ref().map(|mgr| mgr.get_labels(fp, &n.content)).unwrap_or_default();
-                    acc.push(json!({"path": n.path, "type": n.node_type, "name": try_extract_name(n), "start": n.start_line, "labels": labels}));
+                    acc.push(json!({"path": n.path, "type": n.node_type, "name": n.get_name(), "start": n.start_line, "labels": labels}));
                     for c in &n.children { collect(c, acc, fp, lm); }
                 }
                 collect(w.analyze(), &mut nodes, file_path, &label_mgr);
                 tool_success(format!("Found {} nodes", nodes.len()), Some(json!({"nodes": nodes})))
             }
-            Err(e) => tool_error(format!("IO error: {}", e)), // Corrected: escaped curly brace
+            Err(e) => tool_error(format!("IO error: {}", e)),
         }
     }
 
-    fn handle_get_skeleton(file_path: &str, max_depth: usize) -> Value {
+                fn handle_get_skeleton(file_path: &str, max_depth: usize) -> Value {
         match GnawTreeWriter::new(file_path) {
             Ok(w) => {
                 let mut s = String::new();
                 fn build(n: &TreeNode, out: &mut String, d: usize, md: usize) {
                     if d > md { return; }
-                    out.push_str(&format!("{}{} [{}] {}
-", "  ".repeat(d), n.path, n.node_type, try_extract_name(n).unwrap_or_default()));
+                    out.push_str(&format!("{}{} [{}] {}\n", "  ".repeat(d), n.path, n.node_type, n.get_name().unwrap_or_default()));
                     for c in &n.children { build(c, out, d + 1, md); }
                 }
                 build(w.analyze(), &mut s, 0, max_depth);
                 tool_success(format!("Skeleton of {}", file_path), Some(json!({"skeleton": s})))
             }
-            Err(e) => tool_error(format!("IO error: {}", e)), // Corrected: escaped curly brace
+            Err(e) => tool_error(format!("IO error: {}", e)),
         }
     }
+
 
     async fn handle_get_semantic_report(state: Arc<AppState>, file_path: &str) -> Value {
         #[cfg(feature = "modernbert")]
@@ -458,20 +450,20 @@ pub mod mcp_server {
         }
     }
 
-    fn handle_search_nodes(file_path: &str, pattern: &str) -> Value {
+        fn handle_search_nodes(file_path: &str, pattern: &str) -> Value {
         match GnawTreeWriter::new(file_path) {
             Ok(w) => {
                 let mut m = Vec::new();
                 fn find(n: &TreeNode, acc: &mut Vec<Value>, p: &str) {
                     if n.content.contains(p) {
-                        acc.push(json!({"path": n.path, "type": n.node_type, "name": try_extract_name(n)}));
+                        acc.push(json!({"path": n.path, "type": n.node_type, "name": n.get_name()}));
                     }
                     for c in &n.children { find(c, acc, p); }
                 }
                 find(w.analyze(), &mut m, pattern);
                 tool_success(format!("Found {} matches", m.len()), Some(json!({"matches": m})))
             }
-            Err(e) => tool_error(format!("IO error: {}", e)), // Corrected: escaped curly brace
+            Err(e) => tool_error(format!("IO error: {}", e)),
         }
     }
 

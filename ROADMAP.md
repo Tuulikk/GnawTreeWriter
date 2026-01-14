@@ -64,7 +64,7 @@ All features in this section are and will remain **free and open source** under 
 - [x] **Skeletal Mapping**: High-level definition overview for token efficiency.
 - [x] **Node Discovery**: Search for nodes by name or content without counting indexes.
 - [x] **Contextual Usage Hints**: Just-in-Time learning tips in CLI stderr to guide users and agents (e.g., suggesting 'undo' after edits).
-- [ ] **Semantic Selection**: `--function "name"` targeting instead of raw paths.
+- [x] **Semantic Selection**: `--function "name"` or `@fn:name` targeting instead of raw paths.
 - [ ] **Context Truncation**: Smart summary generation for very large AST branches.
 
 ### **Local AI Features** (ModernBERT)
@@ -87,6 +87,7 @@ All features in this section are and will remain **free and open source** under 
 ## Phase 5: Intelligence & Autonomy 🔄 PLANNED
 **Target: Q3 2026**
 
+- [ ] **ALF (Agentic Logging Framework)**: Standardized temporal journaling for AI agents to share intent and discoveries in a Git-safe Markdown format (`ALF.md`).
 - [ ] **Structural Scaffolding**: Create new files by defining a tree schema (e.g., "mod:MyFeature(struct:Config)") rather than raw text, ensuring valid syntax from start.
 - [ ] **"Fix-my-Fix" Loop**: If an edit causes a parse error, use the AST to suggest or auto-apply the syntax fix (e.g., closing missing braces).
 - [ ] **Semantic Diffing**: Show changes as tree operations ("Renamed function X") instead of line diffs.
@@ -104,6 +105,11 @@ All features in this section are and will remain **free and open source** under 
 ---
 
 ## Recent Progress
+
+### v0.6.9 (2026-01-12)
+- ✅ **Semantic Selection**: Target nodes using `@fn:name`, `@struct:name`, etc., instead of numeric paths.
+- ✅ **Enhanced CLI**: Added `read` command and improved `list` output with node names.
+- ✅ **Clean Core**: Moved name-extraction logic to `TreeNode` for universal use.
 
 ### v0.6.8 (2026-01-11)
 - ✅ **Agent Safety Guide**: Added "The Gnaw Mental Model" to AGENTS.md to prevent AI mistakes.
