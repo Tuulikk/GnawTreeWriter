@@ -1,0 +1,111 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "MCP: Start server (background)",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/mcp-serve.sh",
+      "args": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "MCP: Start server (foreground)",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/mcp-serve.sh",
+      "args": ["--foreground"],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "MCP: Stop server",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/mcp-stop.sh",
+      "args": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "MCP: Test (list/init/analyze)",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/test-mcp.sh",
+      "args": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "MCP: Client list",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/mcp-client.sh",
+      "args": ["list"],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "MCP: Client init",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/mcp-client.sh",
+      "args": ["init"],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "MCP: Client analyze (prompt)",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/mcp-client.sh",
+      "args": ["analyze", "${input:analyzeFile}"],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "analyzeFile",
+      "type": "promptString",
+      "description": "File to analyze (relative to workspace)",
+      "default": "examples/example.rs"
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "schemaVersion": "1.0",
+  "title": "GnawTreeWriter — Zed command-runner snippets",
+  "description": "Generic JSON snippet containing command mappings you can copy/paste into a command-runner-like plugin in Zed. Adjust placeholders to match the plugin's variable syntax (e.g. ${file}, ${env:VAR}, etc.).",
+  "placeholders": {
+    "mcp_token": ["${MCP_TOKEN}", "${env:MCP_TOKEN}"],
+    "file": ["${file}", "${filePath}", "${relativeFile}"],
+    "url": ["http://127.0.0.1:8080/"]
+  },
+  "commands": [
+    {
+      "id": "mcp.start",
+      "label": "MCP: Start server (background)",
+      "description": "Start gnawtreewriter MCP server in background (writes PID & log).",
+      "cmd": "./scripts/mcp-serve.sh",
+      "args": ["--addr", "127.0.0.1:8080", "--token", "${MCP_TOKEN}"],
+      "cmdline": "./scripts/mcp-serve.sh --addr 127.0.0.1:8080 --token ${MCP_TOKEN}",
+      "cwd": "${workspaceRoot}",
+      "runIn": "terminal"
+    },
+    {
+      "id": "mcp.start.foreground",
+      "label": "MCP: Start server (foreground)",
+      "description": "Run server in foreground (useful for debugging).",
+      "cmd": "./scripts/mcp-serve.sh",
+      "args": ["--foreground", "--addr", "127.0.0.1:8080", "--token", "${MCP_TOKEN}"],
+      "cmdline": "./scripts/mcp-serve.sh --foreground --addr 127.0.0.1:8080 --token ${MCP_TOKEN}",
+      "cwd": "${workspaceRoot}",
+      "runIn": "terminal"
+    },
+    {
+      "id": "mcp.stop",
+      "label": "MCP: Stop server",
+      "description": "Stop server using stored PID (default .mcp-server.pid).",
+      "cmd": "./scripts/mcp-stop.sh",
+      "args": [],
+      "cmdline": "./scripts/mcp-stop.sh",
+      "cwd": "${workspaceRoot}",
+      "runIn": "terminal"
+    },
+    {
+      "id": "mcp.test",
+      "label": "MCP: Test (start → list → init → analyze → stop)",
+      "description": "Full local test: starts server, runs list/init/analyze on a temp file, then stops server.",
+      "cmd": "./scripts/test-mcp.sh",
+      "args": [],
+      "cmdline": "./scripts/test-mcp.sh",
+      "cwd": "${workspaceRoot}",
+      "runIn": "terminal"
+    },
+    {
+      "id": "mcp.client.list",
+      "label": "MCP: Client list",
+      "description": "Run the Rust MCP client to list available tools.",
+      "cmd": "./scripts/mcp-client.sh",
+      "args": ["list"],
+      "cmdline": "./scripts/mcp-client.sh list",
+      "cwd": "${workspaceRoot}",
+      "runIn": "terminal"
+    },
+    {
+      "id": "mcp.client.init",
+      "label": "MCP: Client init",
+      "description": "Run the Rust MCP client initialize handshake.",
+      "cmd": "./scripts/mcp-client.sh",
+      "args": ["init"],
+      "cmdline": "./scripts/mcp-client.sh init",
+      "cwd": "${workspaceRoot}",
+      "runIn": "terminal"
+    },
+    {
+      "id": "mcp.client.analyze",
+      "label": "MCP: Client analyze (current file)",
+      "description": "Analyze the active file in editor. Replace placeholder to match your plugin (see placeholders.file).",
+      "cmd": "./scripts/mcp-client.sh",
+      "args": ["analyze", "${file}"],
+      "cmdline": "./scripts/mcp-client.sh analyze ${file}",
+      "cwd": "${workspaceRoot}",
+      "runIn": "terminal"
+    },
+    {
+      "id": "mcp.client.call",
+      "label": "MCP: Client call (generic)",
+      "description": "Generic tool call: example `call analyze '{\"file_path\":\"examples/foo.py\"}'`.",
+      "cmd": "./scripts/mcp-client.sh",
+      "args": ["call", "analyze", "{\"file_path\":\"${file}\"}"],
+      "cmdline": "./scripts/mcp-client.sh call analyze '{\"file_path\":\"${file}\"}'",
+      "cwd": "${workspaceRoot}",
+      "runIn": "terminal"
+    },
+    {
+      "id": "mcp.make.start",
+      "label": "MCP: Make start",
+      "description": "Start server using Makefile target.",
+      "cmd": "make",
+      "args": ["start"],
+      "cmdline": "make start",
+      "cwd": "${workspaceRoot}",
+      "runIn": "terminal"
+    },
+    {
+      "id": "mcp.make.test",
+      "label": "MCP: Make test",
+      "description": "Run full test using Makefile target.",
+      "cmd": "make",
+      "args": ["test-mcp"],
+      "cmdline": "make test-mcp",
+      "cwd": "${workspaceRoot}",
+      "runIn": "terminal"
+    }
+  ],
+  "notes": "Copy the command objects you want into your Zed command-runner extension. Replace placeholders with the variable syntax your plugin expects (see placeholders). Example for analyze: use the placeholder that expands to the current file (e.g. ${file} or ${filePath}). If your plugin requires a single command string instead of cmd+args, use the 'cmdline' field."
+}

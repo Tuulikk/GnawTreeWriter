@@ -101,6 +101,12 @@ jobs:
           python examples/python_mcp_client.py --url http://127.0.0.1:0 --token testtoken list
           python examples/python_mcp_client.py --url http://127.0.0.1:0 --token testtoken analyze /tmp/mcp-test/test.py
 
+      - name: Test Rust client
+        run: |
+          cargo run --release --features mcp --example mcp_client -- --url http://127.0.0.1:0 --token testtoken init
+          cargo run --release --features mcp --example mcp_client -- --url http://127.0.0.1:0 --token testtoken list
+          cargo run --release --features mcp --example mcp_client -- --url http://127.0.0.1:0 --token testtoken analyze /tmp/mcp-test/test.py
+
       - name: Server logs on failure
         if: failure()
         run: |
