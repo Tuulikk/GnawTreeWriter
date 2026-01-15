@@ -106,6 +106,11 @@ All features in this section are and will remain **free and open source** under 
 
 ## Recent Progress
 
+### v0.6.10 (2026-01-12)
+- ✅ **Full CLI Parity**: Added `search`, `skeleton`, and `semantic-report` commands to match MCP capabilities.
+- ✅ **Docs Cleanup**: Fixed `examples --topic ai` to accurately reflect available commands.
+- ✅ **Linting**: Silenced unused field warnings in `AiManager`.
+
 ### v0.6.9 (2026-01-12)
 - ✅ **Semantic Selection**: Target nodes using `@fn:name`, `@struct:name`, etc., instead of numeric paths.
 - ✅ **Enhanced CLI**: Added `read` command and improved `list` output with node names.

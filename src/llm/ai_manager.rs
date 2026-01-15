@@ -57,6 +57,7 @@ impl ModernBertModel {
 
 pub struct AiManager {
     model_cache_dir: PathBuf,
+    #[allow(dead_code)]
     project_root: PathBuf,
 }
 

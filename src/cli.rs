@@ -254,6 +254,39 @@ enum Commands {
         /// Preview changes without applying
         preview: bool,
     },
+    /// Search nodes by text or name
+    ///
+    /// Find nodes containing a specific pattern or name.
+    /// Examples:
+    ///   gnawtreewriter search main.rs "println!"
+    ///   gnawtreewriter search src/lib.rs "TreeNode"
+    Search {
+        /// File to search in
+        file_path: String,
+        /// Text pattern to search for
+        pattern: String,
+    },
+    /// Get a high-level skeletal view of a file
+    ///
+    /// Shows only definitions (functions, classes, structs) up to a certain depth.
+    /// Examples:
+    ///   gnawtreewriter skeleton main.rs
+    ///   gnawtreewriter skeleton lib.rs --depth 3
+    Skeleton {
+        /// File to analyze
+        file_path: String,
+        #[arg(short, long, default_value = "2")]
+        /// Maximum depth to show
+        depth: usize,
+    },
+    /// Generate a semantic code quality report using AI
+    ///
+    /// Analyzes the file using ModernBERT to find structural anomalies or complexity.
+    /// (Requires 'modernbert' feature to be enabled)
+    SemanticReport {
+        /// File to analyze
+        file_path: String,
+    },
     /// Convert a unified diff to a batch operation specification
     ///
     /// Parses a git diff format file and converts it to a batch JSON file.
@@ -947,6 +980,15 @@ impl Cli {
             } => {
                 Self::handle_diff_to_batch(&diff_file, output.as_deref(), preview)?;
             }
+            Commands::Search { file_path, pattern } => {
+                Self::handle_search(&file_path, &pattern)?;
+            }
+            Commands::Skeleton { file_path, depth } => {
+                Self::handle_skeleton(&file_path, depth)?;
+            }
+            Commands::SemanticReport { file_path } => {
+                Self::handle_semantic_report(&file_path).await?;
+            }
         }
         Ok(())
     }
@@ -1230,6 +1272,88 @@ Use --no-preview to write batch file"
             output_file
         );
 
+        Ok(())
+    }
+
+    fn handle_search(file_path: &str, pattern: &str) -> Result<()> {
+        let writer = GnawTreeWriter::new(file_path)?;
+        let tree = writer.analyze();
+        let mut matches = Vec::new();
+
+        fn find(n: &TreeNode, acc: &mut Vec<(String, String, String)>, p: &str) {
+            if n.content.contains(p) {
+                let name = n.get_name().unwrap_or_else(|| "unnamed".to_string());
+                acc.push((n.path.clone(), n.node_type.clone(), name));
+            }
+            for child in &n.children {
+                find(child, acc, p);
+            }
+        }
+
+        find(tree, &mut matches, pattern);
+
+        if matches.is_empty() {
+            println!("No matches found for '{}' in {}", pattern, file_path);
+        } else {
+            println!("Found {} matches in {}:", matches.len(), file_path);
+            for (path, node_type, name) in matches {
+                println!("  {} [{}] '{}'", path, node_type, name);
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_skeleton(file_path: &str, max_depth: usize) -> Result<()> {
+        let writer = GnawTreeWriter::new(file_path)?;
+        let tree = writer.analyze();
+
+        println!("Skeletal view of {} (max depth {}):", file_path, max_depth);
+
+        fn build(n: &TreeNode, d: usize, md: usize) {
+            if d > md {
+                return;
+            }
+            let indent = "  ".repeat(d);
+            let name = n.get_name().unwrap_or_default();
+            println!("{}{} [{}] {}", indent, n.path, n.node_type, name);
+            for child in &n.children {
+                build(child, d + 1, md);
+            }
+        }
+
+        build(tree, 0, max_depth);
+        Ok(())
+    }
+
+    async fn handle_semantic_report(file_path: &str) -> Result<()> {
+        #[cfg(feature = "modernbert")]
+        {
+            let current_dir = std::env::current_dir()?;
+            let project_root = find_project_root(&current_dir);
+            let mgr = crate::llm::ai_manager::AiManager::new(&project_root)?;
+
+            println!("Generating semantic report for {}...", file_path);
+            match mgr.generate_semantic_report(file_path).await {
+                Ok(report) => {
+                    println!("\nSemantic Report: {}", file_path);
+                    println!("=====================================");
+                    println!("Summary: {}", report.summary);
+                    println!("\nFindings:");
+                    for finding in report.findings {
+                        println!("- [{}] {}: {}", finding.severity, finding.category, finding.message);
+                    }
+                }
+                Err(e) => {
+                    println!("Error generating report: {}", e);
+                }
+            }
+        }
+        #[cfg(not(feature = "modernbert"))]
+        {
+            let _ = file_path;
+            println!("Error: 'modernbert' feature not enabled in this build.");
+            println!("Please recompile with: cargo build --release --features modernbert");
+        }
         Ok(())
     }
 
@@ -1592,29 +1716,25 @@ Use --no-preview to perform the restoration"
                 println!("  ✅ Transaction logging");
             }
             Some("ai") => {
-                println!("🤖 LOCAL AI EXAMPLES");
-                println!("====================");
+                println!("🤖 LOCAL AI & ANALYSIS EXAMPLES");
+                println!("===============================");
                 println!();
-                println!("1. Setup and Status:");
-                println!("   gnawtreewriter ai setup --device cpu");
-                println!("   gnawtreewriter ai status");
+                println!("1. Semantic Quality Report:");
+                println!("   gnawtreewriter semantic-report src/main.rs");
+                println!("   # Uses ModernBERT to find structural anomalies.");
                 println!();
-                println!("2. Semantic Search:");
-                println!("   gnawtreewriter find --semantic \"database connection logic\"");
-                println!("   gnawtreewriter find --semantic \"error handling in rust\" src/");
+                println!("2. Structural Search:");
+                println!("   gnawtreewriter search main.rs \"database connection\"");
+                println!("   # Finds all nodes containing the pattern.");
                 println!();
-                println!("3. AI Refactoring:");
-                println!("   gnawtreewriter ai refactor src/main.rs");
-                println!("   gnawtreewriter ai refactor app.py --node-path \"0.1\"");
-                println!();
-                println!("4. Code Completion:");
-                println!("   gnawtreewriter ai complete src/core.rs \"0.2.1\"");
+                println!("3. Hierarchical Skeleton:");
+                println!("   gnawtreewriter skeleton src/lib.rs --depth 3");
+                println!("   # High-level overview of classes and functions.");
                 println!();
                 println!("**Key Benefits:**");
                 println!("  ✅ 100% Local - No data leaves your machine");
-                println!("  ✅ Privacy First - Works offline with ModernBERT");
+                println!("  ✅ Privacy First - Works offline with ModernBERT (for reports)");
                 println!("  ✅ AST-Aware - Understands code structure, not just text");
-                println!("  ✅ Hardware Accelerated - Supports CUDA and Metal");
             }
             Some("workflow") => {
                 println!("🔄 COMMON WORKFLOWS");
