@@ -106,6 +106,11 @@ All features in this section are and will remain **free and open source** under 
 
 ## Recent Progress
 
+### v0.6.11 (2026-01-12)
+- ✅ **Help System Cleanup**: Fully updated `examples` and `wizard` commands to match current functionality (Contributed by OpenCode).
+- ✅ **Command Documentation**: Added missing examples for `search` and `skeleton`.
+- ✅ **Quick-Replace Fix**: Corrected outdated references to the `quick` command.
+
 ### v0.6.10 (2026-01-12)
 - ✅ **Full CLI Parity**: Added `search`, `skeleton`, and `semantic-report` commands to match MCP capabilities.
 - ✅ **Docs Cleanup**: Fixed `examples --topic ai` to accurately reflect available commands.

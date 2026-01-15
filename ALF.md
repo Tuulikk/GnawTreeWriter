@@ -4,6 +4,25 @@ This file serves as the **GnawTreeWriter Project Journal**, following the **ALF*
 
 ## [2026-01-12]
 
+### [2026-01-12 23:15:00] | ID: opencode | Author: Gemini-Agent (via OpenCode)
+- **[Intent]**: Cleanup and synchronize the help system (`examples` and `wizard`) with current CLI capabilities.
+- **[Op]**: Updated `src/cli.rs` documentation strings and examples.
+- **[Outcome]**: v0.6.11 released. The help system is now 100% accurate.
+- **[Discovery]**: The `quick` command reference was persistent in examples despite being renamed to `quick-replace` long ago. Documentation debt is now cleared.
+- **[Label]**: `cli` -> `docs:synchronized`
+
+---
+### [2026-01-12 22:30:00] | ID: parity | Author: Gemini-Agent
+- **[Intent]**: Achieve full parity between CLI and MCP tools based on OpenCode/GLM 4.7 bug reports.
+- **[Op]**: 
+  - Added `search`, `skeleton`, and `semantic-report` subcommands to CLI.
+  - Corrected `handle_examples` for the `ai` topic.
+  - Silenced unused field warnings in `AiManager`.
+- **[Outcome]**: v0.6.10 released. All 14 core tools are now available in both CLI and MCP.
+- **[Discovery]**: Regular stress-testing by other agents (OpenCode/GLM) is invaluable for finding documentation drift and tool-parity issues.
+- **[Label]**: `cli` -> `parity:mcp-full`, `docs` -> `cleanup:completed`
+
+---
 ### [2026-01-12 21:30:00] | ID: semantic | Author: Gemini-Agent
 - **[Intent]**: Implement Semantic Selection to allow targeting nodes by name (@fn:name) instead of numeric paths.
 - **[Op]**: 
@@ -13,7 +32,7 @@ This file serves as the **GnawTreeWriter Project Journal**, following the **ALF*
   - Dogfooding: Refactored `src/mcp/mod.rs` using semantic selection to remove redundant logic.
 - **[Outcome]**: Successfully implemented and verified via self-editing. v0.6.9 released.
 - **[Discovery]**: Semantic targeting dramatically reduces cognitive load for agents and prevents "off-by-one" node errors. Shell escaping remains a challenge; STDIN/Source files are the preferred injection methods.
-- **[Label]**: `core` -> `feature:semantic-selection`, `cli` -> `feature:read-command`
+- **[Label]**: `core` -> `feature:semantic-selection`, `cli" -> `feature:read-command`
 
 ---
 ### [2026-01-12 10:15:00] | ID: boot | Author: Gemini-Agent
