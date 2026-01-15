@@ -4,6 +4,17 @@ This file serves as the **GnawTreeWriter Project Journal**, following the **ALF*
 
 ## [2026-01-12]
 
+### [2026-01-12 23:45:00] | ID: bugfixes | Author: Gemini-Agent
+- **[Intent]**: Fix critical architectural bugs identified by OpenCode/GLM 4.7.
+- **[Op]**: 
+  - Refactored `edit_node_at_path` to use line indices instead of `replacen()`.
+  - Fixed `Rename` preview count logic.
+  - Added filtering/limiting to `search` command.
+- **[Outcome]**: v0.6.11 hardened. Core editing is now collision-safe.
+- **[Discovery]**: Using string search (`replacen`) for AST nodes is dangerous if the same snippet exists multiple times. Line-based replacement is mandatory for surgical precision.
+- **[Label]**: `core` -> `fix:surgical-precision`, `cli` -> `feature:search-filtering`
+
+---
 ### [2026-01-12 23:15:00] | ID: opencode | Author: Gemini-Agent (via OpenCode)
 - **[Intent]**: Cleanup and synchronize the help system (`examples` and `wizard`) with current CLI capabilities.
 - **[Op]**: Updated `src/cli.rs` documentation strings and examples.
@@ -32,7 +43,7 @@ This file serves as the **GnawTreeWriter Project Journal**, following the **ALF*
   - Dogfooding: Refactored `src/mcp/mod.rs` using semantic selection to remove redundant logic.
 - **[Outcome]**: Successfully implemented and verified via self-editing. v0.6.9 released.
 - **[Discovery]**: Semantic targeting dramatically reduces cognitive load for agents and prevents "off-by-one" node errors. Shell escaping remains a challenge; STDIN/Source files are the preferred injection methods.
-- **[Label]**: `core` -> `feature:semantic-selection`, `cli" -> `feature:read-command`
+- **[Label]**: `core` -> `feature:semantic-selection`, `cli` -> `feature:read-command`
 
 ---
 ### [2026-01-12 10:15:00] | ID: boot | Author: Gemini-Agent
@@ -47,7 +58,7 @@ This file serves as the **GnawTreeWriter Project Journal**, following the **ALF*
 - **[Intent]**: Rebrand G-LOG to ALF (Agentic Logging Framework) for better naming uniqueness.
 - **[Op]**: `mv GNAW_TEST_REPORTS.md ALF.md`, updated `ROADMAP.md`.
 - **[Outcome]**: ALF is now the official project journaling standard.
-- **[Label]**: `docs` -> `meta:alf-branded`
+- **[Label]**: `docs" -> `meta:alf-branded`
 
 ---
 *Next agent: Append your reports above this line using the standard header.*

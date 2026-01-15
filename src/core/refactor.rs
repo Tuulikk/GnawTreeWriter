@@ -235,7 +235,7 @@ impl RefactorEngine {
             results.push(RefactorResult {
                 file_path: PathBuf::from(fp),
                 occurrences_found: count,
-                occurrences_renamed: if dry_run { 0 } else { count },
+                occurrences_renamed: count, // Count intended changes
                 changes,
             });
         }
@@ -326,18 +326,19 @@ impl RefactorEngine {
 }
 
 /// Display refactor results in a user-friendly format
-pub fn format_refactor_results(results: &[RefactorResult]) -> String {
+pub fn format_refactor_results(results: &[RefactorResult], is_preview: bool) -> String {
     let mut output = String::new();
 
     let total_found: usize = results.iter().map(|r| r.occurrences_found).sum();
-    let total_renamed: usize = results.iter().map(|r| r.occurrences_renamed).sum();
+    let total_count: usize = results.iter().map(|r| r.occurrences_renamed).sum();
 
     output.push_str("Refactor Results:\n");
     output.push_str(&format!("  Total occurrences found: {}\n", total_found));
-    output.push_str(&format!(
-        "  Total occurrences renamed: {}\n\n",
-        total_renamed
-    ));
+    if is_preview {
+        output.push_str(&format!("  Total occurrences to be renamed: {}\n\n", total_count));
+    } else {
+        output.push_str(&format!("  Total occurrences renamed: {}\n\n", total_count));
+    }
 
     for result in results {
         output.push_str(&format!("File: {}\n", result.file_path.display()));
@@ -345,7 +346,13 @@ pub fn format_refactor_results(results: &[RefactorResult]) -> String {
             "  Found: {} occurrences\n",
             result.occurrences_found
         ));
-        if result.occurrences_renamed > 0 {
+        
+        if is_preview {
+            output.push_str(&format!(
+                "  Would rename: {} occurrences\n",
+                result.occurrences_renamed
+            ));
+        } else {
             output.push_str(&format!(
                 "  Renamed: {} occurrences\n",
                 result.occurrences_renamed

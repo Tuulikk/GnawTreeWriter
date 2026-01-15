@@ -325,10 +325,28 @@ impl GnawTreeWriter {
             .find_node_by_path(&self.tree, node_path)
             .context(format!("Node not found at path: {}", node_path))?;
 
-        let old_content = &node.content;
-        let modified = self.source_code.replacen(old_content, new_content, 1);
+        let lines: Vec<&str> = self.source_code.lines().collect();
+        let mut new_lines: Vec<String> = Vec::new();
 
-        Ok(modified)
+        // Lines before the node
+        for i in 0..node.start_line - 1 {
+            if i < lines.len() {
+                new_lines.push(lines[i].to_string());
+            }
+        }
+
+        // Add the new content
+        // Note: new_content might be multi-line
+        for line in new_content.lines() {
+            new_lines.push(line.to_string());
+        }
+
+        // Lines after the node
+        for i in node.end_line..lines.len() {
+            new_lines.push(lines[i].to_string());
+        }
+
+        Ok(new_lines.join("\n"))
     }
 
     fn insert_node_at_path(

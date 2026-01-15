@@ -265,6 +265,12 @@ enum Commands {
         file_path: String,
         /// Text pattern to search for
         pattern: String,
+        #[arg(short, long)]
+        /// Filter by node type (e.g., function_definition)
+        filter_type: Option<String>,
+        #[arg(short, long)]
+        /// Maximum number of matches to show
+        limit: Option<usize>,
     },
     /// Get a high-level skeletal view of a file
     ///
@@ -980,8 +986,8 @@ impl Cli {
             } => {
                 Self::handle_diff_to_batch(&diff_file, output.as_deref(), preview)?;
             }
-            Commands::Search { file_path, pattern } => {
-                Self::handle_search(&file_path, &pattern)?;
+            Commands::Search { file_path, pattern, filter_type, limit } => {
+                Self::handle_search(&file_path, &pattern, filter_type.as_deref(), limit)?;
             }
             Commands::Skeleton { file_path, depth } => {
                 Self::handle_skeleton(&file_path, depth)?;
@@ -1275,27 +1281,41 @@ Use --no-preview to write batch file"
         Ok(())
     }
 
-    fn handle_search(file_path: &str, pattern: &str) -> Result<()> {
+    fn handle_search(file_path: &str, pattern: &str, filter_type: Option<&str>, limit: Option<usize>) -> Result<()> {
         let writer = GnawTreeWriter::new(file_path)?;
         let tree = writer.analyze();
         let mut matches = Vec::new();
 
-        fn find(n: &TreeNode, acc: &mut Vec<(String, String, String)>, p: &str) {
+        fn find(n: &TreeNode, acc: &mut Vec<(String, String, String)>, p: &str, f: Option<&str>) {
             if n.content.contains(p) {
-                let name = n.get_name().unwrap_or_else(|| "unnamed".to_string());
-                acc.push((n.path.clone(), n.node_type.clone(), name));
+                if f.map_or(true, |filter| n.node_type == filter) {
+                    let name = n.get_name().unwrap_or_else(|| "unnamed".to_string());
+                    acc.push((n.path.clone(), n.node_type.clone(), name));
+                }
             }
             for child in &n.children {
-                find(child, acc, p);
+                find(child, acc, p, f);
             }
         }
 
-        find(tree, &mut matches, pattern);
+        find(tree, &mut matches, pattern, filter_type);
+
+        // Sort by relevance (node types containing "definition" or "item" first)
+        matches.sort_by(|a, b| {
+            let a_is_def = a.1.contains("definition") || a.1.contains("item");
+            let b_is_def = b.1.contains("definition") || b.1.contains("item");
+            b_is_def.cmp(&a_is_def)
+        });
+
+        let total_found = matches.len();
+        if let Some(l) = limit {
+            matches.truncate(l);
+        }
 
         if matches.is_empty() {
             println!("No matches found for '{}' in {}", pattern, file_path);
         } else {
-            println!("Found {} matches in {}:", matches.len(), file_path);
+            println!("Found {} matches in {} (showing {}):", total_found, file_path, matches.len());
             for (path, node_type, name) in matches {
                 println!("  {} [{}] '{}'", path, node_type, name);
             }
@@ -1595,6 +1615,39 @@ Use --no-preview to perform the restoration"
                     "   gnawtreewriter insert main.rs \"0\" 0 'use std::collections::HashMap;'"
                 );
             }
+            Some("search") => {
+                println!("🔍 SEARCH EXAMPLES");
+                println!("==================");
+                println!();
+                println!("1. Find nodes by name:");
+                println!("   gnawtreewriter search main.rs \"main\"");
+                println!("   # Finds all nodes containing 'main'");
+                println!();
+                println!("2. Find nodes by pattern:");
+                println!("   gnawtreewriter search app.py \"print\"");
+                println!("   # Finds all print statements");
+                println!();
+                println!("3. Find specific patterns:");
+                println!("   gnawtreewriter search src/lib.rs \"TreeNode\"");
+                println!("   # Finds all references to TreeNode");
+            }
+            Some("skeleton") => {
+                println!("🦴 SKELETON VIEW EXAMPLES");
+                println!("==========================");
+                println!();
+                println!("1. High-level overview (default):");
+                println!("   gnawtreewriter skeleton main.rs");
+                println!("   # Shows top-level definitions");
+                println!();
+                println!("2. Custom depth:");
+                println!("   gnawtreewriter skeleton src/lib.rs --depth 3");
+                println!("   # Shows nested functions and methods");
+                println!();
+                println!("3. Compare structures:");
+                println!("   gnawtreewriter skeleton file1.rs");
+                println!("   gnawtreewriter skeleton file2.rs");
+                println!("   # Easy visual comparison");
+            }
             Some("qml") => {
                 println!("⚛️  QML EXAMPLES");
                 println!("===============");
@@ -1658,20 +1711,15 @@ Use --no-preview to perform the restoration"
                 println!("See BATCH_USAGE.md for complete documentation and examples.");
             }
             Some("quick") => {
-                println!("⚡ QUICK COMMAND EXAMPLES");
-                println!("=========================");
+                println!("⚡ QUICK-REPLACE EXAMPLES");
+                println!("===========================");
                 println!();
-                println!("1. Node-edit mode (AST-based):");
-                println!("   gnawtreewriter quick app.py --node \"0.1.0\" --content 'def new_func():' --preview");
-                println!(
-                    "   gnawtreewriter quick app.py --node \"0.1.0\" --content 'def new_func():'"
-                );
+                println!("1. Text-based search and replace:");
+                println!("   gnawtreewriter quick-replace app.py 'old_function' 'new_function' --preview");
+                println!("   gnawtreewriter quick-replace app.py 'old_function' 'new_function'");
                 println!();
-                println!("2. Find/replace mode (text-based):");
-                println!("   gnawtreewriter quick app.py --find 'old_function' --replace 'new_function' --preview");
-                println!(
-                    "   gnawtreewriter quick app.py --find 'old_function' --replace 'new_function'"
-                );
+                println!("2. Replace text patterns:");
+                println!("   gnawtreewriter quick-replace main.rs \"println!(\\\"Hello\\\")\" \"println!(\\\"Hi\\\")\"");
                 println!();
                 println!("3. Safety features:");
                 println!("   --preview: Show diff without applying changes");
@@ -1680,9 +1728,11 @@ Use --no-preview to perform the restoration"
                 println!("   Transaction logging for undo/redo");
                 println!();
                 println!("**Use Cases:**");
-                println!("  ✅ Quick single-line edits");
-                println!("  ✅ Simple text replacements");
+                println!("  ✅ Quick text replacements");
+                println!("  ✅ Simple search-and-replace");
                 println!("  ✅ Fast prototyping with preview");
+                println!();
+                println!("For AST-based editing, use 'edit' or 'insert' commands.");
             }
             Some("diff") => {
                 println!("📝 DIFF-TO-BATCH EXAMPLES");
@@ -1722,6 +1772,7 @@ Use --no-preview to perform the restoration"
                 println!("1. Semantic Quality Report:");
                 println!("   gnawtreewriter semantic-report src/main.rs");
                 println!("   # Uses ModernBERT to find structural anomalies.");
+                println!("   # Requires: --features modernbert at compile time");
                 println!();
                 println!("2. Structural Search:");
                 println!("   gnawtreewriter search main.rs \"database connection\"");
@@ -1735,6 +1786,8 @@ Use --no-preview to perform the restoration"
                 println!("  ✅ 100% Local - No data leaves your machine");
                 println!("  ✅ Privacy First - Works offline with ModernBERT (for reports)");
                 println!("  ✅ AST-Aware - Understands code structure, not just text");
+                println!();
+                println!("**Note:** 'semantic-report' requires the modernbert feature.");
             }
             Some("workflow") => {
                 println!("🔄 COMMON WORKFLOWS");
@@ -1768,10 +1821,11 @@ Use --no-preview to perform the restoration"
                 println!(
                     "  gnawtreewriter examples --topic batch        # Multi-file batch operations"
                 );
-                println!("  gnawtreewriter examples --topic quick        # Quick edits (node + find/replace)");
+                println!("  gnawtreewriter examples --topic quick        # Quick text search-and-replace");
                 println!(
                     "  gnawtreewriter examples --topic diff         # Convert diffs to batch ops"
                 );
+                println!("  gnawtreewriter examples --topic ai           # AI and analysis features");
                 println!("  gnawtreewriter examples --topic workflow     # Complete workflows");
                 println!();
                 println!("Quick Start:");
@@ -1930,24 +1984,26 @@ Use --no-preview to perform the restoration"
                 println!("❌ Can't find the right node:");
             }
             Some("ai") => {
-                println!("🤖 LOCAL AI WIZARD (ModernBERT)");
-                println!("===============================");
+                println!("🤖 LOCAL AI & ANALYSIS WIZARD");
+                println!("==============================");
                 println!();
-                println!("Step 1: Setup the model");
-                println!("  gnawtreewriter ai setup --device cpu");
-                println!("  (Use --device cuda or --device metal for GPU acceleration)");
+                println!("Step 1: Semantic Quality Report");
+                println!("  gnawtreewriter semantic-report src/main.rs");
+                println!("  # Uses ModernBERT to find structural anomalies");
+                println!("  # Requires: --features modernbert at compile time");
                 println!();
-                println!("Step 2: Verify installation");
-                println!("  gnawtreewriter ai status");
+                println!("Step 2: Search nodes by pattern");
+                println!("  gnawtreewriter search main.rs \"database connection\"");
+                println!("  # Finds all nodes containing the pattern");
                 println!();
-                println!("Step 3: Use semantic search");
-                println!("  gnawtreewriter find --semantic \"your natural language query\"");
+                println!("Step 3: Get skeletal overview");
+                println!("  gnawtreewriter skeleton src/lib.rs --depth 3");
+                println!("  # High-level overview of classes and functions");
                 println!();
-                println!("Step 4: Get refactoring suggestions");
-                println!("  gnawtreewriter ai refactor <file_path>");
-                println!();
-                println!("Step 5: Context-aware completion");
-                println!("  gnawtreewriter ai complete <file_path> <node_path>");
+                println!("Step 4: Combine with editing");
+                println!("  gnawtreewriter analyze <file>");
+                println!("  gnawtreewriter search <file> \"pattern\"");
+                println!("  gnawtreewriter edit <file> <path> 'code'");
                 println!();
                 println!("💡 Note: All AI features run 100% locally for privacy and speed.");
                 println!("   • Use: gnawtreewriter list <file> --filter-type <type>");
@@ -1967,9 +2023,8 @@ Use --no-preview to perform the restoration"
                 println!("  gnawtreewriter wizard --task editing           # How to edit code");
                 println!("  gnawtreewriter wizard --task restoration       # Time travel features");
                 println!("  gnawtreewriter wizard --task batch            # Multi-file operations");
-                println!(
-                    "  gnawtreewriter wizard --task quick            # Fast edits (node + replace)"
-                );
+                println!("  gnawtreewriter wizard --task quick            # Fast edits (text replace)");
+                println!("  gnawtreewriter wizard --task ai               # AI and analysis features");
                 println!("  gnawtreewriter wizard --task troubleshooting   # Fix common problems");
                 println!();
                 println!("Quick help:");
@@ -2180,7 +2235,7 @@ Use --no-preview to actually apply the change."
 "
             );
             let results = engine.preview_rename(symbol_name, new_name, path, recursive)?;
-            println!("{}", format_refactor_results(&results));
+            println!("{}", format_refactor_results(&results, true));
             println!(
                 "
 Use --no-preview to actually apply the rename."
@@ -2218,7 +2273,7 @@ Use --no-preview to actually apply the rename."
 
             // Perform the rename
             let results = engine.rename_symbol(symbol_name, new_name, path, recursive)?;
-            println!("{}", format_refactor_results(&results));
+            println!("{}", format_refactor_results(&results, false));
 
             // Log transaction summary
             let total_renamed: usize = results.iter().map(|r| r.occurrences_renamed).sum();
