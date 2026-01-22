@@ -30,7 +30,10 @@ Resultatet från koden ägs av texten. Varje kodrad är ett experiment för att 
 
 Logiken höll: Markera textdelen som "Verifierad". Använd kodens erfarenheter för att skriva ännu tydligare specs och kodförklaringar i huvudtexten.
 
-Logiken brast: Fixa aldrig felet direkt i koden. Gå tillbaka till steg 1, ändra textritningen och generera sedan en ny kloss.
+Logiken brast (Anti-Brute-Force):
+*   🚫 Det är förbjudet att "gissa" en lösning eller ändra kod slumpmässigt för att få tyst på kompilatorn (Shotgun debugging).
+*   ✅ **Logik-Check:** Stanna upp. Jämför felet mot Text-Appen. Är det ritningen eller bygget som är fel?
+*   Fixa aldrig felet direkt i koden utan att förstå *varför*. Gå tillbaka till steg 1.
 
 Expansion: Dokumentera insikter om felhantering, dataflöden och kantfall som upptäckts under testet direkt i text-appen.
 
@@ -61,11 +64,16 @@ Göra blinda ändringar: Du får aldrig ändra kod utan att först ha verifierat
 
 Bygga monoliter: Du får inte baka in ny funktionalitet i huvudskalet direkt. Allt ska börja som en isolerad "kloss" (Steg 2).
 
-Ignorera fel i kodtester: Om en kloss brister får du inte försöka "patcha" koden tills den fungerar. Du måste backa till Text-Appen och justera logiken där först.
+Brute-force debugga: Om en kloss brister får du inte försöka "patcha" koden tills den fungerar. Du måste backa till Text-Appen och justera logiken där först.
 
 Använda absoluta sökvägar: Inga hårda kopplingar mellan moduler. Använd det definierade Interface-lagret/mellanhanden.
 
 ✅ Agenten SKA:
+
+Agera med Mandat (Agency):
+*   Du är inte en passiv skrivmaskin, du är en ingenjör.
+*   Om Text-Appen (Steg 1) är tydlig och verifierad, har du mandat att implementera och testa klossen (Steg 2) utan att fråga om lov för varje rad.
+*   Driv processen framåt: "Jag har verifierat X, går vidare till Y enligt plan."
 
 Efterfråga "Peta hål"-granskning: Innan du börjar på en ny fas, fråga användaren: "Är vi redo för Steg 0? Har en annan AI granskat denna logik?"
 
