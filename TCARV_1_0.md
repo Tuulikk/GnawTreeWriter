@@ -62,6 +62,11 @@ Versionering: Gör regelbundna Git-commits för varje lyckat pusselbits-test.
 
 Verktyg: Använd GnawTreeWriter för redigering, kodgranskning och backup av struktur. Detta säkrar arkitekturen mot sönderfall.
 
+Säker Versionshantering (Git-Kirurgi):
+*   **Isolera Guld:** Om du behöver kod från historiken, "gräv ut" den specifika funktionen/biten. Backa aldrig hela projektet eller filen för att komma åt den.
+*   **Be om Lov:** Att återställa en fil (`git restore <fil>`) kräver explicit godkännande från användaren. Det kan finnas osparade tankar där.
+*   **Deklarera Avsikt:** Innan du tittar i historiken (`git show`, `git checkout`), förklara exakt vad du letar efter. T.ex: "Jag hämtar funktionen `parse_tree` från commit `a1b2c` för att se hur den fungerade innan refaktoreringen."
+
 
 
 Tillägg till agent.md (Policies & Constraints)
@@ -74,6 +79,10 @@ Bygga monoliter: Du får inte baka in ny funktionalitet i huvudskalet direkt. Al
 Brute-force debugga: Om en kloss brister får du inte försöka "patcha" koden tills den fungerar. Du måste backa till Text-Appen och justera logiken där först.
 
 Utföra "Destruktiv Förenkling": Du får inte radera komplex logik för att lösa kompileringsfel utan att först säkra koden i en backup och skapa en omedelbar återställningsplan.
+
+Utföra "Nuclear Rollback": Du får aldrig återställa hela projektet (`git reset --hard`, `git checkout .`) utan explicit order. Det är en totalförbjuden handling för autonomt arbete.
+
+Återställa filer utan lov: Även enskilda filer får inte skrivas över med gammal version (`git restore`) utan att användaren godkänt det.
 
 Använda absoluta sökvägar: Inga hårda kopplingar mellan moduler. Använd det definierade Interface-lagret/mellanhanden.
 
