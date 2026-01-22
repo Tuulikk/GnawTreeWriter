@@ -225,6 +225,34 @@ pub mod mcp_server {
                                 "required": ["file_path", "node_path", "content"]
                             }
                         },
+                        {
+                            "name": "sense",
+                            "title": "Semantic Search (GnawSense)",
+                            "description": "Search for code semantically using AI. Good for finding where something is implemented when you only have a vague description.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": { "type": "string", "description": "Semantic query (e.g., 'how is backup handled?')" },
+                                    "file_path": { "type": "string", "description": "Optional: Limit search to this file (Zoom mode)" }
+                                },
+                                "required": ["query"]
+                            }
+                        },
+                        {
+                            "name": "semantic_insert",
+                            "title": "Semantic Insert (GnawSense)",
+                            "description": "Insert code near a semantic anchor point. Use this when you know WHAT the surrounding code does, but don't know the exact path.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" },
+                                    "anchor_query": { "type": "string", "description": "Description of the code where you want to insert near (e.g., 'the backup initialization')" },
+                                    "content": { "type": "string", "description": "The new code to insert" },
+                                    "intent": { "type": "string", "description": "Where to insert: 'after' (default), 'before', or 'inside'" }
+                                },
+                                "required": ["file_path", "anchor_query", "content"]
+                            }
+                        },
                         { "name": "batch", "description": "Apply batch", "inputSchema": {"type":"object"} },
                         { "name": "undo", "description": "Undo", "inputSchema": {"type":"object"} }
                     ]
@@ -293,6 +321,18 @@ pub mod mcp_server {
                          let c = validate_arg("content")?;
                          let pos = arguments.get("position").and_then(Value::as_u64).unwrap_or(1) as usize;
                          Ok(handle_insert_node(fp, pp, pos, c))
+                    },
+                    "sense" => {
+                        let query = validate_arg("query")?;
+                        let fp = arguments.get("file_path").and_then(Value::as_str);
+                        Ok(handle_sense(state, query, fp).await)
+                    },
+                    "semantic_insert" => {
+                        let fp = validate_arg("file_path")?;
+                        let anchor = validate_arg("anchor_query")?;
+                        let content = validate_arg("content")?;
+                        let intent = arguments.get("intent").and_then(Value::as_str).unwrap_or("after");
+                        Ok(handle_semantic_insert(state, fp, anchor, content, intent).await)
                     },
                     "batch" => Ok(json!({ "content": [{ "type": "text", "text": "Batch executed" }] })),
                     "undo" => Ok(json!({ "content": [{ "type": "text", "text": "Undo executed" }] })),
@@ -464,6 +504,83 @@ pub mod mcp_server {
                 tool_success(format!("Found {} matches", m.len()), Some(json!({"matches": m})))
             }
             Err(e) => tool_error(format!("IO error: {}", e)),
+        }
+    }
+
+    async fn handle_sense(state: Arc<AppState>, query: &str, file_path: Option<&str>) -> Value {
+        #[cfg(feature = "modernbert")]
+        {
+            use crate::llm::{GnawSenseBroker, SenseResponse};
+            let broker = match GnawSenseBroker::new(&state.project_root) {
+                Ok(b) => b,
+                Err(e) => return tool_error(e.to_string()),
+            };
+
+            match broker.sense(query, file_path).await {
+                Ok(response) => {
+                    match response {
+                        SenseResponse::Satelite { matches } => {
+                            tool_success("Satelite search results".into(), Some(json!({"matches": matches})))
+                        }
+                        SenseResponse::Zoom { file_path, nodes } => {
+                            tool_success(format!("Zoom search results for {}", file_path), Some(json!({"nodes": nodes})))
+                        }
+                    }
+                }
+                Err(e) => tool_error(e.to_string()),
+            }
+        }
+        #[cfg(not(feature = "modernbert"))]
+        {
+            let _ = (state, query, file_path);
+            tool_error("ModernBERT feature not enabled.".into())
+        }
+    }
+
+    async fn handle_semantic_insert(
+        state: Arc<AppState>,
+        file_path: &str,
+        anchor_query: &str,
+        content: &str,
+        intent: &str,
+    ) -> Value {
+        #[cfg(feature = "modernbert")]
+        {
+            use crate::llm::GnawSenseBroker;
+            let broker = match GnawSenseBroker::new(&state.project_root) {
+                Ok(b) => b,
+                Err(e) => return tool_error(e.to_string()),
+            };
+
+            match broker.propose_edit(anchor_query, file_path, intent).await {
+                Ok(proposal) => {
+                    let mut writer = match GnawTreeWriter::new(file_path) {
+                        Ok(w) => w,
+                        Err(e) => return tool_error(e.to_string()),
+                    };
+                    let op = EditOperation::Insert {
+                        parent_path: proposal.parent_path,
+                        position: proposal.position,
+                        content: content.to_string(),
+                    };
+                    match writer.edit(op) {
+                        Ok(_) => tool_success(
+                            format!(
+                                "Successfully inserted code near anchor '{}' (confidence: {:.2})",
+                                proposal.anchor_path, proposal.confidence
+                            ),
+                            None,
+                        ),
+                        Err(e) => tool_error(e.to_string()),
+                    }
+                }
+                Err(e) => tool_error(e.to_string()),
+            }
+        }
+        #[cfg(not(feature = "modernbert"))]
+        {
+            let _ = (state, file_path, anchor_query, content, intent);
+            tool_error("ModernBERT feature not enabled.".into())
         }
     }
 

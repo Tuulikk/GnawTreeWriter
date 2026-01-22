@@ -1,6 +1,6 @@
 {
   "name": "gnawtreewriter",
-  "version": "0.6.13",
+  "version": "0.7.0",
   "description": "Tree-based code editor for LLM-assisted editing. Edit code files based on tree structure levels, avoiding bracket issues and structural problems from LLM code generation.",
   "author": "Gnaw Software",
   "license": "MPL-2.0",

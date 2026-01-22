@@ -7,6 +7,7 @@ use candle_nn::{self, VarBuilder};
 use candle_transformers::models::modernbert::{Config, ModernBert};
 #[cfg(feature = "modernbert")]
 use hf_hub::{Repo, RepoType};
+use crate::core::LabelManager;
 use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "modernbert")]
@@ -116,6 +117,7 @@ impl AiManager {
                 findings.push(QualityFinding {
                     path: node.path.clone(),
                     severity: "Warning".into(),
+                    category: "Complexity".into(),
                     message: msg.clone(),
                 });
                 let _ = label_mgr.add_label(file_path, &node.content, "quality:high-brace-density");
@@ -172,6 +174,7 @@ pub struct SemanticReport {
 pub struct QualityFinding {
     pub path: String,
     pub severity: String,
+    pub category: String,
     pub message: String,
 }
 

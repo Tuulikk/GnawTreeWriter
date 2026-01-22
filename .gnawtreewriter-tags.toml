@@ -1,5 +1,14 @@
 [files."test.py".tags]
 main_func = "0"
 
+[files."test_cli/rust_test.rs".tags]
+main_func = "0.1"
+
+[files."test_cli/complex_edge_cases.py".tags]
+method2 = "1.3.2.4"
+
+[files."test_cli/python_test.py".tags]
+hello_func = "2"
+
 [files."test.qml".tags]
 mainRect = "1.1"

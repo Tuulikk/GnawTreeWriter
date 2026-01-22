@@ -1,0 +1,8 @@
+timestamp: 2026-01-12T20:02:14Z
+cwd: /mnt/content/dev/Gnaw-Software/GnawTreeWriter
+user: tuulikk
+uid: 1000
+pid: 3815050
+argv: --addr 127.0.0.1:8080 --token secret --foreground
+env.MCP_TOKEN: <not set>
+script_exists: [ -f ./scripts/mcp-serve.sh ]

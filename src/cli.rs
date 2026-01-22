@@ -6,6 +6,7 @@ use crate::core::{
     find_project_root, EditOperation, GnawTreeWriter, OperationType, RestorationEngine, TagManager,
     TransactionLog, UndoRedoManager,
 };
+use crate::llm::{GnawSenseBroker, SenseResponse};
 use crate::parser::TreeNode;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
@@ -563,6 +564,37 @@ enum Commands {
         /// Required flag to lint directories (prevents accidental large scans)
         recursive: bool,
     },
+    /// Search for code semantically using AI (ModernBERT)
+    Sense {
+        /// Semantic query (e.g., "how is file backup handled?")
+        query: String,
+        
+        /// Optional: Limit search to a specific file (Zoom mode)
+        file: Option<PathBuf>,
+        
+        /// Optional: Provide deeper analysis and context
+        #[arg(long)]
+        deep: bool,
+    },
+
+    /// Semantically insert code near an anchor point
+    SenseInsert {
+        /// File to edit
+        file: PathBuf,
+        /// Semantic description of where to insert (the anchor)
+        anchor: String,
+        /// Code content to insert
+        content: String,
+        /// Where to insert relative to anchor (after, before, inside)
+        #[arg(long, default_value = "after")]
+        intent: String,
+        /// Show preview instead of applying
+        #[arg(long)]
+        preview: bool,
+    },
+
+    /// Show version information
+    Version,
 }
 
 #[derive(Subcommand)]
@@ -995,6 +1027,15 @@ impl Cli {
             Commands::SemanticReport { file_path } => {
                 Self::handle_semantic_report(&file_path).await?;
             }
+            Commands::Sense { query, file, deep } => {
+                Self::handle_sense(&query, file.as_ref().and_then(|p| p.to_str()), deep).await?;
+            }
+            Commands::SenseInsert { file, anchor, content, intent, preview } => {
+                Self::handle_sense_insert(file, anchor, content, intent, preview).await?;
+            }
+            Commands::Version => {
+                Self::handle_version()?;
+            }
         }
         Ok(())
     }
@@ -1374,6 +1415,93 @@ Use --no-preview to write batch file"
             println!("Error: 'modernbert' feature not enabled in this build.");
             println!("Please recompile with: cargo build --release --features modernbert");
         }
+        Ok(())
+    }
+
+    async fn handle_sense(query: &str, file_path: Option<&str>, deep: bool) -> Result<()> {
+        #[cfg(feature = "modernbert")]
+        {
+            let current_dir = std::env::current_dir()?;
+            let project_root = find_project_root(&current_dir);
+            let broker = GnawSenseBroker::new(&project_root)?;
+
+            println!("🧠 GnawSense is thinking about: \"{}\"...", query);
+            let response = broker.sense(query, file_path).await?;
+
+            match response {
+                SenseResponse::Satelite { matches } => {
+                    println!("\n🛰️ Satelite View: I found these relevant areas in the project:");
+                    for (i, m) in matches.iter().enumerate() {
+                        println!("  {}. {} (score: {:.2})", i + 1, m.file_path, m.score);
+                    }
+                    println!("\nTip: Use `gnawtreewriter sense \"{}\" --file {}` to zoom in.", query, matches[0].file_path);
+                }
+                SenseResponse::Zoom { file_path, nodes } => {
+                    println!("\n🔍 Zoom View: Relevant nodes in {}:", file_path);
+                    for (i, n) in nodes.iter().enumerate() {
+                        println!("  {}. [{}] (score: {:.2})", i + 1, n.path, n.score);
+                        if deep || i == 0 {
+                            println!("     \"{}\"", n.preview.replace("\n", " "));
+                        }
+                    }
+                }
+            }
+        }
+        #[cfg(not(feature = "modernbert"))]
+        {
+            let _ = (query, file_path, deep);
+            println!("Error: 'modernbert' feature not enabled in this build.");
+            println!("Please recompile with: cargo build --release --features modernbert");
+        }
+        Ok(())
+    }
+
+    async fn handle_sense_insert(
+        file: PathBuf,
+        anchor: String,
+        content: String,
+        intent: String,
+        preview: bool,
+    ) -> Result<()> {
+        #[cfg(feature = "modernbert")]
+        {
+            let current_dir = std::env::current_dir()?;
+            let project_root = find_project_root(&current_dir);
+            let broker = GnawSenseBroker::new(&project_root)?;
+            let file_path = file.to_str().ok_or_else(|| anyhow::anyhow!("Invalid file path"))?;
+
+            println!("🧠 GnawSense is searching for anchor: \"{}\"...", anchor);
+            let proposal = broker.propose_edit(&anchor, file_path, &intent).await?;
+            
+            println!("📍 Found anchor at {} (confidence: {:.2})", proposal.anchor_path, proposal.confidence);
+            println!("🔧 Action: {} at {} position {}", proposal.suggested_op, proposal.parent_path, proposal.position);
+
+            let mut writer = GnawTreeWriter::new(file_path)?;
+            let op = EditOperation::Insert {
+                parent_path: proposal.parent_path,
+                position: proposal.position,
+                content,
+            };
+
+            if preview {
+                let modified = writer.preview_edit(op)?;
+                println!("\n--- Preview of Semantic Insertion ---");
+                print_diff(writer.get_source(), &modified);
+            } else {
+                writer.edit(op)?;
+                println!("✓ Successfully inserted code semantically.");
+            }
+        }
+        #[cfg(not(feature = "modernbert"))]
+        {
+            let _ = (file, anchor, content, intent, preview);
+            println!("Error: 'modernbert' feature not enabled.");
+        }
+        Ok(())
+    }
+
+    fn handle_version() -> Result<()> {
+        println!("GnawTreeWriter v{}", env!("CARGO_PKG_VERSION"));
         Ok(())
     }
 

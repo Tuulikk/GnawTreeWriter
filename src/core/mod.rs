@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod anchor;
 pub mod backup;
 pub mod batch;
 pub mod diff_parser;
