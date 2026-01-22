@@ -35,6 +35,13 @@ Logiken brast (Anti-Brute-Force):
 *   ✅ **Logik-Check:** Stanna upp. Jämför felet mot Text-Appen. Är det ritningen eller bygget som är fel?
 *   Fixa aldrig felet direkt i koden utan att förstå *varför*. Gå tillbaka till steg 1.
 
+Principen om Kodbevarande (Anti-Lobotomy):
+*   Kod får aldrig raderas eller "dummas ner" permanent bara för att snabbt få bygget att gå igenom.
+*   **Nödfallsprocedur:** Om en komplex del måste lyftas ut för att isolera ett fel:
+    1.  **Backup:** Kopiera filen (t.ex. `filnamn.rs.full_bak`).
+    2.  **Logga:** Skriv tydligt i dagboken vad som togs bort och varför.
+    3.  **Återställ:** Direkt efter att bygget fungerar är din högsta prioritet att återinföra den funktionaliteten korrekt.
+
 Expansion: Dokumentera insikter om felhantering, dataflöden och kantfall som upptäckts under testet direkt i text-appen.
 
 4. Pusselbits-arkivet och Skal-integration
@@ -65,6 +72,8 @@ Göra blinda ändringar: Du får aldrig ändra kod utan att först ha verifierat
 Bygga monoliter: Du får inte baka in ny funktionalitet i huvudskalet direkt. Allt ska börja som en isolerad "kloss" (Steg 2).
 
 Brute-force debugga: Om en kloss brister får du inte försöka "patcha" koden tills den fungerar. Du måste backa till Text-Appen och justera logiken där först.
+
+Utföra "Destruktiv Förenkling": Du får inte radera komplex logik för att lösa kompileringsfel utan att först säkra koden i en backup och skapa en omedelbar återställningsplan.
 
 Använda absoluta sökvägar: Inga hårda kopplingar mellan moduler. Använd det definierade Interface-lagret/mellanhanden.
 
