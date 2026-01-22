@@ -120,3 +120,7 @@ TCARV är modulärt. Beroende på projektets natur ska specifika tilläggsmodule
 ### [TCARV-TAC (Tool Architecture & Core)](./TCARV_ADDON_TAC.md)
 **Aktiveras för:** CLI-verktyg, Bibliotek, Kompilatorer, Backend-system.
 Beskriver hur man separerar Kärnlogik från Skal (CLI/API) för maximal testbarhet och återanvändning.
+
+### [TCARV-AUTO (Autonom Iteration)](./TCARV_ADDON_AUTO.md)
+**Aktiveras för:** Nattkörningar, batch-jobb och självläkande processer.
+Definierar regler för hur agenten ska agera självständigt när användaren inte är närvarande (Loop of Reflection).
