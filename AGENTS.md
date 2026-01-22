@@ -839,7 +839,18 @@ These contributions demonstrate that AI agents, when used appropriately and foll
 
 ## 🧠 The Gnaw Mental Model: Avoiding Common AI Pitfalls
 
-As an AI agent, your standard "mental model" for editing files often involves overwriting the whole file or using `sed`-like string replacement. In the GnawTreeWriter ecosystem, this can lead to disastrous (and expensive) results. Follow these rules to remain a "well-behaved" agent.
+As an AI agent, your standard "mental model" for editing files often involves overwriting the whole file or using `sed`-like string replacement. In the GnawTreeWriter ecosystem, this can lead to disastrous (and expensive) results. 
+
+### 🛡️ The TCARV Safety Net
+To avoid panic and project corruption, always follow the **TCARV 1.0 (Text-Centric Architecture & Recursive Verification)** methodology:
+
+1.  **Text First (Hypothesis):** Never edit code without a clear logic description in text first.
+2.  **Surgical Edits:** Use `gnawtreewriter` to change ONLY the relevant nodes.
+3.  **Anti-Panic Protocol:**
+    *   **Got an error?** STOP. Do not "shotgun debug".
+    *   **Check the path:** Use `gnawtreewriter list` to verify the node structure hasn't changed.
+    *   **Undo is your friend:** If the build fails, run `gnawtreewriter undo` immediately and rethink the logic.
+    *   **Agency with Responsibility:** You have the mandate to fix things, but you must backup complex code before removing it.
 
 ### 1. The Double-Brace Trap (Rust & JSON Macros)
 Many AI agents (and their tool-calling layers) automatically "escape" curly braces when generating shell commands.
