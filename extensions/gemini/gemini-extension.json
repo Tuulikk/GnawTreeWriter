@@ -1,14 +1,11 @@
 {
   "name": "gnawtreewriter",
-  "description": "AI-native temporal code editor via MCP",
-  "version": "0.6.5",
+  "version": "0.6.12",
+  "description": "GnawTreeWriter integration for Gemini CLI via MCP",
   "mcpServers": {
     "gnawtreewriter": {
-      "command": "/mnt/content/dev/Gnaw-Software/GnawTreeWriter/target/release/gnawtreewriter",
-      "args": [
-        "mcp",
-        "stdio"
-      ]
+      "command": "../../target/release/gnawtreewriter",
+      "args": ["mcp", "stdio"]
     }
   }
 }

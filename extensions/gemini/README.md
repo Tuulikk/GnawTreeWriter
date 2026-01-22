@@ -11,7 +11,7 @@ This extension integrates GnawTreeWriter directly into Gemini CLI using the Mode
 Run this command from the project root:
 
 ```bash
-gemini extensions link ./gemini-extension
+gemini extensions link extensions/gemini
 ```
 
 ## Usage

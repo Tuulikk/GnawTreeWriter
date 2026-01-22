@@ -10,6 +10,7 @@
 # Local development and sandboxing
 playground/
 local_test/
+test_cli/
 mcp_debug.log
 mcp_output.log
 mcp_test.log
@@ -17,4 +18,7 @@ mcp_test.log
 !Cargo.toml
 !package.json
 !*batch.json
+!extensions/gemini/gemini-extension.json
 
+# GnawGuard Auto-ignore
+GnawData/
