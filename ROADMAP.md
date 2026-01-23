@@ -37,7 +37,7 @@ All features in this section are and will remain **free and open source** under 
 ## Phase 1: Reliability & Safety ✅ COMPLETE
 **Status: DONE**
 
-- [x] **Transaction Log System**: JSON-based log tracking all operations.
+- [x] **Transaction Log System**: JSON-based log tracking all operations with timestamps.
 - [x] **Multi-File Time Restoration**: Project-wide and session-based rollback.
 - [x] **Undo & Redo Commands**: Navigation without Git dependency.
 - [x] **Interactive Help System**: `examples` and `wizard` commands.
@@ -120,7 +120,52 @@ All features in this section are and will remain **free and open source** under 
 - ✅ **Safety Policies**: Implemented Anti-Lobotomy and Git-Surgery (No-Nuke) rules.
 
 ### v0.6.11 (2026-01-12)
-- ✅ **Help System Cleanup**: Updated examples and wizard commands.
+- ✅ **Help System Cleanup**: Fully updated `examples` and `wizard` commands to match current functionality (Contributed by OpenCode).
+- ✅ **Command Documentation**: Added missing examples for `search` and `skeleton`.
+- ✅ **Quick-Replace Fix**: Corrected outdated references to the `quick` command.
+
+### v0.6.10 (2026-01-12)
+- ✅ **Full CLI Parity**: Added `search`, `skeleton`, and `semantic-report` commands to match MCP capabilities.
+- ✅ **Docs Cleanup**: Fixed `examples --topic ai` to accurately reflect available commands.
+- ✅ **Linting**: Silenced unused field warnings in `AiManager`.
+
+### v0.6.9 (2026-01-12)
+- ✅ **Semantic Selection**: Target nodes using `@fn:name`, `@struct:name`, etc., instead of numeric paths.
+- ✅ **Enhanced CLI**: Added `read` command and improved `list` output with node names.
+- ✅ **Clean Core**: Moved name-extraction logic to `TreeNode` for universal use.
+
+### v0.6.8 (2026-01-11)
+- ✅ **Agent Safety Guide**: Added "The Gnaw Mental Model" to AGENTS.md to prevent AI mistakes.
+- ✅ **Zed Flatpak Support**: Added dedicated documentation and `flatpak-spawn` instructions for Zed users.
+- ✅ **Robust Extensions**: Improved Zed extension source code for better reliability.
+
+### v0.6.7 (2026-01-11)
+- ✅ **Contextual Usage Hints**: Added a "Just-in-Time" learning system that prints helpful tips to stderr.
+- ✅ **Double-Brace Shield**: Hardened CLI and MCP outputs against common shell escaping issues.
+
+### v0.6.6 (2026-01-11)
+- ✅ **Colored Diff Preview**: Added ANSI color support for CLI previews.
+- ✅ **MCP Diff Feedback**: Edit and Insert tools now return context-aware unified diffs.
+- ✅ **Preview Tool**: Added `preview_edit` to MCP for "dry run" capabilities.
+
+### v0.6.5 (2026-01-11)
+- ✅ **Intelligence Loop**: Integrated LabelManager and Semantic Reporting.
+- ✅ **Robust MCP**: Fixed JSON-RPC syntax and added stdio/http stability.
+- ✅ **Clean Imports**: Optimized dependency usage in core modules.
+
+### v0.6.4 (2026-01-11)
+- ✅ **Skeletal Mapping**: Added `get_skeleton` for high-level definition overviews.
+- ✅ **Smart Search**: Added `search_nodes` to find targets by name/text.
+- ✅ **Token Efficiency**: Depth-limited listing and punctuation filtering.
+
+### v0.6.2 (2026-01-10)
+- ✅ **Full MCP Stdio Support**: Integration with Gemini CLI and Zed.
+- ✅ **License Guardian**: Added `scripts/check-license.sh` to ensure MPL-2.0 purity.
+- ✅ **Temporal Demo**: Added `examples/temporal-demo` micro-project.
+
+### v0.6.0 (2025-01-05)
+- ✅ Fixed GitHub Actions CI/CD for ModernBERT.
+- ✅ Extensive dogfooding - fixes made using GnawTreeWriter!
 
 ---
 
