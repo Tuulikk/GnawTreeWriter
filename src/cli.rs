@@ -593,6 +593,15 @@ enum Commands {
         preview: bool,
     },
 
+    /// Scaffold a new file with a specific AST structure
+    Scaffold {
+        /// Path to the new file to create
+        file_path: PathBuf,
+        /// Schema for the structure (e.g., "rust:mod(name:network,fn:init)")
+        #[arg(long)]
+        schema: String,
+    },
+
     /// Show version information
     Version,
 }
@@ -1032,6 +1041,9 @@ impl Cli {
             }
             Commands::SenseInsert { file, anchor, content, intent, preview } => {
                 Self::handle_sense_insert(file, anchor, content, intent, preview).await?;
+            }
+            Commands::Scaffold { file_path, schema } => {
+                Self::handle_scaffold(&file_path, &schema)?;
             }
             Commands::Version => {
                 Self::handle_version()?;
@@ -1502,6 +1514,29 @@ Use --no-preview to write batch file"
 
     fn handle_version() -> Result<()> {
         println!("GnawTreeWriter v{}", env!("CARGO_PKG_VERSION"));
+        Ok(())
+    }
+
+    fn handle_scaffold(file_path: &PathBuf, schema: &str) -> Result<()> {
+        use crate::core::ScaffoldEngine;
+        use std::fs;
+
+        if file_path.exists() {
+            anyhow::bail!("File already exists: {}. Scaffolding only works for new files.", file_path.display());
+        }
+
+        let engine = ScaffoldEngine::new();
+        let code = engine.generate(schema)?;
+
+        // Create parent directories if they don't exist
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        fs::write(file_path, code)?;
+        println!("✓ Successfully scaffolded new file: {}", file_path.display());
+        println!("You can now use `sense-insert` to fill in the implementation.");
+
         Ok(())
     }
 

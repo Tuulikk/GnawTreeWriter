@@ -2,6 +2,18 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.7.1] - 2026-01-22
+
+### Added
+- **Structural Scaffolding**: Create new files with a predefined AST structure using the `scaffold` command.
+  - Usage: `gnawtreewriter scaffold <file_path> --schema "lang:structure"`
+  - Supports Rust and Python templates.
+- **Arbitrary AST Indexing**: Upgraded core `insert` logic to support arbitrary child indices, enabling precise semantic insertions beyond the basic "start/end" positions.
+
+### Fixed
+- **Sense-Insert Stability**: Improved index calculation in GnawSense to ensure generated proposals are always valid for the core engine.
+- **Code Cleanup**: Removed unused imports and silenced warnings in AI-related modules.
+
 ## [0.7.0] - 2026-01-22
 
 ### Added

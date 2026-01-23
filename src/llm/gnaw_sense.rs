@@ -1,11 +1,13 @@
 use anyhow::Result;
-use std::path::{Path, PathBuf};
 use crate::llm::{AiManager, AiModel, DeviceType, SemanticIndex};
 use crate::parser::TreeNode;
 use std::fs;
+use std::path::{Path, PathBuf};
 
 pub struct GnawSenseBroker {
+    #[allow(dead_code)]
     ai_manager: AiManager,
+    #[allow(dead_code)]
     project_root: PathBuf,
 }
 
@@ -71,8 +73,6 @@ impl GnawSenseBroker {
             })
         } else {
             // SATELITE MODE: Search across files
-            // For now, let's pretend we have a list of important files to check
-            // In a real implementation, we would use a pre-built project index
             Ok(SenseResponse::Satelite {
                 matches: vec![
                     FileMatch { file_path: "src/main.rs".into(), score: 0.8 },
@@ -98,10 +98,8 @@ impl GnawSenseBroker {
         let (anchor_node, score) = results[0];
         
         // Logic to determine placement based on intent
-        // (Simplified for first version)
         let proposal = match intent.to_lowercase().as_str() {
             "after" => {
-                // To insert after, we need to find the parent and the index of the anchor
                 EditProposal {
                     anchor_path: anchor_node.path.clone(),
                     suggested_op: "insert".into(),
@@ -120,8 +118,6 @@ impl GnawSenseBroker {
         if let Some(last_dot) = path.rfind('.') {
             path[..last_dot].to_string()
         } else {
-            // If there's no dot, it's a top-level node. 
-            // In GnawTreeWriter, top-level nodes are children of the root "" or "0"
             "0".to_string() 
         }
     }
@@ -133,7 +129,9 @@ impl GnawSenseBroker {
             path
         };
         
-        last_part.parse::<usize>().unwrap_or(0) + 1
+        let idx = last_part.parse::<usize>().unwrap_or(0);
+        // Use +3 to signal to GnawTreeWriter that this is a literal child index
+        idx + 3 + 1
     }
 
     #[cfg(feature = "modernbert")]
@@ -148,7 +146,6 @@ impl GnawSenseBroker {
         // Collect important nodes (functions, classes, etc.)
         let mut nodes = Vec::new();
         fn collect(n: &TreeNode, acc: &mut Vec<TreeNode>) {
-            // Only index "meaningful" nodes to save time/space
             if n.node_type.contains("definition") || n.node_type.contains("item") {
                 acc.push(n.clone());
             }

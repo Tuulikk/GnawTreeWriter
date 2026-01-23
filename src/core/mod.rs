@@ -11,6 +11,7 @@ pub mod batch;
 pub mod diff_parser;
 pub mod refactor;
 pub mod restoration_engine;
+pub mod scaffold;
 pub mod tag_manager;
 pub mod label_manager;
 pub mod transaction_log;
@@ -19,6 +20,7 @@ pub mod undo_redo;
 pub use batch::{Batch, BatchEdit};
 pub use refactor::{format_refactor_results, RefactorEngine, RefactorResult};
 pub use restoration_engine::{RestorationEngine, RestorationResult, RestorationStats};
+pub use scaffold::ScaffoldEngine;
 pub use tag_manager::TagManager;
 pub use label_manager::LabelManager;
 pub use transaction_log::{
@@ -391,7 +393,19 @@ impl GnawTreeWriter {
                     parent.start_line
                 }
             }
-            _ => return Err(anyhow::anyhow!("Invalid position: {}", position)),
+            // SUPPORT FOR ARBITRARY INDICES
+            idx => {
+                // If we want to insert at a specific index relative to children
+                if idx - 3 < parent.children.len() {
+                    parent.children[idx - 3].end_line
+                } else if !parent.children.is_empty() {
+                    // If index is out of bounds but we have children, append after last child
+                    parent.children.last().unwrap().end_line
+                } else {
+                    // Fallback to inside parent (start)
+                    parent.start_line
+                }
+            }
         };
 
         // Detect indentation from parent or siblings
