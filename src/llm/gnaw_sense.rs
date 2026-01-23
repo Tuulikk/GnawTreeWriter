@@ -121,6 +121,7 @@ impl GnawSenseBroker {
         Ok(proposal)
     }
 
+    #[allow(dead_code)]
     #[cfg(feature = "modernbert")]
     fn get_parent_path(&self, path: &str) -> String {
         if let Some(last_dot) = path.rfind('.') {
@@ -130,6 +131,7 @@ impl GnawSenseBroker {
         }
     }
 
+    #[allow(dead_code)]
     #[cfg(feature = "modernbert")]
     fn get_next_index(&self, path: &str) -> usize {
         let last_part = if let Some(last_dot) = path.rfind('.') {
