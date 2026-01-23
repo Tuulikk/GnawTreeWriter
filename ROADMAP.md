@@ -10,19 +10,21 @@ The roadmap is divided into two sections:
 
 ---
 
-## Current Status: v0.7.0 (Released 2026-01-22)
+## Current Status: v0.7.1 (Released 2026-01-22)
 
-### ✅ Completed Features (The Semantic Milestone)
+### ✅ Completed Features (The Structural Scaffolding Update)
 
+- **Structural Scaffolding**: Create new files with predefined AST structures via the `scaffold` command.
+- **Arbitrary AST Indexing**: Upgraded core logic to support precise child positioning beyond basic top/bottom.
 - **GnawSense Engine**: Revolutionary AI-powered semantic search and action driven by **ModernBERT**.
 - **Semantic Insertion**: `sense-insert` command allowing code injection near landmarks without paths.
 - **TCARV Methodology**: Formalized AI-native development process (1.0 + TAC + AUTO addons).
 - **Anchor Detection**: Ported from Comparative-Writer to support partial AI code snippets (`// ...`).
 - **Agent Intelligence**: `GEMINI.md` and updated `AGENTS.md` for proaktive agent collaboration.
-- **Robust MCP Server**: Fully exposed GnawSense tools to AI agents via `sense` and `semantic_insert`.
+- **Robust MCP Server**: Fully exposed GnawSense tools to AI agents.
 - **Safety Policies**: Anti-Lobotomy and Git-Surgery (No-Nuke) rules enforced for agents.
 - **Temporal Recovery**: Restore project, files, or sessions to any point in time.
-- **Multi-language support**: Python, Rust, TypeScript, JavaScript, PHP, HTML, QML, Go, Java, Zig, C, C++, Bash, XML, YAML, TOML, CSS, Markdown.
+- **Multi-language support**: 17+ programming languages.
 
 ---
 
@@ -67,7 +69,7 @@ All features in this section are and will remain **free and open source** under 
 
 ### **Actionable Intent (The Hand)**
 - [x] **Semantic Anchors**: Basic `after` insertion based on semantic landmarks.
-- [ ] **Relative Placement Expansion**: Support for `INSIDE`, `BEFORE`, `BEGINNING`, and `END` using AST context.
+- [x] **Relative Placement Expansion**: Support for `INSIDE`, `BEFORE`, `BEGINNING`, and `END` using AST context.
 - [ ] **Structural Style Transfer**: Analyze the user's specific coding style and normalize agent-generated code to match it.
 - [ ] **The Duplex Loop**: Self-correcting edits where GnawSense validates its own proposal against the AST before presenting it.
 
@@ -87,7 +89,7 @@ All features in this section are and will remain **free and open source** under 
 **Target: Q3 2026**
 
 - [ ] **ALF (Agentic Logging Framework)**: Standardized temporal journaling for AI agents (`ALF.md`).
-- [ ] **Structural Scaffolding**: Create new files by defining a tree schema.
+- [x] **Structural Scaffolding**: Create new files by defining a tree schema (Moved from Phase 5 to v0.7.1).
 - [ ] **"Fix-my-Fix" Loop**: If an edit causes a parse error, use the AST to suggest or auto-apply the syntax fix.
 - [ ] **Semantic Diffing**: Show changes as tree operations instead of line diffs.
 
@@ -105,6 +107,11 @@ All features in this section are and will remain **free and open source** under 
 
 ## Recent Progress
 
+### v0.7.1 (2026-01-22) — THE SCAFFOLDING UPDATE 🏗️
+- ✅ **Structural Scaffolding**: Command `scaffold` for creating AST-templated files.
+- ✅ **Improved Indexing**: Support for arbitrary child positions in core `insert`.
+- ✅ **Help System**: Added semantic search and scaffolding examples to `examples`.
+
 ### v0.7.0 (2026-01-22) — THE SEMANTIC RELEASE 🚀
 - ✅ **GnawSense**: Semantic search (`sense`) and action (`sense-insert`) using ModernBERT.
 - ✅ **TCARV 1.0**: Core methodology for AI-assisted engineering (+ TAC & AUTO modules).
@@ -114,32 +121,6 @@ All features in this section are and will remain **free and open source** under 
 
 ### v0.6.11 (2026-01-12)
 - ✅ **Help System Cleanup**: Updated examples and wizard commands.
-- ✅ **Command Documentation**: Added missing examples for search and skeleton.
-
-### v0.6.10 (2026-01-12)
-- ✅ **Full CLI Parity**: Added search, skeleton, and semantic-report to CLI.
-
-### v0.6.9 (2026-01-12)
-- ✅ **Semantic Selection**: Target nodes using `@fn:name` shorthand.
-- ✅ **Enhanced CLI**: Added `read` command and improved `list` output.
-
-### v0.6.8 (2026-01-11)
-- ✅ **Agent Safety Guide**: Added "The Gnaw Mental Model" to AGENTS.md.
-- ✅ **Zed Flatpak Support**: Added instructions for flatpak-spawn.
-
-### v0.6.7 (2026-01-11)
-- ✅ **Contextual Usage Hints**: JIT learning system in stderr.
-
-### v0.6.6 (2026-01-11)
-- ✅ **Colored Diff Preview**: ANSI color support for CLI previews.
-- ✅ **MCP Diff Feedback**: Tools now return unified diffs.
-
-### v0.6.5 (2026-01-11)
-- ✅ **Intelligence Loop**: Integrated LabelManager and Semantic Reporting.
-
-### v0.6.0 (2025-01-05)
-- ✅ Fixed GitHub Actions CI/CD for ModernBERT.
-- ✅ Extensive dogfooding for reliability.
 
 ---
 
