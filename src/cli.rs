@@ -1929,28 +1929,44 @@ Use --no-preview to perform the restoration"
                 println!("  ✅ Transaction logging");
             }
             Some("ai") => {
-                println!("🤖 LOCAL AI & ANALYSIS EXAMPLES");
-                println!("===============================");
+                println!("🤖 GNAWSENSE: AI-POWERED NAVIGATION & ACTION");
+                println!("============================================");
                 println!();
-                println!("1. Semantic Quality Report:");
-                println!("   gnawtreewriter semantic-report src/main.rs");
-                println!("   # Uses ModernBERT to find structural anomalies.");
-                println!("   # Requires: --features modernbert at compile time");
+                println!("1. Semantic Search (Project-wide):");
+                println!("   gnawtreewriter sense \"how is file backup handled?\"");
+                println!("   # Uses ModernBERT to find relevant files semantically.");
                 println!();
-                println!("2. Structural Search:");
-                println!("   gnawtreewriter search main.rs \"database connection\"");
-                println!("   # Finds all nodes containing the pattern.");
+                println!("2. Semantic Zoom (Within file):");
+                println!("   gnawtreewriter sense \"where is the database connection?\" src/db.rs");
+                println!("   # Finds specific functions or classes by meaning.");
                 println!();
-                println!("3. Hierarchical Skeleton:");
-                println!("   gnawtreewriter skeleton src/lib.rs --depth 3");
-                println!("   # High-level overview of classes and functions.");
+                println!("3. Semantic Insertion (The magic!):");
+                println!("   gnawtreewriter sense-insert main.rs \"the main function\" \"println!(\\\"Init...\\\");\" --preview");
+                println!("   # Inserts code near a landmark without needing paths.");
                 println!();
                 println!("**Key Benefits:**");
-                println!("  ✅ 100% Local - No data leaves your machine");
-                println!("  ✅ Privacy First - Works offline with ModernBERT (for reports)");
-                println!("  ✅ AST-Aware - Understands code structure, not just text");
+                println!("  ✅ 100% Local - Powered by ModernBERT (requires modernbert feature)");
+                println!("  ✅ Precision - Bridges the gap between intent and AST structure");
+                println!("  ✅ Agent-Friendly - Allows AI agents to navigate autonomously");
+            }
+            Some("scaffolding") => {
+                println!("🏗️  STRUCTURAL SCAFFOLDING EXAMPLES");
+                println!("================================");
                 println!();
-                println!("**Note:** 'semantic-report' requires the modernbert feature.");
+                println!("1. Create a new Rust module:");
+                println!("   gnawtreewriter scaffold src/auth.rs --schema \"rust:mod(name:security, fn:validate)\"");
+                println!();
+                println!("2. Create a Python class:");
+                println!("   gnawtreewriter scaffold model.py --schema \"python:class(name:User, fn:save)\"");
+                println!();
+                println!("3. Combined workflow:");
+                println!("   # Step 1: Scaffold the file structure");
+                println!("   # Step 2: Use sense-insert to fill in the logic");
+                println!();
+                println!("**Why Scaffolding?**");
+                println!("  ✅ Valid Syntax - Files are correct from the first byte");
+                println!("  ✅ AST Landmarks - Creates anchors for GnawSense to find");
+                println!("  ✅ Consistency - Enforces structural patterns");
             }
             Some("workflow") => {
                 println!("🔄 COMMON WORKFLOWS");
