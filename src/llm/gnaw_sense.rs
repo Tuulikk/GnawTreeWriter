@@ -9,6 +9,10 @@ use std::path::{Path, PathBuf};
 
 pub struct GnawSenseBroker {
     #[allow(dead_code)]
+    #[cfg(feature = "modernbert")]
+    ai_manager: AiManager,
+    #[allow(dead_code)]
+    #[cfg(not(feature = "modernbert"))]
     ai_manager: crate::llm::AiManager,
     #[allow(dead_code)]
     project_root: PathBuf,
