@@ -4,7 +4,7 @@
   "description": "GnawTreeWriter integration for Gemini CLI via MCP",
   "mcpServers": {
     "gnawtreewriter": {
-      "command": "../../target/release/gnawtreewriter",
+      "command": "${extensionPath}/../../target/release/gnawtreewriter",
       "args": ["mcp", "stdio"]
     }
   }
