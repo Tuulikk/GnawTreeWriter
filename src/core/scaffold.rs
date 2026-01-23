@@ -2,6 +2,12 @@ use anyhow::{Result, anyhow};
 
 pub struct ScaffoldEngine;
 
+impl Default for ScaffoldEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScaffoldEngine {
     pub fn new() -> Self {
         Self

@@ -1,12 +1,15 @@
 use anyhow::Result;
+#[cfg(feature = "modernbert")]
 use crate::llm::{AiManager, AiModel, DeviceType, SemanticIndex};
+#[cfg(feature = "modernbert")]
 use crate::parser::TreeNode;
+#[cfg(feature = "modernbert")]
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub struct GnawSenseBroker {
     #[allow(dead_code)]
-    ai_manager: AiManager,
+    ai_manager: crate::llm::AiManager,
     #[allow(dead_code)]
     project_root: PathBuf,
 }
@@ -47,7 +50,7 @@ pub struct EditProposal {
 impl GnawSenseBroker {
     pub fn new(project_root: &Path) -> Result<Self> {
         Ok(Self {
-            ai_manager: AiManager::new(project_root)?,
+            ai_manager: crate::llm::AiManager::new(project_root)?,
             project_root: project_root.to_path_buf(),
         })
     }
@@ -114,6 +117,7 @@ impl GnawSenseBroker {
         Ok(proposal)
     }
 
+    #[cfg(feature = "modernbert")]
     fn get_parent_path(&self, path: &str) -> String {
         if let Some(last_dot) = path.rfind('.') {
             path[..last_dot].to_string()
@@ -122,6 +126,7 @@ impl GnawSenseBroker {
         }
     }
 
+    #[cfg(feature = "modernbert")]
     fn get_next_index(&self, path: &str) -> usize {
         let last_part = if let Some(last_dot) = path.rfind('.') {
             &path[last_dot + 1..]

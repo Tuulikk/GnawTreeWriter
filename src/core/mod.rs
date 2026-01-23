@@ -289,6 +289,7 @@ impl GnawTreeWriter {
         None
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn find_node_by_name<'a>(&self, tree: &'a TreeNode, name: &str, kind: Option<&str>) -> Option<&'a TreeNode> {
         // Does this node match?
         if let Some(node_name) = tree.get_name() {
@@ -345,8 +346,8 @@ impl GnawTreeWriter {
         }
 
         // Lines after the node
-        for i in node.end_line..lines.len() {
-            new_lines.push(lines[i].to_string());
+        for line in lines.iter().skip(node.end_line) {
+            new_lines.push(line.to_string());
         }
 
         Ok(new_lines.join("\n"))

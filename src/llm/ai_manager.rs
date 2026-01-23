@@ -7,6 +7,7 @@ use candle_nn::{self, VarBuilder};
 use candle_transformers::models::modernbert::{Config, ModernBert};
 #[cfg(feature = "modernbert")]
 use hf_hub::{Repo, RepoType};
+#[cfg(feature = "modernbert")]
 use crate::core::LabelManager;
 use std::fs;
 use std::path::{Path, PathBuf};

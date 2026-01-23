@@ -6,6 +6,7 @@ use crate::core::{
     find_project_root, EditOperation, GnawTreeWriter, OperationType, RestorationEngine, TagManager,
     TransactionLog, UndoRedoManager,
 };
+#[cfg(feature = "modernbert")]
 use crate::llm::{GnawSenseBroker, SenseResponse};
 use crate::parser::TreeNode;
 use anyhow::{Context, Result};
@@ -1340,11 +1341,9 @@ Use --no-preview to write batch file"
         let mut matches = Vec::new();
 
         fn find(n: &TreeNode, acc: &mut Vec<(String, String, String)>, p: &str, f: Option<&str>) {
-            if n.content.contains(p) {
-                if f.map_or(true, |filter| n.node_type == filter) {
-                    let name = n.get_name().unwrap_or_else(|| "unnamed".to_string());
-                    acc.push((n.path.clone(), n.node_type.clone(), name));
-                }
+            if n.content.contains(p) && f.is_none_or(|filter| n.node_type == filter) {
+                let name = n.get_name().unwrap_or_else(|| "unnamed".to_string());
+                acc.push((n.path.clone(), n.node_type.clone(), name));
             }
             for child in &n.children {
                 find(child, acc, p, f);
