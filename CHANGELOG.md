@@ -2,6 +2,16 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.7.2] - 2026-01-22
+
+### Added
+- **Recursive Scaffolding**: Enhanced `scaffold` command to support deeply nested structures using `children:[...]` syntax.
+- **HRM 2.0 Vision**: Documented the future path for Hierarchical Reasoning Models in `docs/HRM_VISION.md`.
+
+### Fixed
+- **CI Stability**: Resolved all remaining Clippy warnings and GitHub Actions connection timeouts.
+- **Parser Robustness**: Improved the schema parser to handle various input formats for scaffolding.
+
 ## [0.7.1] - 2026-01-22
 
 ### Added

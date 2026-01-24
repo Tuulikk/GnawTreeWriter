@@ -1,7 +1,6 @@
 #[cfg(feature = "modernbert")]
 mod tests {
     use gnawtreewriter::llm::{GnawSenseBroker, AiModel, DeviceType, AiManager};
-    use std::path::Path;
     use std::fs;
     use tempfile::tempdir;
 

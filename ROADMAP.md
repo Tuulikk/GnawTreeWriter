@@ -10,11 +10,12 @@ The roadmap is divided into two sections:
 
 ---
 
-## Current Status: v0.7.1 (Released 2026-01-22)
+## Current Status: v0.7.2 (Released 2026-01-23)
 
 ### ✅ Completed Features (The Structural Scaffolding Update)
 
-- **Structural Scaffolding**: Create new files with predefined AST structures via the `scaffold` command.
+- **Recursive Scaffolding**: Create deeply nested file structures via the `scaffold` command with `children:[...]` support.
+- **Structural Scaffolding**: Create new files with predefined AST structures.
 - **Arbitrary AST Indexing**: Upgraded core logic to support precise child positioning beyond basic top/bottom.
 - **GnawSense Engine**: Revolutionary AI-powered semantic search and action driven by **ModernBERT**.
 - **Semantic Insertion**: `sense-insert` command allowing code injection near landmarks without paths.
@@ -90,6 +91,7 @@ All features in this section are and will remain **free and open source** under 
 
 - [ ] **ALF (Agentic Logging Framework)**: Standardized temporal journaling for AI agents (`ALF.md`).
 - [x] **Structural Scaffolding**: Create new files by defining a tree schema (Moved from Phase 5 to v0.7.1).
+- [ ] **HRM 2.0 Integration**: Implementation of Hierarchical Reasoning Models for side-effect prediction and structural style transfer. See [docs/HRM_VISION.md](docs/HRM_VISION.md).
 - [ ] **"Fix-my-Fix" Loop**: If an edit causes a parse error, use the AST to suggest or auto-apply the syntax fix.
 - [ ] **Semantic Diffing**: Show changes as tree operations instead of line diffs.
 
