@@ -1,0 +1,1 @@
+fn run() { calculate_total(); }

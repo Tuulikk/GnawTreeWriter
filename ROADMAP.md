@@ -14,8 +14,7 @@ The roadmap is divided into two sections:
 
 ### ✅ Completed Features (The Structural Scaffolding Update)
 
-- **Recursive Scaffolding**: Create deeply nested file structures via the `scaffold` command with `children:[...]` support.
-- **Structural Scaffolding**: Create new files with predefined AST structures.
+- **Recursive Scaffolding (v1)**: Create deeply nested file structures via the `scaffold` command with `children:[...]` support. Initial implementation complete; future versions will improve argument parsing.
 - **Arbitrary AST Indexing**: Upgraded core logic to support precise child positioning beyond basic top/bottom.
 - **GnawSense Engine**: Revolutionary AI-powered semantic search and action driven by **ModernBERT**.
 - **Semantic Insertion**: `sense-insert` command allowing code injection near landmarks without paths.

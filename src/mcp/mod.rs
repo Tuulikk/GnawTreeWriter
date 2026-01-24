@@ -522,8 +522,8 @@ pub mod mcp_server {
                         SenseResponse::Satelite { matches } => {
                             tool_success("Satelite search results".into(), Some(json!({"matches": matches})))
                         }
-                        SenseResponse::Zoom { file_path, nodes } => {
-                            tool_success(format!("Zoom search results for {}", file_path), Some(json!({"nodes": nodes})))
+                        SenseResponse::Zoom { file_path, nodes, impact } => {
+                            tool_success(format!("Zoom search results for {}", file_path), Some(json!({"nodes": nodes, "impact": impact})))
                         }
                     }
                 }

@@ -45,13 +45,14 @@ ScaffoldNode], depth: usize) -> String {
         for node in nodes {
             match node.kind.as_str() {
                 "mod" => {
-                    output.push_str(&format!("{}pub mod {} {{\n", indent, node.name));
+                    output.push_str(&format!("{}pub mod {} {{`", indent, node.name));
                     output.push_str(&self.generate_rust(&node.children, depth + 1));
                     output.push_str(&format!("{}}}
 \n", indent));
                 }
                 "struct" => {
-                    output.push_str(&format!("{}pub struct {} {{\n", indent, node.name));
+                    output.push_str(&format!("{}pub struct {} {{
+", indent, node.name));
                     for child in &node.children {
                         output.push_str(&format!("{}    pub {}: String,\n", indent, child.name));
                     }
@@ -62,7 +63,8 @@ ScaffoldNode], depth: usize) -> String {
 \n", indent));
                 }
                 "fn" => {
-                    output.push_str(&format!("{}pub fn {}() {{\n", indent, node.name));
+                    output.push_str(&format!("{}pub fn {}() {{
+", indent, node.name));
                     output.push_str(&self.generate_rust(&node.children, depth + 1));
                     if node.children.is_empty() {
                         output.push_str(&format!("{}    unimplemented!()\n", indent));
@@ -71,13 +73,15 @@ ScaffoldNode], depth: usize) -> String {
 \n", indent));
                 }
                 "impl" => {
-                    output.push_str(&format!("{}impl {} {{\n", indent, node.name));
+                    output.push_str(&format!("{}impl {} {{
+", indent, node.name));
                     output.push_str(&self.generate_rust(&node.children, depth + 1));
                     output.push_str(&format!("{}}}
 \n", indent));
                 }
                 _ => {
-                    output.push_str(&format!("{}// {} {}\n", indent, node.kind, node.name));
+                    output.push_str(&format!("{}// {} {}
+", indent, node.kind, node.name));
                 }
             }
         }
@@ -113,7 +117,8 @@ ScaffoldNode], depth: usize) -> String {
                     }
                 }
                 _ => {
-                    output.push_str(&format!("{}# {} {}\n", indent, node.kind, node.name));
+                    output.push_str(&format!("{}# {} {}
+", indent, node.kind, node.name));
                 }
             }
         }

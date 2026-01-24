@@ -1,6 +1,6 @@
 use anyhow::Result;
 #[cfg(feature = "modernbert")]
-use crate::llm::{AiManager, AiModel, DeviceType, SemanticIndex};
+use crate::llm::{AiManager, AiModel, DeviceType, SemanticIndex, RelationalIndexer, RelationType};
 #[cfg(feature = "modernbert")]
 use crate::parser::TreeNode;
 #[cfg(feature = "modernbert")]
@@ -16,6 +16,8 @@ pub struct GnawSenseBroker {
     ai_manager: crate::llm::AiManager,
     #[allow(dead_code)]
     project_root: PathBuf,
+    #[cfg(feature = "modernbert")]
+    relational_indexer: RelationalIndexer,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -26,6 +28,7 @@ pub enum SenseResponse {
     Zoom {
         file_path: String,
         nodes: Vec<NodeMatch>,
+        impact: Option<Vec<ImpactMatch>>,
     },
 }
 
@@ -43,6 +46,12 @@ pub struct NodeMatch {
 }
 
 #[derive(Debug, serde::Serialize)]
+pub struct ImpactMatch {
+    pub file_path: String,
+    pub node_path: String,
+}
+
+#[derive(Debug, serde::Serialize)]
 pub struct EditProposal {
     pub anchor_path: String,
     pub suggested_op: String,
@@ -56,6 +65,8 @@ impl GnawSenseBroker {
         Ok(Self {
             ai_manager: crate::llm::AiManager::new(project_root)?,
             project_root: project_root.to_path_buf(),
+            #[cfg(feature = "modernbert")]
+            relational_indexer: RelationalIndexer::new(project_root),
         })
     }
 
@@ -70,6 +81,32 @@ impl GnawSenseBroker {
             let index = self.index_file(file_path, &model).await?;
             let results = index.search(&query_vector, 5);
             
+            // JIT RELATIONAL ANALYSIS: Index the directory to find callers
+            if let Some(parent) = Path::new(file_path).parent() {
+                let mut indexer = RelationalIndexer::new(&self.project_root);
+                let _ = indexer.index_directory(parent);
+            }
+
+            // Find impact of top match
+            let mut impact_matches = Vec::new();
+            if !results.is_empty() {
+                let top_node = &results[0].0;
+                // If it's a definition, look for callers
+                if let Some(name) = self.extract_name_from_preview(&top_node.content_preview) {
+                    let all_graphs = self.relational_indexer.load_all_graphs()?;
+                    for graph in all_graphs {
+                        for rel in graph.relations {
+                            if rel.to_name == name && rel.relation_type == RelationType::Call {
+                                impact_matches.push(ImpactMatch {
+                                    file_path: graph.file_path.clone(),
+                                    node_path: rel.from_path.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
             Ok(SenseResponse::Zoom {
                 file_path: file_path.to_string(),
                 nodes: results.into_iter().map(|(n, score)| NodeMatch {
@@ -77,6 +114,7 @@ impl GnawSenseBroker {
                     preview: n.content_preview.clone(),
                     score,
                 }).collect(),
+                impact: if impact_matches.is_empty() { None } else { Some(impact_matches) },
             })
         } else {
             // SATELITE MODE: Search across files
@@ -121,7 +159,6 @@ impl GnawSenseBroker {
         Ok(proposal)
     }
 
-    #[allow(dead_code)]
     #[cfg(feature = "modernbert")]
     fn get_parent_path(&self, path: &str) -> String {
         if let Some(last_dot) = path.rfind('.') {
@@ -131,7 +168,6 @@ impl GnawSenseBroker {
         }
     }
 
-    #[allow(dead_code)]
     #[cfg(feature = "modernbert")]
     fn get_next_index(&self, path: &str) -> usize {
         let last_part = if let Some(last_dot) = path.rfind('.') {
@@ -176,5 +212,21 @@ impl GnawSenseBroker {
         }
 
         Ok(index)
+    }
+
+    #[cfg(feature = "modernbert")]
+    fn extract_name_from_preview(&self, preview: &str) -> Option<String> {
+        // Very basic extraction: look for "fn NAME" or "struct NAME"
+        if let Some(pos) = preview.find("fn ") {
+            let after = &preview[pos + 3..];
+            let name_end = after.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(after.len());
+            return Some(after[..name_end].trim().to_string());
+        }
+        if let Some(pos) = preview.find("struct ") {
+            let after = &preview[pos + 7..];
+            let name_end = after.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(after.len());
+            return Some(after[..name_end].trim().to_string());
+        }
+        None
     }
 }

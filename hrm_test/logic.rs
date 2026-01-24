@@ -1,0 +1,1 @@
+fn calculate_total() { println!("Calculating..."); }

@@ -1447,12 +1447,19 @@ Use --no-preview to write batch file"
                     }
                     println!("\nTip: Use `gnawtreewriter sense \"{}\" --file {}` to zoom in.", query, matches[0].file_path);
                 }
-                SenseResponse::Zoom { file_path, nodes } => {
+                SenseResponse::Zoom { file_path, nodes, impact } => {
                     println!("\n🔍 Zoom View: Relevant nodes in {}:", file_path);
                     for (i, n) in nodes.iter().enumerate() {
                         println!("  {}. [{}] (score: {:.2})", i + 1, n.path, n.score);
                         if deep || i == 0 {
                             println!("     \"{}\"", n.preview.replace("\n", " "));
+                        }
+                    }
+
+                    if let Some(matches) = impact {
+                        println!("\n⚠️  Impact Alert: This logic appears to be used in:");
+                        for m in matches {
+                            println!("  🔗 {} (node path: {})", m.file_path, m.node_path);
                         }
                     }
                 }

@@ -2,6 +2,15 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.7.3] - 2026-01-23
+
+### Added
+- **HRM 2.0 (Hierarchical Reasoning Model)**: Introduces relational awareness to GnawSense.
+  - **Relational Indexing**: Automatically maps function calls and definitions across files.
+  - **Impact Alerts**: GnawSense now warns you when a semantic search result is used by other parts of the project.
+  - **Just-In-Time (JIT) Analysis**: Automatically indexes surrounding files during semantic search to provide context-aware impact reports.
+- **Improved MCP Integration**: Semantic search tools in MCP now include impact analysis, allowing AI agents to foresee side-effects of their changes.
+
 ## [0.7.2] - 2026-01-22
 
 ### Added
