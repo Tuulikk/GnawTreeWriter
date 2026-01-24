@@ -1,4 +1,4 @@
-use crate::parser::{ParserEngine, TreeNode};
+use crate::parser::{TreeNode, ParserEngineLegacy};
 use anyhow::Result;
 use regex::Regex;
 
@@ -16,8 +16,8 @@ impl CssParser {
     }
 }
 
-impl ParserEngine for CssParser {
-    fn parse(&self, code: &str) -> Result<TreeNode> {
+impl ParserEngineLegacy for CssParser {
+    fn parse_legacy(&self, code: &str) -> anyhow::Result<TreeNode> {
         // Remove comments first
         let clean_code = self.remove_comments(code);
 

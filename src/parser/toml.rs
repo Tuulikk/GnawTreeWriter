@@ -1,4 +1,4 @@
-use crate::parser::{ParserEngine, TreeNode};
+use crate::parser::{TreeNode, ParserEngineLegacy};
 use anyhow::Result;
 use toml::Value;
 
@@ -16,8 +16,8 @@ impl TomlParser {
     }
 }
 
-impl ParserEngine for TomlParser {
-    fn parse(&self, code: &str) -> Result<TreeNode> {
+impl ParserEngineLegacy for TomlParser {
+    fn parse_legacy(&self, code: &str) -> anyhow::Result<TreeNode> {
         let value: Value = code
             .parse()
             .map_err(|e| anyhow::anyhow!("Failed to parse TOML: {}", e))?;

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::parser::{ParserEngine, TreeNode};
+use crate::parser::{TreeNode, ParserEngineLegacy};
 use anyhow::Result;
 use tree_sitter::Parser;
 
@@ -58,8 +58,8 @@ impl BashParser {
     }
 }
 
-impl ParserEngine for BashParser {
-    fn parse(&self, source_code: &str) -> Result<TreeNode> {
+impl ParserEngineLegacy for BashParser {
+    fn parse_legacy(&self, source_code: &str) -> anyhow::Result<TreeNode> {
         let mut parser = Parser::new();
         let language = unsafe {
             std::mem::transmute::<tree_sitter_language::LanguageFn, fn() -> tree_sitter::Language>(

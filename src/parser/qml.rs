@@ -1,4 +1,4 @@
-use crate::parser::{ParserEngine, TreeNode};
+use crate::parser::{TreeNode, ParserEngineLegacy};
 use anyhow::Result;
 
 pub struct QmlParser;
@@ -15,76 +15,50 @@ impl QmlParser {
     }
 }
 
-impl ParserEngine for QmlParser {
-    fn parse(&self, code: &str) -> Result<TreeNode> {
-        let mut root = TreeNode {
-            id: "root".to_string(),
-            path: "root".to_string(),
-            node_type: "QmlDocument".to_string(),
-            content: code.to_string(),
-            start_line: 1,
-            end_line: code.lines().count(),
-            children: Vec::new(),
-        };
-
+impl ParserEngineLegacy for QmlParser {
+    fn parse_legacy(&self, code: &str) -> anyhow::Result<TreeNode> {
+        let mut root_children = Vec::new();
         let lines: Vec<&str> = code.lines().collect();
-        let mut current_component: Option<(TreeNode, Vec<TreeNode>)> = None;
-        let mut component_stack: Vec<(TreeNode, Vec<TreeNode>, usize)> = Vec::new();
+        let mut current_obj_name = "unknown".to_string();
+        let mut in_obj = false;
+        let mut obj_start_line = 1;
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
-            let depth = line.len() - trimmed.len();
+            if trimmed.is_empty() || trimmed.starts_with("//") {
+                continue;
+            }
 
-            if trimmed.starts_with("import ") {
-                root.children.push(TreeNode {
-                    id: format!("root.{}", root.children.len()),
-                    path: format!("root.{}", root.children.len()),
-                    node_type: "Import".to_string(),
-                    content: trimmed.to_string(),
-                    start_line: i + 1,
-                    end_line: i + 1,
-                    children: Vec::new(),
-                });
-            } else if trimmed.ends_with("{") {
-                let component_name = trimmed.strip_suffix('{').unwrap().trim();
-                if !component_name.is_empty() {
-                    let component = TreeNode {
-                        id: format!("root.{}", root.children.len()),
-                        path: format!("root.{}", root.children.len()),
-                        node_type: component_name.to_string(),
-                        content: String::new(),
-                        start_line: i + 1,
+            if trimmed.ends_with("{") {
+                if !in_obj {
+                    current_obj_name = trimmed.trim_end_matches("{").trim().to_string();
+                    in_obj = true;
+                    obj_start_line = i + 1;
+                }
+            } else if trimmed == "}" {
+                if in_obj {
+                    root_children.push(TreeNode {
+                        id: format!("obj_{}", root_children.len()),
+                        path: root_children.len().to_string(),
+                        node_type: "ui_object".to_string(),
+                        content: current_obj_name.clone(),
+                        start_line: obj_start_line,
                         end_line: i + 1,
                         children: Vec::new(),
-                    };
-
-                    if let Some((comp, props)) = current_component {
-                        component_stack.push((comp, props, depth));
-                    }
-
-                    current_component = Some((component, Vec::new()));
+                    });
+                    in_obj = false;
                 }
-            } else if trimmed.starts_with("}") {
-                if let Some((comp, props, _comp_depth)) = component_stack.pop() {
-                    if let Some((ref mut root_comp, ref mut root_props)) = current_component {
-                        root_comp.children = root_props.clone();
-                        root_comp.end_line = i + 1;
-                        root.children.push(std::mem::take(root_comp));
-                    }
-                    current_component = Some((comp, props));
-                } else if let Some((ref mut comp, ref mut props)) = current_component {
-                    comp.children = props.clone();
-                    comp.end_line = i + 1;
-                    root.children.push(std::mem::take(comp));
-                    current_component = None;
-                }
-            } else if !trimmed.is_empty() && !trimmed.starts_with("//") {
-                if let Some((ref mut _comp, ref mut props)) = current_component {
-                    if let Some((prop_name, prop_value)) = self.parse_property(trimmed) {
-                        props.push(TreeNode {
-                            id: format!("root.{}.{}", root.children.len(), props.len()),
-                            path: format!("root.{}.{}", root.children.len(), props.len()),
-                            node_type: "Property".to_string(),
+            } else if in_obj {
+                if let Some((prop_name, prop_value)) = self.parse_property(trimmed) {
+                    let last_idx = root_children.len();
+                    if last_idx > 0 {
+                        let parent = &mut root_children[last_idx - 1];
+                        let child_idx = parent.children.len();
+                        let parent_path = parent.path.clone();
+                        parent.children.push(TreeNode {
+                            id: format!("{}_{}", prop_name, child_idx),
+                            path: format!("{}.{}", parent_path, child_idx),
+                            node_type: "ui_property".to_string(),
                             content: format!("{}: {}", prop_name, prop_value),
                             start_line: i + 1,
                             end_line: i + 1,
@@ -95,7 +69,15 @@ impl ParserEngine for QmlParser {
             }
         }
 
-        Ok(root)
+        Ok(TreeNode {
+            id: "root".to_string(),
+            path: "0".to_string(),
+            node_type: "qml_file".to_string(),
+            content: "QML".to_string(),
+            start_line: 1,
+            end_line: lines.len(),
+            children: root_children,
+        })
     }
 
     fn get_supported_extensions(&self) -> Vec<&'static str> {

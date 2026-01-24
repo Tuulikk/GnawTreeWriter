@@ -10,21 +10,13 @@ The roadmap is divided into two sections:
 
 ---
 
-## Current Status: v0.7.2 (Released 2026-01-23)
+## Current Status: v0.7.4 (Released 2026-01-23)
 
-### ✅ Completed Features (The Structural Scaffolding Update)
+### ✅ Completed Features (The Duplex Loop Update)
 
-- **Recursive Scaffolding (v1)**: Create deeply nested file structures via the `scaffold` command with `children:[...]` support. Initial implementation complete; future versions will improve argument parsing.
-- **Arbitrary AST Indexing**: Upgraded core logic to support precise child positioning beyond basic top/bottom.
-- **GnawSense Engine**: Revolutionary AI-powered semantic search and action driven by **ModernBERT**.
-- **Semantic Insertion**: `sense-insert` command allowing code injection near landmarks without paths.
-- **TCARV Methodology**: Formalized AI-native development process (1.0 + TAC + AUTO addons).
-- **Anchor Detection**: Ported from Comparative-Writer to support partial AI code snippets (`// ...`).
-- **Agent Intelligence**: `GEMINI.md` and updated `AGENTS.md` for proaktive agent collaboration.
-- **Robust MCP Server**: Fully exposed GnawSense tools to AI agents.
-- **Safety Policies**: Anti-Lobotomy and Git-Surgery (No-Nuke) rules enforced for agents.
-- **Temporal Recovery**: Restore project, files, or sessions to any point in time.
-- **Multi-language support**: 17+ programming languages.
+- **The Duplex Loop (Infrastructure)**: Foundation for self-healing code edits using structured syntax errors.
+- **Dogfooding Milestone**: Used GnawTreeWriter to refactor its own parser system project-wide.
+- **HRM 2.0 (v1)**: Relational awareness in GnawSense. Find callers and side-effects semantically.
 
 ---
 
@@ -70,8 +62,8 @@ All features in this section are and will remain **free and open source** under 
 ### **Actionable Intent (The Hand)**
 - [x] **Semantic Anchors**: Basic `after` insertion based on semantic landmarks.
 - [x] **Relative Placement Expansion**: Support for `INSIDE`, `BEFORE`, `BEGINNING`, and `END` using AST context.
+- [x] **The Duplex Loop (Foundation)**: Self-correcting edits using structured syntax errors (v0.7.4).
 - [ ] **Structural Style Transfer**: Analyze the user's specific coding style and normalize agent-generated code to match it.
-- [ ] **The Duplex Loop**: Self-correcting edits where GnawSense validates its own proposal against the AST before presenting it.
 
 ---
 
@@ -91,7 +83,7 @@ All features in this section are and will remain **free and open source** under 
 - [ ] **ALF (Agentic Logging Framework)**: Standardized temporal journaling for AI agents (`ALF.md`).
 - [x] **Structural Scaffolding**: Create new files by defining a tree schema (Moved from Phase 5 to v0.7.1).
 - [ ] **HRM 2.0 Integration**: Implementation of Hierarchical Reasoning Models for side-effect prediction and structural style transfer. See [docs/HRM_VISION.md](docs/HRM_VISION.md).
-- [ ] **"Fix-my-Fix" Loop**: If an edit causes a parse error, use the AST to suggest or auto-apply the syntax fix.
+- [🔄] **"Fix-my-Fix" Loop**: If an edit causes a parse error, use the AST to suggest or auto-apply the syntax fix (Initiated in v0.7.4).
 - [ ] **Semantic Diffing**: Show changes as tree operations instead of line diffs.
 
 ---

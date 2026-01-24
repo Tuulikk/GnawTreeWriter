@@ -1,4 +1,4 @@
-use crate::parser::{ParserEngine, TreeNode};
+use crate::parser::{TreeNode, ParserEngineLegacy};
 use anyhow::Result;
 use serde_yaml::Value;
 
@@ -16,8 +16,8 @@ impl YamlParser {
     }
 }
 
-impl ParserEngine for YamlParser {
-    fn parse(&self, code: &str) -> Result<TreeNode> {
+impl ParserEngineLegacy for YamlParser {
+    fn parse_legacy(&self, code: &str) -> anyhow::Result<TreeNode> {
         let value: Value = serde_yaml::from_str(code)
             .map_err(|e| anyhow::anyhow!("Failed to parse YAML: {}", e))?;
 

@@ -2353,12 +2353,11 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
         // Prepare modified content (simple global replace)
         let modified = original.replace(search, &replacement_text);
 
-        // Validate with parser (if available for file type)
-        if let Err(e) = crate::parser::get_parser(path).and_then(|parser| parser.parse(&modified)) {
-            return Err(anyhow::anyhow!(
-                "Validation failed: {}. Change NOT applied.",
-                e
-            ));
+        // VALIDATION: Try to parse the modified code in memory before saving
+        let validation_path = Path::new(file);
+        if let Err(e) = crate::parser::get_parser(validation_path).and_then(|parser| Ok(parser.parse(&modified)?)) {
+            println!("Validation failed: The proposed edit would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e);
+            return Ok(());
         }
 
         if preview {

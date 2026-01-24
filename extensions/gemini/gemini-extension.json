@@ -1,6 +1,6 @@
 {
   "name": "gnawtreewriter",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "GnawTreeWriter integration for Gemini CLI via MCP",
   "mcpServers": {
     "gnawtreewriter": {

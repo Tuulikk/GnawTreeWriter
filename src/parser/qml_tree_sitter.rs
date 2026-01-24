@@ -1,4 +1,4 @@
-use crate::parser::{ParserEngine, TreeNode};
+use crate::parser::{TreeNode, ParserEngineLegacy};
 use anyhow::Result;
 
 pub struct QmlTreeSitterParser;
@@ -15,8 +15,8 @@ impl QmlTreeSitterParser {
     }
 }
 
-impl ParserEngine for QmlTreeSitterParser {
-    fn parse(&self, code: &str) -> Result<TreeNode> {
+impl ParserEngineLegacy for QmlTreeSitterParser {
+    fn parse_legacy(&self, code: &str) -> anyhow::Result<TreeNode> {
         let mut parser = tree_sitter::Parser::new();
 
         // Force call the underlying function pointer

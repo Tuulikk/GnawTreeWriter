@@ -2,6 +2,20 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.7.4] - 2026-01-23
+
+### Added
+- **The Duplex Loop (Foundation)**: Built the core infrastructure for self-healing code edits.
+  - **Structured Syntax Errors**: Introduced `SyntaxError` and `ParseResult` to provide detailed feedback (line, column, message) from parsers.
+  - **Syntax Healer**: Initial implementation of the `Healer` module, capable of suggesting fixes for common errors like missing braces or colons.
+  - **Parser Versioning**: Implemented `LegacyParserWrapper` to support a gradual migration of all 20+ supported languages to the new error reporting standard.
+- **Dogfooding Milestone**: Successfully used GnawTreeWriter's own `edit` and `list` commands to perform a project-wide structural refactoring of the parser system.
+
+### Fixed
+- **System Stability**: Resolved critical borrow checker issues in recursive tree traversal and error detection logic.
+- **Improved Parsers**: Enhanced Rust and Python parsers with explicit error node detection.
+- **CLI Robustness**: Fixed type mismatches and variable scoping in `handle_quick_replace`.
+
 ## [0.7.3] - 2026-01-23
 
 ### Added

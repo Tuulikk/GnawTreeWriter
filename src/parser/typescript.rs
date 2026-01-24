@@ -1,4 +1,5 @@
-use crate::parser::{ParserEngine, TreeNode};
+use crate::parser::{TreeNode, ParserEngineLegacy};
+use tree_sitter::Parser;
 use anyhow::Result;
 
 pub struct TypeScriptParser;
@@ -15,12 +16,12 @@ impl TypeScriptParser {
     }
 }
 
-impl ParserEngine for TypeScriptParser {
-    fn parse(&self, code: &str) -> Result<TreeNode> {
-        let mut parser = tree_sitter::Parser::new();
+impl ParserEngineLegacy for TypeScriptParser {
+    fn parse_legacy(&self, code: &str) -> anyhow::Result<TreeNode> {
+        let mut parser = Parser::new();
         let language = unsafe {
             std::mem::transmute::<tree_sitter_language::LanguageFn, fn() -> tree_sitter::Language>(
-                tree_sitter_typescript::LANGUAGE_TSX,
+                tree_sitter_typescript::LANGUAGE_TYPESCRIPT,
             )()
         };
         parser.set_language(&language)?;

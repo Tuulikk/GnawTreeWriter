@@ -1,4 +1,4 @@
-use crate::parser::{ParserEngine, TreeNode};
+use crate::parser::{TreeNode, ParserEngineLegacy};
 use anyhow::Result;
 use xmltree::{Element, XMLNode};
 
@@ -16,127 +16,52 @@ impl XmlParser {
     }
 }
 
-impl ParserEngine for XmlParser {
-    fn parse(&self, code: &str) -> Result<TreeNode> {
-        // Collect top-level constructs (declaration, doctype, comments)
-        // before parsing the root element. We keep the original `code`
-        // so we can map byte offsets back to line numbers.
+impl ParserEngineLegacy for XmlParser {
+    fn parse_legacy(&self, code: &str) -> anyhow::Result<TreeNode> {
         let mut remaining = code;
-        let mut top_children: Vec<TreeNode> = Vec::new();
-
-        // Consume leading declarations/comments (simple, line-oriented)
-        loop {
-            let s = remaining.trim_start();
-            if s.is_empty() {
-                break;
+        if let Some(pos) = code.find("<?xml") {
+            if let Some(end_pos) = code[pos..].find(">") {
+                remaining = &code[pos + end_pos + 1..];
             }
-
-            if s.starts_with("<?xml") {
-                if let Some(pos) = s.find("?>") {
-                    let decl = &s[..pos + 2];
-                    top_children.push(TreeNode {
-                        id: format!("{}", top_children.len()),
-                        path: format!("{}", top_children.len()),
-                        node_type: "xml_declaration".to_string(),
-                        content: decl.to_string(),
-                        start_line: 1,
-                        end_line: 1,
-                        children: vec![],
-                    });
-                    remaining = &s[pos + 2..];
-                    continue;
-                }
-            }
-
-            if s.starts_with("<!DOCTYPE") {
-                if let Some(pos) = s.find('>') {
-                    let doctype = &s[..pos + 1];
-                    top_children.push(TreeNode {
-                        id: format!("{}", top_children.len()),
-                        path: format!("{}", top_children.len()),
-                        node_type: "doctype".to_string(),
-                        content: doctype.to_string(),
-                        start_line: 1,
-                        end_line: 1,
-                        children: vec![],
-                    });
-                    remaining = &s[pos + 1..];
-                    continue;
-                }
-            }
-
-            if s.starts_with("<!--") {
-                if let Some(pos) = s.find("-->") {
-                    let comment = &s[..pos + 3];
-                    top_children.push(TreeNode {
-                        id: format!("{}", top_children.len()),
-                        path: format!("{}", top_children.len()),
-                        node_type: "comment".to_string(),
-                        content: comment.to_string(),
-                        start_line: 1,
-                        end_line: 1,
-                        children: vec![],
-                    });
-                    remaining = &s[pos + 3..];
-                    continue;
-                }
-            }
-
-            // No more leading top-level constructs to consume
-            break;
         }
 
-        // Compute base offset of `remaining` inside the full `code`
-        let base_offset = code.find(remaining).unwrap_or(0);
-
-        // Parse root element with xmltree
         let elem = Element::parse(&mut std::io::Cursor::new(remaining.as_bytes()))
             .map_err(|e| anyhow::anyhow!("XML parse error: {}", e))?;
 
-        // Try to locate the root element byte-span inside the remaining source
-        if let Some(rel_open) = remaining.find(&format!("<{}", elem.name)) {
-            if let Some(rel_close) =
-                Self::find_matching_close_in_slice(remaining, rel_open, &elem.name)
-            {
-                let abs_start = base_offset + rel_open;
-                let abs_end = base_offset + rel_close;
-                top_children.push(self.element_to_treenode_with_span(
-                    &elem,
-                    "0".to_string(),
-                    code,
-                    abs_start,
-                    abs_end,
-                ));
-            } else {
-                // Fallback: use remaining as span if no close match found
-                let abs_start = base_offset + rel_open;
-                let abs_end = base_offset + remaining.len();
-                top_children.push(self.element_to_treenode_with_span(
-                    &elem,
-                    "0".to_string(),
-                    code,
-                    abs_start,
-                    abs_end,
-                ));
+        let mut top_children = Vec::new();
+        for node in &elem.children {
+            match node {
+                xmltree::XMLNode::Element(child_elem) => {
+                    top_children.push(self.element_to_treenode_with_span(
+                        child_elem,
+                        "0".to_string(), // path
+                        code, // source
+                        1, // abs_start
+                        code.len(), // abs_end
+                    ));
+                }
+                xmltree::XMLNode::Comment(comment) => {
+                    top_children.push(TreeNode {
+                        id: format!("comment_{}", top_children.len()),
+                        path: top_children.len().to_string(),
+                        node_type: "comment".to_string(),
+                        content: comment.clone(),
+                        start_line: 1,
+                        end_line: 1,
+                        children: Vec::new(),
+                    });
+                }
+                _ => {}
             }
-        } else {
-            // Fallback: if we cannot find opening tag text, try to attach the parsed element to the whole remainder
-            top_children.push(self.element_to_treenode_with_span(
-                &elem,
-                "0".to_string(),
-                code,
-                base_offset,
-                base_offset + remaining.len(),
-            ));
         }
 
         Ok(TreeNode {
-            id: "".to_string(),
-            path: "".to_string(),
-            node_type: "document".to_string(),
-            content: String::new(),
+            id: "root".to_string(),
+            path: "0".to_string(),
+            node_type: "xml_file".to_string(),
+            content: elem.name.clone(),
             start_line: 1,
-            end_line: code.lines().count().max(1),
+            end_line: code.lines().count(),
             children: top_children,
         })
     }

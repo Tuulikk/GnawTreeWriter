@@ -9,6 +9,7 @@ pub mod anchor;
 pub mod backup;
 pub mod batch;
 pub mod diff_parser;
+pub mod healer;
 pub mod refactor;
 pub mod restoration_engine;
 pub mod scaffold;
@@ -160,10 +161,31 @@ impl GnawTreeWriter {
 
         // VALIDATION: Try to parse the modified code in memory before saving
         let path = Path::new(&self.file_path);
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let parser = get_parser(path)?;
-        if let Err(e) = parser.parse(&modified_code) {
-            return Err(anyhow::anyhow!("Validation failed: The proposed edit would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e));
-        }
+        
+        let modified_code = match parser.parse(&modified_code) {
+            Ok(_) => modified_code,
+            Err(e) => {
+                // TRY TO HEAL (Duplex Loop)
+                let healer = crate::core::healer::Healer::new();
+                if let Some(action) = healer.suggest_fix(&modified_code, &e, extension) {
+                    let mut healed_code = modified_code.clone();
+                    // Basic healing: append the fix
+                    healed_code.push_str(&action.fix);
+                    
+                    // Validate healed code
+                    if parser.parse(&healed_code).is_ok() {
+                        println!("✨ Duplex Loop: Automatically healed syntax error: {}", action.description);
+                        healed_code
+                    } else {
+                        return Err(anyhow::anyhow!("Validation failed: The proposed edit would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e));
+                    }
+                } else {
+                    return Err(anyhow::anyhow!("Validation failed: The proposed edit would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e));
+                }
+            }
+        };
 
         // Calculate after hash
         let after_hash = calculate_content_hash(&modified_code);

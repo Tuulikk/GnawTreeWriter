@@ -1,4 +1,4 @@
-use crate::parser::{ParserEngine, TreeNode};
+use crate::parser::{TreeNode, ParserEngineLegacy};
 use anyhow::Result;
 
 pub struct TextParser;
@@ -15,33 +15,31 @@ impl TextParser {
     }
 }
 
-impl ParserEngine for TextParser {
-    fn parse(&self, code: &str) -> Result<TreeNode> {
+impl ParserEngineLegacy for TextParser {
+    fn parse_legacy(&self, code: &str) -> anyhow::Result<TreeNode> {
         let lines: Vec<&str> = code.lines().collect();
-        let mut children = Vec::new();
+        let mut root_children = Vec::new();
 
         for (i, line) in lines.iter().enumerate() {
-            let line_num = i + 1;
-
-            children.push(TreeNode {
-                id: format!("{}", i),
-                path: format!("{}", i),
-                node_type: "line".to_string(),
+            root_children.push(TreeNode {
+                id: format!("line_{}", i),
+                path: i.to_string(),
+                node_type: "text_line".to_string(),
                 content: line.to_string(),
-                start_line: line_num,
-                end_line: line_num,
+                start_line: i + 1,
+                end_line: i + 1,
                 children: Vec::new(),
             });
         }
 
         Ok(TreeNode {
-            id: "".to_string(),
-            path: "".to_string(),
-            node_type: "document".to_string(),
-            content: String::new(),
+            id: "root".to_string(),
+            path: "0".to_string(),
+            node_type: "text_file".to_string(),
+            content: code.to_string(),
             start_line: 1,
-            end_line: lines.len(),
-            children,
+            end_line: if lines.is_empty() { 1 } else { lines.len() },
+            children: root_children,
         })
     }
 

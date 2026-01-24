@@ -1,4 +1,4 @@
-use crate::parser::{ParserEngine, TreeNode};
+use crate::parser::{TreeNode, ParserEngineLegacy};
 use anyhow::Result;
 use regex::Regex;
 
@@ -16,8 +16,8 @@ impl MarkdownParser {
     }
 }
 
-impl ParserEngine for MarkdownParser {
-    fn parse(&self, code: &str) -> Result<TreeNode> {
+impl ParserEngineLegacy for MarkdownParser {
+    fn parse_legacy(&self, code: &str) -> anyhow::Result<TreeNode> {
         let root = self.parse_document(code)?;
         Ok(root)
     }

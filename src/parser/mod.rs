@@ -18,6 +18,8 @@ pub mod toml;
 pub mod typescript;
 pub mod xml;
 pub mod yaml;
+pub mod error;
+pub use error::{SyntaxError, ParseResult};
 pub mod zig;
 
 use anyhow::Result;
@@ -67,38 +69,62 @@ impl TreeNode {
 }
 
 pub trait ParserEngine {
-    fn parse(&self, code: &str) -> Result<TreeNode>;
+    fn parse(&self, code: &str) -> ParseResult<TreeNode>;
     fn get_supported_extensions(&self) -> Vec<&'static str>;
 }
 
-pub fn get_parser(file_path: &Path) -> Result<Box<dyn ParserEngine>> {
-    // Get file extension, defaulting to empty string if none exists
-    // This handles files like README, Dockerfile, etc.
+pub fn to_parse_result<T>(res: anyhow::Result<T>) -> ParseResult<T> {
+    res.map_err(SyntaxError::from)
+}
+
+/// A wrapper to let older parsers that return anyhow::Result work with the new ParseResult.
+pub struct LegacyParserWrapper<P: ParserEngineLegacy> {
+    inner: P,
+}
+
+impl<P: ParserEngineLegacy> LegacyParserWrapper<P> {
+    pub fn new(inner: P) -> Self {
+        Self { inner }
+    }
+}
+
+impl<P: ParserEngineLegacy> ParserEngine for LegacyParserWrapper<P> {
+    fn parse(&self, code: &str) -> ParseResult<TreeNode> {
+        to_parse_result(self.inner.parse_legacy(code))
+    }
+    fn get_supported_extensions(&self) -> Vec<&'static str> {
+        self.inner.get_supported_extensions()
+    }
+}
+
+pub trait ParserEngineLegacy {
+    fn parse_legacy(&self, code: &str) -> anyhow::Result<TreeNode>;
+    fn get_supported_extensions(&self) -> Vec<&'static str>;
+}
+pub fn get_parser(file_path: &Path) -> anyhow::Result<Box<dyn ParserEngine>> {
     let extension = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     match extension {
-        "qml" => Ok(Box::new(qml_tree_sitter::QmlTreeSitterParser::new())),
+        "qml" => Ok(Box::new(LegacyParserWrapper::new(qml_tree_sitter::QmlTreeSitterParser::new()))),
         "py" => Ok(Box::new(python::PythonParser::new())),
         "rs" => Ok(Box::new(rust::RustParser::new())),
-        "ts" | "tsx" => Ok(Box::new(typescript::TypeScriptParser::new())),
-        "php" => Ok(Box::new(php::PhpParser::new())),
-        "html" | "htm" => Ok(Box::new(html::HtmlParser::new())),
-        "go" => Ok(Box::new(go::GoParser::new())),
-        "c" | "h" => Ok(Box::new(c::CParser::new())),
-        "cpp" | "hpp" | "cc" | "cxx" | "hxx" | "h++" => Ok(Box::new(cpp::CppParser::new())),
-        "sh" | "bash" => Ok(Box::new(bash::BashParser::new())),
-        "java" => Ok(Box::new(java::JavaParser::new())),
-        "zig" => Ok(Box::new(zig::ZigParser::new())),
-        "css" => Ok(Box::new(css::CssParser::new())),
-        "xml" | "svg" | "xsl" | "xsd" | "rss" | "atom" => Ok(Box::new(xml::XmlParser::new())),
-        "md" | "markdown" => Ok(Box::new(markdown::MarkdownParser::new())),
-        "txt" => Ok(Box::new(text::TextParser::new())),
-        "toml" => Ok(Box::new(toml::TomlParser::new())),
-        "json" => Ok(Box::new(json::JsonParser::new())),
-        "yaml" | "yml" => Ok(Box::new(yaml::YamlParser::new())),
+        "ts" | "tsx" => Ok(Box::new(LegacyParserWrapper::new(typescript::TypeScriptParser::new()))),
+        "php" => Ok(Box::new(LegacyParserWrapper::new(php::PhpParser::new()))),
+        "html" | "htm" => Ok(Box::new(LegacyParserWrapper::new(html::HtmlParser::new()))),
+        "go" => Ok(Box::new(LegacyParserWrapper::new(go::GoParser::new()))),
+        "c" | "h" => Ok(Box::new(LegacyParserWrapper::new(c::CParser::new()))),
+        "cpp" | "hpp" | "cc" | "cxx" | "hxx" | "h++" => Ok(Box::new(LegacyParserWrapper::new(cpp::CppParser::new()))),
+        "sh" | "bash" => Ok(Box::new(LegacyParserWrapper::new(bash::BashParser::new()))),
+        "java" => Ok(Box::new(LegacyParserWrapper::new(java::JavaParser::new()))),
+        "zig" => Ok(Box::new(LegacyParserWrapper::new(zig::ZigParser::new()))),
+        "css" => Ok(Box::new(LegacyParserWrapper::new(css::CssParser::new()))),
+        "xml" | "svg" | "xsl" | "xsd" | "rss" | "atom" => Ok(Box::new(LegacyParserWrapper::new(xml::XmlParser::new()))),
+        "md" | "markdown" => Ok(Box::new(LegacyParserWrapper::new(markdown::MarkdownParser::new()))),
+        "txt" => Ok(Box::new(LegacyParserWrapper::new(text::TextParser::new()))),
+        "toml" => Ok(Box::new(LegacyParserWrapper::new(toml::TomlParser::new()))),
+        "json" => Ok(Box::new(LegacyParserWrapper::new(json::JsonParser::new()))),
+        "yaml" | "yml" => Ok(Box::new(LegacyParserWrapper::new(yaml::YamlParser::new()))),
         _ => {
-            // Use generic parser for all other file types
-            // This enables backup/history for ALL files, not just those we can parse
             Ok(Box::new(generic::GenericParser::new()))
         }
     }

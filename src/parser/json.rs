@@ -1,4 +1,4 @@
-use crate::parser::{ParserEngine, TreeNode};
+use crate::parser::{TreeNode, ParserEngineLegacy};
 use anyhow::Result;
 use serde_json::Value;
 
@@ -16,8 +16,8 @@ impl JsonParser {
     }
 }
 
-impl ParserEngine for JsonParser {
-    fn parse(&self, code: &str) -> Result<TreeNode> {
+impl ParserEngineLegacy for JsonParser {
+    fn parse_legacy(&self, code: &str) -> anyhow::Result<TreeNode> {
         let value: Value = serde_json::from_str(code)
             .map_err(|e| anyhow::anyhow!("Failed to parse JSON: {}", e))?;
 
