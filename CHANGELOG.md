@@ -2,6 +2,14 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.7.6] - 2026-01-23
+
+### Added
+- **Multi-Platform Expansion**: Native support for mobile development languages.
+  - **Swift Support**: Full AST-based editing and semantic search for `.swift` files.
+  - **Kotlin Support**: Full AST-based editing and semantic search for `.kt` and `.kts` files using `tree-sitter-kotlin-ng`.
+- **Improved Language Hygiene**: Standardized dependency naming in `Cargo.toml` for better package discovery.
+
 ## [0.7.5] - 2026-01-23
 
 ### Added

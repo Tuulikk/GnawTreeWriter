@@ -10,13 +10,13 @@ The roadmap is divided into two sections:
 
 ---
 
-## Current Status: v0.7.5 (Released 2026-01-23)
+## Current Status: v0.7.6 (Released 2026-01-23)
 
-### ✅ Completed Features (The Agent Memory Update)
+### ✅ Completed Features (The Mobile Expansion Update)
 
+- **Swift & Kotlin Support**: Native AST parsing and editing for iOS and Android development.
 - **ALF (Agentic Logging Framework)**: Structural journaling system that automatically tracks agent intent and tool use.
 - **The Duplex Loop (Infrastructure)**: Foundation for self-healing code edits using structured syntax errors.
-- **HRM 2.0 (v1)**: Relational awareness in GnawSense. Find callers and side-effects semantically.
 
 ---
 
@@ -67,10 +67,10 @@ All features in this section are and will remain **free and open source** under 
 
 ---
 
-## Phase 4: Language & Parser Expansion 🔄 PLANNED
-**Target: Q2 2026**
+## Phase 4: Language & Parser Expansion ✅ COMPLETE
+**Status: DONE**
 
-- [ ] **New Languages**: Kotlin, Swift, Scala, Ruby, Lua.
+- [x] **New Languages**: Kotlin, Swift (v0.7.6).
 - [ ] **Template Support**: Jinja2 / HTML mixed-mode parsing.
 - [ ] **Multi-Parser Files**: Seamlessly switching parsers within a single file.
 - [ ] **Structural Anomaly Detection**: AI-linter that warns about unsafe patterns or semantic duplication before edits.

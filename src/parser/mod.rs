@@ -6,6 +6,7 @@ pub mod generic;
 pub mod go;
 pub mod html;
 pub mod java;
+pub mod kotlin;
 pub mod json;
 pub mod markdown;
 pub mod php;
@@ -15,6 +16,7 @@ pub mod qml_tree_sitter;
 pub mod rust;
 pub mod text;
 pub mod toml;
+pub mod swift;
 pub mod typescript;
 pub mod xml;
 pub mod yaml;
@@ -108,6 +110,8 @@ pub fn get_parser(file_path: &Path) -> anyhow::Result<Box<dyn ParserEngine>> {
         "qml" => Ok(Box::new(LegacyParserWrapper::new(qml_tree_sitter::QmlTreeSitterParser::new()))),
         "py" => Ok(Box::new(python::PythonParser::new())),
         "rs" => Ok(Box::new(rust::RustParser::new())),
+        "kt" | "kts" => Ok(Box::new(LegacyParserWrapper::new(kotlin::KotlinParser::new()))),
+        "swift" => Ok(Box::new(LegacyParserWrapper::new(swift::SwiftParser::new()))),
         "ts" | "tsx" => Ok(Box::new(LegacyParserWrapper::new(typescript::TypeScriptParser::new()))),
         "php" => Ok(Box::new(LegacyParserWrapper::new(php::PhpParser::new()))),
         "html" | "htm" => Ok(Box::new(LegacyParserWrapper::new(html::HtmlParser::new()))),
