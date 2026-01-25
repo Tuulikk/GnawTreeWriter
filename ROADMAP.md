@@ -10,12 +10,12 @@ The roadmap is divided into two sections:
 
 ---
 
-## Current Status: v0.7.4 (Released 2026-01-23)
+## Current Status: v0.7.5 (Released 2026-01-23)
 
-### ✅ Completed Features (The Duplex Loop Update)
+### ✅ Completed Features (The Agent Memory Update)
 
+- **ALF (Agentic Logging Framework)**: Structural journaling system that automatically tracks agent intent and tool use.
 - **The Duplex Loop (Infrastructure)**: Foundation for self-healing code edits using structured syntax errors.
-- **Dogfooding Milestone**: Used GnawTreeWriter to refactor its own parser system project-wide.
 - **HRM 2.0 (v1)**: Relational awareness in GnawSense. Find callers and side-effects semantically.
 
 ---
@@ -77,10 +77,10 @@ All features in this section are and will remain **free and open source** under 
 
 ---
 
-## Phase 5: Intelligence & Autonomy 🔄 PLANNED
+## Phase 5: Intelligence & Autonomy 🔄 IN PROGRESS
 **Target: Q3 2026**
 
-- [ ] **ALF (Agentic Logging Framework)**: Standardized temporal journaling for AI agents (`ALF.md`).
+- [x] **ALF (Agentic Logging Framework)**: Standardized temporal journaling for AI agents (v0.7.5).
 - [x] **Structural Scaffolding**: Create new files by defining a tree schema (Moved from Phase 5 to v0.7.1).
 - [ ] **HRM 2.0 Integration**: Implementation of Hierarchical Reasoning Models for side-effect prediction and structural style transfer. See [docs/HRM_VISION.md](docs/HRM_VISION.md).
 - [🔄] **"Fix-my-Fix" Loop**: If an edit causes a parse error, use the AST to suggest or auto-apply the syntax fix (Initiated in v0.7.4).

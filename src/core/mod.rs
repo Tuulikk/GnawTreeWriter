@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod alf;
 pub mod anchor;
 pub mod backup;
 pub mod batch;
@@ -229,15 +230,25 @@ impl GnawTreeWriter {
             }
         };
 
-        let _transaction_id = self.transaction_log.log_transaction(
+        let transaction_id = self.transaction_log.log_transaction(
             operation_type,
             PathBuf::from(&self.file_path),
             node_path,
             Some(before_hash),
             Some(after_hash),
-            description,
+            description.clone(),
             HashMap::new(),
         )?;
+
+        // ALF INTEGRATION: Automatically log the tool use
+        let project_root = find_project_root(Path::new(&self.file_path));
+        if let Ok(mut alf) = crate::core::alf::AlfManager::load(&project_root) {
+            let _ = alf.log(
+                crate::core::alf::AlfType::Auto,
+                &format!("Tool Use: {} - {}", description, self.file_path),
+                Some(transaction_id.clone()),
+            );
+        }
 
         fs::write(&self.file_path, modified_code)
             .context(format!("Failed to write file: {}", self.file_path))?;

@@ -603,6 +603,36 @@ enum Commands {
         schema: String,
     },
 
+    /// ALF: Agentic Logging Framework - manage the agent's structural journal
+    Alf {
+        /// Message to log
+        message: Option<String>,
+
+        /// Transaction ID to link to
+        #[arg(long)]
+        txn: Option<String>,
+
+        /// Entry type (intent, assumption, risk, outcome, meta)
+        #[arg(long, default_value = "intent")]
+        kind: String,
+
+        /// Tag an existing entry
+        #[arg(long)]
+        tag: Option<String>,
+
+        /// ALF ID to modify (for tagging or updating message)
+        #[arg(long)]
+        id: Option<String>,
+
+        /// List recent journal entries
+        #[arg(long)]
+        list: bool,
+
+        /// Number of entries to list
+        #[arg(long, default_value = "10")]
+        limit: usize,
+    },
+
     /// Show version information
     Version,
 }
@@ -1045,6 +1075,9 @@ impl Cli {
             }
             Commands::Scaffold { file_path, schema } => {
                 Self::handle_scaffold(&file_path, &schema)?;
+            }
+            Commands::Alf { message, txn, kind, tag, id, list, limit } => {
+                Self::handle_alf(message, txn, kind, tag, id, list, limit)?;
             }
             Commands::Version => {
                 Self::handle_version()?;
@@ -1542,6 +1575,66 @@ Use --no-preview to write batch file"
         fs::write(file_path, code)?;
         println!("✓ Successfully scaffolded new file: {}", file_path.display());
         println!("You can now use `sense-insert` to fill in the implementation.");
+
+        Ok(())
+    }
+
+    fn handle_alf(
+        message: Option<String>,
+        txn: Option<String>,
+        kind: String,
+        tag: Option<String>,
+        id: Option<String>,
+        list: bool,
+        limit: usize,
+    ) -> Result<()> {
+        use crate::core::alf::{AlfManager, AlfType};
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        let mut alf = AlfManager::load(&project_root)?;
+
+        if list {
+            let entries = alf.list(limit);
+            println!("\n📓 Agentic Logging Framework (ALF) - Recent Entries:");
+            for e in entries {
+                let kind_str = match e.entry_type {
+                    AlfType::Auto => "🤖 AUTO",
+                    AlfType::Intent => "🎯 INTENT",
+                    AlfType::Assumption => "🤔 ASSUMPTION",
+                    AlfType::Risk => "⚠️ RISK",
+                    AlfType::Outcome => "✅ OUTCOME",
+                    AlfType::Meta => "ℹ️ META",
+                };
+                let txn_str = e.transaction_id.map(|t| format!(" [txn:{}]", &t[..8])).unwrap_or_default();
+                println!("- [{}] {}{}: {}", e.timestamp.format("%H:%M:%S"), kind_str, txn_str, e.message);
+                if !e.tags.is_empty() {
+                    println!("  tags: {}", e.tags.join(", "));
+                }
+                println!("  ID: {}", e.id);
+            }
+            return Ok(());
+        }
+
+        if let Some(tag_name) = tag {
+            let target_id = id.ok_or_else(|| anyhow::anyhow!("--id is required when tagging"))?;
+            alf.add_tag(&target_id, &tag_name)?;
+            println!("✓ Tag '{}' added to entry {}", tag_name, target_id);
+            return Ok(());
+        }
+
+        if let Some(msg) = message {
+            let alf_type = match kind.to_lowercase().as_str() {
+                "intent" => AlfType::Intent,
+                "assumption" => AlfType::Assumption,
+                "risk" => AlfType::Risk,
+                "outcome" => AlfType::Outcome,
+                "meta" => AlfType::Meta,
+                _ => AlfType::Intent,
+            };
+
+            let entry_id = alf.log(alf_type, &msg, txn)?;
+            println!("✓ Logged to ALF: {}", entry_id);
+        }
 
         Ok(())
     }

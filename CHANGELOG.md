@@ -2,6 +2,16 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.7.5] - 2026-01-23
+
+### Added
+- **ALF (Agentic Logging Framework)**: A structural journaling system for AI agents.
+  - **Auto-Journaling**: Every `edit`, `insert`, and `scaffold` operation is now automatically logged to `.gnawtreewriter_ai/alf.json`.
+  - **Transaction Linking**: ALF entries automatically link to their corresponding Transaction IDs for perfect traceability.
+  - **Structural Intent**: New `alf` command to log high-level intents, assumptions, risks, and outcomes.
+  - **Retrospective Tagging**: Ability to go back and tag or enrich previous journal entries.
+- **Enhanced Agent Memory**: Agenter kan nu "minnas" varför de fattade vissa arkitektoniska beslut genom att läsa ALF-journalen.
+
 ## [0.7.4] - 2026-01-23
 
 ### Added
