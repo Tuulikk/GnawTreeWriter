@@ -24,7 +24,6 @@ pub mod error;
 pub use error::{SyntaxError, ParseResult};
 pub mod zig;
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 

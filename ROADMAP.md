@@ -10,13 +10,13 @@ The roadmap is divided into two sections:
 
 ---
 
-## Current Status: v0.7.6 (Released 2026-01-23)
+## Current Status: v0.7.7 (Released 2026-01-23)
 
-### ✅ Completed Features (The Mobile Expansion Update)
+### ✅ Completed Features (The Global Intelligence Update)
 
+- **Project-wide Semantic Search**: Persistent project crawler and global radar for finding code by meaning anywhere.
 - **Swift & Kotlin Support**: Native AST parsing and editing for iOS and Android development.
 - **ALF (Agentic Logging Framework)**: Structural journaling system that automatically tracks agent intent and tool use.
-- **The Duplex Loop (Infrastructure)**: Foundation for self-healing code edits using structured syntax errors.
 
 ---
 
@@ -55,7 +55,7 @@ All features in this section are and will remain **free and open source** under 
 - [x] **Skeletal Mapping**: High-level definition overview for token efficiency.
 - [x] **Node Discovery**: Search for nodes by name or content.
 - [x] **Semantic Selection**: Target nodes using `@fn:name` shorthand.
-- [ ] **Project-wide Cache**: Background crawler that indexes the entire project into a local vector store (Inspired by Comparative-Thinker).
+- [x] **Project-wide Cache**: Background crawler that indexes the entire project into a local vector store (v0.7.7).
 - [ ] **Lateral Navigation Graph**: Link nodes by usage/calls (Knowledge Graph) to allow agents to "follow the thread".
 - [ ] **Context Truncation**: Smart summary generation for very large AST branches.
 

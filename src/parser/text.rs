@@ -1,5 +1,4 @@
 use crate::parser::{TreeNode, ParserEngineLegacy};
-use anyhow::Result;
 
 pub struct TextParser;
 

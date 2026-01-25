@@ -1,6 +1,6 @@
 use anyhow::Result;
 #[cfg(feature = "modernbert")]
-use crate::llm::{AiManager, AiModel, DeviceType, SemanticIndex, RelationalIndexer, RelationType};
+use crate::llm::{AiManager, AiModel, DeviceType, SemanticIndex, RelationalIndexer, RelationType, NodeEmbedding};
 #[cfg(feature = "modernbert")]
 use crate::parser::TreeNode;
 #[cfg(feature = "modernbert")]
@@ -35,6 +35,7 @@ pub enum SenseResponse {
 #[derive(Debug, serde::Serialize)]
 pub struct FileMatch {
     pub file_path: String,
+    pub node_path: Option<String>,
     pub score: f32,
 }
 
@@ -68,6 +69,10 @@ impl GnawSenseBroker {
             #[cfg(feature = "modernbert")]
             relational_indexer: RelationalIndexer::new(project_root),
         })
+    }
+
+    pub fn get_manager(&self) -> &crate::llm::AiManager {
+        &self.ai_manager
     }
 
     #[cfg(feature = "modernbert")]
@@ -110,19 +115,24 @@ impl GnawSenseBroker {
             Ok(SenseResponse::Zoom {
                 file_path: file_path.to_string(),
                 nodes: results.into_iter().map(|(n, score)| NodeMatch {
-                    path: n.path.clone(),
+                    path: n.node_path.clone(),
                     preview: n.content_preview.clone(),
                     score,
                 }).collect(),
                 impact: if impact_matches.is_empty() { None } else { Some(impact_matches) },
             })
         } else {
-            // SATELITE MODE: Search across files
+            // SATELITE MODE: Search across the entire project index
+            let index_mgr = crate::llm::SemanticIndexManager::new(&self.project_root);
+            let project_index = index_mgr.load_project_index()?;
+            let results = project_index.search(&query_vector, 10);
+
             Ok(SenseResponse::Satelite {
-                matches: vec![
-                    FileMatch { file_path: "src/main.rs".into(), score: 0.8 },
-                    FileMatch { file_path: "src/core/mod.rs".into(), score: 0.6 },
-                ]
+                matches: results.into_iter().map(|(entry, score)| FileMatch {
+                    file_path: entry.file_path.clone(),
+                    node_path: Some(entry.node_path.clone()),
+                    score,
+                }).collect(),
             })
         }
     }
@@ -146,10 +156,10 @@ impl GnawSenseBroker {
         let proposal = match intent.to_lowercase().as_str() {
             "after" => {
                 EditProposal {
-                    anchor_path: anchor_node.path.clone(),
+                    anchor_path: anchor_node.node_path.clone(),
                     suggested_op: "insert".into(),
-                    parent_path: self.get_parent_path(&anchor_node.path),
-                    position: self.get_next_index(&anchor_node.path),
+                    parent_path: self.get_parent_path(&anchor_node.node_path),
+                    position: self.get_next_index(&anchor_node.node_path),
                     confidence: score,
                 }
             }
@@ -190,7 +200,7 @@ impl GnawSenseBroker {
         let parser = crate::parser::get_parser(path)?;
         let tree = parser.parse(&content)?;
 
-        let mut index = SemanticIndex::new(file_path);
+        let mut index = SemanticIndex::default();
         
         // Collect important nodes (functions, classes, etc.)
         let mut nodes = Vec::new();
@@ -210,7 +220,12 @@ impl GnawSenseBroker {
             } else {
                 node.content.clone()
             };
-            index.add_node(node.path, preview, vector);
+            index.entries.push(NodeEmbedding {
+                file_path: file_path.to_string(),
+                node_path: node.path,
+                content_preview: preview,
+                vector,
+            });
         }
 
         Ok(index)

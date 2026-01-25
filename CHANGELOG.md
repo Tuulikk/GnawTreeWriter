@@ -2,6 +2,15 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.7.7] - 2026-01-23
+
+### Added
+- **Project-wide Semantic Search**: Revolutionary ability to search for code by meaning across the entire codebase.
+  - **Project Crawler**: New `ai index` command that rekursivt genomsöker och indexerar projektet.
+  - **Satelite View 2.0**: The `sense` command now performs global searches if no file is specified, return rankings from the entire project.
+  - **Persistent Embedding Cache**: All embeddings are saved in `.gnawtreewriter_ai/index/` for instant project-wide intelligence.
+- **Hygiene & Stability**: Achieve 100% clean build with no clippy warnings across all modules.
+
 ## [0.7.6] - 2026-01-23
 
 ### Added

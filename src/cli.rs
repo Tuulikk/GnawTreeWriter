@@ -603,6 +603,12 @@ enum Commands {
         schema: String,
     },
 
+    /// AI: Artificial Intelligence tools - manage semantic indexing and models
+    Ai {
+        #[command(subcommand)]
+        command: AiSubcommands,
+    },
+
     /// ALF: Agentic Logging Framework - manage the agent's structural journal
     Alf {
         /// Message to log
@@ -635,6 +641,15 @@ enum Commands {
 
     /// Show version information
     Version,
+}
+
+#[derive(Subcommand)]
+enum AiSubcommands {
+    /// Index the entire project for semantic search
+    Index {
+        /// Directory to index (defaults to project root)
+        path: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1073,10 +1088,16 @@ impl Cli {
             Commands::SenseInsert { file, anchor, content, intent, preview } => {
                 Self::handle_sense_insert(file, anchor, content, intent, preview).await?;
             }
-            Commands::Scaffold { file_path, schema } => {
-                Self::handle_scaffold(&file_path, &schema)?;
-            }
-            Commands::Alf { message, txn, kind, tag, id, list, limit } => {
+                        Commands::Scaffold { file_path, schema } => {
+                            Self::handle_scaffold(&file_path, &schema)?;
+                        }
+                        Commands::Ai { command } => match command {
+                            AiSubcommands::Index { path } => {
+                                Self::handle_ai_index(path).await?;
+                            }
+                        },
+                        Commands::Alf {
+             message, txn, kind, tag, id, list, limit } => {
                 Self::handle_alf(message, txn, kind, tag, id, list, limit)?;
             }
             Commands::Version => {
@@ -1636,6 +1657,31 @@ Use --no-preview to write batch file"
             println!("✓ Logged to ALF: {}", entry_id);
         }
 
+        Ok(())
+    }
+
+    async fn handle_ai_index(path: Option<PathBuf>) -> Result<()> {
+        #[cfg(feature = "modernbert")]
+        {
+            use crate::llm::ProjectIndexer;
+            let current_dir = std::env::current_dir()?;
+            let project_root = find_project_root(&current_dir);
+            let target_path = path.unwrap_or(project_root.clone());
+
+            println!("🚀 Starting project-wide semantic indexing...");
+            println!("📂 Target: {}", target_path.display());
+            
+            let indexer = ProjectIndexer::new(&project_root)?;
+            let total = indexer.index_all(&target_path).await?;
+            
+            println!("✨ Successfully indexed {} files.", total);
+            println!("You can now use `gnawtreewriter sense \"<query>\"` without a file context to search the entire project.");
+        }
+        #[cfg(not(feature = "modernbert"))]
+        {
+            let _ = path;
+            println!("Error: 'modernbert' feature not enabled in this build.");
+        }
         Ok(())
     }
 
