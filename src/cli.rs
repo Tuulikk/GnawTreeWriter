@@ -614,6 +614,10 @@ enum Commands {
         /// Message to log
         message: Option<String>,
 
+        /// The actor performing the log (default: "writer")
+        #[arg(long, default_value = "writer")]
+        actor: String,
+
         /// Transaction ID to link to
         #[arg(long)]
         txn: Option<String>,
@@ -1096,10 +1100,10 @@ impl Cli {
                                 Self::handle_ai_index(path).await?;
                             }
                         },
-                        Commands::Alf {
-             message, txn, kind, tag, id, list, limit } => {
-                Self::handle_alf(message, txn, kind, tag, id, list, limit)?;
-            }
+                                    Commands::Alf { message, actor, txn, kind, tag, id, list, limit } => {
+                                        Self::handle_alf(message, actor, txn, kind, tag, id, list, limit)?;
+                                    }
+                        
             Commands::Version => {
                 Self::handle_version()?;
             }
@@ -1602,6 +1606,7 @@ Use --no-preview to write batch file"
 
     fn handle_alf(
         message: Option<String>,
+        actor: String,
         txn: Option<String>,
         kind: String,
         tag: Option<String>,
@@ -1613,6 +1618,7 @@ Use --no-preview to write batch file"
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
         let mut alf = AlfManager::load(&project_root)?;
+        alf.set_actor(&actor);
 
         if list {
             let entries = alf.list(limit);
@@ -1626,8 +1632,9 @@ Use --no-preview to write batch file"
                     AlfType::Outcome => "✅ OUTCOME",
                     AlfType::Meta => "ℹ️ META",
                 };
-                let txn_str = e.transaction_id.map(|t| format!(" [txn:{}]", &t[..8])).unwrap_or_default();
-                println!("- [{}] {}{}: {}", e.timestamp.format("%H:%M:%S"), kind_str, txn_str, e.message);
+                let txn_str = e.transaction_id.as_ref().map(|t| format!(" [txn:{}]", &t[..8])).unwrap_or_default();
+                let actor_str = format!(" @{}", e.actor);
+                println!("- [{}] {}{}{}: {}", e.timestamp.format("%H:%M:%S"), kind_str, actor_str, txn_str, e.message);
                 if !e.tags.is_empty() {
                     println!("  tags: {}", e.tags.join(", "));
                 }

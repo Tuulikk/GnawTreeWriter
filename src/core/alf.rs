@@ -19,6 +19,7 @@ pub enum AlfType {
 pub struct AlfEntry {
     pub id: String,
     pub timestamp: DateTime<Utc>,
+    pub actor: String,          // The tool that created the entry (e.g., "writer", "mimir")
     pub transaction_id: Option<String>,
     pub entry_type: AlfType,
     pub message: String,
@@ -29,6 +30,7 @@ pub struct AlfEntry {
 pub struct AlfManager {
     storage_path: PathBuf,
     entries: Vec<AlfEntry>,
+    current_actor: String,
 }
 
 impl AlfManager {
@@ -46,7 +48,15 @@ impl AlfManager {
             Vec::new()
         };
 
-        Ok(Self { storage_path, entries })
+        Ok(Self { 
+            storage_path, 
+            entries,
+            current_actor: "writer".to_string(), // Default actor
+        })
+    }
+
+    pub fn set_actor(&mut self, actor: &str) {
+        self.current_actor = actor.to_string();
     }
 
     pub fn log(&mut self, entry_type: AlfType, message: &str, txn_id: Option<String>) -> Result<String> {
@@ -54,6 +64,7 @@ impl AlfManager {
         let entry = AlfEntry {
             id: id.clone(),
             timestamp: Utc::now(),
+            actor: self.current_actor.clone(),
             transaction_id: txn_id,
             entry_type,
             message: message.to_string(),

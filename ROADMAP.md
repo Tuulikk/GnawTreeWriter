@@ -10,13 +10,13 @@ The roadmap is divided into two sections:
 
 ---
 
-## Current Status: v0.7.7 (Released 2026-01-23)
+## Current Status: v0.7.8 (Released 2026-01-23)
 
-### ✅ Completed Features (The Global Intelligence Update)
+### ✅ Completed Features (The Ecosystem Update)
 
+- **Multi-Actor ALF**: Support for cross-tool journaling (ready for GnawMimir).
 - **Project-wide Semantic Search**: Persistent project crawler and global radar for finding code by meaning anywhere.
 - **Swift & Kotlin Support**: Native AST parsing and editing for iOS and Android development.
-- **ALF (Agentic Logging Framework)**: Structural journaling system that automatically tracks agent intent and tool use.
 
 ---
 

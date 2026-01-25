@@ -2,6 +2,14 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.7.8] - 2026-01-23
+
+### Added
+- **Multi-Actor ALF**: Support for multiple tools collaborating on the same project.
+  - **Actor Attribution**: ALF entries now track which tool performed the action (e.g., `@writer`, `@mimir`).
+  - **Ecosystem Readiness**: GnawTreeWriter is now prepared to share its structural journal with the upcoming **GnawMimir** project.
+  - **CLI Expansion**: New `--actor` flag for the `alf` command.
+
 ## [0.7.7] - 2026-01-23
 
 ### Added
