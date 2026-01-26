@@ -2,6 +2,17 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.7.9] - 2026-01-23
+
+### Added
+- **Smart Re-indexing**: The project crawler now skips unchanged files by comparing content hashes, making subsequent indexing operations near-instant.
+- **ModernBERT Chunking**: Automatic recursive chunking for large nodes, preventing sequence length errors and allowing indexing of massive source files.
+- **Ecosystem Metadata**: Saved model info in `.gnawtreewriter_ai/index/model_info.json` to enable safe vector sharing with **GnawMimir**.
+
+### Fixed
+- **Path Canonicalization**: Resolved "prefix not found" errors during indexing by ensuring all paths are canonicalized before stripping project root.
+- **Dependency Hygiene**: Standardized more tree-sitter dependency names for better build stability.
+
 ## [0.7.8] - 2026-01-23
 
 ### Added

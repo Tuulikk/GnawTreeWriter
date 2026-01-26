@@ -52,6 +52,16 @@ impl ProjectIndexer {
                     .to_string();
 
                 if let Ok(content) = fs::read_to_string(path) {
+                    // SMART RE-INDEXING: Check if file changed
+                    let file_hash = crate::core::transaction_log::calculate_content_hash(&file_path_str);
+                    let index_path = self.index_manager.get_storage_dir().join(format!("{}.json", file_hash));
+                    
+                    if index_path.exists() {
+                        // File already indexed and hasn't changed (hash is part of filename)
+                        total_files += 1;
+                        continue;
+                    }
+
                     if let Ok(tree) = parser.parse(&content) {
                         let mut entries = Vec::new();
                         self.collect_embeddings(&tree, &file_path_str, &model, &mut entries)?;
@@ -65,6 +75,9 @@ impl ProjectIndexer {
             }
         }
 
+        // Save model metadata for the ecosystem
+        self.index_manager.save_model_info("ModernBERT-base-v1", 768)?;
+
         Ok(total_files)
     }
 
@@ -77,21 +90,39 @@ impl ProjectIndexer {
     ) -> Result<()> {
         // Index functions, classes, and important definitions
         if node.node_type.contains("definition") || node.node_type.contains("item") {
-            let vector_tensor = model.get_embedding(&node.content)?;
-            let vector: Vec<f32> = vector_tensor.to_vec1()?;
-            
-            let preview = if node.content.len() > 100 {
-                format!("{}...", &node.content[..97])
+            // CHUNKING LOGIC: If node is too large, split it
+            // ModernBERT safe limit is roughly 8192 tokens. 
+            // 15,000 chars is a safe heuristic for ~4000-5000 tokens.
+            if node.content.len() > 15000 {
+                let chunks = self.chunk_text(&node.content, 10000, 1000);
+                for (i, chunk) in chunks.into_iter().enumerate() {
+                    let vector_tensor = model.get_embedding(&chunk)?;
+                    let vector: Vec<f32> = vector_tensor.to_vec1()?;
+                    
+                    acc.push(NodeEmbedding {
+                        file_path: file_path.to_string(),
+                        node_path: format!("{}[chunk:{}]", node.path, i),
+                        content_preview: format!("(Chunk {}) {}", i, &chunk[..chunk.len().min(100)]),
+                        vector,
+                    });
+                }
             } else {
-                node.content.clone()
-            };
+                let vector_tensor = model.get_embedding(&node.content)?;
+                let vector: Vec<f32> = vector_tensor.to_vec1()?;
+                
+                let preview = if node.content.len() > 100 {
+                    format!("{}...", &node.content[..97])
+                } else {
+                    node.content.clone()
+                };
 
-            acc.push(NodeEmbedding {
-                file_path: file_path.to_string(),
-                node_path: node.path.clone(),
-                content_preview: preview,
-                vector,
-            });
+                acc.push(NodeEmbedding {
+                    file_path: file_path.to_string(),
+                    node_path: node.path.clone(),
+                    content_preview: preview,
+                    vector,
+                });
+            }
         }
 
         for child in &node.children {
@@ -99,5 +130,19 @@ impl ProjectIndexer {
         }
 
         Ok(())
+    }
+
+    fn chunk_text(&self, text: &str, size: usize, overlap: usize) -> Vec<String> {
+        let mut chunks = Vec::new();
+        if text.is_empty() { return chunks; }
+        
+        let mut start = 0;
+        while start < text.len() {
+            let end = (start + size).min(text.len());
+            chunks.push(text[start..end].to_string());
+            if end == text.len() { break; }
+            start += size - overlap;
+        }
+        chunks
     }
 }

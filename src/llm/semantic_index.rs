@@ -2,6 +2,7 @@ use serde::{Serialize, Deserialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeEmbedding {
@@ -16,6 +17,13 @@ pub struct SemanticIndex {
     pub entries: Vec<NodeEmbedding>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub model_name: String,
+    pub dimension: usize,
+    pub created_at: DateTime<Utc>,
+}
+
 pub struct SemanticIndexManager {
     storage_dir: PathBuf,
 }
@@ -27,6 +35,33 @@ impl SemanticIndexManager {
             let _ = fs::create_dir_all(&storage_dir);
         }
         Self { storage_dir }
+    }
+
+    pub fn get_storage_dir(&self) -> &Path {
+        &self.storage_dir
+    }
+
+    pub fn save_model_info(&self, model_name: &str, dimension: usize) -> Result<()> {
+        let info = ModelInfo {
+            model_name: model_name.to_string(),
+            dimension,
+            created_at: Utc::now(),
+        };
+        let save_path = self.storage_dir.join("model_info.json");
+        let data = serde_json::to_string_pretty(&info)?;
+        fs::write(save_path, data)?;
+        Ok(())
+    }
+
+    pub fn get_model_info(&self) -> Result<Option<ModelInfo>> {
+        let load_path = self.storage_dir.join("model_info.json");
+        if load_path.exists() {
+            let data = fs::read_to_string(load_path)?;
+            let info = serde_json::from_str(&data)?;
+            Ok(Some(info))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn save_index(&self, file_path: &str, entries: Vec<NodeEmbedding>) -> Result<()> {
