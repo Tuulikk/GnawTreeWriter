@@ -83,14 +83,39 @@ To solve the problem of "Agent Amnesia," we built **ALF**. It's a structural jou
 - **Transaction Linking**: Every journal entry is tied to a specific `TransactionID` in the history.
 - **Ecosystem Ready**: Designed to share knowledge with other tools like **GnawMimir**, creating a unified cognitive workspace.
 
-### 📊 Engineering Evidence (Sample Report)
+## 📊 Engineering Case Studies
+
+These examples show how GnawTreeWriter's structural intelligence handles common engineering challenges.
+
+### Case 1: Preventing "Agent Lobotomy" (The Guardian)
+*Scenario: An AI agent tries to "fix" a bug by deleting 40 lines of error handling logic.*
 
 | Layer | Details |
 | :--- | :--- |
-| **Intent** | Strategic Decision: Migrating to async handlers for scalability. |
-| **Structure** | Node `@fn:old_system` in `src/network.rs` |
-| **Actor** | @writer (Autonomous Architect) |
-| **Status** | ✅ Verified via TCARV |
+| **Old State** | Complex function with nested `match` and `Result` handling. |
+| **Agent Proposal** | Replacing the logic with a simple `unwrap()`. |
+| **Guardian Action** | 🛑 **BLOCK**: Structural integrity check failed. |
+| **Reasoning** | Significant complexity loss detected. Logic markers dropped from 12 to 1. |
+
+### Case 2: Multi-Actor Collaboration (ALF)
+*Scenario: GnawMimir (Strategy) and GnawTreeWriter (Execution) working together.*
+
+| Layer | Details |
+| :--- | :--- |
+| **Strategic Intent** | @mimir: "Decision: Migrate database logic to async to support 10k+ users." |
+| **Structural Action** | @writer: Performed `edit` on node `@struct:DBConfig`. |
+| **Outcome** | Transaction `txn_1769` linked to strategic intent via ALF. |
+| **Verification** | ✅ Valid syntax confirmed by The Duplex Loop. |
+
+### Case 3: Semantic Project Mapping (GnawSense)
+*Scenario: Finding Python logic for a Rust migration.*
+
+| Layer | Details |
+| :--- | :--- |
+| **Query** | "How is the pricing discount calculated in the Python legacy app?" |
+| **Satelite View** | Discovered logic in `GnawData/raw/legacy_pricing.py`. |
+| **Zoom View** | Targeted node `0.2.1` (`calculate_discount`). |
+| **Next Step** | Structural evidence ready for Rust scaffolding. |
 
 ---
 
