@@ -2,6 +2,15 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.8.5] - 2026-01-27
+
+### Added
+- **The Architect Handbook**: A new consolidated quickstart guide available via `examples --topic handbook`. This brings together setup, understanding, modification, safety, and reporting in a single, easy-to-read format.
+- **Improved Ecosystem Synergy**: Further refined ALF and Semantic Indexing to pave the way for **GnawMimir**.
+
+### Fixed
+- **CLI Consistency**: Cleaned up various `match` arms and help strings for better alignment with current features.
+
 ## [0.8.4] - 2026-01-27
 
 ### Added

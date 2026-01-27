@@ -10,13 +10,13 @@ The roadmap is divided into two sections:
 
 ---
 
-## Current Status: v0.8.4 (Released 2026-01-27)
+## Current Status: v0.8.5 (Released 2026-01-27)
 
-### ✅ Completed Features (The Polish Update)
+### ✅ Completed Features (The Handbook Update)
 
+- **The Architect Handbook**: Consolidated quickstart guide for high-level engineering.
 - **Human-Readable Sessions**: Support for naming sessions (aliases) for easier restoration.
 - **Safe Content Injection**: Added `@file` syntax to the `edit` command to bypass shell escaping issues.
-- **Token Overload Protection**: Automatic pagination and limits for the `list` command.
 - **The Helpful Guard**: Proactive CLI error handling with strategic advice and tips.
 
 ---

@@ -2172,6 +2172,35 @@ Use --no-preview to perform the restoration"
                 println!("  3. gnawtreewriter edit file.py \"0.1\" 'new'  # Apply if good");
                 println!("  4. gnawtreewriter undo                       # Quick undo if needed");
             }
+            Some("handbook") => {
+                println!("📖 THE GNAWTREE ARCHITECT HANDBOOK");
+                println!("================================");
+                println!();
+                println!("1. SETUP: Prepare your local AI");
+                println!("   gnawtreewriter ai setup --model modernbert");
+                println!("   gnawtreewriter ai index                     # Map the project");
+                println!();
+                println!("2. UNDERSTAND: Find your target");
+                println!("   gnawtreewriter sense \"how does X work?\"     # Semantic search");
+                println!("   gnawtreewriter skeleton <file>              # Structural overview");
+                println!("   gnawtreewriter list <file>                  # Get exact node paths");
+                println!();
+                println!("3. MODIFY: Edit with surgical precision");
+                println!("   gnawtreewriter edit <file> <path> 'code'    # Standard edit");
+                println!("   gnawtreewriter edit <file> <path> @file.txt # Safe injection");
+                println!("   gnawtreewriter sense-insert <file> \"anchor\" 'code'");
+                println!();
+                println!("4. SAFETY: The Guardian is watching");
+                println!("   Always use --preview first to verify changes.");
+                println!("   Use 'gnawtreewriter undo' if anything goes wrong.");
+                println!("   Massive deletions will be BLOCKED by The Guardian.");
+                println!();
+                println!("5. REPORT: Document your progress");
+                println!("   gnawtreewriter alf \"My intent\" --kind intent");
+                println!("   gnawtreewriter ai report --limit 5          # Generate evidence");
+                println!();
+                println!("Tip: Combine commands for speed, e.g., index then sense!");
+            }
             _ => {
                 println!("📚 GNAWTREEWRITER EXAMPLES");
                 println!("=========================");
@@ -2191,6 +2220,7 @@ Use --no-preview to perform the restoration"
                 );
                 println!("  gnawtreewriter examples --topic ai           # AI and analysis features");
                 println!("  gnawtreewriter examples --topic workflow     # Complete workflows");
+                println!("  gnawtreewriter examples --topic handbook     # Consolidated handbook");
                 println!();
                 println!("Quick Start:");
                 println!("  1. gnawtreewriter analyze <file>             # See file structure");
