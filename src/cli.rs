@@ -1105,24 +1105,24 @@ impl Cli {
             Commands::SenseInsert { file, anchor, content, intent, preview } => {
                 Self::handle_sense_insert(file, anchor, content, intent, preview).await?;
             }
-                        Commands::Scaffold { file_path, schema } => {
-                            Self::handle_scaffold(&file_path, &schema)?;
+            Commands::Scaffold { file_path, schema } => {
+                Self::handle_scaffold(&file_path, &schema)?;
+            }
+            Commands::Ai { command } => match command {
+                AiSubcommands::Index { path } => {
+                    Self::handle_ai_index(path).await?;
                         }
-                                    Commands::Ai { command } => match command {
-                                        AiSubcommands::Index { path } => {
-                                            Self::handle_ai_index(path).await?;
-                                        }
-                                        AiSubcommands::Report { limit, output } => {
-                                            Self::handle_ai_report(limit, output).await?;
-                                        }
-                                    },
-                        
-                                    Commands::Alf { message, actor, txn, kind, tag, id, list, limit } => {
-                                        Self::handle_alf(message, actor, txn, kind, tag, id, list, limit)?;
-                                    }
-                        
-            Commands::Version => {
-                Self::handle_version()?;
+                    AiSubcommands::Report { limit, output } => {
+                    Self::handle_ai_report(limit, output).await?;
+                        }
+                    },
+                
+            Commands::Alf { message, actor, txn, kind, tag, id, list, limit } => {
+            Self::handle_alf(message, actor, txn, kind, tag, id, list, limit)?;
+                }
+            
+Commands::Version => {
+Self::handle_version()?;
             }
         }
         Ok(())
@@ -2127,7 +2127,15 @@ Use --no-preview to perform the restoration"
                 println!("   gnawtreewriter sense \"where is the database connection?\" src/db.rs");
                 println!("   # Finds specific functions or classes by meaning.");
                 println!();
-                println!("3. Semantic Insertion (The magic!):");
+                println!("3. Agentic Journaling (ALF):");
+                println!("   gnawtreewriter alf \"Refactoring for scalability\" --kind intent");
+                println!("   gnawtreewriter alf --list                                   # See history");
+                println!();
+                println!("4. Engineering Reports:");
+                println!("   gnawtreewriter ai report --limit 5                          # Show recent work");
+                println!("   gnawtreewriter ai report --output docs/evolution.md         # Save to file");
+                println!();
+                println!("5. Semantic Insertion (The magic!):");
                 println!("   gnawtreewriter sense-insert main.rs \"the main function\" \"println!(\\\"Init...\\\");\" --preview");
                 println!("   # Inserts code near a landmark without needing paths.");
                 println!();

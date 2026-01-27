@@ -2,6 +2,13 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.8.2] - 2026-01-27
+
+### Added
+- **The Helpful Guard**: Proactive help system that intercepts CLI errors and provides strategic advice and command tips.
+- **Enhanced AI Examples**: Expanded `examples --topic ai` with practical workflows for ALF, GnawSense, and ReportEngine.
+- **Auto-Indentation Fixes**: Cleaned up internal CLI code for better maintenance.
+
 ## [0.8.1] - 2026-01-27
 
 ### Added
