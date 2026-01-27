@@ -104,21 +104,19 @@ enum Commands {
         /// Required flag to analyze directories (prevents accidental large scans)
         recursive: bool,
     },
-    /// List all nodes in a file with their paths
-    ///
-    /// Shows every node in the file with dot-notation paths for precise editing.
-    /// Use this to find the exact path for nodes you want to modify.
-    ///
-    /// Examples:
-    ///   gnawtreewriter list app.py
-    ///   gnawtreewriter list app.py --filter-type Property
-    ///   gnawtreewriter list main.rs --filter-type function_item
+    /// List all tree nodes for a file
     List {
-        /// File to list nodes from
+        /// File to list nodes for
         file_path: String,
         #[arg(short, long)]
-        /// Filter by node type (e.g., Property, function_item, class_definition)
+        /// Filter by node type (e.g., function_definition)
         filter_type: Option<String>,
+        #[arg(short, long, default_value = "100")]
+        /// Maximum number of nodes to show (prevents token overload)
+        limit: usize,
+        #[arg(short, long, default_value = "0")]
+        /// Number of nodes to skip
+        offset: usize,
     },
     /// Show the content of a specific node
     ///
@@ -720,9 +718,11 @@ impl Cli {
             Commands::List {
                 file_path,
                 filter_type,
+                limit,
+                offset,
             } => {
                 let writer = GnawTreeWriter::new(&file_path)?;
-                list_nodes(writer.analyze(), filter_type.as_deref());
+                list_nodes(writer.analyze(), filter_type.as_deref(), limit, offset);
             }
             Commands::Show {
                 file_path,
@@ -2884,12 +2884,43 @@ fn show_hint() {
     eprintln!("\x1b[2m[GnawTip]: {}\x1b[0m", hints[index]);
 }
 
-fn list_nodes(tree: &TreeNode, filter_type: Option<&str>) {
-    print_node(tree, 0, filter_type);
-    for child in &tree.children {
-        list_nodes_recursive(child, 1, filter_type);
+    fn list_nodes(tree: &TreeNode, filter_type: Option<&str>, limit: usize, offset: usize) {
+        let mut all_nodes = Vec::new();
+
+        fn collect(n: &TreeNode, filter: Option<&str>, acc: &mut Vec<TreeNode>) {
+            if filter.is_none() || filter.unwrap() == n.node_type {
+                acc.push(n.clone());
+            }
+            for child in &n.children {
+                collect(child, filter, acc);
+            }
+        }
+
+        collect(tree, filter_type, &mut all_nodes);
+        let total_count = all_nodes.len();
+        
+        let target_nodes: Vec<_> = all_nodes.into_iter().skip(offset).take(limit).collect();
+
+        if target_nodes.is_empty() {
+            println!("No nodes found matching criteria (Total: {}, Offset: {})", total_count, offset);
+            return;
+        }
+
+        if offset > 0 || total_count > limit {
+            println!("--- Showing {} nodes (offset {}, total {}) ---", target_nodes.len(), offset, total_count);
+        }
+
+        for n in target_nodes {
+            let name = n.get_name().unwrap_or_default();
+            println!("  {} [{}] {}", n.path, n.node_type, name);
+        }
+
+        if total_count > offset + limit {
+            let remaining = total_count - (offset + limit);
+            println!("\n... and {} more nodes hidden to prevent token overload.", remaining);
+            println!("💡 [GnawTip]: Use --offset {} to see the next batch.", offset + limit);
+        }
     }
-}
 
 fn list_nodes_recursive(node: &TreeNode, depth: usize, filter_type: Option<&str>) {
     print_node(node, depth, filter_type);

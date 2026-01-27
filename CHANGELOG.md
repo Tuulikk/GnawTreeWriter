@@ -2,6 +2,14 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.8.3] - 2026-01-27
+
+### Added
+- **Token Overload Protection**: Implemented mandatory limits on the `list` command to protect LLM context windows and prevent API krascher.
+  - **Surgical Safety Valve**: Standard limit of 100 nodes per list operation.
+  - **Pagination Support**: Added `--limit` and `--offset` flags to the `list` command for safe navigation of large files.
+  - **Proactive Guidance**: Automatically suggests the correct `--offset` when data is truncated.
+
 ## [0.8.2] - 2026-01-27
 
 ### Added

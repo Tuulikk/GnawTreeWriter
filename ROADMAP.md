@@ -10,13 +10,13 @@ The roadmap is divided into two sections:
 
 ---
 
-## Current Status: v0.8.2 (Released 2026-01-27)
+## Current Status: v0.8.3 (Released 2026-01-27)
 
-### ✅ Completed Features (The Proactive Help Update)
+### ✅ Completed Features (The Token Safety Update)
 
+- **Token Overload Protection**: Automatic pagination and limits for the `list` command to protect AI context windows.
 - **The Helpful Guard**: Proactive CLI error handling with strategic advice and tips.
 - **ReportEngine**: Automatically generate structural engineering reports from ALF and Transaction logs.
-- **The Guardian**: Structural integrity protection that prevents massive accidental code deletions.
 
 ---
 
