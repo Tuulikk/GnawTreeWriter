@@ -10,14 +10,14 @@ The roadmap is divided into two sections:
 
 ---
 
-## Current Status: v0.7.9 (Released 2026-01-23)
+## Current Status: v0.8.0 (Released 2026-01-23)
 
-### ✅ Completed Features (The Ecosystem Efficiency Update)
+### ✅ Completed Features (The Guardian Update)
 
+- **The Guardian**: Structural integrity protection that prevents "Agent Lobotomy" by blocking massive accidental code deletions.
+- **Project-wide Semantic Search**: Persistent project crawler and global radar for finding code by meaning anywhere.
 - **Smart Re-indexing**: Blixtsnabb uppdatering av projekt-indexet genom hash-koll.
-- **ModernBERT Chunking**: Stöd för gigantiska filer utan krascher.
-- **Ecosystem Metadata**: Delad intelligens redo för GnawMimir.
-- **Multi-Actor ALF**: Support för cross-tool journaling.
+- **Multi-Actor ALF**: Support for cross-tool journaling (ready for GnawMimir).
 
 ---
 

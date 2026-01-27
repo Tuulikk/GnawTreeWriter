@@ -37,7 +37,7 @@ pub fn apply_batch(operation: BatchOperation) -> Result<BatchResult> {
                 match writer.edit(EditOperation::Edit {
                     node_path: node_path.clone(),
                     content: content.clone(),
-                }) {
+                }, false) {
                     Ok(_) => results.push(format!("Edited node: {}", node_path)),
                     Err(e) => failed.push((format!("Edit node: {}", node_path), e.to_string())),
                 }
@@ -51,7 +51,7 @@ pub fn apply_batch(operation: BatchOperation) -> Result<BatchResult> {
                     parent_path: parent_path.clone(),
                     position,
                     content: content.clone(),
-                }) {
+                }, false) {
                     Ok(_) => results.push(format!("Inserted at parent: {}", parent_path)),
                     Err(e) => failed.push((format!("Insert at: {}", parent_path), e.to_string())),
                 }
@@ -59,7 +59,7 @@ pub fn apply_batch(operation: BatchOperation) -> Result<BatchResult> {
             BatchEdit::Delete { node_path } => {
                 match writer.edit(EditOperation::Delete {
                     node_path: node_path.clone(),
-                }) {
+                }, false) {
                     Ok(_) => results.push(format!("Deleted node: {}", node_path)),
                     Err(e) => failed.push((format!("Delete node: {}", node_path), e.to_string())),
                 }

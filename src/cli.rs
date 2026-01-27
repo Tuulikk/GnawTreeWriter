@@ -165,6 +165,9 @@ enum Commands {
         #[arg(long)]
         /// Manually unescape \n sequences in the content (useful for some shells)
         unescape_newlines: bool,
+        #[arg(long)]
+        /// Bypass Guardian structural integrity checks
+        force: bool,
     },
     /// Insert new content into a parent node
     ///
@@ -727,8 +730,8 @@ impl Cli {
                 source_file,
                 preview,
                 unescape_newlines,
+                force,
             } => {
-                let content = resolve_content(content, source_file, unescape_newlines)?;
 
                 // Resolve target path from --tag flag, 'tag:<name>' positional, or explicit node_path
                 let target_path = if let Some(tag_name) = tag {
@@ -754,6 +757,7 @@ impl Cli {
                     anyhow::bail!("Either node path or --tag must be specified for edit");
                 };
 
+                let content = resolve_content(content, source_file, unescape_newlines)?;
                 let mut writer = GnawTreeWriter::new(&file_path)?;
                 let op = EditOperation::Edit {
                     node_path: target_path,
@@ -763,7 +767,7 @@ impl Cli {
                     let modified = writer.preview_edit(op)?;
                     print_diff(writer.get_source(), &modified);
                 } else {
-                    writer.edit(op)?;
+                    writer.edit(op, force)?;
                     show_hint();
                 }
             }
@@ -812,7 +816,7 @@ impl Cli {
                     let modified = writer.preview_edit(op)?;
                     print_diff(writer.get_source(), &modified);
                 } else {
-                    writer.edit(op)?;
+                    writer.edit(op, false)?;
                     show_hint();
                 }
             }
@@ -853,7 +857,7 @@ impl Cli {
                     let modified = writer.preview_edit(op)?;
                     print_diff(writer.get_source(), &modified);
                 } else {
-                    writer.edit(op)?;
+                    writer.edit(op, false)?;
                     show_hint();
                 }
             }
@@ -876,7 +880,7 @@ impl Cli {
                     let modified = writer.preview_edit(op)?;
                     print_diff(writer.get_source(), &modified);
                 } else {
-                    writer.edit(op)?;
+                    writer.edit(op, false)?;
                     println!("Successfully added property '{}' to {}", name, target_path);
                     show_hint();
                 }
@@ -911,7 +915,7 @@ impl Cli {
                     let modified = writer.preview_edit(op)?;
                     print_diff(writer.get_source(), &modified);
                 } else {
-                    writer.edit(op)?;
+                    writer.edit(op, false)?;
                     println!("Successfully added component '{}' to {}", name, target_path);
                     show_hint();
                 }
@@ -1564,7 +1568,7 @@ Use --no-preview to write batch file"
                 println!("\n--- Preview of Semantic Insertion ---");
                 print_diff(writer.get_source(), &modified);
             } else {
-                writer.edit(op)?;
+                writer.edit(op, false)?;
                 println!("✓ Successfully inserted code semantically.");
             }
         }
@@ -2703,7 +2707,7 @@ Use --no-preview to actually apply the rename."
 Use without --preview to apply the clone"
             );
         } else {
-            writer.edit(op)?;
+            writer.edit(op, false)?;
             println!(
                 "✓ Successfully cloned node to {} [{}]",
                 target_file_path, target_node_path

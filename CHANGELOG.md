@@ -2,6 +2,16 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.8.0] - 2026-01-23
+
+### Added
+- **The Guardian (Structural Integrity Protection)**: Revolutionary safety layer that protects your code from accidental destruction by AI agents.
+  - **Integrity Auditing**: Automatically analyzes every edit for significant volume reduction or structural loss.
+  - **Heuristic Complexity Check**: Detects if critical logic (if, loops, try-catch) is removed without valid replacement.
+  - **Documentation Watchdog**: Warns if comments or documentation are stripped from a node.
+  - **--force Override**: Allows human operators to bypass safety blocks when intentional major refactorings are performed.
+- **Smart Project Indexing (v0.7.9 features included)**: Faster project-wide semantic search with hash-based skipping and large file support.
+
 ## [0.7.9] - 2026-01-23
 
 ### Added

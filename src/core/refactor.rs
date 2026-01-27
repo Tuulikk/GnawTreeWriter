@@ -252,7 +252,7 @@ impl RefactorEngine {
                 node_path: change.node_path.clone(),
                 content: change.new_name.clone(),
             };
-            writer.edit(op)?;
+            writer.edit(op, false)?;
         }
 
         Ok(())

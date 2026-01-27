@@ -10,6 +10,7 @@ pub mod anchor;
 pub mod backup;
 pub mod batch;
 pub mod diff_parser;
+pub mod guardian;
 pub mod healer;
 pub mod refactor;
 pub mod restoration_engine;
@@ -123,7 +124,7 @@ impl GnawTreeWriter {
     }
 
     // Test indent insert
-    pub fn edit(&mut self, operation: EditOperation) -> Result<()> {
+    pub fn edit(&mut self, operation: EditOperation, force: bool) -> Result<()> {
         // Calculate before hash
         let before_hash = calculate_content_hash(&self.source_code);
 
@@ -159,6 +160,30 @@ impl GnawTreeWriter {
                 ));
             }
         };
+
+        // GUARDIAN INTEGRITY CHECK: Analyze the impact of the change
+        if let EditOperation::Edit { node_path, content: _ } = &operation {
+            if !force {
+                let resolved = self.resolve_path(node_path).context("Guardian could not resolve node")?;
+                let guardian = crate::core::guardian::GuardianEngine::new();
+                let report = guardian.audit_edit(resolved, &modified_code);
+                
+                match report.level {
+                    crate::core::guardian::IntegrityLevel::Critical => {
+                        return Err(anyhow::anyhow!("🛑 GUARDIAN BLOCK: This edit removes critical logic or structure.\nMessages: {}\nUse --force to override.", report.messages.join(", ")));
+                    }
+                    crate::core::guardian::IntegrityLevel::Warning => {
+                        println!("⚠️  GUARDIAN WARNING: Significant structural loss detected: {}", report.messages.join(", "));
+                    }
+                    crate::core::guardian::IntegrityLevel::Notice => {
+                        println!("ℹ️  Guardian Note: Minor structural reduction observed.");
+                    }
+                    _ => {}
+                }
+            } else {
+                println!("🛡️  Guardian bypassed via --force.");
+            }
+        }
 
         // VALIDATION: Try to parse the modified code in memory before saving
         let path = Path::new(&self.file_path);

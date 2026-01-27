@@ -563,7 +563,7 @@ pub mod mcp_server {
                         position: proposal.position,
                         content: content.to_string(),
                     };
-                    match writer.edit(op) {
+                    match writer.edit(op, false) {
                         Ok(_) => tool_success(
                             format!(
                                 "Successfully inserted code near anchor '{}' (confidence: {:.2})",
@@ -627,7 +627,7 @@ pub mod mcp_server {
             Ok(mut w) => {
                 let old_source = w.get_source().to_string();
                 let op = EditOperation::Edit { node_path: node_path.to_string(), content: content.to_string() };
-                if let Err(e) = w.edit(op) { return tool_error(e.to_string()); }
+                if let Err(e) = w.edit(op, false) { return tool_error(e.to_string()); }
                 
                 let new_source_loaded = std::fs::read_to_string(file_path).unwrap_or_default();
                 let diff = generate_diff_string(&old_source, &new_source_loaded);
@@ -642,7 +642,7 @@ pub mod mcp_server {
             Ok(mut w) => {
                 let old_source = w.get_source().to_string();
                 let op = EditOperation::Insert { parent_path: parent_path.to_string(), position, content: content.to_string() };
-                if let Err(e) = w.edit(op) { return tool_error(e.to_string()); }
+                if let Err(e) = w.edit(op, false) { return tool_error(e.to_string()); }
                 
                 let new_source_loaded = std::fs::read_to_string(file_path).unwrap_or_default();
                 let diff = generate_diff_string(&old_source, &new_source_loaded);

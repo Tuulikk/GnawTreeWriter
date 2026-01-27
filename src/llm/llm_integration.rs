@@ -74,7 +74,7 @@ pub fn process_llm_request(request: LLMEditRequest) -> Result<LLMResponse> {
             writer.edit(EditOperation::Edit {
                 node_path: node_path.clone(),
                 content: new_content,
-            })?;
+            }, false)?;
             Ok(LLMResponse::success(format!(
                 "Replaced node at {}: {}",
                 node_path, description
@@ -92,7 +92,7 @@ pub fn process_llm_request(request: LLMEditRequest) -> Result<LLMResponse> {
                 parent_path,
                 position: 0,
                 content,
-            })?;
+            }, false)?;
             Ok(LLMResponse::success(format!(
                 "Inserted before node {}: {}",
                 node_path, description
@@ -110,7 +110,7 @@ pub fn process_llm_request(request: LLMEditRequest) -> Result<LLMResponse> {
                 parent_path,
                 position: 1,
                 content,
-            })?;
+            }, false)?;
             Ok(LLMResponse::success(format!(
                 "Inserted after node {}: {}",
                 node_path, description
@@ -121,7 +121,7 @@ pub fn process_llm_request(request: LLMEditRequest) -> Result<LLMResponse> {
             node_path,
         } => {
             let node_path_clone = node_path.clone();
-            writer.edit(EditOperation::Delete { node_path })?;
+            writer.edit(EditOperation::Delete { node_path }, false)?;
             Ok(LLMResponse::success(format!(
                 "Deleted node {}: {}",
                 node_path_clone, description
@@ -138,7 +138,7 @@ pub fn process_llm_request(request: LLMEditRequest) -> Result<LLMResponse> {
                 parent_path: component_path.clone(),
                 position: 1,
                 content,
-            })?;
+            }, false)?;
             Ok(LLMResponse::success(format!(
                 "Added property {} to {}: {}",
                 property_name, component_path, description
