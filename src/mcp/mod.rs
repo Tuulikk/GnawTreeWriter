@@ -197,21 +197,6 @@ pub mod mcp_server {
                             }
                         },
                         {
-                            "name": "insert_node",
-                            "title": "Insert new content",
-                            "description": "Insert code into a parent node.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string" },
-                                    "parent_path": { "type": "string" },
-                                    "position": { "type": "integer" },
-                                    "content": { "type": "string" }
-                                },
-                                "required": ["file_path", "parent_path", "position", "content"]
-                            }
-                        },
-                        {
                             "name": "preview_edit",
                             "title": "Preview edit",
                             "description": "Show a diff of what an edit would change without applying it.",
@@ -251,6 +236,20 @@ pub mod mcp_server {
                                     "intent": { "type": "string", "description": "Where to insert: 'after' (default), 'before', or 'inside'" }
                                 },
                                 "required": ["file_path", "anchor_query", "content"]
+                            }
+                        },
+                        {
+                            "name": "semantic_edit",
+                            "title": "Semantic Edit (GnawSense)",
+                            "description": "Find a node semantically (e.g. 'the main loop') and replace its content. Perfect for surgical edits when you don't want to hunt for node paths.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" },
+                                    "query": { "type": "string", "description": "Semantic description of what to edit (e.g. 'the backup initialization')" },
+                                    "content": { "type": "string", "description": "The new code content" }
+                                },
+                                "required": ["file_path", "query", "content"]
                             }
                         },
                         { "name": "batch", "description": "Apply batch", "inputSchema": {"type":"object"} },
@@ -307,7 +306,7 @@ pub mod mcp_server {
                         let fp = validate_arg("file_path")?;
                         let np = validate_arg("node_path")?;
                         let c = validate_arg("content")?;
-                        Ok(handle_edit_node(fp, np, c))
+                        Ok(handle_edit_node_internal(state, fp, np, c))
                     },
                     "preview_edit" => {
                         let fp = validate_arg("file_path")?;
@@ -320,7 +319,7 @@ pub mod mcp_server {
                          let pp = validate_arg("parent_path")?;
                          let c = validate_arg("content")?;
                          let pos = arguments.get("position").and_then(Value::as_u64).unwrap_or(1) as usize;
-                         Ok(handle_insert_node(fp, pp, pos, c))
+                         Ok(handle_insert_node(state, fp, pp, pos, c))
                     },
                     "sense" => {
                         let query = validate_arg("query")?;
@@ -333,6 +332,12 @@ pub mod mcp_server {
                         let content = validate_arg("content")?;
                         let intent = arguments.get("intent").and_then(Value::as_str).unwrap_or("after");
                         Ok(handle_semantic_insert(state, fp, anchor, content, intent).await)
+                    },
+                    "semantic_edit" => {
+                        let fp = validate_arg("file_path")?;
+                        let query = validate_arg("query")?;
+                        let content = validate_arg("content")?;
+                        Ok(handle_semantic_edit(state, fp, query, content).await)
                     },
                     "batch" => Ok(json!({ "content": [{ "type": "text", "text": "Batch executed" }] })),
                     "undo" => Ok(json!({ "content": [{ "type": "text", "text": "Undo executed" }] })),
@@ -425,6 +430,80 @@ pub mod mcp_server {
             }
         }
         res
+    }
+
+    fn tool_success_with_pulse(msg: String, data: Option<Value>, pulse: Value) -> Value {
+        let mut res = tool_success(msg, data);
+        res.as_object_mut().unwrap().insert("pulse".to_string(), pulse);
+        res
+    }
+
+    fn generate_pulse(state: Arc<AppState>, file_path: &str, node_path: &str) -> Value {
+        let mut pulse = json!({
+            "related_nodes": [],
+            "test_files": [],
+            "hints": []
+        });
+
+        // 1. Find node name
+        let name = if let Ok(writer) = GnawTreeWriter::new(file_path) {
+            let tree = writer.analyze();
+            fn find_name(n: &TreeNode, p: &str) -> Option<String> {
+                if n.path == p { return n.get_name(); }
+                for c in &n.children { if let Some(nm) = find_name(c, p) { return Some(nm); } }
+                None
+            }
+            find_name(tree, node_path)
+        } else { None };
+
+        if let Some(n) = name {
+            // 2. Search for callers via RelationalIndexer
+            let mut indexer = crate::llm::RelationalIndexer::new(&state.project_root);
+            
+            // JIT: Index parent directory to catch local callers immediately
+            if let Some(parent) = std::path::Path::new(file_path).parent() {
+                let _ = indexer.index_directory(parent);
+            }
+
+            if let Ok(graphs) = indexer.load_all_graphs() {
+                let mut callers = Vec::new();
+                for graph in graphs {
+                    for rel in graph.relations {
+                        if rel.to_name == n && rel.relation_type == crate::llm::RelationType::Call {
+                             callers.push(json!({"file": graph.file_path, "path": rel.from_path}));
+                        }
+                    }
+                }
+                pulse["related_nodes"] = json!(callers);
+                if !callers.is_empty() {
+                    pulse["hints"].as_array_mut().unwrap().push(json!(format!("Symbol '{}' is called in {} places. Consider verifying impact.", n, callers.len())));
+                }
+            }
+        }
+
+        // 3. Search for tests
+        let file_name = std::path::Path::new(file_path).file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        let test_patterns = vec![
+            format!("test_{}.rs", file_name),
+            format!("{}_test.rs", file_name),
+            format!("test_{}.py", file_name),
+            format!("{}_test.py", file_name),
+            format!("tests/test_{}.rs", file_name),
+        ];
+        
+        let mut found_tests = Vec::new();
+        for p in test_patterns {
+            let path = state.project_root.join(p);
+            if path.exists() {
+                found_tests.push(path.to_string_lossy().to_string());
+            }
+        }
+        pulse["test_files"] = json!(found_tests);
+        if !found_tests.is_empty() {
+            pulse["hints"].as_array_mut().unwrap().push(json!("Found associated test files. Remember to update or run tests."));
+        }
+
+        pulse
     }
 
     fn handle_analyze(file_path: &str) -> Value {
@@ -564,13 +643,17 @@ pub mod mcp_server {
                         content: content.to_string(),
                     };
                     match writer.edit(op, false) {
-                        Ok(_) => tool_success(
-                            format!(
-                                "Successfully inserted code near anchor '{}' (confidence: {:.2})",
-                                proposal.anchor_path, proposal.confidence
-                            ),
-                            None,
-                        ),
+                        Ok(_) => {
+                            let pulse = generate_pulse(state, file_path, &proposal.anchor_path);
+                            tool_success_with_pulse(
+                                format!(
+                                    "Successfully inserted code near anchor '{}' (confidence: {:.2})",
+                                    proposal.anchor_path, proposal.confidence
+                                ),
+                                None,
+                                pulse,
+                            )
+                        },
                         Err(e) => tool_error(e.to_string()),
                     }
                 }
@@ -580,6 +663,36 @@ pub mod mcp_server {
         #[cfg(not(feature = "modernbert"))]
         {
             let _ = (state, file_path, anchor_query, content, intent);
+            tool_error("ModernBERT feature not enabled.".into())
+        }
+    }
+
+    async fn handle_semantic_edit(
+        state: Arc<AppState>,
+        file_path: &str,
+        query: &str,
+        content: &str,
+    ) -> Value {
+        #[cfg(feature = "modernbert")]
+        {
+            use crate::llm::{GnawSenseBroker, SenseResponse};
+            let broker = match GnawSenseBroker::new(&state.project_root) {
+                Ok(b) => b,
+                Err(e) => return tool_error(e.to_string()),
+            };
+
+            match broker.sense(query, Some(file_path)).await {
+                Ok(SenseResponse::Zoom { nodes, .. }) if !nodes.is_empty() => {
+                    let best_node = &nodes[0];
+                    handle_edit_node_internal(state, file_path, &best_node.path, content)
+                },
+                Ok(_) => tool_error(format!("Could not find a semantic match for '{}' in {}", query, file_path)),
+                Err(e) => tool_error(e.to_string()),
+            }
+        }
+        #[cfg(not(feature = "modernbert"))]
+        {
+            let _ = (state, file_path, query, content);
             tool_error("ModernBERT feature not enabled.".into())
         }
     }
@@ -622,7 +735,7 @@ pub mod mcp_server {
         }
     }
 
-    fn handle_edit_node(file_path: &str, node_path: &str, content: &str) -> Value {
+    fn handle_edit_node_internal(state: Arc<AppState>, file_path: &str, node_path: &str, content: &str) -> Value {
         match GnawTreeWriter::new(file_path) {
             Ok(mut w) => {
                 let old_source = w.get_source().to_string();
@@ -631,13 +744,14 @@ pub mod mcp_server {
                 
                 let new_source_loaded = std::fs::read_to_string(file_path).unwrap_or_default();
                 let diff = generate_diff_string(&old_source, &new_source_loaded);
-                tool_success(format!("Node edited.\nDiff:\n{}", diff), Some(json!({"diff": diff})))
+                let pulse = generate_pulse(state, file_path, node_path);
+                tool_success_with_pulse(format!("Node edited.\nDiff:\n{}", diff), Some(json!({"diff": diff})), pulse)
             },
             Err(e) => tool_error(format!("IO error: {}", e)),
         }
     }
 
-    fn handle_insert_node(file_path: &str, parent_path: &str, position: usize, content: &str) -> Value {
+    fn handle_insert_node(state: Arc<AppState>, file_path: &str, parent_path: &str, position: usize, content: &str) -> Value {
         match GnawTreeWriter::new(file_path) {
             Ok(mut w) => {
                 let old_source = w.get_source().to_string();
@@ -646,7 +760,8 @@ pub mod mcp_server {
                 
                 let new_source_loaded = std::fs::read_to_string(file_path).unwrap_or_default();
                 let diff = generate_diff_string(&old_source, &new_source_loaded);
-                tool_success(format!("Content inserted.\nDiff:\n{}", diff), Some(json!({"diff": diff})))
+                let pulse = generate_pulse(state, file_path, parent_path); // Pulse for parent
+                tool_success_with_pulse(format!("Content inserted.\nDiff:\n{}", diff), Some(json!({"diff": diff})), pulse)
             },
             Err(e) => tool_error(format!("IO error: {}", e)), // Corrected: escaped curly brace
         }

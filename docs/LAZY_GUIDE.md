@@ -11,7 +11,14 @@ Traditionella verktyg (`sed`, `grep`, `replace`) ser kod som textsträngar. Det 
 ## 🧠 GnawSense: Din semantiska kompass
 GnawSense (ModernBERT) låter dig söka efter *logik*, inte bara tecken.
 - **Hitta kod:** `gnawtreewriter sense "hur hanteras backups?"` – sök i hela projektet utan att veta filnamnet.
+- **Smart redigering:** Använd MCP-verktyget `semantic_edit` för att direkt ändra kod via beskrivning. Agenten behöver inte ens veta nodens sökväg!
 - **Smart insättning:** `gnawtreewriter sense-insert --file main.rs --anchor "där loggarna roteras" --content "println!(\"Roterar!\");"` – låt AI:n hitta rätt plats för din kod.
+
+## 💓 GnawPulse: Agentens kontrollpanel
+Varje gång du ändrar kod via MCP-verktygen (`edit_node`, `semantic_edit`, etc.) får du ett **GnawPulse**-svar.
+- **Impact Analysis:** Ser du vilka andra funktioner som anropar den kod du just ändrade?
+- **Test Finder:** Hittar automatiskt relaterade testfiler så att du inte glömmer att verifiera ändringen.
+- **Hints:** Ger proaktiva råd om nästa steg.
 
 ## 🚀 Snabbguide för den lata
 1. **Få överblick:** `gnawtreewriter skeleton <fil>` (visar bara defs, inget brus).
