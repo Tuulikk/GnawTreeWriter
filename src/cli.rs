@@ -1912,9 +1912,27 @@ Use --no-preview to perform the restoration"
             println!("🔍 Alias found: '{}' -> {}", session_id, actual_id);
         }
 
-        let restoration_engine = RestorationEngine::new(transaction_log);
-        let result = restoration_engine.restore_session(&actual_id, preview)?;
+        if preview {
+             println!("Would restore session {}...", actual_id);
+             let files = transaction_log.get_session_files(&actual_id)?;
+             if files.is_empty() {
+                 println!("No files affected in this session.");
+             } else {
+                 println!("Files to be restored:");
+                 for f in files {
+                     println!(" - {}", f.display());
+                 }
+             }
+             println!("\nUse --no-preview to perform restoration.");
+             return Ok(());
+        }
 
+        let restoration_engine = RestorationEngine::new(&project_root)?;
+        let result = restoration_engine.restore_session(&actual_id)?;
+
+        result.print_summary();
+        Ok(())
+    }
 
     fn handle_debug_hash(content: &str) -> Result<()> {
         use crate::core::calculate_content_hash;

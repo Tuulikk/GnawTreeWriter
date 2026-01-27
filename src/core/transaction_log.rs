@@ -406,7 +406,6 @@ impl TransactionLog {
 
     /// Start a new session (clears current session, keeps history)
     pub fn start_new_session(&mut self, name: Option<String>) -> Result<()> {
-        // Log session end for current session
         if !self.current_session.is_empty() {
             let _ = self.log_transaction(
                 OperationType::SessionEnd,
@@ -422,26 +421,23 @@ impl TransactionLog {
             );
         }
 
-        // Start new session
         self.session_id = generate_session_id();
         self.current_session.clear();
 
-        // Save session_id to file for persistence
-        std::fs::write(&self.session_id_file, &self.session_id)?;
+        let _ = std::fs::write(&self.session_id_file, &self.session_id);
 
-        // If a name is provided, save it as an alias
         if let Some(alias) = name {
             let project_root = self.log_file.parent().unwrap_or(Path::new("."));
             let alias_file = project_root.join(".gnawtreewriter_aliases.json");
             let mut aliases: HashMap<String, String> = if alias_file.exists() {
-                let data = fs::read_to_string(&alias_file)?;
+                let data = std::fs::read_to_string(&alias_file)?;
                 serde_json::from_str(&data).unwrap_or_default()
             } else {
                 HashMap::new()
             };
             aliases.insert(alias.clone(), self.session_id.clone());
             let data = serde_json::to_string_pretty(&aliases)?;
-            fs::write(alias_file, data)?;
+            let _ = std::fs::write(alias_file, data);
             println!("✓ Session alias created: '{}' -> {}", alias, self.session_id);
         }
 

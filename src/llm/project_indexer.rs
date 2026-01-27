@@ -1,3 +1,5 @@
+#![cfg(feature = "modernbert")]
+
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use crate::llm::{GnawSenseBroker, SemanticIndexManager, NodeEmbedding, AiModel, DeviceType};
