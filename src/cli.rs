@@ -387,7 +387,11 @@ enum Commands {
     /// Debug hash calculation for troubleshooting
     DebugHash { content: String },
     /// Start a new session (clears current session history)
-    SessionStart,
+    SessionStart {
+        #[arg(short, long)]
+        /// Human-readable name/alias for this session
+        name: Option<String>,
+    },
     /// Show current undo/redo state
     Status,
     /// Manage the MCP server (Model Context Protocol).
@@ -978,8 +982,8 @@ impl Cli {
                     preview,
                 )?;
             }
-            Commands::SessionStart => {
-                Self::handle_session_start()?;
+            Commands::SessionStart { name } => {
+                Self::handle_session_start(name)?;
             }
             Commands::Status => {
                 Self::handle_status()?;
@@ -1727,16 +1731,12 @@ Use --no-preview to write batch file"
         Ok(())
     }
 
-    fn handle_session_start() -> Result<()> {
+    fn handle_session_start(name: Option<String>) -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
         let mut transaction_log = TransactionLog::load(project_root)?;
-
-        transaction_log.start_new_session()?;
-
-        println!("✓ New session started");
-        println!("Previous session history has been preserved");
-
+        transaction_log.start_new_session(name)?;
+        println!("✓ New session started: {}", transaction_log.get_current_session_id());
         Ok(())
     }
 
@@ -1896,35 +1896,25 @@ Use --no-preview to perform the restoration"
     fn handle_restore_session(session_id: &str, preview: bool) -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
-        let transaction_log = TransactionLog::load(project_root.clone())?;
+        let transaction_log = TransactionLog::load(&project_root)?;
 
-        let session_files = transaction_log.get_session_files(session_id)?;
-
-        if session_files.is_empty() {
-            println!("No files found for session: {}", session_id);
-            return Ok(());
-        }
-
-        if preview {
-            println!("Session Restoration Plan:");
-            println!("=========================");
-            println!("Restore all changes from session: {}", session_id);
-            println!("Files affected in this session:");
-            for file in &session_files {
-                println!("  {}", file.display());
-            }
-            println!(
-                "
-Use --no-preview to perform the restoration"
-            );
+        // ALIAS LOOKUP: Check if the session_id is actually a human-readable alias
+        let alias_file = project_root.join(".gnawtreewriter_aliases.json");
+        let actual_id = if alias_file.exists() {
+            let data = std::fs::read_to_string(alias_file)?;
+            let aliases: std::collections::HashMap<String, String> = serde_json::from_str(&data).unwrap_or_default();
+            aliases.get(session_id).cloned().unwrap_or_else(|| session_id.to_string())
         } else {
-            let engine = RestorationEngine::new(&project_root)?;
-            let result = engine.restore_session(session_id)?;
-            result.print_summary();
+            session_id.to_string()
+        };
+
+        if actual_id != session_id {
+            println!("🔍 Alias found: '{}' -> {}", session_id, actual_id);
         }
 
-        Ok(())
-    }
+        let restoration_engine = RestorationEngine::new(transaction_log);
+        let result = restoration_engine.restore_session(&actual_id, preview)?;
+
 
     fn handle_debug_hash(content: &str) -> Result<()> {
         use crate::core::calculate_content_hash;
@@ -2960,6 +2950,10 @@ fn resolve_content(
             let mut buffer = String::new();
             std::io::stdin().read_to_string(&mut buffer)?;
             buffer
+        } else if let Some(file_path) = c.strip_prefix('@') {
+            // SAFE INJECTION: Read content from a file path starting with @
+            std::fs::read_to_string(file_path)
+                .with_context(|| format!("Failed to read content from file: {}", file_path))?
         } else {
             c
         }

@@ -2,6 +2,17 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.8.4] - 2026-01-27
+
+### Added
+- **Human-Readable Sessions**: Introduced session aliasing. Users can now name their sessions (e.g., `--name cleanup`) for much easier restoration and navigation.
+- **Safe Content Injection (@file syntax)**: Added the ability to read edit/insert content from a local file path prefixed with `@`. This completely eliminates shell escaping and quoting issues for AI agents.
+- **Improved Semantic Indexing**: Enhanced persistence and metadata sharing for the future **GnawMimir** integration.
+
+### Fixed
+- **CLI Robustness**: Standardized indentation and fixed minor logic bugs in cross-file command handling.
+- **Updated Documentation**: Refreshed `KNOWN_ISSUES.md` to accurately reflect the v0.8.x series and addressed feedback from the GLM architectural analysis.
+
 ## [0.8.3] - 2026-01-27
 
 ### Added
