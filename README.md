@@ -68,6 +68,32 @@ gnawtreewriter sense-insert src/auth.rs "fn validate_user" "println!(\"Validatin
 
 ---
 
+## 🛡️ The Structural Guardian
+
+GnawTreeWriter isn't just a text editor; it's a **Structural Guardian** for your codebase. It monitors the "entropy" of your code during every edit, ensuring that AI agents (or human operators) don't accidentally perform a "lobotomy" on your logic.
+
+- **Integrity Auditing**: Every edit is scored for structural loss. If a massive amount of logic or documentation is removed, The Guardian blocks the change.
+- **The Duplex Loop**: GnawTreeWriter validates proposed changes against the AST *before* they touch your disk. If it's not valid syntax, it won't be applied.
+
+## 📓 ALF: Agentic Logging Framework
+
+To solve the problem of "Agent Amnesia," we built **ALF**. It's a structural journal that links high-level intent with low-level code changes.
+
+- **Traceable Intent**: Why was this function changed? ALF knows.
+- **Transaction Linking**: Every journal entry is tied to a specific `TransactionID` in the history.
+- **Ecosystem Ready**: Designed to share knowledge with other tools like **GnawMimir**, creating a unified cognitive workspace.
+
+### 📊 Engineering Evidence (Sample Report)
+
+| Layer | Details |
+| :--- | :--- |
+| **Intent** | Strategic Decision: Migrating to async handlers for scalability. |
+| **Structure** | Node `@fn:old_system` in `src/network.rs` |
+| **Actor** | @writer (Autonomous Architect) |
+| **Status** | ✅ Verified via TCARV |
+
+---
+
 ## Key Features
 
 - **AST-Level Precision**: Work at tree level, never worry about brackets again.
