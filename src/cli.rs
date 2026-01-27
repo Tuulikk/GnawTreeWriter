@@ -657,6 +657,15 @@ enum AiSubcommands {
         /// Directory to index (defaults to project root)
         path: Option<PathBuf>,
     },
+    /// Generate an engineering report of recent structural changes
+    Report {
+        /// Number of recent entries to include
+        #[arg(short, long, default_value = "10")]
+        limit: usize,
+        /// Path to save the report (defaults to stdout)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1099,11 +1108,15 @@ impl Cli {
                         Commands::Scaffold { file_path, schema } => {
                             Self::handle_scaffold(&file_path, &schema)?;
                         }
-                        Commands::Ai { command } => match command {
-                            AiSubcommands::Index { path } => {
-                                Self::handle_ai_index(path).await?;
-                            }
-                        },
+                                    Commands::Ai { command } => match command {
+                                        AiSubcommands::Index { path } => {
+                                            Self::handle_ai_index(path).await?;
+                                        }
+                                        AiSubcommands::Report { limit, output } => {
+                                            Self::handle_ai_report(limit, output).await?;
+                                        }
+                                    },
+                        
                                     Commands::Alf { message, actor, txn, kind, tag, id, list, limit } => {
                                         Self::handle_alf(message, actor, txn, kind, tag, id, list, limit)?;
                                     }
@@ -1693,6 +1706,24 @@ Use --no-preview to write batch file"
             let _ = path;
             println!("Error: 'modernbert' feature not enabled in this build.");
         }
+        Ok(())
+    }
+
+    async fn handle_ai_report(limit: usize, output: Option<PathBuf>) -> Result<()> {
+        use crate::core::report::ReportEngine;
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        
+        let engine = ReportEngine::new();
+        let markdown = engine.generate_markdown_report(&project_root, limit)?;
+
+        if let Some(path) = output {
+            std::fs::write(&path, &markdown)?;
+            println!("✓ Engineering report saved to: {}", path.display());
+        } else {
+            println!("{}", markdown);
+        }
+
         Ok(())
     }
 

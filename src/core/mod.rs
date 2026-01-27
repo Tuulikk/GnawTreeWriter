@@ -13,6 +13,7 @@ pub mod diff_parser;
 pub mod guardian;
 pub mod healer;
 pub mod refactor;
+pub mod report;
 pub mod restoration_engine;
 pub mod scaffold;
 pub mod tag_manager;

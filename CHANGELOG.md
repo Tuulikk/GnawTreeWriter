@@ -2,6 +2,14 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.8.1] - 2026-01-27
+
+### Added
+- **ReportEngine (The Evidence Generator)**: New capability to generate structural engineering reports in Markdown format.
+  - **Audit Integration**: Merges high-level intent from ALF with low-level structural changes from TransactionLog.
+  - **Professional Reporting**: Designed to provide clear, evidence-based accounts of technical progress for GitHub or administrative reporting.
+  - **New CLI Command**: `gnawtreewriter ai report` to generate and save structural evolution reports.
+
 ## [0.8.0] - 2026-01-23
 
 ### Added

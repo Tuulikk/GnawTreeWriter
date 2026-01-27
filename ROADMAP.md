@@ -10,14 +10,13 @@ The roadmap is divided into two sections:
 
 ---
 
-## Current Status: v0.8.0 (Released 2026-01-23)
+## Current Status: v0.8.1 (Released 2026-01-27)
 
-### ✅ Completed Features (The Guardian Update)
+### ✅ Completed Features (The Evidence Update)
 
-- **The Guardian**: Structural integrity protection that prevents "Agent Lobotomy" by blocking massive accidental code deletions.
-- **Project-wide Semantic Search**: Persistent project crawler and global radar for finding code by meaning anywhere.
-- **Smart Re-indexing**: Blixtsnabb uppdatering av projekt-indexet genom hash-koll.
-- **Multi-Actor ALF**: Support for cross-tool journaling (ready for GnawMimir).
+- **ReportEngine**: Automatically generate structural engineering reports from ALF and Transaction logs.
+- **The Guardian**: Structural integrity protection that prevents massive accidental code deletions.
+- **Project-wide Semantic Search**: Global radar for finding code by meaning anywhere in the codebase.
 
 ---
 

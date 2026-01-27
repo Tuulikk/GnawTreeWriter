@@ -183,6 +183,12 @@ impl TransactionLog {
         Ok(transaction_id)
     }
 
+    /// Get transaction by ID (wrapper around find_transaction for easier Result handling)
+    pub fn get_transaction(&self, transaction_id: &str) -> Result<Transaction> {
+        self.find_transaction(transaction_id)?
+            .ok_or_else(|| anyhow::anyhow!("Transaction not found: {}", transaction_id))
+    }
+
     /// Get transaction history for current session
     pub fn get_session_history(&self) -> &[Transaction] {
         &self.current_session
