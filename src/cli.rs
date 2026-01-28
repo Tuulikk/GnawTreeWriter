@@ -1829,7 +1829,16 @@ Use --no-preview to write batch file"
         let mgr = crate::llm::ai_manager::AiManager::new(&project_root)?;
         
         println!("🚀 Setting up AI models in {}...", project_root.display());
-        mgr.setup(crate::llm::ai_manager::AiModel::ModernBert, crate::llm::ai_manager::DeviceType::Cpu, force).await?;
+        if let Err(e) = mgr.setup(crate::llm::ai_manager::AiModel::ModernBert, crate::llm::ai_manager::DeviceType::Cpu, force).await {
+            println!("\n⚠️  {}", "Automatic setup failed.".bold().red());
+            println!("Error: {}", e);
+            println!("\n💡 [The Helpful Guard]: You can download the model manually using these commands:");
+            println!("   mkdir -p .gnawtreewriter_ai/models/modernbert");
+            println!("   curl -L https://huggingface.co/answerdotai/ModernBERT-base/resolve/main/config.json -o .gnawtreewriter_ai/models/modernbert/config.json");
+            println!("   curl -L https://huggingface.co/answerdotai/ModernBERT-base/resolve/main/tokenizer.json -o .gnawtreewriter_ai/models/modernbert/tokenizer.json");
+            println!("   curl -L https://huggingface.co/answerdotai/ModernBERT-base/resolve/main/model.safetensors -o .gnawtreewriter_ai/models/modernbert/model.safetensors");
+            return Err(e);
+        }
         println!("✨ AI models setup successfully.");
         Ok(())
     }
@@ -2620,6 +2629,12 @@ Use --no-preview to perform the restoration"
     fn show_visual_pulse(writer: &GnawTreeWriter, focus_path: &str, narrative: Option<&str>) {
         let viz = TreeVisualizer::new(5, true);
         
+        println!("\n┌──────────────────────────────────────────┐");
+        println!("│ 🛠️  {} {:<30} │", "Operation:".bold(), "Structural Update");
+        println!("│ 📍 {} {:<30} │", "Target:".bold(), focus_path);
+        println!("│ ✨ {} {:<30} │", "Status:".bold(), "Syntax Validated ✅");
+        println!("└──────────────────────────────────────────┘");
+
         if let Some(n) = narrative {
             println!("\n🎙️  {}", "Narrative:".bold().cyan());
             println!("   \"{}\"", n.italic());
@@ -2633,6 +2648,12 @@ Use --no-preview to perform the restoration"
     fn show_visual_diff(writer: &GnawTreeWriter, focus_path: &str, old_node: Option<&TreeNode>, narrative: Option<&str>) {
         let viz = TreeVisualizer::new(5, true);
         
+        println!("\n┌──────────────────────────────────────────┐");
+        println!("│ 🛠️  {} {:<30} │", "Operation:".bold(), "Surgical Edit");
+        println!("│ 📍 {} {:<30} │", "Target:".bold(), focus_path);
+        println!("│ ✨ {} {:<30} │", "Status:".bold(), "Structural Diff Applied ✅");
+        println!("└──────────────────────────────────────────┘");
+
         if let Some(n) = narrative {
             println!("\n🎙️  {}", "Narrative:".bold().cyan());
             println!("   \"{}\"", n.italic());
