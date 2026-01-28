@@ -9,6 +9,7 @@ pub mod alf;
 pub mod anchor;
 pub mod backup;
 pub mod batch;
+pub mod blueprint;
 pub mod diff_parser;
 pub mod guardian;
 pub mod healer;
@@ -20,6 +21,7 @@ pub mod tag_manager;
 pub mod label_manager;
 pub mod transaction_log;
 pub mod undo_redo;
+pub mod visualizer;
 
 pub use batch::{Batch, BatchEdit};
 pub use refactor::{format_refactor_results, RefactorEngine, RefactorResult};

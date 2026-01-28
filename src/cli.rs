@@ -4,12 +4,13 @@
 
 use crate::core::{
     find_project_root, EditOperation, GnawTreeWriter, OperationType, RestorationEngine, TagManager,
-    TransactionLog, UndoRedoManager,
+    TransactionLog, UndoRedoManager, visualizer::TreeVisualizer,
 };
 #[cfg(feature = "modernbert")]
 use crate::llm::{GnawSenseBroker, SenseResponse};
 use crate::parser::TreeNode;
 use anyhow::{Context, Result};
+use colored::Colorize;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -650,6 +651,12 @@ enum Commands {
 
     /// Show version information
     Version,
+    /// Generate a project blueprint (architectural overview)
+    Blueprint {
+        /// Optional path to save the blueprint as a file (e.g. blueprint.md)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -773,7 +780,7 @@ impl Cli {
                 let content = resolve_content(content, source_file, unescape_newlines)?;
                 let mut writer = GnawTreeWriter::new(&file_path)?;
                 let op = EditOperation::Edit {
-                    node_path: target_path,
+                    node_path: target_path.clone(),
                     content,
                 };
                 if preview {
@@ -781,6 +788,7 @@ impl Cli {
                     print_diff(writer.get_source(), &modified);
                 } else {
                     writer.edit(op, force)?;
+                    Self::show_visual_pulse(&writer, &target_path);
                     show_hint();
                 }
             }
@@ -821,7 +829,7 @@ impl Cli {
 
                 let mut writer = GnawTreeWriter::new(&file_path)?;
                 let op = EditOperation::Insert {
-                    parent_path: insert_parent,
+                    parent_path: insert_parent.clone(),
                     position,
                     content,
                 };
@@ -830,6 +838,7 @@ impl Cli {
                     print_diff(writer.get_source(), &modified);
                 } else {
                     writer.edit(op, false)?;
+                    Self::show_visual_pulse(&writer, &insert_parent);
                     show_hint();
                 }
             }
@@ -1125,13 +1134,15 @@ impl Cli {
             Self::handle_alf(message, actor, txn, kind, tag, id, list, limit)?;
                 }
             
-Commands::Version => {
+            Commands::Version => {
 Self::handle_version()?;
+            }
+            Commands::Blueprint { output } => {
+                Self::handle_blueprint(output.as_deref())?;
             }
         }
         Ok(())
     }
-
     fn handle_tag_add(file_path: &str, node_path: &str, name: &str, force: bool) -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
@@ -1599,6 +1610,28 @@ Use --no-preview to write batch file"
 
     fn handle_version() -> Result<()> {
         println!("GnawTreeWriter v{}", env!("CARGO_PKG_VERSION"));
+        Ok(())
+    }
+
+    fn handle_blueprint(output_path: Option<&str>) -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        let engine = crate::core::blueprint::BlueprintEngine::new(&project_root);
+        let blueprint = engine.generate()?;
+        
+        if let Some(path) = output_path {
+            let content = if path.ends_with(".md") {
+                engine.render_to_markdown(&blueprint)
+            } else {
+                // Fallback to simple text rendering if not .md
+                // For now we'll just use markdown as it's the requested format
+                engine.render_to_markdown(&blueprint)
+            };
+            std::fs::write(path, content)?;
+            println!("✓ Blueprint saved to {}", path);
+        } else {
+            engine.render_to_terminal(&blueprint);
+        }
         Ok(())
     }
 
@@ -2454,6 +2487,12 @@ Use --no-preview to perform the restoration"
             }
         }
         Ok(())
+    }
+
+    fn show_visual_pulse(writer: &GnawTreeWriter, focus_path: &str) {
+        let viz = TreeVisualizer::new(5, true);
+        println!("\n{}", "Structure Context:".bold());
+        println!("{}", viz.render(writer.analyze(), focus_path));
     }
 
     fn handle_analyze(paths: &[String], format: &str, recursive: bool) -> Result<()> {

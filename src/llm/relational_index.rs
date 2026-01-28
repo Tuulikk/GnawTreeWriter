@@ -45,31 +45,43 @@ impl RelationalIndexer {
         }
     }
 
-    /// Scan a directory and build relations between files
+    /// Scan a directory and build relations between files recursively
     pub fn index_directory(&mut self, dir_path: &Path) -> Result<Vec<FileGraph>> {
         let mut graphs = Vec::new();
+        use walkdir::WalkDir;
         
-        // 1. First pass: Collect all definitions in the directory
-        let entries = fs::read_dir(dir_path)?;
-        for entry in entries {
-            let entry = entry?;
+        // 1. First pass: Collect all definitions in the directory recursively
+        for entry in WalkDir::new(dir_path)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+        {
             let path = entry.path();
-            if path.is_file() {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if let Ok(parser) = crate::parser::get_parser(&path) {
-                        if let Ok(tree) = parser.parse(&content) {
-                            let mut defs = HashMap::new();
-                            self.collect_definitions(&tree, &mut defs);
-                            
-                            let file_str = path.to_string_lossy().to_string();
-                            for name in defs.keys() {
-                                self.symbol_table.entry(name.clone())
-                                    .or_default()
-                                    .push(file_str.clone());
-                            }
-                            
-                            graphs.push((path, tree, defs));
+            
+            // Skip hidden directories and common build/environment folders
+            let is_ignored = path.components().any(|c| {
+                let s = c.as_os_str().to_str().unwrap_or("");
+                s.starts_with('.') || s == "venv" || s == "node_modules" || s == "target" || s == "__pycache__" || s == "env"
+            });
+            
+            if is_ignored {
+                continue;
+            }
+
+            if let Ok(content) = fs::read_to_string(path) {
+                if let Ok(parser) = crate::parser::get_parser(path) {
+                    if let Ok(tree) = parser.parse(&content) {
+                        let mut defs = HashMap::new();
+                        self.collect_definitions(&tree, &mut defs);
+                        
+                        let file_str = path.to_string_lossy().to_string();
+                        for name in defs.keys() {
+                            self.symbol_table.entry(name.clone())
+                                .or_default()
+                                .push(file_str.clone());
                         }
+                        
+                        graphs.push((path.to_path_buf(), tree, defs));
                     }
                 }
             }

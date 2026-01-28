@@ -1,2 +1,2 @@
 def edited():
-    print('Edited!')
+    print("Pulse Check!")
