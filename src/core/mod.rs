@@ -278,8 +278,13 @@ impl GnawTreeWriter {
             );
         }
 
-        fs::write(&self.file_path, modified_code)
+        fs::write(&self.file_path, &modified_code)
             .context(format!("Failed to write file: {}", self.file_path))?;
+
+        // Refresh internal state to reflect the changes on disk
+        self.source_code = modified_code;
+        let parser = get_parser(Path::new(&self.file_path))?;
+        self.tree = parser.parse(&self.source_code)?;
 
         Ok(())
     }

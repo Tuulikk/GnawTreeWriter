@@ -39,6 +39,19 @@ pub struct TreeNode {
 }
 
 impl TreeNode {
+    /// Recursively find a node by its path string.
+    pub fn find_path(&self, target_path: &str) -> Option<&TreeNode> {
+        if self.path == target_path {
+            return Some(self);
+        }
+        for child in &self.children {
+            if let Some(found) = child.find_path(target_path) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
     /// Attempts to extract a descriptive name for this node (e.g., function name, class name).
     /// It looks for common identifier-like children.
     pub fn get_name(&self) -> Option<String> {

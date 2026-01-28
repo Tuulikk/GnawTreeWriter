@@ -167,6 +167,9 @@ enum Commands {
         #[arg(long)]
         /// Bypass Guardian structural integrity checks
         force: bool,
+        #[arg(long, short = 'n')]
+        /// A brief explanation of the intent behind this change
+        narrative: Option<String>,
     },
     /// Insert new content into a parent node
     ///
@@ -201,6 +204,9 @@ enum Commands {
         #[arg(long)]
         /// Manually unescape \n sequences in the content (useful for some shells)
         unescape_newlines: bool,
+        #[arg(long, short = 'n')]
+        /// A brief explanation of the intent behind this change
+        narrative: Option<String>,
     },
     /// Undo recent edit operations
     ///
@@ -657,10 +663,37 @@ enum Commands {
         #[arg(short, long)]
         output: Option<String>,
     },
+    /// Semantic edit: find a node by description and replace its content
+    SemanticEdit {
+        /// File to edit
+        file_path: String,
+        /// Semantic description of what to edit (e.g. 'the main loop')
+        query: String,
+        /// New content to replace the node with. Use "-" to read from stdin.
+        #[arg(required_unless_present = "source_file")]
+        content: Option<String>,
+        /// Read content from a file instead of command line
+        #[arg(long, conflicts_with = "content")]
+        source_file: Option<String>,
+        #[arg(long, short = 'n')]
+        /// A brief explanation of the intent behind this change
+        narrative: Option<String>,
+        #[arg(long)]
+        /// Bypass Guardian structural integrity checks
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
 enum AiSubcommands {
+    /// Setup AI models (downloads required files)
+    Setup {
+        #[arg(long)]
+        /// Force re-download even if already present
+        force: bool,
+    },
+    /// Show AI status and installed models
+    Status,
     /// Index the entire project for semantic search
     Index {
         /// Directory to index (defaults to project root)
@@ -751,6 +784,7 @@ impl Cli {
                 preview,
                 unescape_newlines,
                 force,
+                narrative,
             } => {
 
                 // Resolve target path from --tag flag, 'tag:<name>' positional, or explicit node_path
@@ -779,6 +813,10 @@ impl Cli {
 
                 let content = resolve_content(content, source_file, unescape_newlines)?;
                 let mut writer = GnawTreeWriter::new(&file_path)?;
+                
+                // Capture old node for visual diff
+                let old_node = writer.analyze().clone().find_path(&target_path).cloned();
+
                 let op = EditOperation::Edit {
                     node_path: target_path.clone(),
                     content,
@@ -788,7 +826,7 @@ impl Cli {
                     print_diff(writer.get_source(), &modified);
                 } else {
                     writer.edit(op, force)?;
-                    Self::show_visual_pulse(&writer, &target_path);
+                    Self::show_visual_diff(&writer, &target_path, old_node.as_ref(), narrative.as_deref());
                     show_hint();
                 }
             }
@@ -801,6 +839,7 @@ impl Cli {
                 source_file,
                 preview,
                 unescape_newlines,
+                narrative,
             } => {
                 let content = resolve_content(content, source_file, unescape_newlines)?;
 
@@ -838,7 +877,7 @@ impl Cli {
                     print_diff(writer.get_source(), &modified);
                 } else {
                     writer.edit(op, false)?;
-                    Self::show_visual_pulse(&writer, &insert_parent);
+                    Self::show_visual_pulse(&writer, &insert_parent, narrative.as_deref());
                     show_hint();
                 }
             }
@@ -1122,13 +1161,19 @@ impl Cli {
                 Self::handle_scaffold(&file_path, &schema)?;
             }
             Commands::Ai { command } => match command {
+                AiSubcommands::Setup { force } => {
+                    Self::handle_ai_setup(force).await?;
+                }
+                AiSubcommands::Status => {
+                    Self::handle_ai_status()?;
+                }
                 AiSubcommands::Index { path } => {
                     Self::handle_ai_index(path).await?;
-                        }
-                    AiSubcommands::Report { limit, output } => {
+                }
+                AiSubcommands::Report { limit, output } => {
                     Self::handle_ai_report(limit, output).await?;
-                        }
-                    },
+                }
+            },
                 
             Commands::Alf { message, actor, txn, kind, tag, id, list, limit } => {
             Self::handle_alf(message, actor, txn, kind, tag, id, list, limit)?;
@@ -1139,6 +1184,16 @@ Self::handle_version()?;
             }
             Commands::Blueprint { output } => {
                 Self::handle_blueprint(output.as_deref())?;
+            }
+            Commands::SemanticEdit {
+                file_path,
+                query,
+                content,
+                source_file,
+                narrative,
+                force,
+            } => {
+                Self::handle_semantic_edit(&file_path, &query, content, source_file, narrative, force).await?;
             }
         }
         Ok(())
@@ -1635,6 +1690,53 @@ Use --no-preview to write batch file"
         Ok(())
     }
 
+    async fn handle_semantic_edit(
+        file_path: &str,
+        query: &str,
+        content: Option<String>,
+        source_file: Option<String>,
+        narrative: Option<String>,
+        force: bool,
+    ) -> Result<()> {
+        #[cfg(feature = "modernbert")]
+        {
+            let current_dir = std::env::current_dir()?;
+            let project_root = find_project_root(&current_dir);
+            let broker = GnawSenseBroker::new(&project_root)?;
+            
+            println!("🧠 GnawSense is searching for: \"{}\" in {}...", query, file_path);
+            let response = broker.sense(query, Some(file_path)).await?;
+
+            if let SenseResponse::Zoom { nodes, .. } = response {
+                if let Some(best_node) = nodes.first() {
+                    println!("📍 Found best match at node path: {} (score: {:.2})", best_node.path, best_node.score);
+                    
+                    let content = resolve_content(content, source_file, false)?;
+                    let mut writer = GnawTreeWriter::new(file_path)?;
+                    
+                    // Capture old state for visual diff
+                    let old_node = writer.analyze().find_path(&best_node.path).cloned();
+
+                    let op = EditOperation::Edit {
+                        node_path: best_node.path.clone(),
+                        content,
+                    };
+                    
+                    writer.edit(op, force)?;
+                    Self::show_visual_diff(&writer, &best_node.path, old_node.as_ref(), narrative.as_deref());
+                    println!("✓ Successfully edited node: {}", best_node.path);
+                    return Ok(());
+                }
+            }
+            anyhow::bail!("Could not find a semantic match for '{}' in {}", query, file_path);
+        }
+        #[cfg(not(feature = "modernbert"))]
+        {
+            let _ = (file_path, query, content, source_file, narrative, force);
+            anyhow::bail!("ModernBERT feature not enabled. Semantic features require --features modernbert.");
+        }
+    }
+
     fn handle_scaffold(file_path: &PathBuf, schema: &str) -> Result<()> {
         use crate::core::ScaffoldEngine;
         use std::fs;
@@ -1718,6 +1820,32 @@ Use --no-preview to write batch file"
             println!("✓ Logged to ALF: {}", entry_id);
         }
 
+        Ok(())
+    }
+
+    async fn handle_ai_setup(force: bool) -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        let mgr = crate::llm::ai_manager::AiManager::new(&project_root)?;
+        
+        println!("🚀 Setting up AI models in {}...", project_root.display());
+        mgr.setup(crate::llm::ai_manager::AiModel::ModernBert, crate::llm::ai_manager::DeviceType::Cpu, force).await?;
+        println!("✨ AI models setup successfully.");
+        Ok(())
+    }
+
+    fn handle_ai_status() -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        let mgr = crate::llm::ai_manager::AiManager::new(&project_root)?;
+        let status = mgr.get_status()?;
+        
+        println!("\n🧠 GnawTreeWriter AI Status");
+        println!("===========================");
+        println!("ModernBERT: {}", if status.modern_bert_installed { "✅ Installed".green() } else { "❌ Not found (run 'ai setup')".red() });
+        println!("Cache Dir:  {}", status.cache_dir.display());
+        println!("Device:     CPU");
+        println!();
         Ok(())
     }
 
@@ -2489,10 +2617,30 @@ Use --no-preview to perform the restoration"
         Ok(())
     }
 
-    fn show_visual_pulse(writer: &GnawTreeWriter, focus_path: &str) {
+    fn show_visual_pulse(writer: &GnawTreeWriter, focus_path: &str, narrative: Option<&str>) {
         let viz = TreeVisualizer::new(5, true);
+        
+        if let Some(n) = narrative {
+            println!("\n🎙️  {}", "Narrative:".bold().cyan());
+            println!("   \"{}\"", n.italic());
+        }
+
         println!("\n{}", "Structure Context:".bold());
-        println!("{}", viz.render(writer.analyze(), focus_path));
+        println!("{}", viz.generate_sparkline(writer.analyze()));
+        println!("{}", viz.render_with_diff(writer.analyze(), focus_path, None));
+    }
+
+    fn show_visual_diff(writer: &GnawTreeWriter, focus_path: &str, old_node: Option<&TreeNode>, narrative: Option<&str>) {
+        let viz = TreeVisualizer::new(5, true);
+        
+        if let Some(n) = narrative {
+            println!("\n🎙️  {}", "Narrative:".bold().cyan());
+            println!("   \"{}\"", n.italic());
+        }
+
+        println!("\n{}", "Structure Context:".bold());
+        println!("{}", viz.generate_sparkline(writer.analyze()));
+        println!("{}", viz.render_with_diff(writer.analyze(), focus_path, old_node));
     }
 
     fn handle_analyze(paths: &[String], format: &str, recursive: bool) -> Result<()> {
