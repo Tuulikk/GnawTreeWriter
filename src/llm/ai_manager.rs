@@ -65,10 +65,21 @@ pub struct AiManager {
 
 impl AiManager {
     pub fn new(project_root: &Path) -> Result<Self> {
-        let model_cache_dir = project_root.join(".gnawtreewriter_ai").join("models");
-        if !model_cache_dir.exists() {
-            fs::create_dir_all(&model_cache_dir)?;
-        }
+        let local_cache = project_root.join(".gnawtreewriter_ai").join("models");
+        
+        // Try local first, then global home dir
+        let model_cache_dir = if local_cache.exists() && local_cache.join("modernbert").exists() {
+            local_cache
+        } else {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let global_cache = PathBuf::from(home).join(".gnawtreewriter_ai").join("models");
+            
+            if !global_cache.exists() {
+                let _ = fs::create_dir_all(&global_cache);
+            }
+            global_cache
+        };
+
         Ok(Self { 
             model_cache_dir,
             project_root: project_root.to_path_buf(),
@@ -78,27 +89,51 @@ impl AiManager {
     #[cfg(feature = "modernbert")]
     pub fn load_model(&self, model_type: AiModel, device_type: DeviceType) -> Result<ModernBertModel> {
         let model_dir = self.get_model_path(&model_type);
-        let config: Config = serde_json::from_str(&fs::read_to_string(model_dir.join("config.json"))?)?;
-        let tokenizer = Tokenizer::from_file(model_dir.join("tokenizer.json")).map_err(anyhow::Error::msg)?;
+        
+        let config_path = model_dir.join("config.json");
+        let tokenizer_path = model_dir.join("tokenizer.json");
+        let weights_path = model_dir.join("model.safetensors");
+
+        if !config_path.exists() { return Err(anyhow::anyhow!("Missing config: {:?}", config_path)); }
+        if !tokenizer_path.exists() { return Err(anyhow::anyhow!("Missing tokenizer: {:?}", tokenizer_path)); }
+        if !weights_path.exists() { return Err(anyhow::anyhow!("Missing weights: {:?}", weights_path)); }
+
+        let config: Config = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
+        let tokenizer = Tokenizer::from_file(&tokenizer_path).map_err(anyhow::Error::msg)?;
+        
         let device = match device_type {
             DeviceType::Cpu => Device::Cpu,
             DeviceType::Cuda => Device::new_cuda(0)?,
             DeviceType::Metal => Device::new_metal(0)?,
         };
-        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_dir.join("model.safetensors")], DType::F32, &device)? };
+        
+        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)? };
         let model = ModernBert::load(vb, &config)?;
         Ok(ModernBertModel { model, tokenizer, device })
     }
 
     #[cfg(feature = "modernbert")]
     pub async fn generate_semantic_report(&self, file_path: &str) -> Result<SemanticReport> {
+        eprintln!("[DEBUG] Starting semantic report for: {}", file_path);
         let _model = self.load_model(AiModel::ModernBert, DeviceType::Cpu)?;
+        eprintln!("[DEBUG] Model loaded successfully");
+        
         let mut label_mgr = LabelManager::load(&self.project_root)?;
+        eprintln!("[DEBUG] Label manager loaded from: {:?}", self.project_root);
+        
+        let path = Path::new(file_path);
+        if !path.exists() {
+            return Err(anyhow::anyhow!("File not found: {}", file_path));
+        }
         
         let content = fs::read_to_string(file_path)?;
-        let path = Path::new(file_path);
+        eprintln!("[DEBUG] File content read ({} bytes)", content.len());
+        
         let parser = crate::parser::get_parser(path)?;
+        eprintln!("[DEBUG] Parser obtained");
+        
         let tree = parser.parse(&content)?;
+        eprintln!("[DEBUG] AST parsed");
 
         let mut nodes = Vec::new();
         fn collect(n: &crate::parser::TreeNode, acc: &mut Vec<crate::parser::TreeNode>) {
@@ -106,6 +141,7 @@ impl AiManager {
             for c in &n.children { collect(c, acc); }
         }
         collect(&tree, &mut nodes);
+        eprintln!("[DEBUG] Collected {} nodes", nodes.len());
 
         let mut findings = Vec::new();
         for node in &nodes {

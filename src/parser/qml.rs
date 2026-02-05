@@ -36,7 +36,7 @@ impl ParserEngineLegacy for QmlParser {
                 }
             } else if trimmed == "}" {
                 if in_obj {
-                    root_children.push(TreeNode {
+                    root_children.push(TreeNode { start_col: 0, end_col: 0, 
                         id: format!("obj_{}", root_children.len()),
                         path: root_children.len().to_string(),
                         node_type: "ui_object".to_string(),
@@ -54,7 +54,7 @@ impl ParserEngineLegacy for QmlParser {
                         let parent = &mut root_children[last_idx - 1];
                         let child_idx = parent.children.len();
                         let parent_path = parent.path.clone();
-                        parent.children.push(TreeNode {
+                        parent.children.push(TreeNode { start_col: 0, end_col: 0, 
                             id: format!("{}_{}", prop_name, child_idx),
                             path: format!("{}.{}", parent_path, child_idx),
                             node_type: "ui_property".to_string(),
@@ -68,14 +68,14 @@ impl ParserEngineLegacy for QmlParser {
             }
         }
 
-        Ok(TreeNode {
+        Ok(TreeNode { start_col: 0, end_col: 0, 
             id: "root".to_string(),
             path: "0".to_string(),
             node_type: "qml_file".to_string(),
             content: "QML".to_string(),
             start_line: 1,
             end_line: lines.len(),
-            children: root_children,
+            children: root_children, 
         })
     }
 

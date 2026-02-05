@@ -1,14 +1,14 @@
 use crate::parser::{ParserEngine, TreeNode, ParseResult, SyntaxError};
 
-pub struct PythonParser;
+pub struct SlintParser;
 
-impl Default for PythonParser {
+impl Default for SlintParser {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl PythonParser {
+impl SlintParser {
     pub fn new() -> Self {
         Self
     }
@@ -66,27 +66,27 @@ impl PythonParser {
     }
 }
 
-impl ParserEngine for PythonParser {
+impl ParserEngine for SlintParser {
     fn parse(&self, code: &str) -> ParseResult<TreeNode> {
         let mut parser = tree_sitter::Parser::new();
         let language = unsafe {
             std::mem::transmute::<tree_sitter_language::LanguageFn, fn() -> tree_sitter::Language>(
-                tree_sitter_python::LANGUAGE,
+                tree_sitter_slint::LANGUAGE,
             )()
         };
         if let Err(e) = parser.set_language(&language) {
-            return Err(SyntaxError::from(anyhow::anyhow!("Failed to set Python language: {}", e)));
+            return Err(SyntaxError::from(anyhow::anyhow!("Failed to set Slint language: {}", e)));
         }
 
         let tree = parser
             .parse(code, None)
-            .ok_or_else(|| SyntaxError::from(anyhow::anyhow!("Failed to parse Python: No tree returned")))?;
+            .ok_or_else(|| SyntaxError::from(anyhow::anyhow!("Failed to parse Slint: No tree returned")))?;
 
         if tree.root_node().has_error() {
             let mut cursor = tree.walk();
             if let Some(err_node) = self.find_error(&tree.root_node(), &mut cursor) {
                 return Err(SyntaxError {
-                    message: "Syntax error in Python code".to_string(),
+                    message: "Syntax error in Slint code".to_string(),
                     line: err_node.start_position().row + 1,
                     column: err_node.start_position().column + 1,
                     expected: None,
@@ -98,6 +98,6 @@ impl ParserEngine for PythonParser {
     }
 
     fn get_supported_extensions(&self) -> Vec<&'static str> {
-        vec!["py"]
+        vec!["slint"]
     }
 }

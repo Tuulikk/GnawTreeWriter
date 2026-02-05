@@ -282,11 +282,14 @@ pub mod mcp_server {
                     },
                     "list_nodes" => {
                         let fp = validate_arg("file_path")?;
-                        Ok(handle_list_nodes(state, fp, None, None, false))
+                        let filter = arguments.get("filter").and_then(Value::as_str);
+                        let max_depth = arguments.get("max_depth").and_then(Value::as_u64).map(|d| d as usize);
+                        Ok(handle_list_nodes(state, fp, filter, max_depth, false))
                     },
                     "get_skeleton" => {
                         let fp = validate_arg("file_path")?;
-                        Ok(handle_get_skeleton(fp, 2))
+                        let max_depth = arguments.get("max_depth").and_then(Value::as_u64).unwrap_or(2) as usize;
+                        Ok(handle_get_skeleton(fp, max_depth))
                     },
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
@@ -391,32 +394,46 @@ pub mod mcp_server {
     }
 
     pub async fn serve_stdio() -> Result<()> {
-        let stdin = io::stdin();
-        let mut stdout = io::stdout();
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let mut stdin = BufReader::new(tokio::io::stdin());
+        let mut stdout = tokio::io::stdout();
         let project_root = std::env::current_dir()?;
         let state = Arc::new(AppState { token: None, project_root });
 
-        for line_res in stdin.lock().lines() {
-            let line = line_res?;
-            if line.trim().is_empty() || line.starts_with("Content-") { continue; }
-            let req: JsonRpcRequest = match serde_json::from_str(&line) {
+        let mut line = String::new();
+        while stdin.read_line(&mut line).await? > 0 {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with("Content-") {
+                line.clear();
+                continue;
+            }
+
+            let req: JsonRpcRequest = match serde_json::from_str(trimmed) {
                 Ok(r) => r,
-                Err(_) => continue,
+                Err(_) => {
+                    line.clear();
+                    continue;
+                }
             };
+
             let id = req.id.clone();
             match process_request(state.clone(), req).await {
                 Ok(result) => {
-                    let resp = json!({"jsonrpc": "2.0", "id": id, "result": result}); // Corrected: escaped curly brace
-                    let _ = serde_json::to_writer(&mut stdout, &resp);
-                    let _ = stdout.write_all(b"\n");
-                    let _ = stdout.flush();
-                },
+                    let resp = json!({"jsonrpc": "2.0", "id": id, "result": result});
+                    if let Ok(resp_str) = serde_json::to_string(&resp) {
+                        let _ = stdout.write_all(resp_str.as_bytes()).await;
+                        let _ = stdout.write_all(b"\n").await;
+                        let _ = stdout.flush().await;
+                    }
+                }
                 Err(err) => {
-                    let _ = serde_json::to_writer(&mut stdout, &err);
-                    let _ = stdout.write_all(b"\n");
-                    let _ = stdout.flush();
+                    let _ = stdout.write_all(serde_json::to_string(&err).unwrap_or_default().as_bytes()).await;
+                    let _ = stdout.write_all(b"\n").await;
+                    let _ = stdout.flush().await;
                 }
             }
+            line.clear();
         }
         Ok(())
     }
@@ -515,18 +532,47 @@ pub mod mcp_server {
 
     
 
-        fn handle_list_nodes(state: Arc<AppState>, file_path: &str, _filter: Option<&str>, _max_depth: Option<usize>, _all: bool) -> Value {
+        fn handle_list_nodes(state: Arc<AppState>, file_path: &str, filter: Option<&str>, max_depth: Option<usize>, all: bool) -> Value {
         match GnawTreeWriter::new(file_path) {
             Ok(w) => {
                 let label_mgr = LabelManager::load(&state.project_root).ok();
                 let mut nodes = Vec::new();
-                fn collect(n: &TreeNode, acc: &mut Vec<Value>, fp: &str, lm: &Option<LabelManager>) {
-                    let labels = lm.as_ref().map(|mgr| mgr.get_labels(fp, &n.content)).unwrap_or_default();
-                    acc.push(json!({"path": n.path, "type": n.node_type, "name": n.get_name(), "start": n.start_line, "labels": labels}));
-                    for c in &n.children { collect(c, acc, fp, lm); }
+                let effective_max_depth = if all { usize::MAX } else { max_depth.unwrap_or(3) };
+                
+                fn collect(
+                    n: &TreeNode, 
+                    acc: &mut Vec<Value>, 
+                    fp: &str, 
+                    lm: &Option<LabelManager>, 
+                    filter: Option<&str>, 
+                    depth: usize, 
+                    max_d: usize
+                ) {
+                    if depth > max_d || acc.len() >= 1000 { return; }
+                    
+                    if filter.is_none() || filter.unwrap() == n.node_type {
+                        let labels = lm.as_ref().map(|mgr| mgr.get_labels(fp, &n.content)).unwrap_or_default();
+                        acc.push(json!({
+                            "path": n.path, 
+                            "type": n.node_type, 
+                            "name": n.get_name(), 
+                            "start": n.start_line, 
+                            "labels": labels
+                        }));
+                    }
+                    
+                    for c in &n.children { 
+                        collect(c, acc, fp, lm, filter, depth + 1, max_d); 
+                    }
                 }
-                collect(w.analyze(), &mut nodes, file_path, &label_mgr);
-                tool_success(format!("Found {} nodes", nodes.len()), Some(json!({"nodes": nodes})))
+                
+                collect(w.analyze(), &mut nodes, file_path, &label_mgr, filter, 0, effective_max_depth);
+                
+                let mut msg = format!("Found {} nodes", nodes.len());
+                if nodes.len() >= 1000 {
+                    msg.push_str(" (limit reached)");
+                }
+                tool_success(msg, Some(json!({"nodes": nodes})))
             }
             Err(e) => tool_error(format!("IO error: {}", e)),
         }
@@ -536,12 +582,18 @@ pub mod mcp_server {
         match GnawTreeWriter::new(file_path) {
             Ok(w) => {
                 let mut s = String::new();
-                fn build(n: &TreeNode, out: &mut String, d: usize, md: usize) {
-                    if d > md { return; }
+                let mut count = 0;
+                fn build(n: &TreeNode, out: &mut String, d: usize, md: usize, count: &mut usize) {
+                    if d > md || *count >= 500 { return; }
+                    *count += 1;
                     out.push_str(&format!("{}{} [{}] {}\n", "  ".repeat(d), n.path, n.node_type, n.get_name().unwrap_or_default()));
-                    for c in &n.children { build(c, out, d + 1, md); }
+                    if *count == 500 {
+                        out.push_str("... (limit reached)\n");
+                        return;
+                    }
+                    for c in &n.children { build(c, out, d + 1, md, count); }
                 }
-                build(w.analyze(), &mut s, 0, max_depth);
+                build(w.analyze(), &mut s, 0, max_depth, &mut count);
                 tool_success(format!("Skeleton of {}", file_path), Some(json!({"skeleton": s})))
             }
             Err(e) => tool_error(format!("IO error: {}", e)),
@@ -574,13 +626,18 @@ pub mod mcp_server {
             Ok(w) => {
                 let mut m = Vec::new();
                 fn find(n: &TreeNode, acc: &mut Vec<Value>, p: &str) {
+                    if acc.len() >= 500 { return; }
                     if n.content.contains(p) {
                         acc.push(json!({"path": n.path, "type": n.node_type, "name": n.get_name()}));
                     }
                     for c in &n.children { find(c, acc, p); }
                 }
                 find(w.analyze(), &mut m, pattern);
-                tool_success(format!("Found {} matches", m.len()), Some(json!({"matches": m})))
+                let mut msg = format!("Found {} matches", m.len());
+                if m.len() >= 500 {
+                    msg.push_str(" (limit reached)");
+                }
+                tool_success(msg, Some(json!({"matches": m})))
             }
             Err(e) => tool_error(format!("IO error: {}", e)),
         }
@@ -787,7 +844,7 @@ pub mod mcp_server {
 
     pub async fn serve(addr: &str, token: Option<String>) -> Result<()> {
         let listener = TcpListener::bind(addr).await?;
-        println!("Starting MCP server on http://{}", listener.local_addr()?); // Corrected: escaped curly brace
+        eprintln!("Starting MCP server on http://{}", listener.local_addr()?); // Fixed: redirected to stderr
         serve_with_shutdown(listener, token, async { let _ = signal::ctrl_c().await; }).await
     }
 
@@ -796,7 +853,7 @@ pub mod mcp_server {
         let mut req = client.post(url);
         if let Some(t) = token { req = req.header("Authorization", format!("Bearer {}", t)); } // Corrected: escaped curly brace
         let _ = req.json(&json!({"jsonrpc":"2.0","method":"initialize","id":1})).send().await?;
-        println!("✓ Server ready");
+        eprintln!("✓ Server ready");
         Ok(())
     }
 }

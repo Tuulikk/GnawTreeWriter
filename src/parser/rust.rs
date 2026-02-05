@@ -39,6 +39,8 @@ impl RustParser {
         let node_type = node.kind().to_string();
         let start_line = node.start_position().row + 1;
         let end_line = node.end_position().row + 1;
+        let start_col = node.start_position().column + 1;
+        let end_col = node.end_position().column + 1;
 
         let mut children = Vec::new();
         let mut cursor = node.walk();
@@ -61,6 +63,8 @@ impl RustParser {
             content,
             start_line,
             end_line,
+            start_col,
+            end_col,
             children,
         })
     }

@@ -17,6 +17,7 @@ pub mod rust;
 pub mod text;
 pub mod toml;
 pub mod swift;
+pub mod slint;
 pub mod typescript;
 pub mod xml;
 pub mod yaml;
@@ -35,6 +36,10 @@ pub struct TreeNode {
     pub content: String,
     pub start_line: usize,
     pub end_line: usize,
+    #[serde(default)]
+    pub start_col: usize,
+    #[serde(default)]
+    pub end_col: usize,
     pub children: Vec<TreeNode>,
 }
 
@@ -122,6 +127,7 @@ pub fn get_parser(file_path: &Path) -> anyhow::Result<Box<dyn ParserEngine>> {
         "qml" => Ok(Box::new(LegacyParserWrapper::new(qml_tree_sitter::QmlTreeSitterParser::new()))),
         "py" => Ok(Box::new(python::PythonParser::new())),
         "rs" => Ok(Box::new(rust::RustParser::new())),
+        "slint" => Ok(Box::new(slint::SlintParser::new())),
         "kt" | "kts" => Ok(Box::new(LegacyParserWrapper::new(kotlin::KotlinParser::new()))),
         "swift" => Ok(Box::new(LegacyParserWrapper::new(swift::SwiftParser::new()))),
         "ts" | "tsx" => Ok(Box::new(LegacyParserWrapper::new(typescript::TypeScriptParser::new()))),

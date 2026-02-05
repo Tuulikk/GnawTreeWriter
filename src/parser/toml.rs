@@ -86,14 +86,14 @@ impl TomlParser {
 
         let id = path.clone();
 
-        Ok(TreeNode {
+        Ok(TreeNode { start_col: 0, end_col: 0,
             id,
             path,
             node_type,
             content,
             start_line,
             end_line,
-            children,
+            children, 
         })
     }
 }

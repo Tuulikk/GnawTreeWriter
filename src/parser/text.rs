@@ -20,7 +20,7 @@ impl ParserEngineLegacy for TextParser {
         let mut root_children = Vec::new();
 
         for (i, line) in lines.iter().enumerate() {
-            root_children.push(TreeNode {
+            root_children.push(TreeNode { start_col: 0, end_col: 0, 
                 id: format!("line_{}", i),
                 path: i.to_string(),
                 node_type: "text_line".to_string(),
@@ -31,14 +31,14 @@ impl ParserEngineLegacy for TextParser {
             });
         }
 
-        Ok(TreeNode {
+        Ok(TreeNode { start_col: 0, end_col: 0, 
             id: "root".to_string(),
             path: "0".to_string(),
             node_type: "text_file".to_string(),
             content: code.to_string(),
             start_line: 1,
             end_line: if lines.is_empty() { 1 } else { lines.len() },
-            children: root_children,
+            children: root_children, 
         })
     }
 

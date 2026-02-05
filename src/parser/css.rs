@@ -80,7 +80,7 @@ impl CssParser {
                 let mut at_rule_children = Vec::new();
 
                 // Add at-rule name as child
-                at_rule_children.push(TreeNode {
+                at_rule_children.push(TreeNode { start_col: 0, end_col: 0, 
                     id: format!("{}.name", child_path),
                     path: format!("{}.name", child_path),
                     node_type: "at_rule_name".to_string(),
@@ -92,7 +92,7 @@ impl CssParser {
 
                 // Add at-rule value as child if exists
                 if !at_value.is_empty() {
-                    at_rule_children.push(TreeNode {
+                    at_rule_children.push(TreeNode { start_col: 0, end_col: 0, 
                         id: format!("{}.value", child_path),
                         path: format!("{}.value", child_path),
                         node_type: "at_rule_value".to_string(),
@@ -109,14 +109,14 @@ impl CssParser {
                 at_rule_children.push(nested_tree);
 
                 let block_lines = rule_content.lines().count();
-                children.push(TreeNode {
+                children.push(TreeNode { start_col: 0, end_col: 0, 
                     id: child_path.clone(),
                     path: child_path.clone(),
                     node_type: "at_rule".to_string(),
                     content: rule_content.to_string(),
                     start_line: line_num,
                     end_line: line_num + block_lines,
-                    children: at_rule_children,
+                    children: at_rule_children, 
                 });
 
                 line_num += block_lines;
@@ -142,7 +142,7 @@ impl CssParser {
                 };
 
                 // Add selector
-                let mut rule_children = vec![TreeNode {
+                let mut rule_children = vec![TreeNode { start_col: 0, end_col: 0, 
                     id: format!("{}.selector", child_path),
                     path: format!("{}.selector", child_path),
                     node_type: "selector".to_string(),
@@ -161,14 +161,14 @@ impl CssParser {
                 rule_children.push(declarations);
 
                 let block_lines = rule_content.lines().count();
-                children.push(TreeNode {
+                children.push(TreeNode { start_col: 0, end_col: 0, 
                     id: child_path.clone(),
                     path: child_path.clone(),
                     node_type: "rule".to_string(),
                     content: rule_content.to_string(),
                     start_line: line_num,
                     end_line: line_num + block_lines,
-                    children: rule_children,
+                    children: rule_children, 
                 });
 
                 line_num += block_lines;
@@ -180,14 +180,14 @@ impl CssParser {
             current_pos += 1;
         }
 
-        Ok(TreeNode {
+        Ok(TreeNode { start_col: 0, end_col: 0, 
             id: path.clone(),
             path,
             node_type: "stylesheet".to_string(),
             content: String::new(),
             start_line,
             end_line: line_num,
-            children,
+            children, 
         })
     }
 
@@ -236,7 +236,7 @@ impl CssParser {
             let child_path = format!("{}.{}", path, i);
 
             let decl_children = vec![
-                TreeNode {
+                TreeNode { start_col: 0, end_col: 0, 
                     id: format!("{}.property", child_path),
                     path: format!("{}.property", child_path),
                     node_type: "property".to_string(),
@@ -245,7 +245,7 @@ impl CssParser {
                     end_line: line_num,
                     children: vec![],
                 },
-                TreeNode {
+                TreeNode { start_col: 0, end_col: 0, 
                     id: format!("{}.value", child_path),
                     path: format!("{}.value", child_path),
                     node_type: "value".to_string(),
@@ -256,27 +256,27 @@ impl CssParser {
                 },
             ];
 
-            children.push(TreeNode {
+            children.push(TreeNode { start_col: 0, end_col: 0, 
                 id: child_path.clone(),
                 path: child_path,
                 node_type: "declaration".to_string(),
                 content: format!("{}: {};", property, value),
                 start_line: line_num,
                 end_line: line_num,
-                children: decl_children,
+                children: decl_children, 
             });
 
             line_num += 1;
         }
 
-        Ok(TreeNode {
+        Ok(TreeNode { start_col: 0, end_col: 0, 
             id: path.clone(),
             path,
             node_type: "declarations".to_string(),
             content: String::new(),
             start_line,
             end_line: line_num,
-            children,
+            children, 
         })
     }
 }

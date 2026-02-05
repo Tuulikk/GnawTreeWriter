@@ -23,7 +23,7 @@ impl ParserEngine for GenericParser {
         let lines = code.lines().collect::<Vec<&str>>();
         let line_count = lines.len();
 
-        Ok(TreeNode {
+        Ok(TreeNode { start_col: 0, end_col: 0, 
             id: "0".to_string(),
             path: "0".to_string(),
             node_type: GENERIC_NODE_TYPE.to_string(),

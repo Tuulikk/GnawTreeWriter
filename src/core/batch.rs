@@ -282,7 +282,7 @@ impl Batch {
         }
 
         // If we reach here, all writes and logs succeeded
-        println!("✓ Batch applied successfully to {} files", written.len());
+        eprintln!("✓ Batch applied successfully to {} files", written.len());
         Ok(())
     }
 

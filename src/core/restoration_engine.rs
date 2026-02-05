@@ -54,7 +54,7 @@ impl RestorationEngine {
         let mut restored_files = Vec::new();
         let mut failed_files = Vec::new();
 
-        println!(
+        eprintln!(
             "🔄 Starting project restoration to {}",
             plan.restore_to_timestamp.format("%Y-%m-%d %H:%M:%S UTC")
         );
@@ -63,12 +63,12 @@ impl RestorationEngine {
             match self.restore_file_to_transaction(&file_plan.target_transaction_id) {
                 Ok(restored_path) => {
                     restored_files.push(restored_path.clone());
-                    println!("✅ Restored: {}", restored_path.display());
+                    eprintln!("✅ Restored: {}", restored_path.display());
                 }
                 Err(e) => {
                     let error_msg = format!("Failed to restore: {}", e);
                     failed_files.push((file_plan.file_path.clone(), error_msg.clone()));
-                    println!(
+                    eprintln!(
                         "❌ Failed to restore {}: {}",
                         file_plan.file_path.display(),
                         error_msg
@@ -80,12 +80,12 @@ impl RestorationEngine {
         let success = failed_files.is_empty();
 
         if success {
-            println!(
+            eprintln!(
                 "🎉 Project restoration completed successfully! Restored {} files",
                 restored_files.len()
             );
         } else {
-            println!(
+            eprintln!(
                 "⚠️  Project restoration completed with {} errors out of {} files",
                 failed_files.len(),
                 plan.affected_files.len()
@@ -147,7 +147,7 @@ impl RestorationEngine {
 
     /// Attempt restoration using timestamp matching
     fn restore_by_timestamp(&self, transaction: &Transaction) -> Result<PathBuf> {
-        println!("🔄 Falling back to timestamp-based restoration");
+        eprintln!("🔄 Falling back to timestamp-based restoration");
 
         let backups = self.list_backup_files()?;
         let file_backups: Vec<_> = backups
@@ -177,7 +177,7 @@ impl RestorationEngine {
 
         match best_backup {
             Some(backup) => {
-                println!("✅ Using timestamp-based backup: {}", backup.path.display());
+                eprintln!("✅ Using timestamp-based backup: {}", backup.path.display());
                 self.restore_from_backup(&transaction.file_path, &backup.path)
             }
             None => Err(anyhow!("No suitable backup found for transaction")),
@@ -193,7 +193,7 @@ impl RestorationEngine {
         let mut restored_files = Vec::new();
         let mut failed_files = Vec::new();
 
-        println!(
+        eprintln!(
             "🔄 Restoring {} files to state before {}",
             files.len(),
             before_time.format("%Y-%m-%d %H:%M:%S UTC")
@@ -203,12 +203,12 @@ impl RestorationEngine {
             match self.restore_file_before_timestamp(file_path, before_time) {
                 Ok(restored_path) => {
                     restored_files.push(restored_path.clone());
-                    println!("✅ Restored: {}", restored_path.display());
+                    eprintln!("✅ Restored: {}", restored_path.display());
                 }
                 Err(e) => {
                     let error_msg = format!("Failed to restore: {}", e);
                     failed_files.push((file_path.clone(), error_msg.clone()));
-                    println!(
+                    eprintln!(
                         "❌ Failed to restore {}: {}",
                         file_path.display(),
                         error_msg
@@ -220,12 +220,12 @@ impl RestorationEngine {
         let success = failed_files.is_empty();
 
         if success {
-            println!(
+            eprintln!(
                 "🎉 Files restoration completed successfully! Restored {} files",
                 restored_files.len()
             );
         } else {
-            println!(
+            eprintln!(
                 "⚠️  Files restoration completed with {} errors out of {} files",
                 failed_files.len(),
                 files.len()
@@ -275,8 +275,8 @@ impl RestorationEngine {
             });
         }
 
-        println!("🔄 Restoring session: {}", session_id);
-        println!("Files to restore: {}", session_files.len());
+        eprintln!("🔄 Restoring session: {}", session_id);
+        eprintln!("Files to restore: {}", session_files.len());
 
         // For session restoration, we want to find the state of each file
         // just before the session started
@@ -393,17 +393,17 @@ pub struct RestorationStats {
 impl RestorationResult {
     pub fn print_summary(&self) {
         if self.success {
-            println!("✅ Restoration completed successfully!");
-            println!("   Restored files: {}", self.restored_files.len());
+            eprintln!("✅ Restoration completed successfully!");
+            eprintln!("   Restored files: {}", self.restored_files.len());
         } else {
-            println!("⚠️  Restoration completed with errors:");
-            println!("   Successful: {}", self.restored_files.len());
-            println!("   Failed: {}", self.failed_files.len());
+            eprintln!("⚠️  Restoration completed with errors:");
+            eprintln!("   Successful: {}", self.restored_files.len());
+            eprintln!("   Failed: {}", self.failed_files.len());
 
             if !self.failed_files.is_empty() {
-                println!("\nFailed files:");
+                eprintln!("\nFailed files:");
                 for (file, error) in &self.failed_files {
-                    println!("   ❌ {}: {}", file.display(), error);
+                    eprintln!("   ❌ {}: {}", file.display(), error);
                 }
             }
         }

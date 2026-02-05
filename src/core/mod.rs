@@ -176,15 +176,15 @@ impl GnawTreeWriter {
                         return Err(anyhow::anyhow!("🛑 GUARDIAN BLOCK: This edit removes critical logic or structure.\nMessages: {}\nUse --force to override.", report.messages.join(", ")));
                     }
                     crate::core::guardian::IntegrityLevel::Warning => {
-                        println!("⚠️  GUARDIAN WARNING: Significant structural loss detected: {}", report.messages.join(", "));
+                        eprintln!("⚠️  GUARDIAN WARNING: Significant structural loss detected: {}", report.messages.join(", "));
                     }
                     crate::core::guardian::IntegrityLevel::Notice => {
-                        println!("ℹ️  Guardian Note: Minor structural reduction observed.");
+                        eprintln!("ℹ️  Guardian Note: Minor structural reduction observed.");
                     }
                     _ => {}
                 }
             } else {
-                println!("🛡️  Guardian bypassed via --force.");
+                eprintln!("🛡️  Guardian bypassed via --force.");
             }
         }
 
@@ -205,13 +205,26 @@ impl GnawTreeWriter {
                     
                     // Validate healed code
                     if parser.parse(&healed_code).is_ok() {
-                        println!("✨ Duplex Loop: Automatically healed syntax error: {}", action.description);
+                        eprintln!("✨ Duplex Loop: Automatically healed syntax error: {}", action.description);
                         healed_code
                     } else {
                         return Err(anyhow::anyhow!("Validation failed: The proposed edit would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e));
                     }
                 } else {
-                    return Err(anyhow::anyhow!("Validation failed: The proposed edit would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e));
+                    let tip = match extension {
+                        "rs" => "\n\n💡 Tip: In Rust, check for missing semicolons ';' at the end of statements, or unbalanced braces '{}'.",
+                        "qml" => "\n\n💡 Tip: In QML, ensure properties have a colon ':' and that braces '{}' and brackets '[]' are balanced.",
+                        "py" => "\n\n💡 Tip: In Python, check your indentation levels and ensure colons ':' are present after def/if/for/while.",
+                        _ => "\n\n💡 Tip: Ensure you included all necessary punctuation and punctuation is balanced for this file type.",
+                    };
+                    
+                    let mut msg = format!("Validation failed: The proposed edit would result in invalid syntax.\nError: {}", e);
+                    if e.line > 0 {
+                        msg.push_str(&format!("\nCheck near line {}.", e.line));
+                    }
+                    msg.push_str(tip);
+                    msg.push_str("\nChange was NOT applied.");
+                    return Err(anyhow::anyhow!(msg));
                 }
             }
         };
@@ -396,27 +409,74 @@ impl GnawTreeWriter {
             .context(format!("Node not found at path: {}", node_path))?;
 
         let lines: Vec<&str> = self.source_code.lines().collect();
-        let mut new_lines: Vec<String> = Vec::new();
 
-        // Lines before the node
-        for i in 0..node.start_line - 1 {
-            if i < lines.len() {
-                new_lines.push(lines[i].to_string());
+        // If we have column information, use it for surgical precision
+        if node.start_col > 0 && node.end_col > 0 {
+            let mut new_lines: Vec<String> = Vec::new();
+
+            // Lines before the node's start line
+            for i in 0..node.start_line - 1 {
+                if i < lines.len() {
+                    new_lines.push(lines[i].to_string());
+                }
             }
-        }
 
-        // Add the new content
-        // Note: new_content might be multi-line
-        for line in new_content.lines() {
-            new_lines.push(line.to_string());
-        }
+            // Handle the start line (with prefix)
+            let start_line_idx = node.start_line - 1;
+            let start_line_text = lines[start_line_idx];
+            let prefix: String = start_line_text.chars().take(node.start_col - 1).collect();
 
-        // Lines after the node
-        for line in lines.iter().skip(node.end_line) {
-            new_lines.push(line.to_string());
-        }
+            // Handle the end line (with suffix)
+            let end_line_idx = node.end_line - 1;
+            let end_line_text = lines[end_line_idx];
+            let suffix: String = end_line_text.chars().skip(node.end_col - 1).collect();
 
-        Ok(new_lines.join("\n"))
+            // Combine prefix, new_content, and suffix
+            let mut combined = prefix;
+            combined.push_str(new_content);
+            combined.push_str(&suffix);
+
+            // Since combined might be multi-line if new_content is, we push its lines
+            // We use a custom splitting to preserve empty lines at the end if needed
+            let mut first = true;
+            for line in combined.split('\n') {
+                if first {
+                    new_lines.push(line.to_string());
+                    first = false;
+                } else {
+                    new_lines.push(line.to_string());
+                }
+            }
+
+            // Lines after the node's end line
+            for line in lines.iter().skip(node.end_line) {
+                new_lines.push(line.to_string());
+            }
+
+            Ok(new_lines.join("\n"))
+        } else {
+            let mut new_lines: Vec<String> = Vec::new();
+
+            // Lines before the node
+            for i in 0..node.start_line - 1 {
+                if i < lines.len() {
+                    new_lines.push(lines[i].to_string());
+                }
+            }
+
+            // Add the new content
+            // Note: new_content might be multi-line
+            for line in new_content.lines() {
+                new_lines.push(line.to_string());
+            }
+
+            // Lines after the node
+            for line in lines.iter().skip(node.end_line) {
+                new_lines.push(line.to_string());
+            }
+
+            Ok(new_lines.join("\n"))
+        }
     }
 
     fn insert_node_at_path(
