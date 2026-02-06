@@ -1814,20 +1814,20 @@ Use --no-preview to perform the restoration"
                 println!("1. Basic workflow:");
                 println!("   gnawtreewriter analyze app.py              # See structure");
                 println!("   gnawtreewriter list app.py                 # Find node paths");
-                println!("   gnawtreewriter edit app.py "0.1" 'new code' # Edit specific node");
+                println!("   gnawtreewriter edit app.py \"0.1\" 'new code' # Edit specific node");
                 println!();
                 println!("2. Surgical Inline Editing (v0.9.1+):");
-                println!("   gnawtreewriter edit main.rs "1.2.3" 'new_var' # Change just one variable");
+                println!("   gnawtreewriter edit main.rs \"1.2.3\" 'new_var' # Change just one variable");
                 println!("   # The editor now preserves surrounding code on the same line!");
                 println!();
                 println!("3. Safe editing with preview:");
-                println!("   gnawtreewriter edit main.rs "0.2" 'fn main() {{}}' --preview");
+                println!("   gnawtreewriter edit main.rs \"0.2\" 'fn main() {{}}' --preview");
                 println!("   # Review the diff, then run without --preview");
                 println!();
                 println!("4. Insert new functions:");
-                println!("   gnawtreewriter insert app.py "0" 1 'def helper(): return 42'");
+                println!("   gnawtreewriter insert app.py \"0\" 1 'def helper(): return 42'");
                 println!(
-                    "   gnawtreewriter insert main.rs "0" 0 'use std::collections::HashMap;'"
+                    "   gnawtreewriter insert main.rs \"0\" 0 'use std::collections::HashMap;'"
                 );
             }
             Some("precision") => {
@@ -1839,7 +1839,7 @@ Use --no-preview to perform the restoration"
                 println!("target specific nodes within a line (like a single parameter).");
                 println!();
                 println!("1. Edit a single parameter:");
-                println!("   gnawtreewriter edit src/lib.rs "1.2.3.5" 'new_param_name'");
+                println!("   gnawtreewriter edit src/lib.rs \"1.2.3.5\" 'new_param_name'");
                 println!();
                 println!("2. Pedagogical Validation:");
                 println!("   If you make a syntax error, the editor now provides");
@@ -1850,15 +1850,15 @@ Use --no-preview to perform the restoration"
                 println!("==================");
                 println!();
                 println!("1. Find nodes by name:");
-                println!("   gnawtreewriter search main.rs "main"");
+                println!("   gnawtreewriter search main.rs \"main\"");
                 println!("   # Finds all nodes containing 'main'");
                 println!();
                 println!("2. Find nodes by pattern:");
-                println!("   gnawtreewriter search app.py "print"");
+                println!("   gnawtreewriter search app.py \"print\"");
                 println!("   # Finds all print statements");
                 println!();
                 println!("3. Find specific patterns:");
-                println!("   gnawtreewriter search src/lib.rs "TreeNode"");
+                println!("   gnawtreewriter search src/lib.rs \"TreeNode\"");
                 println!("   # Finds all references to TreeNode");
             }
             Some("skeleton") => {
@@ -1883,33 +1883,33 @@ Use --no-preview to perform the restoration"
                 println!("===============");
                 println!();
                 println!("1. Add properties to components:");
-                println!("   gnawtreewriter add-property app.qml "0.1" width int 300");
-                println!("   gnawtreewriter add-property app.qml "0.1" color string '"red"'");
+                println!("   gnawtreewriter add-property app.qml \"0.1\" width int 300");
+                println!("   gnawtreewriter add-property app.qml \"0.1\" color string '\"red\"'");
                 println!();
                 println!("2. Add child components:");
-                println!("   gnawtreewriter add-component app.qml "0" Rectangle");
-                println!("   gnawtreewriter add-component app.qml "0.1" Button --content 'text: "Click"'");
+                println!("   gnawtreewriter add-component app.qml \"0\" Rectangle");
+                println!("   gnawtreewriter add-component app.qml \"0.1\" Button --content 'text: \"Click\"'");
                 println!();
                 println!("3. Complex QML editing:");
                 println!("   gnawtreewriter list app.qml --filter-type ui_property");
-                println!("   gnawtreewriter edit app.qml "0.2.1" 'anchors.fill: parent'");
+                println!("   gnawtreewriter edit app.qml \"0.2.1\" 'anchors.fill: parent'");
             }
             Some("restoration") => {
                 println!("⏰ TIME RESTORATION EXAMPLES");
                 println!("===========================");
                 println!();
                 println!("1. Project-wide time travel:");
-                println!("   gnawtreewriter restore-project "2025-12-27T15:30:00Z" --preview");
-                println!("   gnawtreewriter restore-project "2025-12-27T15:30:00Z"");
+                println!("   gnawtreewriter restore-project \"2025-12-27T15:30:00Z\" --preview");
+                println!("   gnawtreewriter restore-project \"2025-12-27T15:30:00Z\"");
                 println!();
                 println!("2. Selective file restoration:");
-                println!("   gnawtreewriter restore-files --since "2025-12-27T16:00:00Z" --files "*.py"");
-                println!("   gnawtreewriter restore-files -s "2025-12-27T16:00:00Z" -f "src/"");
+                println!("   gnawtreewriter restore-files --since \"2025-12-27T16:00:00Z\" --files \"*.py\"");
+                println!("   gnawtreewriter restore-files -s \"2025-12-27T16:00:00Z\" -f \"src/\"");
                 println!();
                 println!("3. Undo AI agent sessions:");
                 println!("   gnawtreewriter history                      # Find session ID");
-                println!("   gnawtreewriter restore-session "session_123" --preview");
-                println!("   gnawtreewriter restore-session "session_123"");
+                println!("   gnawtreewriter restore-session \"session_123\" --preview");
+                println!("   gnawtreewriter restore-session \"session_123\"");
             }
             Some("batch") => {
                 println!("📦 BATCH OPERATIONS EXAMPLES");
@@ -1929,7 +1929,7 @@ Use --no-preview to perform the restoration"
                 println!("   - delete: Remove a node");
                 println!();
                 println!("4. Use with tags:");
-                println!("   gnawtreewriter tag add app.qml "1.1" mainRect");
+                println!("   gnawtreewriter tag add app.qml \"1.1\" mainRect");
                 println!("   # Use path '1.1' in batch operations");
                 println!();
                 println!("**Key Features:**");
@@ -1949,7 +1949,7 @@ Use --no-preview to perform the restoration"
                 println!("   gnawtreewriter quick-replace app.py 'old_function' 'new_function'");
                 println!();
                 println!("2. Replace text patterns:");
-                println!("   gnawtreewriter quick-replace main.rs "println!("Hello")" "println!("Hi")"");
+                println!("   gnawtreewriter quick-replace main.rs \"println!(\\\"Hello\\\")\" \"println!(\\\"Hi\\\")\"");
                 println!();
                 println!("3. Safety features:");
                 println!("   --preview: Show diff without applying changes");
@@ -2000,15 +2000,15 @@ Use --no-preview to perform the restoration"
                 println!("============================================");
                 println!();
                 println!("1. Semantic Search (Project-wide):");
-                println!("   gnawtreewriter sense "how is file backup handled?"");
+                println!("   gnawtreewriter sense \"how is file backup handled?\"");
                 println!("   # Uses ModernBERT to find relevant files semantically.");
                 println!();
                 println!("2. Semantic Zoom (Within file):");
-                println!("   gnawtreewriter sense "where is the database connection?" src/db.rs");
+                println!("   gnawtreewriter sense \"where is the database connection?\" src/db.rs");
                 println!("   # Finds specific functions or classes by meaning.");
                 println!();
                 println!("3. Agentic Journaling (ALF):");
-                println!("   gnawtreewriter alf "Refactoring for scalability" --kind intent");
+                println!("   gnawtreewriter alf \"Refactoring for scalability\" --kind intent");
                 println!("   gnawtreewriter alf --list                                   # See history");
                 println!();
                 println!("4. Engineering Reports:");
@@ -2016,7 +2016,7 @@ Use --no-preview to perform the restoration"
                 println!("   gnawtreewriter ai report --output docs/evolution.md         # Save to file");
                 println!();
                 println!("5. Semantic Insertion (The magic!):");
-                println!("   gnawtreewriter sense-insert main.rs "the main function" "println!("Init...");" --preview");
+                println!("   gnawtreewriter sense-insert main.rs \"the main function\" \"println!(\\\"Init...\\\");\" --preview");
                 println!("   # Inserts code near a landmark without needing paths.");
                 println!();
                 println!("**Key Benefits:**");
@@ -2029,10 +2029,10 @@ Use --no-preview to perform the restoration"
                 println!("================================");
                 println!();
                 println!("1. Create a new Rust module:");
-                println!("   gnawtreewriter scaffold src/auth.rs --schema "rust:mod(name:security, fn:validate)"");
+                println!("   gnawtreewriter scaffold src/auth.rs --schema \"rust:mod(name:security, fn:validate)\"");
                 println!();
                 println!("2. Create a Python class:");
-                println!("   gnawtreewriter scaffold model.py --schema "python:class(name:User, fn:save)"");
+                println!("   gnawtreewriter scaffold model.py --schema \"python:class(name:User, fn:save)\"");
                 println!();
                 println!("3. Combined workflow:");
                 println!("   # Step 1: Scaffold the file structure");
@@ -2050,16 +2050,15 @@ Use --no-preview to perform the restoration"
                 println!("AI Agent Development Workflow:");
                 println!("  1. gnawtreewriter session-start             # Start tracking");
                 println!("  2. gnawtreewriter analyze src/*.py          # Understand structure");
-                println!("  3. gnawtreewriter edit file.py "0.1" 'code'  # Make changes");
+                println!("  3. gnawtreewriter edit file.py \"0.1\" 'code'  # Make changes");
                 println!("  4. gnawtreewriter history                    # Review what happened");
-                println!("  5. gnawtreewriter restore-session "id"      # Undo if needed");
+                println!("  5. gnawtreewriter restore-session \"id\"      # Undo if needed");
                 println!();
                 println!("Safe Refactoring Workflow:");
                 println!("  1. gnawtreewriter status                     # Check current state");
-                println!(
-                    "  2. gnawtreewriter edit file.py "0.1" 'new' --preview  # Preview changes"
+                println!("  2. gnawtreewriter edit file.py \"0.1\" 'new' --preview  # Preview changes"
                 );
-                println!("  3. gnawtreewriter edit file.py "0.1" 'new'  # Apply if good");
+                println!("  3. gnawtreewriter edit file.py \"0.1\" 'new'  # Apply if good");
                 println!("  4. gnawtreewriter undo                       # Quick undo if needed");
             }
             Some("handbook") => {
@@ -2071,14 +2070,14 @@ Use --no-preview to perform the restoration"
                 println!("   gnawtreewriter ai index                     # Map the project");
                 println!();
                 println!("2. UNDERSTAND: Find your target");
-                println!("   gnawtreewriter sense "how does X work?"     # Semantic search");
+                println!("   gnawtreewriter sense \"how does X work?\"     # Semantic search");
                 println!("   gnawtreewriter skeleton <file>              # Structural overview");
                 println!("   gnawtreewriter list <file>                  # Get exact node paths");
                 println!();
                 println!("3. MODIFY: Edit with surgical precision");
                 println!("   gnawtreewriter edit <file> <path> 'code'    # Standard edit");
                 println!("   gnawtreewriter edit <file> <path> @file.txt # Safe injection");
-                println!("   gnawtreewriter sense-insert <file> "anchor" 'code'");
+                println!("   gnawtreewriter sense-insert <file> \"anchor\" 'code'");
                 println!();
                 println!("4. SAFETY: The Guardian is watching");
                 println!("   Always use --preview first to verify changes.");
@@ -2087,7 +2086,7 @@ Use --no-preview to perform the restoration"
                 println!("   v0.9.1+ includes inline precision and helpful syntax tips.");
                 println!();
                 println!("5. REPORT: Document your progress");
-                println!("   gnawtreewriter alf "My intent" --kind intent");
+                println!("   gnawtreewriter alf \"My intent\" --kind intent");
                 println!("   gnawtreewriter ai report --limit 5          # Generate evidence");
                 println!();
                 println!("Tip: Combine commands for speed, e.g., index then sense!");
@@ -2141,7 +2140,7 @@ Use --no-preview to perform the restoration"
                 println!();
                 println!("Step 2: Edit a specific node with Surgical Precision (v0.9.1+)");
                 println!(
-                    "  Example: gnawtreewriter edit app.py "0.1" 'def hello(): print("world")'"
+                    "  Example: gnawtreewriter edit app.py \\\"0.1\\\" 'def hello(): print(\\\"world\\\")'"
                 );
                 println!("  Paths can target large blocks OR small inline nodes like a single parameter.");
                 println!("  GnawTreeWriter preserves the rest of the line automatically!");
@@ -2190,7 +2189,7 @@ Use --no-preview to perform the restoration"
                 println!("   gnawtreewriter undo --steps 3            # Last 3 changes");
                 println!();
                 println!("B) Go back to specific time:");
-                println!("   gnawtreewriter restore-project "2025-12-27T15:30:00Z" --preview");
+                println!("   gnawtreewriter restore-project \"2025-12-27T15:30:00Z\" --preview");
                 println!("   (Use ISO timestamp format)");
                 println!();
                 println!("C) Undo an AI agent session:");
@@ -2198,7 +2197,7 @@ Use --no-preview to perform the restoration"
                 println!("   2. gnawtreewriter restore-session <session-id> --preview");
                 println!();
                 println!("D) Restore specific files:");
-                println!("   gnawtreewriter restore-files --since "2025-12-27T16:00:00Z" --files "*.py"");
+                println!("   gnawtreewriter restore-files --since \"2025-12-27T16:00:00Z\" --files \"*.py\"");
                 println!();
                 println!("💡 Always use --preview first to see what will change!");
             }
@@ -2217,7 +2216,7 @@ Use --no-preview to perform the restoration"
                 println!("   gnawtreewriter batch ops.json");
                 println!();
                 println!("C) Batch with tags:");
-                println!("   gnawtreewriter tag add file.py "0.1" helper");
+                println!("   gnawtreewriter tag add file.py \"0.1\" helper");
                 println!("   # Use '0.1' in batch operations");
                 println!();
                 println!("💡 Perfect for:");
@@ -2232,7 +2231,7 @@ Use --no-preview to perform the restoration"
                 println!("Quick command for fast, safe edits:");
                 println!();
                 println!("A) Node-edit mode:");
-                println!("   gnawtreewriter quick file.py --node "0.1.0" --content 'new code' --preview");
+                println!("   gnawtreewriter quick file.py --node \"0.1.0\" --content 'new code' --preview");
                 println!("   # Uses AST-based editing");
                 println!();
                 println!("B) Find/replace mode:");
@@ -2240,7 +2239,7 @@ Use --no-preview to perform the restoration"
                 println!("   # Global text replacement");
                 println!();
                 println!("C) Apply changes:");
-                println!("   gnawtreewriter quick file.py --node "0.1.0" --content 'new code'");
+                println!("   gnawtreewriter quick file.py --node \"0.1.0\" --content 'new code'");
                 println!("   # Creates backup, logs transaction");
                 println!();
                 println!("💡 Perfect for:");
@@ -2254,24 +2253,24 @@ Use --no-preview to perform the restoration"
                 println!();
                 println!("Common issues and solutions:");
                 println!();
-                println!("❌ "Node not found at path":");
+                println!("❌ \"Node not found at path\":");
                 println!("   • Run: gnawtreewriter list <file>");
                 println!("   • Check that path exists in current file state");
                 println!("   • File might have changed - analyze again");
                 println!();
-                println!("❌ "Validation failed":");
+                println!("❌ \"Validation failed\":");
                 println!("   • Your new code has syntax errors");
                 println!("   • Read the Tip provided by the editor (v0.9.1+)");
                 println!("   • Check for missing semicolons, brackets, or indentation");
                 println!("   • Try smaller changes first");
                 println!();
-                println!("❌ "Backup not found":");
+                println!("❌ \"Backup not found\":");
                 println!("   • Some restoration operations need existing backups");
                 println!("   • Check: ls .gnawtreewriter_backups/");
                 println!("   • Use timestamp-based restoration as fallback");
                 println!();
                 println!("❌ Can't find the right node:");
-                println!("   • Use 'gnawtreewriter search <file> "text"' to find by content");
+                println!("   • Use 'gnawtreewriter search <file> \"text\"' to find by content");
                 println!("   • Use 'gnawtreewriter skeleton <file>' for a high-level view");
             }
             Some("ai") => {
@@ -2284,7 +2283,7 @@ Use --no-preview to perform the restoration"
                 println!("  # Requires: --features modernbert at compile time");
                 println!();
                 println!("Step 2: Search nodes by pattern");
-                println!("  gnawtreewriter search main.rs "database connection"");
+                println!("  gnawtreewriter search main.rs \"database connection\"");
                 println!("  # Finds all nodes containing the pattern");
                 println!();
                 println!("Step 3: Get skeletal overview");
@@ -2293,7 +2292,7 @@ Use --no-preview to perform the restoration"
                 println!();
                 println!("Step 4: Combine with editing");
                 println!("  gnawtreewriter analyze <file>");
-                println!("  gnawtreewriter search <file> "pattern"");
+                println!("  gnawtreewriter search <file> \"pattern\"");
                 println!("  gnawtreewriter edit <file> <path> 'code'");
                 println!();
                 println!("💡 Note: All AI features run 100% locally for privacy and speed.");

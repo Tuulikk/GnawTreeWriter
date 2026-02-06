@@ -2,6 +2,18 @@
 
 All notable changes to GnawTreeWriter.
 
+## [0.9.2] - 2026-02-05
+
+### Fixed
+- **Critical Compilation Errors**: Fixed 56+ syntax errors in `src/cli.rs` caused by unescaped double quotes in help text examples. All println! statements containing nested quotes have been properly escaped.
+- **Build System**: Restored compilation on Rust stable by fixing string literal syntax issues.
+
+### Technical Details
+- Problem: String literals like `println!("text "quote" more")` were interpreted as separate tokens
+- Solution: Escaped all nested quotes as `println!("text \"quote\" more")`
+- Affected: Help text in examples subcommand covering editing, search, restoration, and AI features
+- Lines modified: ~80 println! statements across 30+ example categories
+
 ## [0.9.1] - 2026-02-04
 
 ### Added
