@@ -21,7 +21,7 @@ pub mod mcp_server {
     use serde::{Deserialize, Serialize};
     use serde_json::{json, Value};
     use similar::{ChangeTag, TextDiff};
-    use std::{io::{self, BufRead, Write}, sync::Arc};
+    use std::sync::Arc;
     use tokio::net::TcpListener;
     use tokio::signal;
 

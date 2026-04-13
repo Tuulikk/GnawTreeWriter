@@ -1,4 +1,4 @@
-use crate::parser::{TreeNode, ParserEngineLegacy};
+use crate::parser::{TreeNode, ParserEngine, ParseResult};
 use xmltree::{Element, XMLNode};
 
 pub struct XmlParser;
@@ -15,53 +15,129 @@ impl XmlParser {
     }
 }
 
-impl ParserEngineLegacy for XmlParser {
-    fn parse_legacy(&self, code: &str) -> anyhow::Result<TreeNode> {
-        let mut remaining = code;
-        if let Some(pos) = code.find("<?xml") {
-            if let Some(end_pos) = code[pos..].find(">") {
-                remaining = &code[pos + end_pos + 1..];
+impl ParserEngine for XmlParser {
+    fn parse(&self, code: &str) -> ParseResult<TreeNode> {
+        let mut top_children = Vec::new();
+        let mut current_pos = 0;
+
+        // 1. Look for XML Declaration
+        if let Some(start) = code.find("<?xml") {
+            if let Some(end) = code[start..].find("?>") {
+                let abs_end = start + end + 2;
+                let content = &code[start..abs_end];
+                let line = code[..start].chars().filter(|c| *c == '\n').count() + 1;
+                top_children.push(TreeNode {
+                    id: "xml_declaration".to_string(),
+                    path: "0.xml_declaration".to_string(),
+                    node_type: "xml_declaration".to_string(),
+                    content: content.to_string(),
+                    start_line: line,
+                    end_line: line,
+                    ..Default::default()
+                });
+                current_pos = abs_end;
             }
         }
 
-        let elem = Element::parse(&mut std::io::Cursor::new(remaining.as_bytes()))
-            .map_err(|e| anyhow::anyhow!("XML parse error: {}", e))?;
+        // 2. Look for DOCTYPE
+        if let Some(start) = code[current_pos..].find("<!DOCTYPE") {
+            let abs_start = current_pos + start;
+            if let Some(end) = code[abs_start..].find('>') {
+                let abs_end = abs_start + end + 1;
+                let content = &code[abs_start..abs_end];
+                let line = code[..abs_start].chars().filter(|c| *c == '\n').count() + 1;
+                top_children.push(TreeNode {
+                    id: "doctype".to_string(),
+                    path: format!("{}.doctype", top_children.len()),
+                    node_type: "doctype".to_string(),
+                    content: content.to_string(),
+                    start_line: line,
+                    end_line: line,
+                    ..Default::default()
+                });
+                current_pos = abs_end;
+            }
+        }
 
-        let mut top_children = Vec::new();
-        for node in &elem.children {
-            match node {
-                xmltree::XMLNode::Element(child_elem) => {
-                    top_children.push(self.element_to_treenode_with_span(
-                        child_elem,
-                        "0".to_string(), // path
-                        code, // source
-                        1, // abs_start
-                        code.len(), // abs_end
-                    ));
-                }
-                xmltree::XMLNode::Comment(comment) => {
-                    top_children.push(TreeNode { start_col: 0, end_col: 0, 
+        // 3. Look for comments or processing instructions before root element
+        // (Simplistic approach: find the first < that isn't part of declaration/doctype/comment)
+        let mut search_pos = current_pos;
+        while let Some(start) = code[search_pos..].find('<') {
+            let abs_start = search_pos + start;
+            if code[abs_start..].starts_with("<!--") {
+                if let Some(end) = code[abs_start..].find("-->") {
+                    let abs_end = abs_start + end + 3;
+                    let content = &code[abs_start..abs_end];
+                    let line_start = code[..abs_start].chars().filter(|c| *c == '\n').count() + 1;
+                    let line_end = code[..abs_end].chars().filter(|c| *c == '\n').count() + 1;
+                    top_children.push(TreeNode {
                         id: format!("comment_{}", top_children.len()),
                         path: top_children.len().to_string(),
                         node_type: "comment".to_string(),
-                        content: comment.clone(),
-                        start_line: 1,
-                        end_line: 1,
-                        children: Vec::new(),
+                        content: content.to_string(),
+                        start_line: line_start,
+                        end_line: line_end,
+                        ..Default::default()
                     });
+                    search_pos = abs_end;
+                    current_pos = abs_end;
+                    continue;
                 }
-                _ => {}
+            } else if code[abs_start..].starts_with("<?") || code[abs_start..].starts_with("<!") {
+                // Skip other declarations for now
+                if let Some(end) = code[abs_start..].find('>') {
+                    search_pos = abs_start + end + 1;
+                    current_pos = search_pos;
+                    continue;
+                }
+            }
+            break;
+        }
+
+        // 4. Parse Root Element
+        let remaining = &code[current_pos..];
+        let elem = Element::parse(&mut std::io::Cursor::new(remaining.as_bytes()))
+            .map_err(|e| anyhow::anyhow!("XML parse error: {}", e))?;
+
+        // Find where the root element actually starts in the original source
+        if let Some(rel_start) = code[current_pos..].find(&format!("<{}", elem.name)) {
+            let root_abs_start = current_pos + rel_start;
+            // Find its matching close
+            if let Some(rel_close) = Self::find_matching_close_in_slice(&code[root_abs_start..], 0, &elem.name) {
+                let root_abs_end = root_abs_start + rel_close;
+                let root_node = self.element_to_treenode_with_span(
+                    &elem,
+                    top_children.len().to_string(),
+                    code,
+                    root_abs_start,
+                    root_abs_end,
+                );
+                top_children.push(root_node);
+            } else {
+                // Fallback if closing tag not found (self-closing?)
+                if let Some(gt) = code[root_abs_start..].find('>') {
+                    let root_abs_end = root_abs_start + gt + 1;
+                    let root_node = self.element_to_treenode_with_span(
+                        &elem,
+                        top_children.len().to_string(),
+                        code,
+                        root_abs_start,
+                        root_abs_end,
+                    );
+                    top_children.push(root_node);
+                }
             }
         }
 
-        Ok(TreeNode { start_col: 0, end_col: 0, 
+        Ok(TreeNode {
             id: "root".to_string(),
             path: "0".to_string(),
-            node_type: "xml_file".to_string(),
-            content: elem.name.clone(),
+            node_type: "document".to_string(),
+            content: String::new(),
             start_line: 1,
-            end_line: code.lines().count(),
-            children: top_children, 
+            end_line: code.lines().count().max(1),
+            children: top_children,
+            ..Default::default()
         })
     }
 

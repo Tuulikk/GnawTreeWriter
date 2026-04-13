@@ -7,7 +7,7 @@ use crate::core::{
     TransactionLog, UndoRedoManager, visualizer::TreeVisualizer,
 };
 #[cfg(feature = "modernbert")]
-use crate::llm::{GnawSenseBroker, SenseResponse};
+use crate::llm::{GnawSenseBroker, SenseResponse, SemanticIndexManager};
 use crate::parser::TreeNode;
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -1288,13 +1288,58 @@ Use --no-preview to write batch file"
         {
             let current_dir = std::env::current_dir()?;
             let project_root = find_project_root(&current_dir);
+
+            // Check if the project has been indexed (for satelite mode)
+            if file_path.is_none() {
+                let index_mgr = SemanticIndexManager::new(&project_root);
+                let model_info = index_mgr.get_model_info()?;
+                let has_index = if let Some(info) = &model_info {
+                    info.dimension > 0
+                } else {
+                    false
+                };
+
+                if !has_index {
+                    println!("🧠 GnawSense requires a project index for project-wide search.");
+                    println!("📂 No semantic index found for: {}", project_root.display());
+                    println!();
+
+                    // Prompt user
+                    print!("\x1b[1mWould you like to index this project now? [y/N]\x1b[0m ");
+                    use std::io::Write;
+                    std::io::stdout().flush()?;
+
+                    let mut answer = String::new();
+                    std::io::stdin().read_line(&mut answer)?;
+                    let answer = answer.trim().to_lowercase();
+
+                    if answer == "y" || answer == "yes" {
+                        println!();
+                        Self::handle_ai_index(None).await?;
+                        println!();
+                        println!("Now searching for: \"{}\"...", query);
+                    } else {
+                        println!();
+                        println!("💡 Tip: Run 'gnawtreewriter ai index' to build the semantic index, then use 'sense' again.");
+                        println!("   You can also use 'sense --file <path>' for single-file search (no index required).");
+                        return Ok(());
+                    }
+                }
+            }
+
             let broker = GnawSenseBroker::new(&project_root)?;
 
-            println!("🧠 GnawSense is thinking about: \"{}\"...", query);
+            println!("🧠 GnawSense is thinking about: {}...", query);
             let response = broker.sense(query, file_path).await?;
 
             match response {
                 SenseResponse::Satelite { matches } => {
+                    if matches.is_empty() {
+                        println!("\n🛰️ Satelite View: No relevant results found for \"{}\".", query);
+                        println!("The index may be outdated. Try running 'gnawtreewriter ai index' again.");
+                        return Ok(());
+                    }
+
                     println!("\n🛰️ Satelite View: I found these relevant areas in the project:");
                     for (i, m) in matches.iter().enumerate() {
                         println!("  {}. {} (score: {:.2})", i + 1, m.file_path, m.score);
@@ -1302,6 +1347,11 @@ Use --no-preview to write batch file"
                     println!("\nTip: Use `gnawtreewriter sense \"{}\" --file {}` to zoom in.", query, matches[0].file_path);
                 }
                 SenseResponse::Zoom { file_path, nodes, impact } => {
+                    if nodes.is_empty() {
+                        println!("\n🔍 Zoom View: No relevant nodes found in {} for \"{}\".", file_path, query);
+                        return Ok(());
+                    }
+
                     println!("\n🔍 Zoom View: Relevant nodes in {}:", file_path);
                     for (i, n) in nodes.iter().enumerate() {
                         println!("  {}. [{}] (score: {:.2})", i + 1, n.path, n.score);

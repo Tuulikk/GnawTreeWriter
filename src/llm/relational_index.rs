@@ -58,8 +58,9 @@ impl RelationalIndexer {
         {
             let path = entry.path();
             
-            // Skip hidden directories and common build/environment folders
-            let is_ignored = path.components().any(|c| {
+            // Skip hidden directories and common build/environment folders relative to dir_path
+            let relative_path = path.strip_prefix(dir_path).unwrap_or(path);
+            let is_ignored = relative_path.components().any(|c| {
                 let s = c.as_os_str().to_str().unwrap_or("");
                 s.starts_with('.') || s == "venv" || s == "node_modules" || s == "target" || s == "__pycache__" || s == "env"
             });

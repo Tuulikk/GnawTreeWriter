@@ -1,0 +1,9 @@
+{
+  "description": "Fix escaped quotes in help text",
+  "operations": [
+    {"file": "src/cli.rs", "search": "println!(\"   gnawtreewriter edit app.py \"0.1\" 'new code' # Edit specific node\");", "replace": "println!(\"   gnawtreewriter edit app.py \\\\\"0.1\\\\\" 'new code' # Edit specific node\");"},
+    {"file": "src/cli.rs", "search": "println!(\"   gnawtreewriter edit main.rs \"1.2.3\" 'new_var' # Change just one variable\");", "replace": "println!(\"   gnawtreewriter edit main.rs \\\\\"1.2.3\\\\\" 'new_var' # Change just one variable\");"},
+    {"file": "src/cli.rs", "search": "println!(\"   gnawtreewriter edit main.rs \"0.2\" 'fn main() {{}}' --preview\");", "replace": "println!(\"   gnawtreewriter edit main.rs \\\\\"0.2\\\\\" 'fn main() {{}}' --preview\");"},
+    {"file": "src/cli.rs", "search": "println!(\"   gnawtreewriter insert app.py \"0\" 1 'def helper(): return 42'\");", "replace": "println!(\"   gnawtreewriter insert app.py \\\\\"0\\\\\" 1 'def helper(): return 42'\");"}
+  ]
+}

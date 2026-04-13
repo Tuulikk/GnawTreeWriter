@@ -501,7 +501,18 @@ impl GnawTreeWriter {
                     parent.start_line - 1
                 }
             }
-            1 => parent.end_line - 1,
+            1 => {
+                // Insert at the end of the parent node.
+                // For source_file: TreeSitter end_line can exceed lines.len()
+                // (trailing newline counted as extra line), so we clamp.
+                // For other nodes (blocks, etc.): end_line points to the closing
+                // delimiter line, so we subtract 1 to insert BEFORE it.
+                if parent.node_type == "source_file" {
+                    parent.end_line.min(lines.len())
+                } else {
+                    parent.end_line.saturating_sub(1)
+                }
+            },
             2 => {
                 let mut last_prop_line = parent.start_line;
                 let mut found = false;
@@ -543,8 +554,13 @@ impl GnawTreeWriter {
                 lines[lines.len() - 1]
             };
             let ws: String = ref_line.chars().take_while(|c| c.is_whitespace()).collect();
-            if ws.is_empty() && insert_pos > 0 {
-                lines[insert_pos - 1]
+            if ws.is_empty() {
+                let prev_idx = if insert_pos > 0 && insert_pos <= lines.len() {
+                    insert_pos - 1
+                } else {
+                    lines.len() - 1
+                };
+                lines[prev_idx]
                     .chars()
                     .take_while(|c| c.is_whitespace())
                     .collect()

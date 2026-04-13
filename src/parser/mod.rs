@@ -85,6 +85,78 @@ impl TreeNode {
         }
         None
     }
+
+    /// Find the deepest node that contains the given 1-based line number.
+    /// Returns the most specific (deepest) node whose start_line..=end_line range includes `line`.
+    pub fn find_node_at_line(&self, line: usize) -> Option<&TreeNode> {
+        if line >= self.start_line && line <= self.end_line {
+            // Recurse into children first — prefer deeper (more specific) nodes
+            for child in &self.children {
+                if let Some(found) = child.find_node_at_line(line) {
+                    return Some(found);
+                }
+            }
+            Some(self)
+        } else {
+            None
+        }
+    }
+
+    /// Find the best parent node for inserting at a given 1-based line number.
+    /// Used by diff-to-batch to determine where to insert new code.
+    ///
+    /// Strategy: Walk the tree depth-first, but when the deepest node at
+    /// `line` is at a boundary of a scoped container (function, class, block),
+    /// skip past it so the insert becomes a sibling rather than a child.
+    pub fn find_parent_at_line(&self, line: usize) -> &TreeNode {
+        if !(line >= self.start_line && line <= self.end_line) {
+            return self;
+        }
+
+        let mut best_container: Option<&TreeNode> = None;
+
+        for child in &self.children {
+            if !(line >= child.start_line && line <= child.end_line) {
+                continue;
+            }
+
+            let nt = child.node_type.to_lowercase();
+
+            // Check if this child is a "scoped container" whose boundary
+            // should not be descended into. This includes:
+            // - function_item, method_declaration, fn_definition
+            // - class_definition, struct_item, enum_item
+            // - impl_item, trait_item, mod_item
+            // - block, body, statement_block
+            let is_scoped = nt.contains("function")
+                || nt.contains("method")
+                || nt.contains("class")
+                || nt.contains("struct")
+                || nt.contains("enum")
+                || (nt.contains("impl") && !nt.contains("implementation"))
+                || nt.contains("trait")
+                || nt.contains("mod")
+                || nt.contains("block")
+                || nt.contains("body")
+                || nt.contains("statement_block");
+
+            let at_boundary = line <= child.start_line + 1
+                || line >= child.end_line.saturating_sub(1);
+
+            if is_scoped && at_boundary {
+                // The line is at the edge of a scoped container.
+                // Don't descend — the insert should be a sibling, not a child.
+                best_container = None;
+                continue;
+            }
+
+            // Recurse into the child
+            let result = child.find_parent_at_line(line);
+            best_container = Some(result);
+        }
+
+        best_container.unwrap_or(self)
+    }
 }
 
 pub trait ParserEngine {
@@ -140,7 +212,7 @@ pub fn get_parser(file_path: &Path) -> anyhow::Result<Box<dyn ParserEngine>> {
         "java" => Ok(Box::new(LegacyParserWrapper::new(java::JavaParser::new()))),
         "zig" => Ok(Box::new(LegacyParserWrapper::new(zig::ZigParser::new()))),
         "css" => Ok(Box::new(LegacyParserWrapper::new(css::CssParser::new()))),
-        "xml" | "svg" | "xsl" | "xsd" | "rss" | "atom" => Ok(Box::new(LegacyParserWrapper::new(xml::XmlParser::new()))),
+        "xml" | "svg" | "xsl" | "xsd" | "rss" | "atom" => Ok(Box::new(xml::XmlParser::new())),
         "md" | "markdown" => Ok(Box::new(LegacyParserWrapper::new(markdown::MarkdownParser::new()))),
         "txt" => Ok(Box::new(LegacyParserWrapper::new(text::TextParser::new()))),
         "toml" => Ok(Box::new(LegacyParserWrapper::new(toml::TomlParser::new()))),

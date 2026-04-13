@@ -45,7 +45,7 @@ ScaffoldNode], depth: usize) -> String {
         for node in nodes {
             match node.kind.as_str() {
                 "mod" => {
-                    output.push_str(&format!("{}pub mod {} {{`", indent, node.name));
+                    output.push_str(&format!("{}pub mod {} {{\n", indent, node.name));
                     output.push_str(&self.generate_rust(&node.children, depth + 1));
                     output.push_str(&format!("{}}}
 \n", indent));

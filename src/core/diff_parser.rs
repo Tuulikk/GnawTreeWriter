@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use crate::core::batch::BatchEdit;
 use crate::core::Batch;
+use crate::parser::{get_parser, TreeNode};
 
 /// Represents a single hunk in a unified diff
 #[derive(Debug, Clone)]
@@ -159,111 +160,258 @@ pub fn parse_unified_diff(diff: &str) -> Result<ParsedDiff> {
 }
 
 /// Convert a parsed diff to batch operations
+///
+/// For each hunk, this function:
+/// 1. Parses the target file with the appropriate TreeSitter parser
+/// 2. Finds the AST node at the hunk's line number
+/// 3. Creates Edit or Insert operations with proper node paths
 pub fn diff_to_batch(diff: &ParsedDiff) -> Result<Batch> {
-    let mut file_operations: HashMap<PathBuf, Vec<BatchEdit>> = HashMap::new();
-
+    // Group hunks by file
+    let mut file_hunks: HashMap<PathBuf, Vec<&DiffHunk>> = HashMap::new();
     for hunk in &diff.hunks {
-        let file_path = &hunk.file_path;
+        file_hunks.entry(hunk.file_path.clone()).or_default().push(hunk);
+    }
 
-        // Convert hunk to one or more batch edits
-        // For simple line replacements, we can use Edit operation
-        // For complex multi-line changes, we may need multiple operations
+    let mut batch = Batch::new();
 
-        // Find the actual content to replace by looking at deletions
-        let deletions: Vec<&DiffLine> = hunk
-            .lines
-            .iter()
-            .filter(|l| matches!(l, DiffLine::Deletion(_)))
-            .collect();
+    for (file_path, hunks) in file_hunks.into_iter() {
+        let file_str = file_path.to_string_lossy().to_string();
 
-        let additions: Vec<&DiffLine> = hunk
-            .lines
-            .iter()
-            .filter(|l| matches!(l, DiffLine::Addition(_)))
-            .collect();
+        // Parse the file to get AST for line-to-node resolution
+        let source = std::fs::read_to_string(&file_path)
+            .map_err(|e| anyhow!("Failed to read {}: {}", file_path.display(), e))?;
+        let parser = get_parser(&file_path)
+            .map_err(|e| anyhow!("No parser available for {}: {}", file_path.display(), e))?;
+        let tree = parser.parse(&source)
+            .map_err(|e| anyhow!("Failed to parse {}: {}", file_path.display(), e))?;
 
-        // Strategy: For now, we'll create a simple replace operation
-        // In the future, we could do AST-aware conversion
+        let mut operations = Vec::new();
 
-        if !deletions.is_empty() {
-            // Extract deleted content
-            let _deleted_content: String = deletions
+        for hunk in hunks {
+            let deletions: Vec<&DiffLine> = hunk
+                .lines
                 .iter()
-                .map(|l| match l {
-                    DiffLine::Deletion(s) => s.as_str(),
-                    _ => "",
-                })
-                .collect::<Vec<&str>>()
-                .join("\n");
-
-            // Find insertion point (typically the line before the first deletion)
-            // For now, we use the old_start line number
-            // TODO: This is a simplified approach. A more robust implementation
-            // would use AST parsing to find the exact node to edit
-
-            // Create an edit operation at the line level
-            // We use line number as a node path for now
-            let node_path = format!("line:{}", hunk.old_start);
-
-            // Create the new content by combining context and additions
-            let new_content: String = additions
+                .filter(|l| matches!(l, DiffLine::Deletion(_)))
+                .collect();
+            let additions: Vec<&DiffLine> = hunk
+                .lines
                 .iter()
-                .map(|l| match l {
-                    DiffLine::Addition(s) => s.as_str(),
-                    _ => "",
-                })
-                .collect::<Vec<&str>>()
-                .join("\n");
+                .filter(|l| matches!(l, DiffLine::Addition(_)))
+                .collect();
 
-            if !new_content.is_empty() {
-                let batch_edit = BatchEdit::Edit {
-                    node_path,
-                    content: new_content,
-                };
+            if !deletions.is_empty() && !additions.is_empty() {
+                // Edit: find the target node and replace it.
+                // Strategy: find the node at the first deletion line,
+                // then replace its entire content with the new additions.
+                // We also include any trailing context that belongs to the node.
+                let mut first_del_line = hunk.old_start;
+                for line in &hunk.lines {
+                    if matches!(line, DiffLine::Context(_)) {
+                        first_del_line += 1;
+                    } else {
+                        break;
+                    }
+                }
 
-                file_operations
-                    .entry(file_path.clone())
-                    .or_default()
-                    .push(batch_edit);
+                // Build new content from additions
+                let mut new_parts: Vec<String> = additions
+                    .iter()
+                    .map(|l| match l {
+                        DiffLine::Addition(s) => s.clone(),
+                        _ => String::new(),
+                    })
+                    .collect();
+
+                // If the old node had a closing delimiter (like '}' or ')') that
+                // wasn't part of the deletion, we need to append it.
+                let mut past_additions = false;
+                for line in &hunk.lines {
+                    match line {
+                        DiffLine::Addition(_) => past_additions = true,
+                        DiffLine::Context(s) if past_additions => {
+                            let trimmed = s.trim();
+                            if trimmed == "}" || trimmed == ")" || trimmed == "]" {
+                                // Use indentation from the first addition line
+                                let indent = additions
+                                    .first()
+                                    .and_then(|l| match l {
+                                        DiffLine::Addition(s) => Some(s),
+                                        _ => None,
+                                    })
+                                    .and_then(|s| s.chars().take_while(|c| *c == ' ' || *c == '\t').collect::<String>().into())
+                                    .unwrap_or_default();
+                                new_parts.push(format!("{}{}", indent, trimmed));
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                let new_content = new_parts.join("\n");
+
+                if !new_content.is_empty() {
+                    // Find the best enclosing node at the deletion line
+                    let node_path = resolve_line_to_node(&tree, first_del_line, &source);
+                    operations.push(BatchEdit::Edit {
+                        node_path,
+                        content: new_content,
+                    });
+                }
+            } else if !additions.is_empty() {
+                // Pure insert: find parent node and compute correct position
+                let content: String = additions
+                    .iter()
+                    .map(|l| match l {
+                        DiffLine::Addition(s) => s.clone(),
+                        _ => String::new(),
+                    })
+                    .collect::<Vec<String>>()
+                    .join("\n");
+
+                if !content.is_empty() {
+                    let parent = tree.find_parent_at_line(hunk.new_start);
+                    // Determine position: find which sibling index comes after the hunk line
+                    let position = compute_insert_position(&tree, parent, hunk.new_start);
+                    operations.push(BatchEdit::Insert {
+                        parent_path: parent.path.clone(),
+                        position,
+                        content,
+                    });
+                }
             }
-        } else if !additions.is_empty() {
-            // Pure addition - use insert operation
-            // Insert at the specified line
-            let node_path = format!("line:{}", hunk.new_start);
-            let content: String = additions
-                .iter()
-                .map(|l| match l {
-                    DiffLine::Addition(s) => s.as_str(),
-                    _ => "",
-                })
-                .collect::<Vec<&str>>()
-                .join("\n");
+            // Pure deletions are not supported yet (would need Delete operation)
+        }
 
-            if !content.is_empty() {
-                let batch_edit = BatchEdit::Insert {
-                    parent_path: node_path,
-                    position: 1, // After the line
-                    content,
-                };
-
-                file_operations
-                    .entry(file_path.clone())
-                    .or_default()
-                    .push(batch_edit);
-            }
+        if !operations.is_empty() {
+            batch = Batch::with_file(file_str, operations);
         }
     }
 
-    // Convert to Batch structure
-    let mut batch = Batch::new();
-    if let Some((file_path, operations)) = file_operations.into_iter().next() {
-        // Note: We're creating a separate Batch for each file
-        // This is simplified - a real implementation might merge them
-        batch = Batch::with_file(file_path.to_string_lossy().to_string(), operations);
-        // For MVP, just handle first file
+    Ok(batch)
+}
+
+/// Resolve a 1-based line number to the path of the best enclosing node for editing.
+/// For diff edits, we want a meaningful container (function, class, statement),
+/// not a leaf node (keyword, identifier). We walk up from the deepest match
+/// to find the smallest node that has both a meaningful type and children.
+fn resolve_line_to_node(tree: &TreeNode, line: usize, source: &str) -> String {
+    let line_count = source.lines().count();
+    let line = if line > line_count { line_count } else if line == 0 { 1 } else { line };
+
+    // First find the deepest node at this line
+    let deepest = match tree.find_node_at_line(line) {
+        Some(n) => n,
+        None => return tree.path.clone(),
+    };
+
+    // If the deepest node is a leaf-like type, find its enclosing
+    // container by searching for the smallest ancestor that has children
+    // and is a meaningful edit target.
+    let nt = deepest.node_type.to_lowercase();
+    let is_leaf = nt.contains("identifier")
+        || nt.contains("keyword")
+        || nt.contains(":")
+        || nt.contains("operator")
+        || nt.contains("literal")
+        || nt.contains("string")
+        || nt.contains("comment")
+        || nt.contains("parameter")
+        || deepest.children.is_empty();
+
+    if is_leaf {
+        // Walk up: find the first ancestor that is a scoped container
+        // We need to search the tree for a node whose path is a prefix
+        // of the deepest node's path.
+        return find_editable_ancestor(tree, &deepest.path)
+            .map(|n| n.path.clone())
+            .unwrap_or_else(|| tree.path.clone());
     }
 
-    Ok(batch)
+    deepest.path.clone()
+}
+
+/// Find the smallest ancestor of the node at `target_path` that is a
+/// meaningful edit target (function, class, struct, statement, etc.).
+/// Compute the insert position within a parent node based on which sibling
+/// follows the given line number.
+///
+/// GTW position semantics:
+///   0 = prepend (after opening brace or at top)
+///   1 = append (at end of parent)
+///   2 = after last ui_property (QML-specific)
+///   3+ = after child at index (position - 3). So position N = after child N-3.
+///
+/// To insert before child at index `child_idx`, use position `child_idx + 3`.
+fn compute_insert_position(root: &TreeNode, parent: &TreeNode, line: usize) -> usize {
+    // Walk the parent's path to get the actual parent node with children
+    let parent_path = &parent.path;
+    let parent_node: &TreeNode = if parent_path.is_empty() || parent_path == "root" {
+        root
+    } else {
+        let segments: Vec<&str> = parent_path.split('.').filter(|s| !s.is_empty()).collect();
+        let mut node = root;
+        for seg in segments {
+            if let Ok(idx) = seg.parse::<usize>() {
+                if let Some(child) = node.children.get(idx) {
+                    node = child;
+                } else {
+                    break;
+                }
+            }
+        }
+        node
+    };
+
+    // Find the first child that starts at or after the target line.
+    // We want to insert BEFORE that child.
+    // GTW semantics: position 0 = prepend, position 1 = append,
+    // position 3+N = after child N. So to insert BEFORE child at index i,
+    // we use position (i + 2) = after child (i-1), with special case i=0 → position 0.
+    for (i, child) in parent_node.children.iter().enumerate() {
+        if child.start_line >= line {
+            return if i == 0 { 0 } else { i + 2 };
+        }
+    }
+
+    // No child starts after the line — append at end
+    1
+}
+
+fn find_editable_ancestor<'a>(tree: &'a TreeNode, target_path: &str) -> Option<&'a TreeNode> {
+    // Walk the path segments to find the node, then check each ancestor
+    let segments: Vec<&str> = target_path.split('.').collect();
+    let mut current = tree;
+    let mut best: Option<&TreeNode> = None;
+
+    for _seg in segments.iter() {
+        let nt = current.node_type.to_lowercase();
+        let is_meaningful = nt.contains("function")
+            || nt.contains("method")
+            || nt.contains("class")
+            || nt.contains("struct")
+            || nt.contains("enum")
+            || nt.contains("impl")
+            || nt.contains("trait")
+            || nt.contains("mod")
+            || nt.contains("statement")
+            || nt.contains("block")
+            || nt.contains("body")
+            || nt.contains("declaration")
+            || nt.contains("source_file")
+            || nt.contains("program")
+            || nt.contains("module");
+
+        if is_meaningful && !current.children.is_empty() {
+            best = Some(current);
+        }
+
+        // Navigate to the next child
+        let seg_num: usize = _seg.parse().ok()?;
+        current = current.children.get(seg_num)?;
+    }
+
+    best
 }
 
 /// Normalize file paths from diff headers (remove a/ or b/ prefix)

@@ -1,5 +1,4 @@
 use std::path::Path;
-use tokenizers::Tokenizer;
 use candle_core::{DType, Device};
 use candle_nn::VarBuilder;
 
