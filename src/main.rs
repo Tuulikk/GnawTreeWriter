@@ -26,16 +26,25 @@ async fn main() -> Result<()> {
     };
 
     if let Err(err) = cli.run().await {
-        eprintln!("Error: {}", err);
-        
-        // Logical tips based on execution errors
-        let err_msg = err.to_string().to_lowercase();
-        if err_msg.contains("guardian block") {
-            eprintln!("\n🛡️  [GuardianTip]: Significant code loss detected. Use --force if this deletion is intentional.");
-        } else if err_msg.contains("syntax error") {
-            eprintln!("\n✨ [DuplexTip]: The proposed edit broke the AST. GnawTreeWriter prevented this to keep your project stable.");
-        } else if err_msg.contains("modernbert") {
-            eprintln!("\n🧠 [AiTip]: Semantic features require ModernBERT. Run 'gnawtreewriter ai setup' or check your features.");
+        // Check if JSON mode was requested
+        let json_mode = std::env::var("GNAW_JSON").is_ok();
+        if json_mode {
+            use gnawtreewriter::core::diagnostics::{DiagnosticReport, DiagnosticError};
+            let diag = DiagnosticReport::err("gnawtreewriter", "", "unknown", 
+                DiagnosticError::from_anyhow(&err, "unknown"));
+            eprintln!("{}", serde_json::to_string_pretty(&diag).unwrap_or_else(|_| format!("{{\"success\": false, \"error\": \"{}\"}}", err)));
+        } else {
+            eprintln!("Error: {}", err);
+            
+            // Logical tips based on execution errors
+            let err_msg = err.to_string().to_lowercase();
+            if err_msg.contains("guardian block") {
+                eprintln!("\n🛡️  [GuardianTip]: Significant code loss detected. Use --force if this deletion is intentional.");
+            } else if err_msg.contains("syntax error") {
+                eprintln!("\n✨ [DuplexTip]: The proposed edit broke the AST. GnawTreeWriter prevented this to keep your project stable.");
+            } else if err_msg.contains("modernbert") {
+                eprintln!("\n🧠 [AiTip]: Semantic features require ModernBERT. Run 'gnawtreewriter ai setup' or check your features.");
+            }
         }
         
         std::process::exit(1);

@@ -98,7 +98,12 @@ To solve the problem of "Agent Amnesia," we built **ALF**. It's a structural jou
 - **GnawSense**: Semantic navigation and editing via local AI.
 - **Time Travel**: Project-wide restoration to any timestamp.
 - **Atomic Multi-File Operations**: Coordinated edits with automatic rollback.
-- **Multi-Language Support**: 17+ programming languages.
+- **Multi-Language Support**: 26 programming languages (Python, Rust, TypeScript, JavaScript, C#, Dart, Svelte, SQL, Go, Java, C/C++, Kotlin, Swift, PHP, QML, HTML, CSS, YAML, TOML, XML, JSON, Markdown, Bash, Zig, and more).
+- **Doctor Command**: `gnawtreewriter doctor` validates all parsers, backups, and transaction logs.
+- **Verbose Mode**: `GNAW_VERBOSE=1` shows parser selection, node resolution, guardian scoring, and AST structural changes.
+- **Structured JSON Errors**: `GNAW_JSON=1` gives machine-readable error output for AI agents.
+- **Post-Edit AST Diff**: Automatic structural analysis after every edit — warns if important nodes are removed or changed.
+- **Enhanced Error Context**: Parse errors now show the offending code line, language name, and actionable tips.
 
 ## Documentation
 

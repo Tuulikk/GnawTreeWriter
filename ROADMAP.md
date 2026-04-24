@@ -164,3 +164,48 @@ All features in this section are and will remain **free and open source** under 
 ---
 
 *This roadmap is a living document. Inspired by Comparative-Thinker and Comparative-Writer.*
+
+---
+
+## Phase 7: Debuggability & Agent Diagnostics 🔄 IN PROGRESS
+**Target: v0.10.0 | Q2 2026**
+
+*Investigation date: 2026-04-24 — comprehensive audit of existing debugging infrastructure.*
+
+### Existing Infrastructure (Already Complete)
+- [x] **Transaction Log System** — JSON-based operation log with timestamps, hashes, session IDs
+- [x] **Backup System** — Per-edit JSON backups with content hashes
+- [x] **Undo/Redo** — Stack-based navigation through transaction history
+- [x] **Restoration Engine** — Project-wide and session-based rollback
+- [x] **Guardian Engine** — Edit impact analysis (volume, complexity, comment preservation)
+- [x] **Healer (Duplex Loop)** — Auto-heal for simple syntax errors (missing braces/colons)
+- [x] **Post-edit Validation** — Reparse code after edit, block invalid syntax
+- [x] **TreeVisualizer** — Visual diff with focus-nodes and sparklines
+- [x] **Health Check (`status`)** — Environment, Git, AI, MCP, undo-state
+- [x] **ALF (Agentic Logging)** — Intent/risk/outcome journaling
+- [x] **Report Engine** — Markdown structural evolution reports
+- [x] **SyntaxError** — Parsing errors with line/col/message
+- [x] **Lint Command** — Find issues in files
+
+### Prio 1 — Agent-Critical (Making GTW Easy to Debug for AI Agents)
+- [ ] **`--dry-run` on edit/insert/delete** — Return what *would* happen without writing to disk
+- [x] **Structured JSON errors** — `GNAW_JSON=1` env var gives machine-readable errors with error_type, suggestion, context
+- [x] **`--verbose` flag** — `GNAW_VERBOSE=1` visar parser-val, node-uppslagning, guardian-score, AST-validering, structural changes
+
+### Prio 2 — Robustness
+- [x] **`doctor` command** — Test all parsers, check backup integrity, validate transaction log
+- [x] **Better error context** — Include offending code line at parse errors, language name, nearby nodes
+
+### Prio 3 — Advanced
+- [x] **Post-edit AST diff** — Compare tree before/after and warn if structure breaks (e.g. function_declaration becomes something else)
+- [ ] **Reference analysis** — Warn if deletion affects referenced code (future: cross-file)
+
+### Identified Gaps (Why These Features Matter)
+1. **No post-edit AST verification** — Validation checks if code *parses*, not that tree structure is consistent
+2. **No `--dry-run` on single edits** — Only batch and quick-replace have preview. Agents can't test-drive edits
+3. **Limited error messages** — `SyntaxError` has line/col but lacks code context, fix suggestions, and language info
+4. **No structured error format** — All errors formatted for humans (emojis, ANSI). Agents need JSON
+5. **No debug/verbose flag** — No way to see what GTW does step-by-step (parser choice, node lookup, etc.)
+6. **No `doctor` command** — `Status` shows env but doesn't validate parsers, backups, or log consistency
+7. **No consequence analysis** — Guardian checks volume/complexity but not reference integrity or scope
+8. **No diff command** — Can't see before/after detail of an edit (only visualizer with focus)

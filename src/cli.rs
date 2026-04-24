@@ -73,6 +73,9 @@ pub struct Cli {
     #[arg(long, global = true)]
     /// Show what would happen without making any changes
     dry_run: bool,
+    #[arg(long, global = true)]
+    /// Output machine-readable JSON for errors and results
+    json: bool,
 }
 
 #[derive(Subcommand)]
@@ -362,6 +365,11 @@ enum Commands {
     },
     /// Show version information
     Version,
+    /// Run diagnostic health checks on parsers, backups, and logs
+    Doctor {
+        #[arg(short, long)]
+        format: Option<String>,
+    },
     /// Generate a project blueprint
     Blueprint {
         #[arg(short, long)]
@@ -449,6 +457,7 @@ enum TagSubcommands {
 }
 impl Cli {
     pub async fn run(self) -> Result<()> {
+        let json_mode = self.json;
         match self.command {
             Commands::Analyze {
                 paths,
@@ -879,6 +888,9 @@ impl Cli {
             
             Commands::Version => {
 Self::handle_version()?;
+            }
+            Commands::Doctor { format } => {
+                Self::handle_doctor(format.as_deref())?;
             }
             Commands::Blueprint { output } => {
                 Self::handle_blueprint(output.as_deref())?;
@@ -2322,6 +2334,11 @@ Use --no-preview to perform the restoration"
                 println!("❌ Can't find the right node:");
                 println!("   • Use 'gnawtreewriter search <file> \"text\"' to find by content");
                 println!("   • Use 'gnawtreewriter skeleton <file>' for a high-level view");
+                println!();
+                println!("🔬 System diagnostics:");
+                println!("   • Run 'gnawtreewriter doctor' to validate all parsers and backups");
+                println!("   • Set GNAW_VERBOSE=1 to see detailed edit execution steps");
+                println!("   • Set GNAW_JSON=1 for machine-readable error output");
             }
             Some("ai") => {
                 println!("🤖 LOCAL AI & ANALYSIS WIZARD");
@@ -2883,6 +2900,84 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
         Ok(())
     }
     
+        fn handle_doctor(format: Option<&str>) -> Result<()> {
+            use crate::core::diagnostics::DoctorReport;
+            use colored::*;
+
+            let current_dir = std::env::current_dir()?;
+            let project_root = find_project_root(&current_dir);
+
+            let mut report = DoctorReport::new();
+
+            // --- Parser Health Checks ---
+            println!("\n{}", "🔬 Parser Health Checks".bold());
+            let parser_tests = [
+                ("py", "def hello(): pass"),
+                ("rs", "fn main() {}"),
+                ("js", "function hello() {}"),
+                ("ts", "const x: number = 1;"),
+                ("go", "package main\nfunc main() {}"),
+                ("java", "class Main {}"),
+                ("c", "int main() { return 0; }"),
+                ("cpp", "int main() { return 0; }"),
+                ("html", "<html></html>"),
+                ("css", "body { margin: 0; }"),
+                ("json", "{\"key\": \"value\"}"),
+                ("yaml", "key: value"),
+                ("toml", "[section]\nkey = \"value\""),
+                ("sql", "SELECT 1;"),
+                ("sh", "echo hello"),
+                ("zig", "pub fn main() void {}"),
+                ("php", "<?php echo 'hello';"),
+                ("svelte", "<script>let x = 0;</script>"),
+                ("dart", "void main() {}"),
+                ("cs", "using System;"),
+            ];
+
+            for (ext, code) in &parser_tests {
+                report.check_parser(ext, code);
+            }
+
+            // --- Backup Integrity ---
+            println!("\n{}", "💾 Backup Integrity".bold());
+            report.check_backups(&project_root);
+
+            // --- Transaction Log ---
+            println!("\n{}", "📝 Transaction Log".bold());
+            report.check_transaction_log(&project_root);
+
+            // --- Print results ---
+            match format {
+                Some("json") => {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                }
+                _ => {
+                    for check in &report.checks {
+                        let icon = match check.status.as_str() {
+                            "pass" => "✅".green(),
+                            "fail" => "❌".red(),
+                            "warn" => "⚠️ ".yellow(),
+                            _ => "  ".normal(),
+                        };
+                        println!("  {} [{}] {} — {}", icon, check.category.bright_black(), check.name.bold(), check.message);
+                    }
+
+                    println!("\n{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".bright_black());
+                    if report.overall_healthy {
+                        println!("  {} All {} checks passed ({} warnings)", "✅".green(), report.passed.to_string().green(), report.warnings);
+                    } else {
+                        println!("  {} {}/{} checks passed, {} failed, {} warnings",
+                            "⚠️ ".yellow(),
+                            report.passed.to_string().green(),
+                            report.total_checks,
+                            report.failed.to_string().red(),
+                            report.warnings.to_string().yellow());
+                    }
+                }
+            }
+            Ok(())
+        }
+
         async fn handle_health_check() -> Result<()> {
             use colored::*;
             use std::process::Command;
@@ -3037,6 +3132,9 @@ fn show_hint() {
         "Use 'gnawtreewriter analyze --format summary' for a high-level file overview.",
         "Searching for something? Try 'gnawtreewriter search_nodes' to find code patterns.",
         "Want to see code quality? Try 'gnawtreewriter get_semantic_report' (requires ModernBERT).",
+        "Run 'gnawtreewriter doctor' to validate all parsers, backups, and transaction logs.",
+        "Set GNAW_VERBOSE=1 to see parser choice, node resolution, and structural changes.",
+        "Set GNAW_JSON=1 for machine-readable JSON errors (useful for AI agents).",
     ];
 
     // Simple pseudo-random selection based on time

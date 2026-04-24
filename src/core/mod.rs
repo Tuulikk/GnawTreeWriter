@@ -12,6 +12,7 @@ pub mod batch;
 pub mod blueprint;
 pub mod diff_parser;
 pub mod guardian;
+pub mod diagnostics;
 pub mod healer;
 pub mod refactor;
 pub mod report;

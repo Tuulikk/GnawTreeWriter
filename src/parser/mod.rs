@@ -1,23 +1,28 @@
 pub mod bash;
 pub mod c;
 pub mod cpp;
+pub mod csharp;
 pub mod css;
+pub mod dart;
 pub mod generic;
 pub mod go;
 pub mod html;
 pub mod java;
-pub mod kotlin;
+pub mod javascript;
 pub mod json;
+pub mod kotlin;
 pub mod markdown;
 pub mod php;
 pub mod python;
 pub mod qml;
 pub mod qml_tree_sitter;
 pub mod rust;
+pub mod slint;
+pub mod sql;
+pub mod svelte;
+pub mod swift;
 pub mod text;
 pub mod toml;
-pub mod swift;
-pub mod slint;
 pub mod typescript;
 pub mod xml;
 pub mod yaml;
@@ -202,6 +207,11 @@ pub fn get_parser(file_path: &Path) -> anyhow::Result<Box<dyn ParserEngine>> {
         "slint" => Ok(Box::new(slint::SlintParser::new())),
         "kt" | "kts" => Ok(Box::new(LegacyParserWrapper::new(kotlin::KotlinParser::new()))),
         "swift" => Ok(Box::new(LegacyParserWrapper::new(swift::SwiftParser::new()))),
+        "cs" => Ok(Box::new(LegacyParserWrapper::new(csharp::CSharpParser::new()))),
+        "dart" => Ok(Box::new(LegacyParserWrapper::new(dart::DartParser::new()))),
+        "svelte" => Ok(Box::new(LegacyParserWrapper::new(svelte::SvelteParser::new()))),
+        "sql" => Ok(Box::new(LegacyParserWrapper::new(sql::SqlParser::new()))),
+        "js" | "jsx" | "mjs" | "cjs" => Ok(Box::new(LegacyParserWrapper::new(javascript::JavaScriptParser::new()))),
         "ts" | "tsx" => Ok(Box::new(LegacyParserWrapper::new(typescript::TypeScriptParser::new()))),
         "php" => Ok(Box::new(LegacyParserWrapper::new(php::PhpParser::new()))),
         "html" | "htm" => Ok(Box::new(LegacyParserWrapper::new(html::HtmlParser::new()))),
