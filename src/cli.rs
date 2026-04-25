@@ -457,7 +457,8 @@ enum TagSubcommands {
 }
 impl Cli {
     pub async fn run(self) -> Result<()> {
-        let json_mode = self.json;
+        let _json_mode = self.json;
+        let global_dry_run = self.dry_run;
         match self.command {
             Commands::Analyze {
                 paths,
@@ -493,6 +494,7 @@ impl Cli {
                 force,
                 narrative,
             } => {
+                let preview = preview || global_dry_run;
 
                 // Resolve target path from --tag flag, 'tag:<name>' positional, or explicit node_path
                 let target_path = if let Some(tag_name) = tag {
@@ -548,6 +550,7 @@ impl Cli {
                 unescape_newlines,
                 narrative,
             } => {
+                let preview = preview || global_dry_run;
                 let content = resolve_content(content, source_file, unescape_newlines)?;
 
                 // Resolve parent path from --tag flag, 'tag:<name>' positional, or explicit parent_path
@@ -594,6 +597,7 @@ impl Cli {
                 tag,
                 preview,
             } => {
+                let preview = preview || global_dry_run;
                 // Resolve target path from --tag flag, 'tag:<name>' positional, or explicit node_path
                 let target_path = if let Some(tag_name) = tag {
                     let current_dir = std::env::current_dir()?;
@@ -637,6 +641,7 @@ impl Cli {
                 value,
                 preview,
             } => {
+                let preview = preview || global_dry_run;
                 let mut writer = GnawTreeWriter::new(&file_path)?;
                 let property_code = format!("property {} {}: {}", r#type, name, value);
                 let op = EditOperation::Insert {
@@ -660,6 +665,7 @@ impl Cli {
                 content,
                 preview,
             } => {
+                let preview = preview || global_dry_run;
                 let mut writer = GnawTreeWriter::new(&file_path)?;
                 let component_code = match content {
                     Some(c) => format!(
@@ -702,6 +708,7 @@ impl Cli {
                 transaction_id,
                 preview,
             } => {
+                let preview = preview || global_dry_run;
                 Self::handle_restore(&file_path, &transaction_id, preview)?;
             }
             Commands::QuickReplace {
@@ -711,6 +718,7 @@ impl Cli {
                 preview,
                 unescape_newlines,
             } => {
+                let preview = preview || global_dry_run;
                 Self::handle_quick_replace(&file, &search, &replace, unescape_newlines, preview)?;
             }
             Commands::Rename {
@@ -720,6 +728,7 @@ impl Cli {
                 recursive,
                 preview,
             } => {
+                let preview = preview || global_dry_run;
                 Self::handle_rename(&symbol_name, &new_name, &path, recursive, preview)?;
             }
             Commands::Clone {
@@ -729,6 +738,7 @@ impl Cli {
                 target_path,
                 preview,
             } => {
+                let preview = preview || global_dry_run;
                 Self::handle_clone(
                     &source_file,
                     &source_path,
@@ -804,6 +814,7 @@ impl Cli {
                 files,
                 preview,
             } => {
+                let preview = preview || global_dry_run;
                 Self::handle_restore_files(&since, &files, preview)?;
             }
             Commands::Tag { command } => match command {
@@ -834,6 +845,7 @@ impl Cli {
                 session_id,
                 preview,
             } => {
+                let preview = preview || global_dry_run;
                 Self::handle_restore_session(&session_id, preview)?;
             }
             Commands::Batch { file, preview } => {
@@ -844,6 +856,7 @@ impl Cli {
                 output,
                 preview,
             } => {
+                let preview = preview || global_dry_run;
                 Self::handle_diff_to_batch(&diff_file, output.as_deref(), preview)?;
             }
             Commands::Search { file_path, pattern, filter_type, limit } => {
