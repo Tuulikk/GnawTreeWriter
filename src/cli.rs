@@ -721,6 +721,17 @@ impl Cli {
                 let preview = preview || global_dry_run;
                 Self::handle_quick_replace(&file, &search, &replace, unescape_newlines, preview)?;
             }
+            Commands::QuickInsert {
+                file,
+                after,
+                filter,
+                content,
+                preview,
+                unique,
+            } => {
+                let preview = preview || global_dry_run;
+                Self::handle_quick_insert(&file, &after, filter.as_deref(), &content, preview, unique)?;
+            }
             Commands::Rename {
                 symbol_name,
                 new_name,
