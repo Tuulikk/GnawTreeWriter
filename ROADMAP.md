@@ -101,6 +101,14 @@ All features in this section are and will remain **free and open source** under 
 
 ## Recent Progress
 
+### v0.9.2 (2026-04-25) — THE AGENT TOOLBELT UPDATE 🔧
+- ✅ **Quick Insert**: Bulk insert content after regex-matched lines with `--filter`, `--unique`, preview support.
+- ✅ **5 New Languages**: JavaScript, C#, Dart, Svelte, SQL → 26 languages total.
+- ✅ **Global `--dry-run`**: All edit commands respect global dry-run flag for safer agent workflows.
+- ✅ **Diagnostics Module**: `doctor` command, `GNAW_JSON=1`, `GNAW_VERBOSE=1`, post-edit AST diff.
+- ✅ **Better Error Context**: Offending code line, language name, nearby nodes on parse failure.
+- ✅ **`commands` endpoint**: `gtw commands --json` lists all tools with metadata for dynamic integration.
+
 ### v0.7.1 (2026-01-22) — THE SCAFFOLDING UPDATE 🏗️
 - ✅ **Structural Scaffolding**: Command `scaffold` for creating AST-templated files.
 - ✅ **Improved Indexing**: Support for arbitrary child positions in core `insert`.
@@ -167,7 +175,7 @@ All features in this section are and will remain **free and open source** under 
 
 ---
 
-## Phase 7: Debuggability & Agent Diagnostics 🔄 IN PROGRESS
+## Phase 7: Debuggability & Agent Diagnostics ✅ COMPLETE
 **Target: v0.10.0 | Q2 2026**
 
 *Investigation date: 2026-04-24 — comprehensive audit of existing debugging infrastructure.*
@@ -188,7 +196,7 @@ All features in this section are and will remain **free and open source** under 
 - [x] **Lint Command** — Find issues in files
 
 ### Prio 1 — Agent-Critical (Making GTW Easy to Debug for AI Agents)
-- [ ] **`--dry-run` on edit/insert/delete** — Return what *would* happen without writing to disk
+- [x] **`--dry-run` on edit/insert/delete** — Return what *would* happen without writing to disk (global flag working on all commands)
 - [x] **Structured JSON errors** — `GNAW_JSON=1` env var gives machine-readable errors with error_type, suggestion, context
 - [x] **`--verbose` flag** — `GNAW_VERBOSE=1` visar parser-val, node-uppslagning, guardian-score, AST-validering, structural changes
 

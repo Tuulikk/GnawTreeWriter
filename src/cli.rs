@@ -246,6 +246,11 @@ enum Commands {
     },
     /// Debug hash calculation
     DebugHash { content: String },
+    /// List all available commands with metadata (for tool integration)
+    Commands {
+        #[arg(long)]
+        json: bool,
+    },
     /// Start a new session
     SessionStart {
         #[arg(short, long)]
@@ -829,6 +834,9 @@ impl Cli {
             }
             Commands::DebugHash { content } => {
                 Self::handle_debug_hash(&content)?;
+            }
+            Commands::Commands { json } => {
+                Self::handle_commands(json)?;
             }
             Commands::RestoreProject { timestamp, preview } => {
                 Self::handle_restore_project(&timestamp, preview)?;
@@ -1901,6 +1909,58 @@ Use --no-preview to perform the restoration"
             println!("File hash: {}", file_hash);
         }
 
+        Ok(())
+    }
+
+    fn handle_commands(json: bool) -> Result<()> {
+        let commands = serde_json::json!([
+            {"name": "analyze", "tool": "gtw_analyze", "write": false, "desc": "Parse file and show AST tree structure"},
+            {"name": "list", "tool": "gtw_list", "write": false, "desc": "List all tree nodes, optionally filtered by type"},
+            {"name": "show", "tool": "gtw_show", "write": false, "desc": "Show content of a specific node"},
+            {"name": "skeleton", "tool": "gtw_skeleton", "write": false, "desc": "High-level skeletal view of file structure"},
+            {"name": "search", "tool": "gtw_search", "write": false, "desc": "Search nodes by text or name pattern"},
+            {"name": "nodes", "tool": "gtw_nodes", "write": false, "desc": "List AST nodes with paths and types"},
+            {"name": "tag", "tool": "gtw_tag", "write": false, "desc": "Manage named references to AST nodes"},
+            {"name": "history", "tool": "gtw_history", "write": false, "desc": "Show transaction history"},
+            {"name": "status", "tool": "gtw_status", "write": false, "desc": "Health check of the system"},
+            {"name": "doctor", "tool": "gtw_doctor", "write": false, "desc": "Test all parsers and validate backups"},
+            {"name": "lint", "tool": "gtw_lint", "write": false, "desc": "Find issues in files"},
+            {"name": "edit", "tool": "gtw_edit", "write": true, "desc": "Replace content of a specific node"},
+            {"name": "insert", "tool": "gtw_insert", "write": true, "desc": "Insert new content into a parent node"},
+            {"name": "delete", "tool": "gtw_delete", "write": true, "desc": "Delete a node"},
+            {"name": "rename", "tool": "gtw_rename", "write": true, "desc": "AST-aware symbol renaming"},
+            {"name": "clone", "tool": "gtw_clone", "write": true, "desc": "Clone code structures"},
+            {"name": "quick-replace", "tool": "gtw_quick_replace", "write": true, "desc": "Simple text-based search and replace"},
+            {"name": "quick-insert", "tool": "gtw_quick_insert", "write": true, "desc": "Bulk insert after regex-matched lines"},
+            {"name": "batch", "tool": "gtw_batch", "write": true, "desc": "Execute a batch of operations atomically"},
+            {"name": "diff-to-batch", "tool": "gtw_diff_to_batch", "write": true, "desc": "Convert unified diff to batch operations"},
+            {"name": "undo", "tool": "gtw_undo", "write": true, "desc": "Undo recent edit operations"},
+            {"name": "redo", "tool": "gtw_redo", "write": true, "desc": "Redo previously undone operations"},
+            {"name": "restore", "tool": "gtw_restore", "write": true, "desc": "Restore file to a specific transaction"},
+            {"name": "restore-project", "tool": "gtw_restore_project", "write": true, "desc": "Restore entire project to a point"},
+            {"name": "restore-session", "tool": "gtw_restore_session", "write": true, "desc": "Undo all changes from a session"},
+            {"name": "session-start", "tool": "gtw_session_start", "write": false, "desc": "Start a new editing session"},
+            {"name": "mcp", "tool": "gtw_mcp", "write": false, "desc": "Manage MCP server"},
+            {"name": "semantic-report", "tool": "gtw_semantic_report", "write": false, "desc": "Generate semantic code quality report"}
+        ]);
+
+        if json {
+            println!("{}", serde_json::to_string_pretty(&commands)?);
+        } else {
+            println!("GnawTreeWriter — Available Commands");
+            println!("===================================\n");
+            let read_cmds: Vec<_> = commands.as_array().unwrap().iter().filter(|c| !c["write"].as_bool().unwrap()).collect();
+            let write_cmds: Vec<_> = commands.as_array().unwrap().iter().filter(|c| c["write"].as_bool().unwrap()).collect();
+            println!("📖 Read-only (safe):");
+            for c in &read_cmds {
+                println!("  {:20} {} — {}", c["tool"].as_str().unwrap(), c["name"].as_str().unwrap(), c["desc"].as_str().unwrap());
+            }
+            println!("\n✏️  Write operations (blocked by dry-mode):");
+            for c in &write_cmds {
+                println!("  {:20} {} — {}", c["tool"].as_str().unwrap(), c["name"].as_str().unwrap(), c["desc"].as_str().unwrap());
+            }
+            println!("\nTotal: {} commands ({} read, {} write)", commands.as_array().unwrap().len(), read_cmds.len(), write_cmds.len());
+        }
         Ok(())
     }
 
