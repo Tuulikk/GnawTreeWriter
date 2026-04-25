@@ -210,6 +210,19 @@ enum Commands {
         #[arg(long)]
         unescape_newlines: bool,
     },
+    /// Bulk insert content after lines matching a pattern across a file
+    QuickInsert {
+        file: String,
+        #[arg(short, long)]
+        after: String,
+        #[arg(short, long)]
+        filter: Option<String>,
+        content: String,
+        #[arg(short, long)]
+        preview: bool,
+        #[arg(long)]
+        unique: bool,
+    },
     /// AST-aware renaming
     Rename {
         symbol_name: String,
@@ -2562,6 +2575,62 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
         }
         Ok(())
     }
+        fn handle_quick_insert(
+            file: &str,
+            after: &str,
+            filter: Option<&str>,
+            content: &str,
+            preview: bool,
+            unique: bool,
+        ) -> Result<()> {
+            use regex::Regex;
+            use std::path::Path;
+            let path = Path::new(file);
+            let original = std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file, e))?;
+            let insert_content = if content == "-" { use std::io::Read; let mut buf = String::new(); std::io::stdin().read_to_string(&mut buf)?; buf } else { content.to_string() };
+            let after_re = Regex::new(after).with_context(|| format!("Invalid --after regex: {}", after))?;
+            let lines: Vec<&str> = original.lines().collect();
+            let mut new_lines: Vec<String> = Vec::new();
+            let mut insertions = 0usize;
+            let insert_text = insert_content.trim_end();
+            for (i, line) in lines.iter().enumerate() {
+                new_lines.push(line.to_string());
+                if after_re.is_match(line) {
+                    if let Some(filter_text) = filter { let context_end = (i + 10).min(lines.len()); let context: String = lines[i..context_end].join("\n"); if !context.contains(filter_text) { continue; } }
+                    if unique { let check_end = (i + 5).min(lines.len()); let nearby: String = lines[i..check_end].join("\n"); if nearby.contains(insert_text) { continue; } }
+                    new_lines.push(insert_text.to_string());
+                    insertions += 1;
+                }
+            }
+            let modified = new_lines.join("\n");
+            let modified = if original.ends_with('\n') && !modified.ends_with('\n') { modified + "\n" } else { modified };
+            if preview {
+                println!("--- QuickInsert preview for: {}", file);
+                println!("Pattern: /{}/", after);
+                if let Some(f) = filter { println!("Filter: contains '{}'", f); }
+                if unique { println!("Unique: enabled (skip if already present)"); }
+                println!("Insertions: {} match(es)", insertions);
+                println!();
+                print_diff(&original, &modified);
+                println!("\nUse without --preview to apply");
+                return Ok(());
+            }
+            if let Err(e) = crate::parser::get_parser(path).and_then(|p| Ok(p.parse(&modified)?)) {
+                println!("Validation failed: The proposed insert would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e);
+                return Ok(());
+            }
+            let writer = GnawTreeWriter::new(file)?;
+            writer.create_backup()?;
+            let current_dir = std::env::current_dir()?;
+            let project_root = find_project_root(&current_dir);
+            let before_hash = crate::core::calculate_content_hash(&original);
+            let after_hash = crate::core::calculate_content_hash(&modified);
+            let mut tlog = TransactionLog::load(&project_root)?;
+            let txid = tlog.log_transaction(OperationType::Insert, PathBuf::from(file), None, Some(before_hash), Some(after_hash), format!("QuickInsert: {} insertion(s) after /{}/", insertions, after), std::collections::HashMap::new())?;
+            std::fs::write(path, &modified).map_err(|e| anyhow::anyhow!("Failed to write {}: {}", file, e))?;
+            println!("✓ QuickInsert applied: {} insertion(s) (txn {})", insertions, txid);
+            Ok(())
+        }
 
     fn find_supported_files(dir: &std::path::Path) -> Result<Vec<String>> {
         let mut files = Vec::new();
