@@ -91,12 +91,20 @@ impl SemanticIndexManager {
 }
 
 impl SemanticIndex {
+    /// Search for entries most similar to query_vector.
+    /// Results with cosine similarity below 0.2 are filtered out.
     pub fn search(&self, query_vector: &[f32], limit: usize) -> Vec<(&NodeEmbedding, f32)> {
+        self.search_with_threshold(query_vector, limit, 0.2)
+    }
+
+    /// Search with explicit minimum score threshold.
+    pub fn search_with_threshold(&self, query_vector: &[f32], limit: usize, min_score: f32) -> Vec<(&NodeEmbedding, f32)> {
         let mut results: Vec<(&NodeEmbedding, f32)> = self.entries.iter()
             .map(|entry| {
                 let score = cosine_similarity(query_vector, &entry.vector);
                 (entry, score)
             })
+            .filter(|(_, score)| *score >= min_score)
             .collect();
 
         // Sort by score descending

@@ -1334,8 +1334,7 @@ Use --no-preview to write batch file"
         #[cfg(not(feature = "modernbert"))]
         {
             let _ = file_path;
-            println!("Error: 'modernbert' feature not enabled in this build.");
-            println!("Please recompile with: cargo build --release --features modernbert");
+            Self::err_modernbert_disabled()?;
         }
         Ok(())
     }
@@ -1343,6 +1342,7 @@ Use --no-preview to write batch file"
     async fn handle_sense(query: &str, file_path: Option<&str>, deep: bool) -> Result<()> {
         #[cfg(feature = "modernbert")]
         {
+            let json_mode = std::env::var("GNAW_JSON").is_ok();
             let current_dir = std::env::current_dir()?;
             let project_root = find_project_root(&current_dir);
 
@@ -1389,12 +1389,23 @@ Use --no-preview to write batch file"
             println!("🧠 GnawSense is thinking about: {}...", query);
             let response = broker.sense(query, file_path).await?;
 
+            // JSON output for agents
+            if json_mode {
+                println!("{}", serde_json::to_string(&response)?);
+                return Ok(());
+            }
+
             match response {
                 SenseResponse::Satelite { matches } => {
                     if matches.is_empty() {
                         println!("\n🛰️ Satelite View: No relevant results found for \"{}\".", query);
                         println!("The index may be outdated. Try running 'gnawtreewriter ai index' again.");
                         return Ok(());
+                    }
+
+                    // Low confidence warning
+                    if matches[0].score < 0.5 {
+                        println!("\n⚠️  Low confidence: Best match has score {:.2} (< 0.5). Results may not be relevant.", matches[0].score);
                     }
 
                     println!("\n🛰️ Satelite View: I found these relevant areas in the project:");
@@ -1407,6 +1418,11 @@ Use --no-preview to write batch file"
                     if nodes.is_empty() {
                         println!("\n🔍 Zoom View: No relevant nodes found in {} for \"{}\".", file_path, query);
                         return Ok(());
+                    }
+
+                    // Low confidence warning
+                    if nodes[0].score < 0.5 {
+                        println!("\n⚠️  Low confidence: Best match has score {:.2} (< 0.5). Results may not be relevant.", nodes[0].score);
                     }
 
                     println!("\n🔍 Zoom View: Relevant nodes in {}:", file_path);
@@ -1429,8 +1445,7 @@ Use --no-preview to write batch file"
         #[cfg(not(feature = "modernbert"))]
         {
             let _ = (query, file_path, deep);
-            println!("Error: 'modernbert' feature not enabled in this build.");
-            println!("Please recompile with: cargo build --release --features modernbert");
+            Self::err_modernbert_disabled()?;
         }
         Ok(())
     }
@@ -1474,13 +1489,30 @@ Use --no-preview to write batch file"
         #[cfg(not(feature = "modernbert"))]
         {
             let _ = (file, anchor, content, intent, preview);
-            println!("Error: 'modernbert' feature not enabled.");
+            Self::err_modernbert_disabled()?;
         }
         Ok(())
     }
 
     fn handle_version() -> Result<()> {
         println!("GnawTreeWriter v{}", env!("CARGO_PKG_VERSION"));
+        Ok(())
+    }
+
+    /// Standardized error for when modernbert feature is not enabled.
+    /// Outputs JSON if GNAW_JSON is set, human-readable otherwise.
+    fn err_modernbert_disabled() -> Result<()> {
+        let json_mode = std::env::var("GNAW_JSON").is_ok();
+        if json_mode {
+            let err = serde_json::json!({
+                "error": "modernbert_disabled",
+                "message": "ModernBERT feature not enabled. Recompile with: cargo build --release --features modernbert"
+            });
+            println!("{}", serde_json::to_string(&err)?);
+        } else {
+            println!("Error: GnawSense requires the 'modernbert' feature.");
+            println!("Recompile with: cargo build --release --features modernbert");
+        }
         Ok(())
     }
 
@@ -1549,7 +1581,7 @@ Use --no-preview to write batch file"
         #[cfg(not(feature = "modernbert"))]
         {
             let _ = (file_path, query, content, source_file, narrative, force);
-            anyhow::bail!("ModernBERT feature not enabled. Semantic features require --features modernbert.");
+            Self::err_modernbert_disabled()?;
         }
     }
 
@@ -1694,7 +1726,7 @@ Use --no-preview to write batch file"
         #[cfg(not(feature = "modernbert"))]
         {
             let _ = path;
-            println!("Error: 'modernbert' feature not enabled in this build.");
+            Self::err_modernbert_disabled()?;
         }
         Ok(())
     }

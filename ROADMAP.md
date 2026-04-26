@@ -80,10 +80,10 @@ src/llm/
 
 ### Tier 1: Quick Fixes (Hours)
 
-- [ ] **Confidence threshold**: Only return results with score > 0.3. Warn if best result is > 0.5 (low confidence). Prevents false-positive "matches" that agents trust.
-- [ ] **JSON output for sense**: `--json` flag for machine-readable results. Agents currently parse ANSI/emoji stdout.
-- [ ] **Extract name — all languages**: Add patterns for `def `, `class `, `func `, `pub fn`, `async fn`, `impl`, `trait`, methods, etc. Currently only handles `fn ` and `struct `.
-- [ ] **Better error when model not loaded**: `not(feature = "modernbert")` should return JSON-formatted error for agents.
+- [x] **Confidence threshold**: Only return results with score > 0.3. Warn if best result is > 0.5 (low confidence). Prevents false-positive "matches" that agents trust.
+- [x] **JSON output for sense**: `--json` flag for machine-readable results. Agents currently parse ANSI/emoji stdout.
+- [x] **Extract name — all languages**: Add patterns for `def `, `class `, `func `, `pub fn`, `async fn`, `impl`, `trait`, methods, etc. Currently only handles `fn ` and `struct `.
+- [x] **Better error when model not loaded**: `not(feature = "modernbert")` should return JSON-formatted error for agents.
 
 ### Tier 2: Agent-Friendly (1–2 Days)
 

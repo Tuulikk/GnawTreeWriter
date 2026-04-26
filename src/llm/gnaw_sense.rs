@@ -309,16 +309,33 @@ impl GnawSenseBroker {
 
     #[cfg(feature = "modernbert")]
     fn extract_name_from_preview(&self, preview: &str) -> Option<String> {
-        // Very basic extraction: look for "fn NAME" or "struct NAME"
-        if let Some(pos) = preview.find("fn ") {
-            let after = &preview[pos + 3..];
-            let name_end = after.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(after.len());
-            return Some(after[..name_end].trim().to_string());
-        }
-        if let Some(pos) = preview.find("struct ") {
-            let after = &preview[pos + 7..];
-            let name_end = after.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(after.len());
-            return Some(after[..name_end].trim().to_string());
+        // Multi-language name extraction from AST node content preview.
+        // Returns the first identifier that looks like a definition name.
+        let patterns: &[&str] = &[
+            // Rust
+            "fn ", "struct ", "enum ", "trait ", "impl ", "type ", "mod ",
+            // Python
+            "def ", "class ",
+            // Go
+            "func ",
+            // JavaScript/TypeScript
+            "function ", "let ", "const ", "var ",
+            // Java/C/C++
+            "void ", "int ", "bool ", "string ",
+            // QML
+            "property ",
+        ];
+
+        for pattern in patterns {
+            if let Some(pos) = preview.find(pattern) {
+                let after = &preview[pos + pattern.len()..];
+                // Skip modifiers: "pub ", "async ", "mut ", etc.
+                let after = after.trim_start();
+                let name_end = after.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(after.len());
+                if name_end > 0 {
+                    return Some(after[..name_end].trim().to_string());
+                }
+            }
         }
         None
     }
