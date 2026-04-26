@@ -12,7 +12,7 @@ pub struct NodeEmbedding {
     pub vector: Vec<f32>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SemanticIndex {
     pub entries: Vec<NodeEmbedding>,
 }

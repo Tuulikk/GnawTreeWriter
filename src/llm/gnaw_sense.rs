@@ -18,6 +18,17 @@ pub struct GnawSenseBroker {
     project_root: PathBuf,
     #[cfg(feature = "modernbert")]
     relational_indexer: RelationalIndexer,
+    /// JIT cache: file_path -> (SemanticIndex, content_hash).
+    /// Avoids re-embedding unchanged files on repeated Zoom queries.
+    #[cfg(feature = "modernbert")]
+    jit_cache: std::sync::Mutex<std::collections::HashMap<String, CachedFileIndex>>,
+}
+
+/// Cached file index with content hash for invalidation.
+#[cfg(feature = "modernbert")]
+struct CachedFileIndex {
+    index: SemanticIndex,
+    content_hash: String,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -68,6 +79,8 @@ impl GnawSenseBroker {
             project_root: project_root.to_path_buf(),
             #[cfg(feature = "modernbert")]
             relational_indexer: RelationalIndexer::new(project_root),
+            #[cfg(feature = "modernbert")]
+            jit_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
     }
 
@@ -82,8 +95,8 @@ impl GnawSenseBroker {
         let query_vector: Vec<f32> = query_vector_tensor.to_vec1()?;
 
         if let Some(file_path) = file_context {
-            // ZOOM MODE: Search within a specific file
-            let index = self.index_file(file_path, &model).await?;
+            // ZOOM MODE: Search within a specific file (with JIT cache)
+            let index = self.index_file_cached(file_path, &model).await?;
             let results = index.search(&query_vector, 5);
             
             // JIT RELATIONAL ANALYSIS: Index the directory to find callers
@@ -191,6 +204,69 @@ impl GnawSenseBroker {
         let idx = last_part.parse::<usize>().unwrap_or(0);
         // Use +3 to signal to GnawTreeWriter that this is a literal child index
         idx + 3 + 1
+    }
+
+    #[cfg(feature = "modernbert")]
+    async fn index_file_cached(&self, file_path: &str, model: &crate::llm::ModernBertModel) -> Result<SemanticIndex> {
+        let content = fs::read_to_string(file_path)?;
+        let content_hash = crate::core::calculate_content_hash(&content);
+
+        // Check JIT cache
+        {
+            let cache = self.jit_cache.lock().unwrap();
+            if let Some(cached) = cache.get(file_path) {
+                if cached.content_hash == content_hash {
+                    return Ok(cached.index.clone());
+                }
+            }
+        }
+
+        // Cache miss — index from pre-loaded content
+        let index = self.index_file_from_content(file_path, &content, model).await?;
+
+        // Store in cache
+        self.jit_cache.lock().unwrap().insert(file_path.to_string(), CachedFileIndex {
+            index: index.clone(),
+            content_hash,
+        });
+
+        Ok(index)
+    }
+
+    #[cfg(feature = "modernbert")]
+    async fn index_file_from_content(&self, file_path: &str, content: &str, model: &crate::llm::ModernBertModel) -> Result<SemanticIndex> {
+        let path = Path::new(file_path);
+        let parser = crate::parser::get_parser(path)?;
+        let tree = parser.parse(content)?;
+
+        let mut index = SemanticIndex::default();
+        
+        let mut nodes = Vec::new();
+        fn collect(n: &TreeNode, acc: &mut Vec<TreeNode>) {
+            if n.node_type.contains("definition") || n.node_type.contains("item") {
+                acc.push(n.clone());
+            }
+            for c in &n.children { collect(c, acc); }
+        }
+        collect(&tree, &mut nodes);
+
+        for node in nodes {
+            let vector_tensor = model.get_embedding(&node.content)?;
+            let vector: Vec<f32> = vector_tensor.to_vec1()?;
+            let preview = if node.content.len() > 100 {
+                format!("{}...", &node.content[..97])
+            } else {
+                node.content.clone()
+            };
+            index.entries.push(NodeEmbedding {
+                file_path: file_path.to_string(),
+                node_path: node.path,
+                content_preview: preview,
+                vector,
+            });
+        }
+
+        Ok(index)
     }
 
     #[cfg(feature = "modernbert")]

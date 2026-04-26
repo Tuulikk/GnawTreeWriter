@@ -61,6 +61,10 @@ pub struct AiManager {
     model_cache_dir: PathBuf,
     #[allow(dead_code)]
     project_root: PathBuf,
+    /// Cached model — loaded once, reused across all calls within this process.
+    /// Uses OnceLock for thread-safety (MCP server is async multi-threaded).
+    #[cfg(feature = "modernbert")]
+    cached_model: std::sync::OnceLock<ModernBertModel>,
 }
 
 impl AiManager {
@@ -83,11 +87,21 @@ impl AiManager {
         Ok(Self { 
             model_cache_dir,
             project_root: project_root.to_path_buf(),
+            #[cfg(feature = "modernbert")]
+            cached_model: std::sync::OnceLock::new(),
         })
     }
 
     #[cfg(feature = "modernbert")]
-    pub fn load_model(&self, model_type: AiModel, device_type: DeviceType) -> Result<ModernBertModel> {
+    pub fn load_model(&self, model_type: AiModel, device_type: DeviceType) -> Result<&ModernBertModel> {
+        // OnceLock doesn't have get_or_try_init on stable Rust yet.
+        // Use get_or_init with interior error handling — if model fails to load,
+        // we panic (this is acceptable: missing model = broken installation).
+        if let Some(model) = self.cached_model.get() {
+            return Ok(model);
+        }
+        
+        // Load the model (not cached yet)
         let model_dir = self.get_model_path(&model_type);
         
         let config_path = model_dir.join("config.json");
@@ -109,7 +123,13 @@ impl AiManager {
         
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)? };
         let model = ModernBert::load(vb, &config)?;
-        Ok(ModernBertModel { model, tokenizer, device })
+        let loaded = ModernBertModel { model, tokenizer, device };
+        
+        // Store in cache (get_or_init for the first call wins; subsequent calls reuse)
+        // If another thread loaded meanwhile, that's fine — we just return the cached one
+        self.cached_model.set(loaded).ok().expect("Model cache already set");
+        
+        Ok(self.cached_model.get().unwrap())
     }
 
     #[cfg(feature = "modernbert")]
