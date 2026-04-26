@@ -49,22 +49,81 @@ All features in this section are and will remain **free and open source** under 
 ---
 
 ## Phase 3: GnawSense & Semantic Infrastructure 🔄 IN PROGRESS
-**Target: Q1 2026**
+**Target: Q1–Q3 2026**
 
-### **Semantic Navigation (The Radar)**
+### Architecture
+
+```
+src/llm/
+├── ai_manager.rs          — Model management (load ModernBERT, device selection)
+├── gnaw_sense.rs          — Broker: Satelite/Zoom/ProposeEdit
+├── semantic_index.rs      — Vector storage + cosine similarity search
+├── project_indexer.rs     — Project crawler → per-node embeddings
+└── relational_index.rs    — Call graph (Call/Definition/Reference relations)
+```
+
+**Two modes**: Satelite (project-wide search) and Zoom (file-level search with impact analysis).
+**Model**: ModernBERT-base (149M params, 768-dim, 571 MB) via Candle — fully local, no external calls.
+
+### Performance Baseline (Measured 2026-04-26)
+
+| Step | Time | Bottleneck? |
+|------|------|-------------|
+| Load ModernBERT (571 MB) | ~2–3 sec | 🔴 YES — 90% of total time |
+| Generate 1 embedding | ~50–200 ms | 🟡 Medium |
+| Brute-force cosine sim (468 nodes) | ~0.15 ms | 🟢 Negligible |
+| Load 23 JSON index files | ~5–10 ms | 🟢 Negligible |
+
+**Key insight**: Vector DB is NOT needed at current scale. The bottleneck is model loading, not search.
+
+---
+
+### Tier 1: Quick Fixes (Hours)
+
+- [ ] **Confidence threshold**: Only return results with score > 0.3. Warn if best result is > 0.5 (low confidence). Prevents false-positive "matches" that agents trust.
+- [ ] **JSON output for sense**: `--json` flag for machine-readable results. Agents currently parse ANSI/emoji stdout.
+- [ ] **Extract name — all languages**: Add patterns for `def `, `class `, `func `, `pub fn`, `async fn`, `impl`, `trait`, methods, etc. Currently only handles `fn ` and `struct `.
+- [ ] **Better error when model not loaded**: `not(feature = "modernbert")` should return JSON-formatted error for agents.
+
+### Tier 2: Agent-Friendly (1–2 Days)
+
+- [ ] **Auto-index without prompt**: `--auto-index` flag that indexes without interactive y/N. Current prompt blocks agents.
+- [ ] **Sense-insert with all intents**: Support `before`, `inside`, `replace` — not just `after`. Currently returns "Unsupported intent" for everything else.
+- [ ] **Fix propose_edit position logic**: `get_next_index()` uses `idx + 3 + 1` hack. Replace with proper AST sibling lookup via GnawTreeWriter.
+
+### Tier 3: Performance (2–3 Days) — 🔥 CURRENT PRIORITY
+
+- [ ] **Model caching**: Load ModernBERT once into `Arc<Mutex<Option<ModernBertModel>>>`. Reuse across calls. Eliminates 2–3 sec per invocation. 10–20x speedup.
+- [ ] **JIT index cache**: Cache Zoom-mode embeddings per file+content-hash. Avoid re-embedding unchanged files.
+- [ ] **Incremental project indexing**: Only re-index changed files at `ai index`. Currently re-embeds everything (smart hash check exists but is per-file, not global).
+
+### Tier 4: Intelligence (1–2 Weeks)
+
+- [ ] **Query expansion**: Expand vague queries ("fixa git-grejen") into multiple embedding searches for better recall.
+- [ ] **Hierarchical context in embeddings**: Include parent node type/name when generating embeddings. A `login` function in `tests/` differs from one in `auth/`.
+- [ ] **Fix RelationalIndex integration**: `index_directory()` is only called inside `sense()` JIT, never during `ai index`. Call graph is never properly built at index time.
+- [ ] **Feedback loop**: Log failed searches (no results, low confidence) and adjust scoring. Spec calls this "AUTO-koppling".
+
+### Tier 5: Scale & Vision (Future)
+
+- [ ] **HNSW index**: Pure Rust `hnsw` crate for approximate nearest neighbor. Only needed at 10k+ nodes. Current brute-force takes 0.15 ms at 468 nodes.
+- [ ] **Smaller/code-specialized model**: Evaluate swapping ModernBERT-base (571 MB) for a smaller code-tuned model to reduce memory footprint.
+- [ ] **Side-effect prediction**: Use relational graph to warn about downstream impact before edits (HRM Vision).
+- [ ] **Structural style transfer**: Learn user's coding style and normalize agent-generated code.
+- [ ] **Semantic diffing**: Show changes as tree operations instead of line diffs.
+
+---
+
+### Completed (Foundation)
+
 - [x] **Zoom Mode**: Semantic search within a single file.
 - [x] **Skeletal Mapping**: High-level definition overview for token efficiency.
 - [x] **Node Discovery**: Search for nodes by name or content.
 - [x] **Semantic Selection**: Target nodes using `@fn:name` shorthand.
 - [x] **Project-wide Cache**: Background crawler that indexes the entire project into a local vector store (v0.7.7).
-- [ ] **Lateral Navigation Graph**: Link nodes by usage/calls (Knowledge Graph) to allow agents to "follow the thread".
-- [ ] **Context Truncation**: Smart summary generation for very large AST branches.
-
-### **Actionable Intent (The Hand)**
 - [x] **Semantic Anchors**: Basic `after` insertion based on semantic landmarks.
 - [x] **Relative Placement Expansion**: Support for `INSIDE`, `BEFORE`, `BEGINNING`, and `END` using AST context.
 - [x] **The Duplex Loop (Foundation)**: Self-correcting edits using structured syntax errors (v0.7.4).
-- [ ] **Structural Style Transfer**: Analyze the user's specific coding style and normalize agent-generated code to match it.
 
 ---
 
