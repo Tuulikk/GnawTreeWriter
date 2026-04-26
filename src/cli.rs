@@ -2738,13 +2738,25 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
         let original = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file, e))?;
 
-        // Process replacement text if unescape_newlines is set
-        let replacement_text = if unescape_newlines {
-            replace.replace(
-                "\
-", "
-",
-            )
+        // Auto-detect literal \n or \t in replacement text that likely should be real newlines/tabs.
+        // This prevents the common mistake of passing '\n' as a CLI argument where it becomes
+        // the two characters '\' + 'n' instead of an actual newline.
+        let needs_unescape = !unescape_newlines
+            && !replace.contains('\n')  // already has real newlines — skip auto-detect
+            && (replace.contains("\\n") || replace.contains("\\t"));
+
+        let replacement_text = if unescape_newlines || needs_unescape {
+            if needs_unescape {
+                eprintln!(
+                    "⚠ Auto-detected literal \\n or \\t in replacement text. \
+                    Auto-unescaping to real newlines/tabs. \
+                    Use --unescape-newlines explicitly to suppress this warning."
+                );
+            }
+            let mut result = replace.to_string();
+            result = result.replace("\\n", "\n");
+            result = result.replace("\\t", "\t");
+            result
         } else {
             replace.to_string()
         };
