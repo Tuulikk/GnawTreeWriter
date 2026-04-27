@@ -1518,6 +1518,7 @@ Use --no-preview to write batch file"
 
     /// Standardized error for when modernbert feature is not enabled.
     /// Outputs JSON if GNAW_JSON is set, human-readable otherwise.
+    #[allow(dead_code)]
     fn err_modernbert_disabled() -> Result<()> {
         let json_mode = std::env::var("GNAW_JSON").is_ok();
         if json_mode {

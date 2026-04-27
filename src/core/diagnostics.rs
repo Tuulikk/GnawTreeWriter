@@ -507,7 +507,7 @@ fn extract_line_number(msg: &str) -> Option<usize> {
     None
 }
 
-fn generate_suggestion(error_type: &str, language: &str, msg: &str) -> Option<String> {
+fn generate_suggestion(error_type: &str, language: &str, _msg: &str) -> Option<String> {
     match error_type {
         "syntax_error" => Some(match language {
             "rs" => "Check for missing semicolons, unbalanced braces, or incorrect type annotations".to_string(),

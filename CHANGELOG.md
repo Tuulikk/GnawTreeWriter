@@ -1,3 +1,29 @@
+## [0.9.3] - 2026-04-27
+
+### Added
+- **GnawSense Semantic Navigation** (AI-powered code search & insertion):
+  - `sense` command: search code by meaning using local ModernBERT model
+  - `sense-insert` command: insert code at semantically located anchors
+  - All 4 intents supported: `after`, `before`, `inside`, `replace`
+  - `--auto-index` flag: skip interactive prompt for AI agents/CI
+  - `GNAW_JSON=1` environment variable for machine-readable output
+  - Confidence threshold: filters < 0.2, warns < 0.5
+  - Multi-language `extract_name_from_preview`: 15+ patterns (Rust, Python, Go, JS, Java, C, QML)
+  - Standardized `err_modernbert_disabled()` helper with JSON support
+
+### Fixed
+- **quick-replace literal \n bug**: Auto-detects literal `\n`/`\t` in replacement text and converts to real newlines/tabs (prevented broken file writes from CLI escaping)
+- **sense-insert position logic**: Fixed off-by-one in `get_next_index()` — was `idx+3+1`, now `idx+3`
+- **Compiler warnings**: Eliminated all warnings (unused variable, dead code)
+
+### Changed
+- **Performance**: Model caching with `OnceLock<ModernBertModel>` — loads once, reuses across calls
+- **Performance**: JIT file index cache with content-hash invalidation in `GnawSenseBroker`
+- **SemanticIndex** now derives `Clone` for caching support
+
+### Documentation
+- GnawSense SKILL.md for AI agents at `~/.pi/agent/skills/gnaw-sense/`
+- ROADMAP.md: detailed 5-tier GnawSense improvement plan with measured baselines
 # Changelog
 
 All notable changes to GnawTreeWriter.
