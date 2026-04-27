@@ -176,7 +176,35 @@ impl GnawSenseBroker {
                     confidence: score,
                 }
             }
-            _ => anyhow::bail!("Unsupported intent: {}", intent),
+            "before" => {
+                EditProposal {
+                    anchor_path: anchor_node.node_path.clone(),
+                    suggested_op: "insert".into(),
+                    parent_path: self.get_parent_path(&anchor_node.node_path),
+                    position: self.get_current_index(&anchor_node.node_path),
+                    confidence: score,
+                }
+            }
+            "inside" => {
+                // Insert as the last child of the anchor node
+                EditProposal {
+                    anchor_path: anchor_node.node_path.clone(),
+                    suggested_op: "insert".into(),
+                    parent_path: anchor_node.node_path.clone(),
+                    position: 1, // bottom of the anchor node
+                    confidence: score,
+                }
+            }
+            "replace" => {
+                EditProposal {
+                    anchor_path: anchor_node.node_path.clone(),
+                    suggested_op: "edit".into(),
+                    parent_path: anchor_node.node_path.clone(),
+                    position: 0,
+                    confidence: score,
+                }
+            }
+            _ => anyhow::bail!("Unsupported intent: {}. Supported: after, before, inside, replace", intent),
         };
         
         Ok(proposal)
@@ -202,8 +230,30 @@ impl GnawSenseBroker {
         };
         
         let idx = last_part.parse::<usize>().unwrap_or(0);
-        // Use +3 to signal to GnawTreeWriter that this is a literal child index
-        idx + 3 + 1
+        // Position encoding: 3+ means "insert after child at index (pos-3)"
+        // idx+3 = insert after child at index idx (the anchor node)
+        idx + 3
+    }
+
+    /// Get the position for inserting BEFORE a node (used for "before" intent).
+    /// Returns 0 (top of parent) if anchor is the first child, otherwise
+    /// inserts after the previous sibling.
+    #[allow(dead_code)]
+    #[cfg(feature = "modernbert")]
+    fn get_current_index(&self, path: &str) -> usize {
+        let last_part = if let Some(last_dot) = path.rfind('.') {
+            &path[last_dot + 1..]
+        } else {
+            path
+        };
+        let idx = last_part.parse::<usize>().unwrap_or(0);
+        if idx == 0 {
+            // Anchor is first child — insert at top of parent
+            0
+        } else {
+            // Insert after previous sibling (before anchor)
+            (idx - 1) + 3
+        }
     }
 
     #[cfg(feature = "modernbert")]

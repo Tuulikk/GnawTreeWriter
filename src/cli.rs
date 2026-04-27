@@ -341,6 +341,8 @@ enum Commands {
         file: Option<PathBuf>,
         #[arg(long)]
         deep: bool,
+        #[arg(long)]
+        auto_index: bool,
     },
     /// Semantically insert code
     SenseInsert {
@@ -903,8 +905,8 @@ impl Cli {
             Commands::SemanticReport { file_path } => {
                 Self::handle_semantic_report(&file_path).await?;
             }
-            Commands::Sense { query, file, deep } => {
-                Self::handle_sense(&query, file.as_ref().and_then(|p| p.to_str()), deep).await?;
+            Commands::Sense { query, file, deep, auto_index } => {
+                Self::handle_sense(&query, file.as_ref().and_then(|p| p.to_str()), deep, auto_index).await?;
             }
             Commands::SenseInsert { file, anchor, content, intent, preview } => {
                 Self::handle_sense_insert(file, anchor, content, intent, preview).await?;
@@ -1339,7 +1341,7 @@ Use --no-preview to write batch file"
         Ok(())
     }
 
-    async fn handle_sense(query: &str, file_path: Option<&str>, deep: bool) -> Result<()> {
+    async fn handle_sense(query: &str, file_path: Option<&str>, deep: bool, auto_index: bool) -> Result<()> {
         #[cfg(feature = "modernbert")]
         {
             let json_mode = std::env::var("GNAW_JSON").is_ok();
@@ -1357,29 +1359,37 @@ Use --no-preview to write batch file"
                 };
 
                 if !has_index {
-                    println!("🧠 GnawSense requires a project index for project-wide search.");
-                    println!("📂 No semantic index found for: {}", project_root.display());
-                    println!();
-
-                    // Prompt user
-                    print!("\x1b[1mWould you like to index this project now? [y/N]\x1b[0m ");
-                    use std::io::Write;
-                    std::io::stdout().flush()?;
-
-                    let mut answer = String::new();
-                    std::io::stdin().read_line(&mut answer)?;
-                    let answer = answer.trim().to_lowercase();
-
-                    if answer == "y" || answer == "yes" {
-                        println!();
+                    if auto_index {
+                        // Auto-index mode: skip interactive prompt (for AI agents / CI)
+                        println!("🧠 GnawSense requires a project index. Auto-indexing (--auto-index)...");
                         Self::handle_ai_index(None).await?;
                         println!();
                         println!("Now searching for: \"{}\"...", query);
                     } else {
+                        println!("🧠 GnawSense requires a project index for project-wide search.");
+                        println!("📂 No semantic index found for: {}", project_root.display());
                         println!();
-                        println!("💡 Tip: Run 'gnawtreewriter ai index' to build the semantic index, then use 'sense' again.");
-                        println!("   You can also use 'sense --file <path>' for single-file search (no index required).");
-                        return Ok(());
+
+                        // Prompt user
+                        print!("\x1b[1mWould you like to index this project now? [y/N]\x1b[0m ");
+                        use std::io::Write;
+                        std::io::stdout().flush()?;
+
+                        let mut answer = String::new();
+                        std::io::stdin().read_line(&mut answer)?;
+                        let answer = answer.trim().to_lowercase();
+
+                        if answer == "y" || answer == "yes" {
+                            println!();
+                            Self::handle_ai_index(None).await?;
+                            println!();
+                            println!("Now searching for: \"{}\"...", query);
+                        } else {
+                            println!();
+                            println!("💡 Tip: Run 'gnawtreewriter ai index' to build the semantic index, then use 'sense' again.");
+                            println!("   You can also use 'sense --file <path>' for single-file search (no index required).");
+                            return Ok(());
+                        }
                     }
                 }
             }
@@ -1471,19 +1481,26 @@ Use --no-preview to write batch file"
             println!("🔧 Action: {} at {} position {}", proposal.suggested_op, proposal.parent_path, proposal.position);
 
             let mut writer = GnawTreeWriter::new(file_path)?;
-            let op = EditOperation::Insert {
-                parent_path: proposal.parent_path,
-                position: proposal.position,
-                content,
+            let op = if proposal.suggested_op == "edit" {
+                EditOperation::Edit {
+                    node_path: proposal.anchor_path,
+                    content,
+                }
+            } else {
+                EditOperation::Insert {
+                    parent_path: proposal.parent_path,
+                    position: proposal.position,
+                    content,
+                }
             };
 
             if preview {
                 let modified = writer.preview_edit(op)?;
-                println!("\n--- Preview of Semantic Insertion ---");
+                println!("\n--- Preview of Semantic {} ---", if proposal.suggested_op == "edit" { "Replacement" } else { "Insertion" });
                 print_diff(writer.get_source(), &modified);
             } else {
                 writer.edit(op, false)?;
-                println!("✓ Successfully inserted code semantically.");
+                println!("✓ Successfully {} code semantically.", if proposal.suggested_op == "edit" { "replaced" } else { "inserted" });
             }
         }
         #[cfg(not(feature = "modernbert"))]
