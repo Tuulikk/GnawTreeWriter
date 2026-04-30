@@ -223,6 +223,16 @@ enum Commands {
         #[arg(long)]
         unique: bool,
     },
+    /// Multiple search-and-replace pairs in a single pass
+    MultiReplace {
+        file: String,
+        #[arg(long)]
+        pairs: String,
+        #[arg(short, long)]
+        preview: bool,
+        #[arg(long)]
+        unescape_newlines: bool,
+    },
     /// AST-aware renaming
     Rename {
         symbol_name: String,
@@ -752,6 +762,15 @@ impl Cli {
                 let preview = preview || global_dry_run;
                 Self::handle_quick_insert(&file, &after, filter.as_deref(), &content, preview, unique)?;
             }
+            Commands::MultiReplace {
+                file,
+                pairs,
+                preview,
+                unescape_newlines,
+            } => {
+                let preview = preview || global_dry_run;
+                Self::handle_multi_replace(&file, &pairs, unescape_newlines, preview)?;
+            }
             Commands::Rename {
                 symbol_name,
                 new_name,
@@ -1180,9 +1199,19 @@ Use --no-preview to actually perform the restore"
     }
 
     fn handle_batch(file: &str, preview: bool) -> Result<()> {
-        // Load and execute batch file; preview shows diffs, apply writes atomically
-        let batch = crate::core::Batch::from_file(file)
-            .with_context(|| format!("Failed to load batch file: {}", file))?;
+        // Load batch from file or STDIN ("-")
+        let batch = if file == "-" {
+            use std::io::Read;
+            let mut buffer = String::new();
+            std::io::stdin().read_to_string(&mut buffer)
+                .context("Failed to read batch JSON from STDIN")?;
+            crate::core::Batch::from_json(&buffer)
+                .context("Failed to parse batch JSON from STDIN")?
+        } else {
+            crate::core::Batch::from_file(file)
+                .with_context(|| format!("Failed to load batch file: {}", file))?
+        };
+
         if preview {
             println!("{}", batch.preview_text()?);
         } else {
@@ -1191,6 +1220,7 @@ Use --no-preview to actually perform the restore"
         }
         Ok(())
     }
+
 
     fn handle_diff_to_batch(diff_file: &str, output: Option<&str>, preview: bool) -> Result<()> {
         use crate::core::diff_parser::{diff_to_batch, parse_diff_file, preview_diff};
@@ -2742,6 +2772,116 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
             Ok(())
         }
 
+    
+        fn handle_multi_replace(
+            file: &str,
+            pairs: &str,
+            unescape_newlines: bool,
+            preview: bool,
+        ) -> Result<()> {
+            use std::path::Path;
+    
+            let current_dir = std::env::current_dir()?;
+            let project_root = find_project_root(&current_dir);
+            let path = Path::new(file);
+    
+            // Read pairs JSON - either "-" for STDIN or inline JSON array or file path
+            let pairs_json = if pairs == "-" {
+                use std::io::Read;
+                let mut buffer = String::new();
+                std::io::stdin().read_to_string(&mut buffer)
+                    .context("Failed to read pairs JSON from STDIN")?;
+                buffer
+            } else if pairs.starts_with('[') {
+                pairs.to_string()
+            } else {
+                std::fs::read_to_string(pairs)
+                    .with_context(|| format!("Failed to read pairs file: {}", pairs))?
+            };
+    
+            // Parse pairs: [{"search": "old1", "replace": "new1"}, ...]
+            let pair_list: Vec<serde_json::Value> = serde_json::from_str(&pairs_json)
+                .context("Failed to parse pairs JSON. Expected format: [{\"search\":\"old\",\"replace\":\"new\"},...]")?;
+    
+            if pair_list.is_empty() {
+                println!("No pairs provided. Nothing to do.");
+                return Ok(());
+            }
+    
+            // Read original content
+            let original = std::fs::read_to_string(path)
+                .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file, e))?;
+    
+            let mut modified = original.clone();
+            let mut applied_count = 0usize;
+    
+            for (i, pair) in pair_list.iter().enumerate() {
+                let search = pair.get("search").and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("Pair {} missing \"search\" field", i))?;
+                let replace_text = pair.get("replace").and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("Pair {} missing \"replace\" field", i))?;
+    
+                // Auto-unescape \n/\t in replacement text if needed
+                let replacement = if unescape_newlines
+                    || (!replace_text.contains('\n') && (replace_text.contains("\\n") || replace_text.contains("\\t")))
+                {
+                    let mut r = replace_text.to_string();
+                    r = r.replace("\\n", "\n");
+                    r = r.replace("\\t", "\t");
+                    r
+                } else {
+                    replace_text.to_string()
+                };
+    
+                if modified.contains(search) {
+                    modified = modified.replace(search, &replacement);
+                    applied_count += 1;
+                }
+            }
+    
+            if modified == original {
+                println!("No matches found. File unchanged.");
+                return Ok(());
+            }
+    
+            // Validate the result
+            if let Err(e) = crate::parser::get_parser(path).and_then(|parser| Ok(parser.parse(&modified)?)) {
+                println!("Validation failed: Multi-replace would result in invalid syntax.\nError: {}\n\nChanges NOT applied.", e);
+                return Ok(());
+            }
+    
+            if preview {
+                println!("--- MultiReplace preview for: {}", file);
+                println!("Pairs: {} total, {} matched", pair_list.len(), applied_count);
+                print_diff(&original, &modified);
+                println!("\nUse without --preview to apply");
+                return Ok(());
+            }
+    
+            // Apply: create backup, log transaction, write file
+            let writer = GnawTreeWriter::new(file)?;
+            writer.create_backup()?;
+    
+            let before_hash = crate::core::calculate_content_hash(&original);
+            let after_hash = crate::core::calculate_content_hash(&modified);
+    
+            let mut tlog = TransactionLog::load(&project_root)?;
+            let txid = tlog.log_transaction(
+                OperationType::Edit,
+                PathBuf::from(file),
+                None,
+                Some(before_hash),
+                Some(after_hash),
+                format!("Multi-replace: {} pairs, {} applied", pair_list.len(), applied_count),
+                std::collections::HashMap::new(),
+            )?;
+    
+            std::fs::write(path, modified)
+                .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", file, e))?;
+    
+            println!("MultiReplace applied: {} pair(s) matched out of {} (txn {})", applied_count, pair_list.len(), txid);
+            Ok(())
+        }
     fn find_supported_files(dir: &std::path::Path) -> Result<Vec<String>> {
         let mut files = Vec::new();
         let supported_extensions = vec![

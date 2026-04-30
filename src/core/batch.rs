@@ -124,7 +124,12 @@ impl Batch {
     /// Load a batch from a JSON file
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let s = fs::read_to_string(&path).context("Failed to read batch file")?;
-        let bf: BatchFile = serde_json::from_str(&s).context("Failed to parse batch JSON")?;
+        Self::from_json(&s)
+    }
+
+    /// Load a batch from a JSON string (supports both file and STDIN)
+    pub fn from_json(s: &str) -> Result<Self> {
+        let bf: BatchFile = serde_json::from_str(s).context("Failed to parse batch JSON")?;
         Ok(Self {
             description: bf.description,
             operations: bf.operations,
@@ -309,6 +314,7 @@ impl Batch {
         Ok(out)
     }
 }
+
 
 /// Format a unified-ish diff of two strings (line-based).
 fn format_diff(before: &str, after: &str) -> String {
