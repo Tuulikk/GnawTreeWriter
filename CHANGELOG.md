@@ -1,3 +1,22 @@
+## [0.9.4] - 2026-04-30
+
+### Added
+- **`multi-replace` command**: Multiple search/replace pairs in one pass
+  - Supports STDIN (`--pairs -`), inline JSON, or file path
+  - Single file read, single backup, single transaction
+  - Atomic: all-or-nothing validation
+  - Auto-unescape of `\n`/`\t` in replacement text
+  - Example: `echo '[{"search":"a","replace":"b"}]' | gtw multi-replace file.rs --pairs -`
+
+- **Batch STDIN support**: `batch -` reads JSON from STDIN
+  - No temp file needed for pipelining
+  - Example: `cat ops.json | gtw batch - --preview`
+
+### Documentation
+- **SKILL.md**: Added Quick STDIN Reference table at top
+- **SKILL.md**: Added "Agent Workflows" section with 10 patterns
+- **GTW_AGENT_COOKBOOK.md**: New 287-line cookbook with 10 recipes for AI agents
+
 ## [0.9.3] - 2026-04-27
 
 ### Added
