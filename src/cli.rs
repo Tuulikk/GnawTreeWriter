@@ -358,7 +358,10 @@ enum Commands {
     SenseInsert {
         file: PathBuf,
         anchor: String,
-        content: String,
+        #[arg(required_unless_present = "source_file")]
+        content: Option<String>,
+        #[arg(long, conflicts_with = "content")]
+        source_file: Option<String>,
         #[arg(long, default_value = "after")]
         intent: String,
         #[arg(long)]
@@ -927,8 +930,8 @@ impl Cli {
             Commands::Sense { query, file, deep, auto_index } => {
                 Self::handle_sense(&query, file.as_ref().and_then(|p| p.to_str()), deep, auto_index).await?;
             }
-            Commands::SenseInsert { file, anchor, content, intent, preview } => {
-                Self::handle_sense_insert(file, anchor, content, intent, preview).await?;
+            Commands::SenseInsert { file, anchor, content, source_file, intent, preview } => {
+                Self::handle_sense_insert(file, anchor, content, source_file, intent, preview).await?;
             }
             Commands::Scaffold { file_path, schema } => {
                 Self::handle_scaffold(&file_path, &schema)?;
@@ -1493,7 +1496,8 @@ Use --no-preview to write batch file"
     async fn handle_sense_insert(
         file: PathBuf,
         anchor: String,
-        content: String,
+        content: Option<String>,
+        source_file: Option<String>,
         intent: String,
         preview: bool,
     ) -> Result<()> {
@@ -1503,6 +1507,7 @@ Use --no-preview to write batch file"
             let project_root = find_project_root(&current_dir);
             let broker = GnawSenseBroker::new(&project_root)?;
             let file_path = file.to_str().ok_or_else(|| anyhow::anyhow!("Invalid file path"))?;
+            let insert_content = resolve_content(content, source_file, false)?;
 
             println!("🧠 GnawSense is searching for anchor: \"{}\"...", anchor);
             let proposal = broker.propose_edit(&anchor, file_path, &intent).await?;
@@ -1514,13 +1519,13 @@ Use --no-preview to write batch file"
             let op = if proposal.suggested_op == "edit" {
                 EditOperation::Edit {
                     node_path: proposal.anchor_path,
-                    content,
+                    content: insert_content,
                 }
             } else {
                 EditOperation::Insert {
                     parent_path: proposal.parent_path,
                     position: proposal.position,
-                    content,
+                    content: insert_content,
                 }
             };
 
@@ -1535,7 +1540,7 @@ Use --no-preview to write batch file"
         }
         #[cfg(not(feature = "modernbert"))]
         {
-            let _ = (file, anchor, content, intent, preview);
+            let _ = (file, anchor, content, source_file, intent, preview);
             Self::err_modernbert_disabled()?;
         }
         Ok(())
