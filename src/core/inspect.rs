@@ -18,6 +18,8 @@ pub enum InspectMode {
     Orphans,
     /// Show code relations
     Relations,
+    /// Change impact analysis (blast)
+    Blast,
     /// Full analysis
     Full,
 }
@@ -55,6 +57,7 @@ pub fn inspect(
         InspectMode::Metrics => "metrics",
         InspectMode::Orphans => "orphans",
         InspectMode::Relations => "relations",
+        InspectMode::Blast => "blast",
         InspectMode::Full => "full",
     };
 
@@ -75,6 +78,36 @@ fn inspect_file(file_path: &str, mode: InspectMode, symbol: Option<&str>) -> Res
         InspectMode::Metrics => calculate_metrics(&tree, &path_str),
         InspectMode::Orphans => find_orphans(&tree, &path_str),
         InspectMode::Relations => analyze_relations(&tree, &path_str),
+        InspectMode::Blast => {
+            // For blast mode, use the symbol as the node path
+            let node_path = symbol.unwrap_or("");
+            if !node_path.is_empty() {
+                let result = crate::core::blast::blast(file_path, node_path, false, None);
+                match result {
+                    Ok(r) => {
+                        let mut findings = Vec::new();
+                        for caller in r.callers {
+                            findings.push(crate::core::inspect::Finding {
+                                file: caller.file,
+                                line: caller.line,
+                                path: caller.path,
+                                node_type: "caller".to_string(),
+                                name: caller.name,
+                                context: Some(format!("calls target @ {}", r.target_path)),
+                            });
+                        }
+                        let mut summary = HashMap::new();
+                        summary.insert("callers".to_string(), r.summary.callers_count);
+                        summary.insert("callees".to_string(), r.summary.callees_count);
+                        summary.insert("risk".to_string(), (r.summary.risk_score * 100.0) as usize);
+                        (findings, summary)
+                    }
+                    Err(_) => (Vec::new(), HashMap::new()),
+                }
+            } else {
+                (Vec::new(), HashMap::new())
+            }
+        }
         InspectMode::Full => {
             let c = calculate_metrics(&tree, &path_str);
             let o = find_orphans(&tree, &path_str);
@@ -108,6 +141,7 @@ fn inspect_project(
         InspectMode::Metrics => "metrics",
         InspectMode::Orphans => "orphans",
         InspectMode::Relations => "relations",
+        InspectMode::Blast => "blast",
         InspectMode::Full => "full",
     };
 

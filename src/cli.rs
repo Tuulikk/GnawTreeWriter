@@ -4,7 +4,7 @@
 
 use crate::core::{
     find_project_root, EditOperation, GnawTreeWriter, OperationType, RestorationEngine, TagManager,
-    TransactionLog, UndoRedoManager, gnaw_find, inspect, visualizer::TreeVisualizer,
+    TransactionLog, UndoRedoManager, gnaw_find, inspect, blast, visualizer::TreeVisualizer,
 };
 #[cfg(feature = "modernbert")]
 use crate::llm::{GnawSenseBroker, SenseResponse, SemanticIndexManager};
@@ -433,6 +433,17 @@ enum Commands {
         mode: Option<String>,
         #[arg(long)]
         symbol: Option<String>,
+        #[arg(long, default_value = "false")]
+        recursive: bool,
+        #[arg(long, short = 'd')]
+        directory: Option<String>,
+        #[arg(long, short = 'o')]
+        format: Option<String>,
+    },
+    /// Change impact analysis (gnaw-blast)
+    GnawBlast {
+        file_path: String,
+        node_path: String,
         #[arg(long, default_value = "false")]
         recursive: bool,
         #[arg(long, short = 'd')]
@@ -1022,7 +1033,42 @@ Self::handle_version()?;
                     format.as_deref(),
                 )?;
             }
+            Commands::GnawBlast {
+                file_path,
+                node_path,
+                recursive,
+                directory,
+                format,
+            } => {
+                Self::handle_gnaw_blast(
+                    &file_path,
+                    &node_path,
+                    recursive,
+                    directory.as_deref(),
+                    format.as_deref(),
+                )?;
+            }
         }
+        Ok(())
+    }
+    fn handle_gnaw_blast(
+        file_path: &str,
+        node_path: &str,
+        recursive: bool,
+        directory: Option<&str>,
+        format: Option<&str>,
+    ) -> Result<()> {
+        let result = blast::blast(file_path, node_path, recursive, directory)?;
+
+        match format.as_deref() {
+            Some("json") => {
+                println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+            }
+            _ => {
+                print!("{}", blast::format_blast_text(&result));
+            }
+        }
+
         Ok(())
     }
     fn handle_tag_add(file_path: &str, node_path: &str, name: &str, force: bool) -> Result<()> {
@@ -1724,6 +1770,7 @@ Use --no-preview to write batch file"
             Some("metrics") => inspect::InspectMode::Metrics,
             Some("orphans") => inspect::InspectMode::Orphans,
             Some("relations") => inspect::InspectMode::Relations,
+            Some("blast") => inspect::InspectMode::Blast,
             _ => inspect::InspectMode::Full,
         };
 

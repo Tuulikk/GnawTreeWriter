@@ -11,6 +11,7 @@ pub mod backup;
 pub mod batch;
 pub mod gnaw_find;
 pub mod inspect;
+pub mod blast;
 pub mod blueprint;
 pub mod diff_parser;
 pub mod guardian;
