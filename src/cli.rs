@@ -4,7 +4,7 @@
 
 use crate::core::{
     find_project_root, EditOperation, GnawTreeWriter, OperationType, RestorationEngine, TagManager,
-    TransactionLog, UndoRedoManager, gnaw_find, visualizer::TreeVisualizer,
+    TransactionLog, UndoRedoManager, gnaw_find, inspect, visualizer::TreeVisualizer,
 };
 #[cfg(feature = "modernbert")]
 use crate::llm::{GnawSenseBroker, SenseResponse, SemanticIndexManager};
@@ -425,6 +425,20 @@ enum Commands {
         max_results: usize,
         #[arg(long, short = 'o', default_value = "text")]
         format: String,
+    },
+    /// Advanced code inspection (gnaw-inspect)
+    GnawInspect {
+        file_path: Option<String>,
+        #[arg(long, short = 'm')]
+        mode: Option<String>,
+        #[arg(long)]
+        symbol: Option<String>,
+        #[arg(long, default_value = "false")]
+        recursive: bool,
+        #[arg(long, short = 'd')]
+        directory: Option<String>,
+        #[arg(long, short = 'o')]
+        format: Option<String>,
     },
 }
 
@@ -989,6 +1003,23 @@ Self::handle_version()?;
                     recursive,
                     max_results,
                     format.as_str(),
+                )?;
+            }
+            Commands::GnawInspect {
+                file_path,
+                mode,
+                symbol,
+                recursive,
+                directory,
+                format,
+            } => {
+                Self::handle_gnaw_inspect(
+                    file_path.as_deref(),
+                    mode.as_deref(),
+                    symbol.as_deref(),
+                    recursive,
+                    directory.as_deref(),
+                    format.as_deref(),
                 )?;
             }
         }
@@ -1674,6 +1705,45 @@ Use --no-preview to write batch file"
             }
             _ => {
                 print!("{}", gnaw_find::format_results_text(&results, total, max_results));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_gnaw_inspect(
+        file_path: Option<&str>,
+        mode: Option<&str>,
+        symbol: Option<&str>,
+        recursive: bool,
+        directory: Option<&str>,
+        format: Option<&str>,
+    ) -> Result<()> {
+        let inspect_mode = match mode {
+            Some("callers") => inspect::InspectMode::Callers,
+            Some("metrics") => inspect::InspectMode::Metrics,
+            Some("orphans") => inspect::InspectMode::Orphans,
+            Some("relations") => inspect::InspectMode::Relations,
+            _ => inspect::InspectMode::Full,
+        };
+
+        let target_file = file_path.unwrap_or(".");
+        let output_format = format.unwrap_or("text");
+
+        let results = inspect::inspect(
+            target_file,
+            inspect_mode,
+            symbol,
+            recursive,
+            directory,
+        )?;
+
+        match output_format {
+            "json" => {
+                println!("{}", serde_json::to_string_pretty(&results).unwrap_or_default());
+            }
+            _ => {
+                print!("{}", inspect::format_inspect_text(&results));
             }
         }
 
