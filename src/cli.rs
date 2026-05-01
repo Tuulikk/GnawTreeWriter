@@ -4,7 +4,7 @@
 
 use crate::core::{
     find_project_root, EditOperation, GnawTreeWriter, OperationType, RestorationEngine, TagManager,
-    TransactionLog, UndoRedoManager, visualizer::TreeVisualizer,
+    TransactionLog, UndoRedoManager, gnaw_find, visualizer::TreeVisualizer,
 };
 #[cfg(feature = "modernbert")]
 use crate::llm::{GnawSenseBroker, SenseResponse, SemanticIndexManager};
@@ -223,16 +223,6 @@ enum Commands {
         #[arg(long)]
         unique: bool,
     },
-    /// Multiple search-and-replace pairs in a single pass
-    MultiReplace {
-        file: String,
-        #[arg(long)]
-        pairs: String,
-        #[arg(short, long)]
-        preview: bool,
-        #[arg(long)]
-        unescape_newlines: bool,
-    },
     /// AST-aware renaming
     Rename {
         symbol_name: String,
@@ -358,10 +348,7 @@ enum Commands {
     SenseInsert {
         file: PathBuf,
         anchor: String,
-        #[arg(required_unless_present = "source_file")]
-        content: Option<String>,
-        #[arg(long, conflicts_with = "content")]
-        source_file: Option<String>,
+        content: String,
         #[arg(long, default_value = "after")]
         intent: String,
         #[arg(long)]
@@ -420,6 +407,24 @@ enum Commands {
         narrative: Option<String>,
         #[arg(long)]
         force: bool,
+    },
+    /// Find AST nodes across project files (gnaw-find)
+    GnawFind {
+        pattern: Option<String>,
+        #[arg(long)]
+        type_filter: Option<String>,
+        #[arg(long, short = 'e')]
+        extensions: Option<String>,
+        #[arg(long)]
+        text: Option<String>,
+        #[arg(long, short = 'd')]
+        directory: Option<String>,
+        #[arg(long, default_value = "true")]
+        recursive: bool,
+        #[arg(long, short = 'm', default_value = "100")]
+        max_results: usize,
+        #[arg(long, short = 'o', default_value = "text")]
+        format: String,
     },
 }
 
@@ -765,15 +770,6 @@ impl Cli {
                 let preview = preview || global_dry_run;
                 Self::handle_quick_insert(&file, &after, filter.as_deref(), &content, preview, unique)?;
             }
-            Commands::MultiReplace {
-                file,
-                pairs,
-                preview,
-                unescape_newlines,
-            } => {
-                let preview = preview || global_dry_run;
-                Self::handle_multi_replace(&file, &pairs, unescape_newlines, preview)?;
-            }
             Commands::Rename {
                 symbol_name,
                 new_name,
@@ -930,8 +926,8 @@ impl Cli {
             Commands::Sense { query, file, deep, auto_index } => {
                 Self::handle_sense(&query, file.as_ref().and_then(|p| p.to_str()), deep, auto_index).await?;
             }
-            Commands::SenseInsert { file, anchor, content, source_file, intent, preview } => {
-                Self::handle_sense_insert(file, anchor, content, source_file, intent, preview).await?;
+            Commands::SenseInsert { file, anchor, content, intent, preview } => {
+                Self::handle_sense_insert(file, anchor, content, intent, preview).await?;
             }
             Commands::Scaffold { file_path, schema } => {
                 Self::handle_scaffold(&file_path, &schema)?;
@@ -973,6 +969,27 @@ Self::handle_version()?;
                 force,
             } => {
                 Self::handle_semantic_edit(&file_path, &query, content, source_file, narrative, force).await?;
+            }
+            Commands::GnawFind {
+                pattern,
+                type_filter,
+                extensions,
+                text,
+                directory,
+                recursive,
+                max_results,
+                format,
+            } => {
+                Self::handle_gnaw_find(
+                    pattern.as_deref(),
+                    type_filter.as_deref(),
+                    extensions.as_deref(),
+                    text.as_deref(),
+                    directory.as_deref(),
+                    recursive,
+                    max_results,
+                    format.as_str(),
+                )?;
             }
         }
         Ok(())
@@ -1202,19 +1219,9 @@ Use --no-preview to actually perform the restore"
     }
 
     fn handle_batch(file: &str, preview: bool) -> Result<()> {
-        // Load batch from file or STDIN ("-")
-        let batch = if file == "-" {
-            use std::io::Read;
-            let mut buffer = String::new();
-            std::io::stdin().read_to_string(&mut buffer)
-                .context("Failed to read batch JSON from STDIN")?;
-            crate::core::Batch::from_json(&buffer)
-                .context("Failed to parse batch JSON from STDIN")?
-        } else {
-            crate::core::Batch::from_file(file)
-                .with_context(|| format!("Failed to load batch file: {}", file))?
-        };
-
+        // Load and execute batch file; preview shows diffs, apply writes atomically
+        let batch = crate::core::Batch::from_file(file)
+            .with_context(|| format!("Failed to load batch file: {}", file))?;
         if preview {
             println!("{}", batch.preview_text()?);
         } else {
@@ -1223,7 +1230,6 @@ Use --no-preview to actually perform the restore"
         }
         Ok(())
     }
-
 
     fn handle_diff_to_batch(diff_file: &str, output: Option<&str>, preview: bool) -> Result<()> {
         use crate::core::diff_parser::{diff_to_batch, parse_diff_file, preview_diff};
@@ -1496,8 +1502,7 @@ Use --no-preview to write batch file"
     async fn handle_sense_insert(
         file: PathBuf,
         anchor: String,
-        content: Option<String>,
-        source_file: Option<String>,
+        content: String,
         intent: String,
         preview: bool,
     ) -> Result<()> {
@@ -1507,7 +1512,6 @@ Use --no-preview to write batch file"
             let project_root = find_project_root(&current_dir);
             let broker = GnawSenseBroker::new(&project_root)?;
             let file_path = file.to_str().ok_or_else(|| anyhow::anyhow!("Invalid file path"))?;
-            let insert_content = resolve_content(content, source_file, false)?;
 
             println!("🧠 GnawSense is searching for anchor: \"{}\"...", anchor);
             let proposal = broker.propose_edit(&anchor, file_path, &intent).await?;
@@ -1519,13 +1523,13 @@ Use --no-preview to write batch file"
             let op = if proposal.suggested_op == "edit" {
                 EditOperation::Edit {
                     node_path: proposal.anchor_path,
-                    content: insert_content,
+                    content,
                 }
             } else {
                 EditOperation::Insert {
                     parent_path: proposal.parent_path,
                     position: proposal.position,
-                    content: insert_content,
+                    content,
                 }
             };
 
@@ -1540,7 +1544,7 @@ Use --no-preview to write batch file"
         }
         #[cfg(not(feature = "modernbert"))]
         {
-            let _ = (file, anchor, content, source_file, intent, preview);
+            let _ = (file, anchor, content, intent, preview);
             Self::err_modernbert_disabled()?;
         }
         Ok(())
@@ -1636,6 +1640,44 @@ Use --no-preview to write batch file"
             let _ = (file_path, query, content, source_file, narrative, force);
             Self::err_modernbert_disabled()?;
         }
+    }
+
+    /// gnaw-find: Search AST nodes across project files
+    fn handle_gnaw_find(
+        pattern: Option<&str>,
+        type_filter: Option<&str>,
+        extensions: Option<&str>,
+        text: Option<&str>,
+        directory: Option<&str>,
+        recursive: bool,
+        max_results: usize,
+        format: &str,
+    ) -> Result<()> {
+        let results = gnaw_find::find_nodes(
+            pattern,
+            type_filter,
+            extensions,
+            text,
+            directory,
+            recursive,
+            max_results,
+        )?;
+
+        let total = results.len();
+
+        match format {
+            "json" => {
+                println!("{}", serde_json::to_string_pretty(&results).unwrap_or_default());
+            }
+            "summary" => {
+                print!("{}", gnaw_find::format_results_summary(&results, total));
+            }
+            _ => {
+                print!("{}", gnaw_find::format_results_text(&results, total, max_results));
+            }
+        }
+
+        Ok(())
     }
 
     fn handle_scaffold(file_path: &PathBuf, schema: &str) -> Result<()> {
@@ -2777,116 +2819,6 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
             Ok(())
         }
 
-    
-        fn handle_multi_replace(
-            file: &str,
-            pairs: &str,
-            unescape_newlines: bool,
-            preview: bool,
-        ) -> Result<()> {
-            use std::path::Path;
-    
-            let current_dir = std::env::current_dir()?;
-            let project_root = find_project_root(&current_dir);
-            let path = Path::new(file);
-    
-            // Read pairs JSON - either "-" for STDIN or inline JSON array or file path
-            let pairs_json = if pairs == "-" {
-                use std::io::Read;
-                let mut buffer = String::new();
-                std::io::stdin().read_to_string(&mut buffer)
-                    .context("Failed to read pairs JSON from STDIN")?;
-                buffer
-            } else if pairs.starts_with('[') {
-                pairs.to_string()
-            } else {
-                std::fs::read_to_string(pairs)
-                    .with_context(|| format!("Failed to read pairs file: {}", pairs))?
-            };
-    
-            // Parse pairs: [{"search": "old1", "replace": "new1"}, ...]
-            let pair_list: Vec<serde_json::Value> = serde_json::from_str(&pairs_json)
-                .context("Failed to parse pairs JSON. Expected format: [{\"search\":\"old\",\"replace\":\"new\"},...]")?;
-    
-            if pair_list.is_empty() {
-                println!("No pairs provided. Nothing to do.");
-                return Ok(());
-            }
-    
-            // Read original content
-            let original = std::fs::read_to_string(path)
-                .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file, e))?;
-    
-            let mut modified = original.clone();
-            let mut applied_count = 0usize;
-    
-            for (i, pair) in pair_list.iter().enumerate() {
-                let search = pair.get("search").and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow::anyhow!("Pair {} missing \"search\" field", i))?;
-                let replace_text = pair.get("replace").and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow::anyhow!("Pair {} missing \"replace\" field", i))?;
-    
-                // Auto-unescape \n/\t in replacement text if needed
-                let replacement = if unescape_newlines
-                    || (!replace_text.contains('\n') && (replace_text.contains("\\n") || replace_text.contains("\\t")))
-                {
-                    let mut r = replace_text.to_string();
-                    r = r.replace("\\n", "\n");
-                    r = r.replace("\\t", "\t");
-                    r
-                } else {
-                    replace_text.to_string()
-                };
-    
-                if modified.contains(search) {
-                    modified = modified.replace(search, &replacement);
-                    applied_count += 1;
-                }
-            }
-    
-            if modified == original {
-                println!("No matches found. File unchanged.");
-                return Ok(());
-            }
-    
-            // Validate the result
-            if let Err(e) = crate::parser::get_parser(path).and_then(|parser| Ok(parser.parse(&modified)?)) {
-                println!("Validation failed: Multi-replace would result in invalid syntax.\nError: {}\n\nChanges NOT applied.", e);
-                return Ok(());
-            }
-    
-            if preview {
-                println!("--- MultiReplace preview for: {}", file);
-                println!("Pairs: {} total, {} matched", pair_list.len(), applied_count);
-                print_diff(&original, &modified);
-                println!("\nUse without --preview to apply");
-                return Ok(());
-            }
-    
-            // Apply: create backup, log transaction, write file
-            let writer = GnawTreeWriter::new(file)?;
-            writer.create_backup()?;
-    
-            let before_hash = crate::core::calculate_content_hash(&original);
-            let after_hash = crate::core::calculate_content_hash(&modified);
-    
-            let mut tlog = TransactionLog::load(&project_root)?;
-            let txid = tlog.log_transaction(
-                OperationType::Edit,
-                PathBuf::from(file),
-                None,
-                Some(before_hash),
-                Some(after_hash),
-                format!("Multi-replace: {} pairs, {} applied", pair_list.len(), applied_count),
-                std::collections::HashMap::new(),
-            )?;
-    
-            std::fs::write(path, modified)
-                .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", file, e))?;
-    
-            println!("MultiReplace applied: {} pair(s) matched out of {} (txn {})", applied_count, pair_list.len(), txid);
-            Ok(())
-        }
     fn find_supported_files(dir: &std::path::Path) -> Result<Vec<String>> {
         let mut files = Vec::new();
         let supported_extensions = vec![

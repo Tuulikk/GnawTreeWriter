@@ -9,6 +9,7 @@ pub mod alf;
 pub mod anchor;
 pub mod backup;
 pub mod batch;
+pub mod gnaw_find;
 pub mod blueprint;
 pub mod diff_parser;
 pub mod guardian;
