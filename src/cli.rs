@@ -4,7 +4,7 @@
 
 use crate::core::{
     find_project_root, EditOperation, GnawTreeWriter, OperationType, RestorationEngine, TagManager,
-    TransactionLog, UndoRedoManager, gnaw_find, inspect, blast, gnaw_refactor, visualizer::TreeVisualizer,
+    TransactionLog, UndoRedoManager, gnaw_find, inspect, blast, gnaw_refactor, gnaw_diff, visualizer::TreeVisualizer,
 };
 #[cfg(feature = "modernbert")]
 use crate::llm::{GnawSenseBroker, SenseResponse, SemanticIndexManager};
@@ -463,6 +463,21 @@ enum Commands {
         target_location: Option<String>,
         #[arg(long)]
         recursive: bool,
+    },
+    /// AST-aware diff between files (gnaw-diff)
+    GnawDiff {
+        #[arg(long)]
+        old_file: String,
+        #[arg(long)]
+        new_file: String,
+        #[arg(long)]
+        file_path: Option<String>,
+        #[arg(long)]
+        old_path: Option<String>,
+        #[arg(long)]
+        new_path: Option<String>,
+        #[arg(long, short = 'o')]
+        format: Option<String>,
     },
 }
 
@@ -1076,6 +1091,23 @@ Self::handle_version()?;
                     new_name.as_deref(),
                     target_location.as_deref(),
                     recursive,
+                )?;
+            }
+            Commands::GnawDiff {
+                old_file,
+                new_file,
+                file_path,
+                old_path,
+                new_path,
+                format,
+            } => {
+                Self::handle_gnaw_diff(
+                    &old_file,
+                    &new_file,
+                    file_path.as_deref(),
+                    old_path.as_deref(),
+                    new_path.as_deref(),
+                    format.as_deref(),
                 )?;
             }
         }
@@ -1855,6 +1887,29 @@ Use --no-preview to write batch file"
         )?;
 
         print!("{}", gnaw_refactor::format_refactor_text(&result));
+        Ok(())
+    }
+
+    fn handle_gnaw_diff(
+        old_file: &str,
+        new_file: &str,
+        file_path: Option<&str>,
+        old_path: Option<&str>,
+        new_path: Option<&str>,
+        format: Option<&str>,
+    ) -> Result<()> {
+        if let (Some(fp), Some(op), Some(np)) = (file_path, old_path, new_path) {
+            // Node diff within same file
+            let output = gnaw_diff::diff_nodes(fp, op, np)?;
+            print!("{}", output);
+        } else {
+            // File-to-file diff
+            let result = gnaw_diff::diff(old_file, new_file, format.unwrap_or("text"))?;
+            match format.unwrap_or("text") {
+                "json" => println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default()),
+                _ => print!("{}", gnaw_diff::format_diff_text(&result)),
+            }
+        }
         Ok(())
     }
 

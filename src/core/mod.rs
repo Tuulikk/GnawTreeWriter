@@ -13,6 +13,7 @@ pub mod gnaw_find;
 pub mod inspect;
 pub mod blast;
 pub mod gnaw_refactor;
+pub mod gnaw_diff;
 pub mod blueprint;
 pub mod diff_parser;
 pub mod guardian;
