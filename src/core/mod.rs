@@ -14,6 +14,7 @@ pub mod inspect;
 pub mod blast;
 pub mod gnaw_refactor;
 pub mod gnaw_diff;
+pub mod gnaw_graph;
 pub mod blueprint;
 pub mod diff_parser;
 pub mod guardian;

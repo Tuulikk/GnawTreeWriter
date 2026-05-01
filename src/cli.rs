@@ -4,7 +4,7 @@
 
 use crate::core::{
     find_project_root, EditOperation, GnawTreeWriter, OperationType, RestorationEngine, TagManager,
-    TransactionLog, UndoRedoManager, gnaw_find, inspect, blast, gnaw_refactor, gnaw_diff, visualizer::TreeVisualizer,
+    TransactionLog, UndoRedoManager, gnaw_find, inspect, blast, gnaw_refactor, gnaw_diff, gnaw_graph, visualizer::TreeVisualizer,
 };
 #[cfg(feature = "modernbert")]
 use crate::llm::{GnawSenseBroker, SenseResponse, SemanticIndexManager};
@@ -477,6 +477,16 @@ enum Commands {
         #[arg(long)]
         new_path: Option<String>,
         #[arg(long, short = 'o')]
+        format: Option<String>,
+    },
+    /// Visualize code relations (gnaw-graph)
+    GnawGraph {
+        file_path: Option<String>,
+        #[arg(long, default_value = "3")]
+        max_depth: usize,
+        #[arg(long)]
+        include_external: bool,
+        #[arg(long, short = 'f')]
         format: Option<String>,
     },
 }
@@ -1107,6 +1117,19 @@ Self::handle_version()?;
                     file_path.as_deref(),
                     old_path.as_deref(),
                     new_path.as_deref(),
+                    format.as_deref(),
+                )?;
+            }
+            Commands::GnawGraph {
+                file_path,
+                max_depth,
+                include_external,
+                format,
+            } => {
+                Self::handle_gnaw_graph(
+                    file_path.as_deref(),
+                    max_depth,
+                    include_external,
                     format.as_deref(),
                 )?;
             }
@@ -1910,6 +1933,26 @@ Use --no-preview to write batch file"
                 _ => print!("{}", gnaw_diff::format_diff_text(&result)),
             }
         }
+        Ok(())
+    }
+
+    fn handle_gnaw_graph(
+        file_path: Option<&str>,
+        max_depth: usize,
+        include_external: bool,
+        format: Option<&str>,
+    ) -> Result<()> {
+        let path = file_path.unwrap_or(".");
+        let result = gnaw_graph::graph(path, max_depth, include_external, false)?;
+
+        match format.unwrap_or("text") {
+            "mermaid" => print!("{}", gnaw_graph::format_graph_mermaid(&result)),
+            "dot" => print!("{}", gnaw_graph::format_graph_dot(&result)),
+            "tree" => print!("{}", gnaw_graph::format_graph_tree(&result)),
+            "json" => println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default()),
+            _ => print!("{}", gnaw_graph::format_graph_text(&result)),
+        }
+
         Ok(())
     }
 
