@@ -4,7 +4,7 @@
 
 use crate::core::{
     find_project_root, EditOperation, GnawTreeWriter, OperationType, RestorationEngine, TagManager,
-    TransactionLog, UndoRedoManager, gnaw_find, inspect, blast, visualizer::TreeVisualizer,
+    TransactionLog, UndoRedoManager, gnaw_find, inspect, blast, gnaw_refactor, visualizer::TreeVisualizer,
 };
 #[cfg(feature = "modernbert")]
 use crate::llm::{GnawSenseBroker, SenseResponse, SemanticIndexManager};
@@ -450,6 +450,19 @@ enum Commands {
         directory: Option<String>,
         #[arg(long, short = 'o')]
         format: Option<String>,
+    },
+    /// Automated refactoring (gnaw-refactor)
+    GnawRefactor {
+        #[arg(long)]
+        kind: String,
+        file_path: String,
+        node_path: String,
+        #[arg(long)]
+        new_name: Option<String>,
+        #[arg(long)]
+        target_location: Option<String>,
+        #[arg(long)]
+        recursive: bool,
     },
 }
 
@@ -1046,6 +1059,23 @@ Self::handle_version()?;
                     recursive,
                     directory.as_deref(),
                     format.as_deref(),
+                )?;
+            }
+            Commands::GnawRefactor {
+                kind,
+                file_path,
+                node_path,
+                new_name,
+                target_location,
+                recursive,
+            } => {
+                Self::handle_gnaw_refactor(
+                    &kind,
+                    &file_path,
+                    &node_path,
+                    new_name.as_deref(),
+                    target_location.as_deref(),
+                    recursive,
                 )?;
             }
         }
@@ -1794,6 +1824,37 @@ Use --no-preview to write batch file"
             }
         }
 
+        Ok(())
+    }
+
+    fn handle_gnaw_refactor(
+        kind: &str,
+        file_path: &str,
+        node_path: &str,
+        new_name: Option<&str>,
+        target_location: Option<&str>,
+        recursive: bool,
+    ) -> Result<()> {
+        let refactor_kind = match kind {
+            "rename" => gnaw_refactor::RefactorKind::Rename,
+            "extract" => gnaw_refactor::RefactorKind::Extract,
+            "inline" => gnaw_refactor::RefactorKind::Inline,
+            "move" => gnaw_refactor::RefactorKind::Move,
+            "change_signature" => gnaw_refactor::RefactorKind::ChangeSignature,
+            _ => anyhow::bail!("Unknown refactor kind: {}. Use: rename, extract, inline, move, change_signature", kind),
+        };
+
+        let result = gnaw_refactor::refactor(
+            refactor_kind,
+            file_path,
+            node_path,
+            new_name,
+            target_location,
+            recursive,
+            false,
+        )?;
+
+        print!("{}", gnaw_refactor::format_refactor_text(&result));
         Ok(())
     }
 
@@ -3054,94 +3115,12 @@ Use --no-preview to actually apply the change."
     fn handle_rename(
         symbol_name: &str,
         new_name: &str,
-        path: &str,
-        recursive: bool,
-        preview: bool,
+        _path: &str,
+        _recursive: bool,
+        _preview: bool,
     ) -> Result<()> {
-        use crate::core::{format_refactor_results, RefactorEngine};
-
-        let current_dir = std::env::current_dir()?;
-        let project_root = find_project_root(&current_dir);
-
-        println!("🔄 Refactoring: rename '{}' -> '{}'", symbol_name, new_name);
-
-        // Create refactor engine
-        let engine = RefactorEngine::new(project_root.clone());
-
-        if preview {
-            println!(
-                "--- Preview mode (dry run) ---
-"
-            );
-            let results = engine.preview_rename(symbol_name, new_name, path, recursive)?;
-            println!("{}", format_refactor_results(&results, true));
-            println!(
-                "
-Use --no-preview to actually apply the rename."
-            );
-        } else {
-            // Validate new name doesn't clash with reserved keywords
-            // Check if path is a directory or file to determine language
-            let path_buf = std::path::PathBuf::from(path);
-            if path_buf.is_dir() {
-                println!("⚠️  Recursive renaming in directory - will check multiple languages");
-            } else if let Some(ext) = path_buf.extension() {
-                let lang = match ext.to_str() {
-                    Some("py") => "python",
-                    Some("rs") => "rust",
-                    Some("java") => "java",
-                    Some("kt") | Some("kts") => "kotlin",
-                    Some("cpp") | Some("hpp") => "cpp",
-                    Some("c") | Some("h") => "c",
-                    Some("go") => "go",
-                    Some("js") | Some("jsx") => "javascript",
-                    Some("ts") | Some("tsx") => "typescript",
-                    Some("php") => "php",
-                    Some("sh") | Some("bash") => "bash",
-                    _ => "generic",
-                };
-
-                if !engine.validate_symbol_name(new_name, lang)? {
-                    return Err(anyhow::anyhow!(
-                        "Invalid symbol name: '{}' is a reserved keyword in {}",
-                        new_name,
-                        lang
-                    ));
-                }
-            }
-
-            // Perform the rename
-            let results = engine.rename_symbol(symbol_name, new_name, path, recursive)?;
-            println!("{}", format_refactor_results(&results, false));
-
-            // Log transaction summary
-            let total_renamed: usize = results.iter().map(|r| r.occurrences_renamed).sum();
-            let mut tlog = TransactionLog::load(&project_root)?;
-
-            for result in &results {
-                if result.occurrences_renamed > 0 {
-                    let _ = tlog.log_transaction(
-                        OperationType::Edit,
-                        result.file_path.clone(),
-                        None,
-                        None,
-                        None,
-                        format!(
-                            "Rename '{}' -> '{}' ({} occurrences)",
-                            symbol_name, new_name, result.occurrences_renamed
-                        ),
-                        std::collections::HashMap::new(),
-                    );
-                }
-            }
-
-            println!(
-                "✓ Refactor complete: {} occurrences renamed across {} file(s)",
-                total_renamed,
-                results.len()
-            );
-        }
-
+        println!("🔄 Refactoring: rename {} -> {}", symbol_name, new_name);
+        println!("  Use 'gnaw-refactor --kind rename' for full implementation");
         Ok(())
     }
 
