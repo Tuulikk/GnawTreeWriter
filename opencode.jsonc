@@ -1,0 +1,9 @@
+{
+  "mcp": {
+    "gnawtreewriter": {
+      "type": "local",
+      "command": ["/home/tuulikk/.cargo/bin/gnawtreewriter", "mcp", "stdio"],
+      "enabled": true
+    }
+  }
+}
