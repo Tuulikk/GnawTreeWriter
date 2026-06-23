@@ -55,7 +55,7 @@ impl Clone for DiffSummary {
 pub fn diff(
     old_file: &str,
     new_file: &str,
-    format: &str,
+    _format: &str,
 ) -> Result<DiffResult> {
     let old_writer = GnawTreeWriter::new(old_file)?;
     let old_tree = old_writer.analyze();

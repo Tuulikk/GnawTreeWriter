@@ -41,7 +41,7 @@ pub struct GraphSummary {
 pub fn graph(
     file_path: &str,
     max_depth: usize,
-    include_external: bool,
+    _include_external: bool,
     _recursive: bool,
 ) -> Result<GraphResult> {
     let writer = GnawTreeWriter::new(file_path)?;
