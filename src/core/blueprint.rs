@@ -127,7 +127,7 @@ impl BlueprintEngine {
         for (from, to) in &blueprint.connections {
             md.push_str(&format!("| `{}` | ──▶ | `{}` |\n", from, to));
         }
-        md.push_str("\n");
+        md.push('\n');
 
         md.push_str("## 🚀 Detected Entry Points\n\n");
         for ep in &blueprint.entry_points {

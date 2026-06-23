@@ -66,7 +66,7 @@ impl ProjectIndexer {
 
                     if let Ok(tree) = parser.parse(&content) {
                         let mut entries = Vec::new();
-                        self.collect_embeddings(&tree, &file_path_str, &model, &mut entries)?;
+                        self.collect_embeddings(&tree, &file_path_str, model, &mut entries)?;
                         
                         if !entries.is_empty() {
                             self.index_manager.save_index(&file_path_str, entries)?;

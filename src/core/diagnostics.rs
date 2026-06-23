@@ -179,6 +179,12 @@ impl DiagnosticError {
     }
 }
 
+impl Default for VerboseTrace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VerboseTrace {
     pub fn new() -> Self {
         Self { steps: Vec::new() }
@@ -319,6 +325,12 @@ impl AstDiff {
     }
 }
 
+impl Default for DoctorReport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DoctorReport {
     pub fn new() -> Self {
         Self {
@@ -453,7 +465,7 @@ impl DoctorReport {
 
     /// Check transaction log integrity
     pub fn check_transaction_log(&mut self, project_root: &std::path::Path) {
-        match crate::core::transaction_log::TransactionLog::load(project_root.to_path_buf()) {
+        match crate::core::transaction_log::TransactionLog::load(project_root) {
             Ok(tlog) => {
                 match tlog.get_full_history() {
                     Ok(history) => {

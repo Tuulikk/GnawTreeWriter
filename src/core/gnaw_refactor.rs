@@ -164,7 +164,7 @@ fn find_and_rename_references(old_name: &str, new_name: &str) -> Result<Vec<Chan
                 let file_str = path.to_string_lossy().to_string();
                 if let Ok(writer) = GnawTreeWriter::new(&file_str) {
                     let tree = writer.analyze();
-                    for node in collect_nodes_matching(&tree, &old_lower) {
+                    for node in collect_nodes_matching(tree, &old_lower) {
                         changes.push(Change {
                             file: file_str.clone(),
                             line: node.start_line,

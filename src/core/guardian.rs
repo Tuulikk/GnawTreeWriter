@@ -18,6 +18,12 @@ pub struct IntegrityReport {
 
 pub struct GuardianEngine;
 
+impl Default for GuardianEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GuardianEngine {
     pub fn new() -> Self {
         Self
@@ -50,12 +56,11 @@ impl GuardianEngine {
         }
 
         // 3. Comment Preservation
-        if old_node.content.contains("//") || old_node.content.contains("/*") {
-            if !new_content.contains("//") && !new_content.contains("/*") {
+        if (old_node.content.contains("//") || old_node.content.contains("/*"))
+            && !new_content.contains("//") && !new_content.contains("/*") {
                 score -= 0.2;
                 messages.push("Documentation/Comments appear to have been stripped.".into());
             }
-        }
 
         let level = if score <= 0.3 {
             IntegrityLevel::Critical

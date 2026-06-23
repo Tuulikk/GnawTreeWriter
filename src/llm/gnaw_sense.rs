@@ -96,7 +96,7 @@ impl GnawSenseBroker {
 
         if let Some(file_path) = file_context {
             // ZOOM MODE: Search within a specific file (with JIT cache)
-            let index = self.index_file_cached(file_path, &model).await?;
+            let index = self.index_file_cached(file_path, model).await?;
             let results = index.search(&query_vector, 5);
             
             // JIT RELATIONAL ANALYSIS: Index the directory to find callers
@@ -153,7 +153,7 @@ impl GnawSenseBroker {
     #[cfg(feature = "modernbert")]
     pub async fn propose_edit(&self, anchor_query: &str, file_path: &str, intent: &str) -> Result<EditProposal> {
         let model = self.ai_manager.load_model(AiModel::ModernBert, DeviceType::Cpu)?;
-        let index = self.index_file(file_path, &model).await?;
+        let index = self.index_file(file_path, model).await?;
         
         let query_vector_tensor = model.get_embedding(anchor_query)?;
         let query_vector: Vec<f32> = query_vector_tensor.to_vec1()?;

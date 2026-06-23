@@ -10,6 +10,12 @@ pub struct HealingAction {
 
 pub struct Healer;
 
+impl Default for Healer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Healer {
     pub fn new() -> Self {
         Self

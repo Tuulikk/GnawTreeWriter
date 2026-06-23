@@ -63,7 +63,7 @@ pub fn diff(
     let new_writer = GnawTreeWriter::new(new_file)?;
     let new_tree = new_writer.analyze();
 
-    let (additions, deletions, modifications) = compare_trees(&old_tree, &new_tree);
+    let (additions, deletions, modifications) = compare_trees(old_tree, new_tree);
 
     let summary = DiffSummary {
         additions: additions.len(),
@@ -163,7 +163,7 @@ impl TreeNode {
         paths
     }
 
-    fn get_all_nodes<'a>(&'a self) -> Vec<&'a TreeNode> {
+    fn get_all_nodes(&self) -> Vec<&TreeNode> {
         let mut nodes = vec![self];
         for child in &self.children {
             nodes.extend(child.get_all_nodes());

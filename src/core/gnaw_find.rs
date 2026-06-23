@@ -66,12 +66,12 @@ pub fn find_nodes(
             let tree = writer.analyze();
 
             if let Some(tf) = type_filter {
-                collect_by_type(&tree, tf, &path_str, max_results, &mut results);
+                collect_by_type(tree, tf, &path_str, max_results, &mut results);
             } else if let Some(txt) = text {
-                collect_by_text(&tree, txt, &path_str, max_results, &mut results);
+                collect_by_text(tree, txt, &path_str, max_results, &mut results);
             } else if let Some(pat) = pattern {
-                collect_by_type(&tree, pat, &path_str, max_results, &mut results);
-                collect_by_text(&tree, pat, &path_str, max_results, &mut results);
+                collect_by_type(tree, pat, &path_str, max_results, &mut results);
+                collect_by_text(tree, pat, &path_str, max_results, &mut results);
             }
         }
     }

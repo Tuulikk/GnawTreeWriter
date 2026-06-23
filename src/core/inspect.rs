@@ -74,10 +74,10 @@ fn inspect_file(file_path: &str, mode: InspectMode, symbol: Option<&str>) -> Res
     let path_str = file_path.to_string();
 
     let (findings, summary) = match mode {
-        InspectMode::Callers => find_callers(&tree, symbol.unwrap_or(""), &path_str),
-        InspectMode::Metrics => calculate_metrics(&tree, &path_str),
-        InspectMode::Orphans => find_orphans(&tree, &path_str),
-        InspectMode::Relations => analyze_relations(&tree, &path_str),
+        InspectMode::Callers => find_callers(tree, symbol.unwrap_or(""), &path_str),
+        InspectMode::Metrics => calculate_metrics(tree, &path_str),
+        InspectMode::Orphans => find_orphans(tree, &path_str),
+        InspectMode::Relations => analyze_relations(tree, &path_str),
         InspectMode::Blast => {
             // For blast mode, use the symbol as the node path
             let node_path = symbol.unwrap_or("");
@@ -109,8 +109,8 @@ fn inspect_file(file_path: &str, mode: InspectMode, symbol: Option<&str>) -> Res
             }
         }
         InspectMode::Full => {
-            let c = calculate_metrics(&tree, &path_str);
-            let o = find_orphans(&tree, &path_str);
+            let c = calculate_metrics(tree, &path_str);
+            let o = find_orphans(tree, &path_str);
             let mut all_findings = c.0;
             all_findings.extend(o.0);
             (all_findings, c.1)
@@ -244,7 +244,7 @@ fn collect_functions_and_calls(
                 if !call_name.is_empty() {
                     calls
                         .entry(call_name.to_string())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push((file.to_string(), tree.start_line, tree.path.clone()));
                 }
             }
@@ -418,7 +418,7 @@ fn collect_relations(
     // Struct definitions
     if node_type == "struct_item" || node_type == "class_declaration" || node_type == "type_declaration" {
         if let Some(name) = tree.get_name() {
-            structs.entry(name).or_insert_with(Vec::new);
+            structs.entry(name).or_default();
         }
     }
 

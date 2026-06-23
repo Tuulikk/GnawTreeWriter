@@ -78,6 +78,7 @@ pub struct Cli {
     json: bool,
 }
 
+#[allow(clippy::enum_variant_names, clippy::too_many_arguments)]
 #[derive(Subcommand)]
 enum Commands {
     /// Parse files and show their AST tree structure
@@ -1145,7 +1146,7 @@ Self::handle_version()?;
     ) -> Result<()> {
         let result = blast::blast(file_path, node_path, recursive, directory)?;
 
-        match format.as_deref() {
+        match format {
             Some("json") => {
                 println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
             }
@@ -1805,6 +1806,7 @@ Use --no-preview to write batch file"
     }
 
     /// gnaw-find: Search AST nodes across project files
+#[allow(clippy::too_many_arguments)]
     fn handle_gnaw_find(
         pattern: Option<&str>,
         type_filter: Option<&str>,
@@ -1978,7 +1980,7 @@ Use --no-preview to write batch file"
 
         Ok(())
     }
-
+#[allow(clippy::too_many_arguments)]
     fn handle_alf(
         message: Option<String>,
         actor: String,
@@ -3669,7 +3671,7 @@ fn show_hint() {
         }
 
         if let Some((path, _, name)) = target_nodes.first() {
-            if path != "" { // Don't suggest editing the source_file root directly usually
+            if !path.is_empty() { // Don't suggest editing the source_file root directly usually
                 println!("\n💡 [GnawTip]: To edit a node (e.g. '{}'), use:", name);
                 println!("   gnawtreewriter edit {} {} -", file_path, path);
             }

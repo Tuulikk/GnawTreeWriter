@@ -73,7 +73,7 @@ pub fn blast(
     let callers = if recursive {
         find_callers_project(&target_name, directory)?
     } else {
-        find_callers_in_file(&tree, &target_name, file_path)
+        find_callers_in_file(tree, &target_name, file_path)
     };
 
     let callees = find_callees(target);
@@ -110,7 +110,7 @@ pub fn blast(
     })
 }
 
-fn collect_all_nodes<'a>(node: &'a TreeNode) -> Vec<&'a TreeNode> {
+fn collect_all_nodes(node: &TreeNode) -> Vec<&TreeNode> {
     let mut nodes = vec![node];
     for child in &node.children {
         nodes.extend(collect_all_nodes(child));
@@ -138,8 +138,8 @@ pub fn find_callers_in_file(tree: &TreeNode, target: &str, file: &str) -> Vec<Co
                     relation_type: "call".to_string(),
                 });
             }
-        } else if node.node_type == "identifier" {
-            if node.content.to_lowercase() == target_lower {
+        } else if node.node_type == "identifier"
+            && node.content.to_lowercase() == target_lower {
                 // Check if this identifier is in a function (not the definition)
                 let parent_func = find_parent_function(node, tree);
                 if let Some(pf) = parent_func {
@@ -154,7 +154,6 @@ pub fn find_callers_in_file(tree: &TreeNode, target: &str, file: &str) -> Vec<Co
                     }
                 }
             }
-        }
     }
 
     callers
@@ -213,7 +212,7 @@ pub fn find_callers_project(target: &str, directory: Option<&str>) -> Result<Vec
                 let file_str = path.to_string_lossy().to_string();
                 if let Ok(writer) = GnawTreeWriter::new(&file_str) {
                     let tree = writer.analyze();
-                    let callers = find_callers_in_file(&tree, target, &file_str);
+                    let callers = find_callers_in_file(tree, target, &file_str);
                     all_callers.extend(callers);
                 }
             }
@@ -256,7 +255,7 @@ fn calculate_risk(callers: &[CodeRelation], callees: &[CodeRelation], files_affe
 pub fn format_blast_text(result: &BlastResult) -> String {
     let mut output = String::new();
 
-    output.push_str(&format!("\n💥 BLAST RADIUS ANALYSIS\n"));
+    output.push_str("\n💥 BLAST RADIUS ANALYSIS\n");
     output.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
     output.push_str(&format!("📍 {} @ {}\n", result.target_name, result.target_path));
     output.push_str(&format!("   Type: {}\n", result.target_type));

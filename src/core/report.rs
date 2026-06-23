@@ -14,6 +14,12 @@ pub struct Snapshot {
     pub timestamp: String,
 }
 
+impl Default for ReportEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReportEngine {
     pub fn new() -> Self {
         Self
@@ -21,7 +27,7 @@ impl ReportEngine {
 
     pub fn generate_markdown_report(&self, project_root: &Path, limit: usize) -> Result<String> {
         let alf = AlfManager::load(project_root)?;
-        let tlog = TransactionLog::load(project_root.to_path_buf())?;
+        let tlog = TransactionLog::load(project_root)?;
         
         let entries = alf.list(limit);
         let mut report = String::new();
@@ -47,7 +53,7 @@ impl ReportEngine {
                     
                     // 3. ACTOR & TIME
                     report.push_str(&format!("| **Actor** | @{} |\n", entry.actor));
-                    report.push_str(&format!("| **Status** | ✅ Verified via TCARV |\n\n"));
+                    report.push_str("| **Status** | ✅ Verified via TCARV |\n\n");
 
                     report.push_str("#### 📝 Structural Change\n");
                     report.push_str("```rust\n"); // We assume rust for the report or detect from extension

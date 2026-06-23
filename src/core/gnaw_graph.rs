@@ -52,7 +52,7 @@ pub fn graph(
     let mut functions: HashMap<String, Vec<String>> = HashMap::new();
 
     // Collect all function definitions and calls
-    collect_functions_and_calls(&tree, &mut nodes, &mut edges, &mut functions, max_depth);
+    collect_functions_and_calls(tree, &mut nodes, &mut edges, &mut functions, max_depth);
 
     // Find orphan nodes (functions not called by anything)
     let called_functions: HashSet<String> = edges.iter()
@@ -247,14 +247,14 @@ pub fn format_graph_mermaid(result: &GraphResult) -> String {
     // Add nodes
     for node in &result.nodes {
         let label = node.name.replace('"', "").replace('<', "&lt;").replace('>', "&gt;");
-        let node_id = node.id.replace(':', "_").replace('.', "_");
+        let node_id = node.id.replace([':', '.'], "_");
         output.push_str(&format!("    {}(\"{}\")\n", node_id, label));
     }
 
     // Add edges
     for edge in &result.edges {
-        let from_id = edge.from.replace(':', "_").replace('.', "_");
-        let to_id = edge.to.replace(':', "_").replace('.', "_");
+        let from_id = edge.from.replace([':', '.'], "_");
+        let to_id = edge.to.replace([':', '.'], "_");
         output.push_str(&format!("    {} --> {}\n", from_id, to_id));
     }
 
@@ -273,14 +273,14 @@ pub fn format_graph_dot(result: &GraphResult) -> String {
     // Add nodes
     for node in &result.nodes {
         let label = node.name.replace('"', "").replace('\\', "\\\\");
-        let node_id = node.id.replace(':', "_").replace('.', "_");
+        let node_id = node.id.replace([':', '.'], "_");
         output.push_str(&format!("    \"{}\" [label=\"{}\"];\n", node_id, label));
     }
 
     // Add edges
     for edge in &result.edges {
-        let from_id = edge.from.replace(':', "_").replace('.', "_");
-        let to_id = edge.to.replace(':', "_").replace('.', "_");
+        let from_id = edge.from.replace([':', '.'], "_");
+        let to_id = edge.to.replace([':', '.'], "_");
         output.push_str(&format!("    \"{}\" -> \"{}\";\n", from_id, to_id));
     }
 
