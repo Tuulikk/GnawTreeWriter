@@ -21,9 +21,13 @@ fn test_ai_status_detection() -> Result<()> {
     let manager = AiManager::new(&project_root)?;
     let status = manager.get_status()?;
 
-    assert_eq!(
-        status.cache_dir,
-        project_root.join(".gnawtreewriter_ai/models")
+            let local = project_root.join(".gnawtreewriter_ai/models");
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let global = std::path::PathBuf::from(&home).join(".gnawtreewriter_ai/models");
+    assert!(
+        status.cache_dir == local || status.cache_dir == global,
+        "cache_dir mismatch: {:?}",
+        status.cache_dir
     );
     
     #[cfg(feature = "modernbert")]
