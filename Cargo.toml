@@ -60,6 +60,7 @@ candle-core = { version = "0.8", optional = true }
 candle-nn = { version = "0.8", optional = true }
 candle-transformers = { version = "0.8", optional = true }
 hf-hub = { version = "0.3", optional = true }
+ureq = { version = "2", optional = true }
 tokenizers = { version = "0.21", optional = true }
 
 # MCP server dependencies (optional)
@@ -75,7 +76,7 @@ reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 
 [features]
 default = ["modernbert", "mcp"]
-modernbert = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "tokenizers"]
+modernbert = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "ureq", "tokenizers"]
 mcp = ["dep:reqwest", "hyper", "axum", "tokio-stream", "tower-http"]
 cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]

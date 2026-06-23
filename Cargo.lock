@@ -1225,6 +1225,7 @@ dependencies = [
  "tree-sitter-swift",
  "tree-sitter-typescript",
  "tree-sitter-zig",
+ "ureq",
  "walkdir",
  "xmltree",
 ]

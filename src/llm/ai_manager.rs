@@ -6,8 +6,6 @@ use candle_nn::{self, VarBuilder};
 #[cfg(feature = "modernbert")]
 use candle_transformers::models::modernbert::{Config, ModernBert};
 #[cfg(feature = "modernbert")]
-use hf_hub::{Repo, RepoType};
-#[cfg(feature = "modernbert")]
 use crate::core::LabelManager;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -192,19 +190,25 @@ impl AiManager {
         #[cfg(feature = "modernbert")]
         {
             let model_id = "answerdotai/ModernBERT-base";
-            let api = hf_hub::api::sync::ApiBuilder::new().with_progress(true).build()?;
-            let repo = api.repo(Repo::new(model_id.to_string(), RepoType::Model));
             let model_dir = self.get_model_path(&AiModel::ModernBert);
             if !model_dir.exists() { fs::create_dir_all(&model_dir)?; }
             for file in ["config.json", "model.safetensors", "tokenizer.json"] {
                 let dest = model_dir.join(file);
                 if !dest.exists() || _force {
-                    fs::copy(&repo.get(file)?, &dest)?;
+                    let url = format!("https://huggingface.co/{}/resolve/main/{}", model_id, file);
+                    println!("  Downloading {}...", file);
+                    let resp = ureq::get(&url).call()
+                        .map_err(|e| anyhow::anyhow!("HTTP download failed: {}", e))?;
+                    let mut reader = resp.into_reader();
+                    let mut out = std::fs::File::create(&dest)
+                        .map_err(|e| anyhow::anyhow!("Failed to create {:?}: {}", dest, e))?;
+                    std::io::copy(&mut reader, &mut out)?;
                 }
             }
         }
         Ok(())
     }
+
 
     pub fn get_status(&self) -> Result<AiStatus> {
         let modern_bert_installed = self.get_model_path(&AiModel::ModernBert).join("config.json").exists();
