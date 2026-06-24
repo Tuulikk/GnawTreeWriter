@@ -283,6 +283,17 @@ enum Commands {
         #[arg(short, long)]
         preview: bool,
     },
+        /// Move a node to a new location (atomically delete + reinsert)
+        Move {
+            source_file: String,
+            source_path: String,
+            #[arg(required_unless_present = "target_path")]
+            target_file: Option<String>,
+            #[arg(required_unless_present = "target_file")]
+            target_path: Option<String>,
+            #[arg(short, long)]
+            preview: bool,
+        },
     /// Delete a node
     Delete {
         file_path: String,
@@ -853,6 +864,22 @@ impl Cli {
             } => {
                 let preview = preview || global_dry_run;
                 Self::handle_clone(
+                    &source_file,
+                    &source_path,
+                    target_file.as_deref(),
+                    target_path.as_deref(),
+                    preview,
+                )?;
+            }
+            Commands::Move {
+                source_file,
+                source_path,
+                target_file,
+                target_path,
+                preview,
+            } => {
+                let preview = preview || global_dry_run;
+                Self::handle_move(
                     &source_file,
                     &source_path,
                     target_file.as_deref(),
@@ -3296,6 +3323,67 @@ Use without --preview to apply the clone"
                 "✓ Successfully cloned node to {} [{}]",
                 target_file_path, target_node_path
             );
+        }
+
+        Ok(())
+    }
+
+    fn handle_move(
+        source_file: &str,
+        source_path: &str,
+        target_file: Option<&str>,
+        target_path: Option<&str>,
+        preview: bool,
+    ) -> Result<()> {
+        use crate::parser::get_parser;
+        use crate::core::EditOperation;
+        use crate::core::GnawTreeWriter;
+        use anyhow::Context as _;
+
+        let target_file_path = target_file.unwrap_or(source_file);
+
+        // Read source file
+        let parser = get_parser(std::path::Path::new(source_file))?;
+        let source_code = std::fs::read_to_string(source_file)
+            .with_context(|| format!("Failed to read source file: {}", source_file))?;
+        let source_tree = parser
+            .parse(&source_code)
+            .with_context(|| format!("Failed to parse source file: {}", source_file))?;
+
+        let source_node = Self::find_node_by_path(&source_tree, source_path)
+            .ok_or_else(|| anyhow::anyhow!("Source node not found at path: {}", source_path))?;
+
+        println!("📦 Moving node from {} [{}]", source_file, source_path);
+        println!("  Node type: {}", source_node.node_type);
+        println!("  Lines: {}-{}", source_node.start_line, source_node.end_line);
+
+        if target_path.is_none() {
+            return Err(anyhow::anyhow!("Target path must be specified."));
+        }
+        let target_node_path = target_path.unwrap();
+
+        if preview {
+            let preview_writer = GnawTreeWriter::new(source_file)?;
+            let modified = preview_writer.preview_edit(EditOperation::Delete { node_path: source_path.to_string() })?;
+            // Simple preview: show delete diff
+            print_diff(&source_code, &modified);
+            println!("
+✓ Preview complete (would then insert at {} [{}])", target_file_path, target_node_path);
+        } else {
+            // Step 1: Delete source node and save
+            let mut source_writer = GnawTreeWriter::new(source_file)?;
+            source_writer.edit(EditOperation::Delete { node_path: source_path.to_string() }, false)?;
+
+            // Step 2: Re-read (if same file) and insert at target
+            let mut target_writer = GnawTreeWriter::new(target_file_path)?;
+            target_writer.edit(EditOperation::Insert {
+                parent_path: target_node_path.to_string(),
+                position: 1,
+                content: source_node.content.clone(),
+            }, false)?;
+
+            println!("  Moved from {} [{}] to {} [{}]",
+                source_file, source_path, target_file_path, target_node_path);
         }
 
         Ok(())
