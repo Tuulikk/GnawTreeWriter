@@ -548,7 +548,7 @@ pub mod mcp_server {
                     depth: usize, 
                     max_d: usize
                 ) {
-                    if depth > max_d || acc.len() >= 1000 { return; }
+                    if depth > max_d || acc.len() >= 5000 { return; }
                     
                     if filter.is_none() || filter.unwrap() == n.node_type {
                         let labels = lm.as_ref().map(|mgr| mgr.get_labels(fp, &n.content)).unwrap_or_default();
