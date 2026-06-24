@@ -22,6 +22,7 @@ pub trait MacroParser: Send + Sync {
 // ─── Dispatcher ─────────────────────────────────────────────────────────────
 
 /// Registry of macro-name → parser mappings.
+#[derive(Default)]
 pub struct MacroDispatcher {
     parsers: HashMap<String, Box<dyn MacroParser>>,
 }
@@ -67,11 +68,11 @@ impl MacroParser for JsonMacroParser {
 
     fn parse_macro_body(&self, content: &str, base_path: &str) -> Result<Vec<TreeNode>> {
         let value: serde_json::Value = serde_json::from_str(content)?;
-        Ok(vec![json_value_to_tree(&value, base_path, 0)])
+        Ok(vec![json_value_to_tree(&value, base_path)])
     }
 }
 
-fn json_value_to_tree(value: &serde_json::Value, base_path: &str, depth: usize) -> TreeNode {
+fn json_value_to_tree(value: &serde_json::Value, base_path: &str) -> TreeNode {
     let (node_type, content, children) = match value {
         serde_json::Value::Object(map) => {
             let mut kids = Vec::new();
@@ -85,7 +86,7 @@ fn json_value_to_tree(value: &serde_json::Value, base_path: &str, depth: usize) 
                     children: vec![],
                 });
                 let val_path = format!("{}.{}", base_path, i * 2 + 1);
-                kids.push(json_value_to_tree(val, &val_path, depth + 1));
+                kids.push(json_value_to_tree(val, &val_path));
             }
             ("json_object", content_str(value), kids)
         }
@@ -93,7 +94,7 @@ fn json_value_to_tree(value: &serde_json::Value, base_path: &str, depth: usize) 
             let mut kids = Vec::new();
             for (i, val) in arr.iter().enumerate() {
                 let child_path = format!("{}.{}", base_path, i);
-                kids.push(json_value_to_tree(val, &child_path, depth + 1));
+                kids.push(json_value_to_tree(val, &child_path));
             }
             ("json_array", content_str(value), kids)
         }

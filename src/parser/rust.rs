@@ -66,17 +66,12 @@ impl RustParser {
                         if let Some(child) = node.child(ci as u32) {
                             if child.kind() == "token_tree" {
                                 if let Ok(body) = child.utf8_text(source.as_bytes()) {
-                                    // Strip surrounding delimiters: json!(...) has parens, json!{...} has braces
+                                    // Strip surrounding delimiters: json!(...), json!{...}, json![...]
                                     let stripped = body.trim();
-                                    let inner = if stripped.starts_with('(') && stripped.ends_with(')') {
-                                        &stripped[1..stripped.len()-1]
-                                    } else if stripped.starts_with('{') && stripped.ends_with('}') {
-                                        &stripped[1..stripped.len()-1]
-                                    } else if stripped.starts_with('[') && stripped.ends_with(']') {
-                                        &stripped[1..stripped.len()-1]
-                                    } else {
-                                        stripped
-                                    };
+                                    let inner = stripped
+                                        .strip_prefix(&['(', '{', '['][..])
+                                        .and_then(|s| s.strip_suffix(&[')', '}', ']'][..]))
+                                        .unwrap_or(stripped);
                                     let base_path = format!("{}.{}", path, ci);
                                     if let Some(virtual_kids) = crate::core::macro_dispatcher::try_expand_macro(macro_name, inner, &base_path) {
                                         children.extend(virtual_kids);
