@@ -182,6 +182,21 @@ pub mod mcp_server {
                             }
                         },
                         {
+                            "name": "move_node",
+                            "title": "Move node to new location",
+                            "description": "Delete a node from one location and insert it at another. Atomically moves code across files.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "source_file": { "type": "string" },
+                                    "source_path": { "type": "string" },
+                                    "target_file": { "type": "string" },
+                                    "target_path": { "type": "string" }
+                                },
+                                "required": ["source_file", "source_path", "target_path"]
+                            }
+                        },
+                        {
                             "name": "insert_node",
                             "title": "Insert new content",
                             "description": "Insert code into a parent node.",
@@ -316,6 +331,13 @@ pub mod mcp_server {
                         let np = validate_arg("node_path")?;
                         let c = validate_arg("content")?;
                         Ok(handle_preview_edit(fp, np, c))
+                    },
+                    "move_node" => {
+                        let sf = validate_arg("source_file")?;
+                        let sp = validate_arg("source_path")?;
+                        let tf = arguments.get("target_file").and_then(Value::as_str).unwrap_or(sf);
+                        let tp = validate_arg("target_path")?;
+                        Ok(handle_move_node(state, sf, sp, tf, tp))
                     },
                     "insert_node" => {
                          let fp = validate_arg("file_path")?;
@@ -821,6 +843,34 @@ pub mod mcp_server {
                 tool_success_with_pulse(format!("Content inserted.\nDiff:\n{}", diff), Some(json!({"diff": diff})), pulse)
             },
             Err(e) => tool_error(format!("IO error: {}", e)), // Corrected: escaped curly brace
+        }
+    }
+
+    fn handle_move_node(state: Arc<AppState>, source_file: &str, source_path: &str, target_file: &str, target_path: &str) -> Value {
+        match GnawTreeWriter::new(source_file) {
+            Ok(mut src_w) => {
+                let old_source = src_w.get_source().to_string();
+                let delete_op = EditOperation::Delete { node_path: source_path.to_string() };
+                if let Err(e) = src_w.edit(delete_op, false) { return tool_error(e.to_string()); }
+
+                let insert_op = EditOperation::Insert {
+                    parent_path: target_path.to_string(),
+                    position: 1,
+                    content: old_source.clone(),
+                };
+                match GnawTreeWriter::new(target_file) {
+                    Ok(mut tgt_w) => {
+                        let old_target = tgt_w.get_source().to_string();
+                        if let Err(e) = tgt_w.edit(insert_op, false) { return tool_error(e.to_string()); }
+                        let new_target = std::fs::read_to_string(target_file).unwrap_or_default();
+                        let diff = generate_diff_string(&old_target, &new_target);
+                        let pulse = generate_pulse(state, target_file, target_path);
+                        tool_success_with_pulse(format!("Moved from {} [{}] to {} [{}].\nDiff:\n{}", source_file, source_path, target_file, target_path, diff), Some(json!({"diff": diff})), pulse)
+                    },
+                    Err(e) => tool_error(format!("IO error on target: {}", e)),
+                }
+            },
+            Err(e) => tool_error(format!("IO error on source: {}", e)),
         }
     }
 
