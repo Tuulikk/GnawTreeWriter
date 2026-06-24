@@ -76,52 +76,38 @@ fn json_value_to_tree(value: &serde_json::Value, base_path: &str, depth: usize) 
         serde_json::Value::Object(map) => {
             let mut kids = Vec::new();
             for (i, (key, val)) in map.iter().enumerate() {
-                let child_path = format!("{}.v{}", base_path, i);
-                let mut child = json_value_to_tree(val, &child_path, depth + 1);
-                // Set the key name as the node's name metadata
-                child.id = format!("{}.v{}", base_path, i);
-                child.node_type = format!("json_key:{}", key);
-                child.content = key.clone();
-                kids.push(child);
-                // Add the value as a separate child
-                let val_path = format!("{}.v{}.v", base_path, i);
-                let mut val_node = json_value_to_tree(val, &val_path, depth + 1);
-                val_node.id = format!("{}.v{}.v", base_path, i);
-                kids.push(val_node);
+                // Even = key node, Odd = value node
+                let key_path = format!("{}.{}", base_path, i * 2);
+                kids.push(TreeNode {
+                    id: key_path.clone(), path: key_path,
+                    node_type: format!("json_key:{}", key), content: key.clone(),
+                    start_line: 0, end_line: 0, start_col: 0, end_col: 0,
+                    children: vec![],
+                });
+                let val_path = format!("{}.{}", base_path, i * 2 + 1);
+                kids.push(json_value_to_tree(val, &val_path, depth + 1));
             }
             ("json_object", content_str(value), kids)
         }
         serde_json::Value::Array(arr) => {
             let mut kids = Vec::new();
             for (i, val) in arr.iter().enumerate() {
-                let child_path = format!("{}.v{}", base_path, i);
+                let child_path = format!("{}.{}", base_path, i);
                 kids.push(json_value_to_tree(val, &child_path, depth + 1));
             }
             ("json_array", content_str(value), kids)
         }
-        serde_json::Value::String(s) => {
-            ("json_string", format!("\"{}\"", s), vec![])
-        }
-        serde_json::Value::Number(n) => {
-            ("json_number", n.to_string(), vec![])
-        }
-        serde_json::Value::Bool(b) => {
-            ("json_bool", b.to_string(), vec![])
-        }
-        serde_json::Value::Null => {
-            ("json_null", "null".to_string(), vec![])
-        }
+        serde_json::Value::String(s) => ("json_string", format!("\"{}\"", s), vec![]),
+        serde_json::Value::Number(n) => ("json_number", n.to_string(), vec![]),
+        serde_json::Value::Bool(b) => ("json_bool", b.to_string(), vec![]),
+        serde_json::Value::Null => ("json_null", "null".to_string(), vec![]),
     };
-
     TreeNode {
         id: base_path.to_string(),
         path: base_path.to_string(),
         node_type: node_type.to_string(),
         content,
-        start_line: 0,
-        end_line: 0,
-        start_col: 0,
-        end_col: 0,
+        start_line: 0, end_line: 0, start_col: 0, end_col: 0,
         children,
     }
 }
@@ -185,17 +171,17 @@ mod tests {
         let content = r#"{"tools": [{"name": "test"}]}"#;
         let result = JsonMacroParser.parse_macro_body(content, "0").unwrap();
         let obj = &result[0];
-        // tools key
+        // tools key at 0 (even)
         assert_eq!(obj.children[0].node_type, "json_key:tools");
-        // tools value (array)
+        // tools value at 1 (odd) - json_array
         assert_eq!(obj.children[1].node_type, "json_array");
         let arr = &obj.children[1];
         assert_eq!(arr.children.len(), 1);
-        // First array element (object)
         assert_eq!(arr.children[0].node_type, "json_object");
         let inner = &arr.children[0];
-        // name key inside inner object
+        // name key at 0
         assert_eq!(inner.children[0].node_type, "json_key:name");
+        // name value at 1
         assert_eq!(inner.children[1].node_type, "json_string");
         assert_eq!(inner.children[1].content, r#""test""#);
     }
