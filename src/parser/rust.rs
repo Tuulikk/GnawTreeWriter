@@ -54,6 +54,42 @@ impl RustParser {
             children.push(Self::build_tree(&child, source, child_path)?);
         }
 
+        // ── Macro expansion hook ─────────────────────────────────────
+        // If this is a macro_invocation, try to expand known macros
+        // (e.g. json!({...})) and inject virtual sub-trees.
+        if node.kind() == "macro_invocation" {
+            if let Some(name_node) = node.child(0) {
+                let macro_name = name_node.utf8_text(source.as_bytes()).unwrap_or("");
+                if crate::core::macro_dispatcher::dispatcher().has(macro_name) {
+                    // Find the token_tree child (usually child index 2: identifier, !, token_tree)
+                    for ci in 0..node.child_count() {
+                        if let Some(child) = node.child(ci as u32) {
+                            if child.kind() == "token_tree" {
+                                if let Ok(body) = child.utf8_text(source.as_bytes()) {
+                                    // Strip surrounding delimiters: json!(...) has parens, json!{...} has braces
+                                    let stripped = body.trim();
+                                    let inner = if stripped.starts_with('(') && stripped.ends_with(')') {
+                                        &stripped[1..stripped.len()-1]
+                                    } else if stripped.starts_with('{') && stripped.ends_with('}') {
+                                        &stripped[1..stripped.len()-1]
+                                    } else if stripped.starts_with('[') && stripped.ends_with(']') {
+                                        &stripped[1..stripped.len()-1]
+                                    } else {
+                                        stripped
+                                    };
+                                    let base_path = format!("{}.{}", path, ci);
+                                    if let Some(virtual_kids) = crate::core::macro_dispatcher::try_expand_macro(macro_name, inner, &base_path) {
+                                        children.extend(virtual_kids);
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let id = path.clone();
 
         Ok(TreeNode {

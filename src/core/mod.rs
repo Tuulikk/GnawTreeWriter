@@ -25,6 +25,7 @@ pub mod restoration_engine;
 pub mod scaffold;
 pub mod tag_manager;
 pub mod label_manager;
+pub mod macro_dispatcher;
 pub mod transaction_log;
 pub mod undo_redo;
 pub mod visualizer;
