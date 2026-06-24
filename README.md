@@ -2,6 +2,14 @@
 
 **AI-native tree-based code editor** - Edit code files based on AST structure levels with surgical precision, avoiding the common pitfalls of LLM-generated code.
 
+## 🚀 Version 0.9.5: Move, MacroDispatcher, Candle 0.9
+
+This release brings three major improvements:
+
+- **`move` command**: Atomically delete a node and reinsert it at a new location. Works cross-file. `gnawtreewriter move <src_file> <src_path> [tgt_file] <tgt_path>`. MCP: `move_node`.
+- **MacroDispatcher**: Parses `json!()` macro bodies with a JSON parser, injecting 2600+ virtual AST nodes. Lays foundation for other macro-aware parsing (SQL, TOML, etc.).
+- **Candle 0.9.2**: Fixes ModernBERT rope dimension mismatch. `sense`, `semantic_edit`, `semantic_insert` now work reliably.
+
 ## 🚀 Version 0.9.1: The Surgical Update
 
 We've just released v0.9.1, a major refinement that brings **surgical inline precision** to your editing workflow. This update bridges the gap between high-level structural editing and the need for microscopic changes within a single line.
