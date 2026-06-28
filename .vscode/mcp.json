@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "gnawtreewriter": {
+      "type": "stdio",
+      "command": "gnawtreewriter",
+      "args": ["mcp", "stdio"]
+    }
+  }
+}

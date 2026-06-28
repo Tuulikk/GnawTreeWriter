@@ -19,6 +19,12 @@ mcp_test.log
 !package.json
 !*batch.json
 !extensions/gemini/gemini-extension.json
+!.vscode/mcp.json
 
 # GnawGuard Auto-ignore
 GnawData/
+
+# Local Dokubase database (sqlite) — never commit
+.dokubase.db
+.dokubase.db-shm
+.dokubase.db-wal

@@ -69,21 +69,59 @@ Det gör det mycket lättare att binda editor-knappar eller shell-alias.
 ---
 
 ## VS Code (GUI)
-Jag har redan lagt in en `tasks.json` som gör det enkelt att köra server och tester via GUI.
+Det finns två sätt att använda GnawTreeWriter i VS Code: **tasks** (manuella) och
+**MCP-integration** (agent-driven via Copilot Chat). Båda är konfigurerade i repot.
 
-- Fil: `.vscode/tasks.json`
-- Så kör du en task:
-  1. Öppna Command Palette (Ctrl+Shift+P).
-  2. Skriv `Tasks: Run Task` → välj t.ex. `MCP: Start server` eller `MCP: Test (list/init/analyze)`.
-
-Exempel (du kan titta på den faktiska filen i repo):
-```GnawTreeWriter/.vscode/tasks.json#L1-40
-# Öppna filen i din editor för att se alla tasks (start/stop/test/client).
-```
+### 1. Tasks (manuell körning)
+Fil: `.vscode/tasks.json`
+1. Öppna Command Palette (Ctrl+Shift+P).
+2. Skriv `Tasks: Run Task` → välj t.ex. `MCP: Start server` eller `MCP: Test (list/init/analyze)`.
 
 Tips:
 - Använd `MCP: Start server (foreground)` vid debugging (se loggen direkt).
-- `MCP: Test` kör en komplett runda och stoppar servern automatiskt — perfekt att använda i CI-lokalt.
+- `MCP: Test` kör en komplett runda och stoppar servern automatiskt — perfekt att använda i CI lokalt.
+
+### 2. MCP-integration (Copilot Chat → AST-edits) ⭐ rekommenderas
+Fil: `.vscode/mcp.json`
+Detta låter Copilot-agenten i chat direkt anropa GnawTreeWriter som AST-editor.
+Ingen port, ingen daemon — stdio per Copilot-session.
+
+```json
+{
+  "servers": {
+    "gnawtreewriter": {
+      "type": "stdio",
+      "command": "gnawtreewriter",
+      "args": ["mcp", "stdio"]
+    }
+  }
+}
+```
+
+Aktivera:
+1. `Developer: Reload Window` (Ctrl+Shift+P).
+2. Godkänn toast "MCP server gnawtreewriter wants to run".
+3. Verifiera: Command Palette → `MCP: List Servers` — `gnawtreewriter` ska vara
+   **Connected** med 8+ tools (analyze, list_nodes, edit_node, semantic_edit, ...).
+4. Be Copilot: *"Byt namn på funktionen X i src/cli.rs"* — agenten använder
+   `mcp_gnawtreewrite_edit_node`/`semantic_edit` istället för text-replace.
+
+Förutsättning: `gnawtreewriter` i PATH (t.ex. `cargo install --path .`).
+
+### Agent-vägledning (så Copilot faktiskt väljer GnawTreeWriter)
+Bara att MCP finns räcker inte — agenten måste veta *när* och *varför* den ska
+välja AST framför text-replace. Tre filer etablerar denna vägledning:
+
+| Fil | Scope | Roll |
+|---|---|---|
+| `.github/copilot-instructions.md` | detta workspace | Always-on regel för Copilot |
+| `.github/instructions/gnawtreewriter-edit.instructions.md` | detta workspace | Triggar på kod-filtyper via `applyTo` |
+| `AGENTS.md` | detta workspace | Samma regel för CLI-agenter (Opencode, Claude Code, ...) |
+
+För att samma regel ska gälla i **alla projekt**, lägg motsvarande instruction i
+`~/.config/Code/User/prompts/gnawtreewriter.instructions.md` och registrera
+MCP-servern i `~/.config/Code/User/mcp.json` (eller
+`settings.json` → `github.copilot.chat.mcpServers`).
 
 ---
 

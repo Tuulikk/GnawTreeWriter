@@ -6,6 +6,42 @@ Version: 2.0 | Last Updated: 2025-12-27
 
 ---
 
+## ⚡ Quick Rule for AI Agents: Use GnawTreeWriter to edit this repo
+
+**Default to GnawTreeWriter for code edits. Text-replace tools (`sed`, `replace`, `write_file`) are fallback only.**
+
+This is the GnawTreeWriter repository. The tool is available to you — use it to
+edit the codebase, the way it is meant to be used.
+
+### Decision rule
+| Situation | Use |
+|---|---|
+| Editing a function, struct, class, or named code block | **GnawTreeWriter** (AST edit) |
+| Inserting a new node at a structural position | **GnawTreeWriter** (insert) |
+| Renaming / refactoring within a file | **GnawTreeWriter** |
+| Reading a specific block without dumping the file | **GnawTreeWriter** (read_node / skeleton) |
+| Multi-file coordinated change | **GnawTreeWriter** (batch) |
+| Editing prose, README, CHANGELOG, comments-only | text tools are fine |
+| File type not in the supported list | text tools are fine |
+| AST edit failed twice with corrected input | fall back to text tools |
+
+### How to reach the tool
+- **In VSCode / Copilot Chat**: MCP tools prefixed `mcp_gnawtreewrite_*`
+  (`edit_node`, `semantic_edit`, `insert_node`, `batch`, `preview_edit`, ...).
+- **In a terminal / CLI agent**: the `gnawtreewriter` binary
+  (`gnawtreewriter edit <file> <path> -`, `gnawtreewriter batch <spec.json>`, ...).
+
+### Why this matters
+GnawTreeWriter validates syntax **before** writing and targets the smallest
+possible node. Text-replace can silently corrupt syntax on multi-line edits and
+match unintended locations. When you skip the AST, you lose the safety net this
+project exists to provide.
+
+See `.github/copilot-instructions.md` and
+`.github/instructions/gnawtreewriter-edit.instructions.md` for the full policy.
+
+---
+
 ## 🎯 Purpose
 
 This document explains how AI agents can contribute to the GnawTreeWriter project by using the tool to develop itself—a practice known as "dogfooding." By using GnawTreeWriter to edit its own codebase, AI agents help validate functionality, discover edge cases, and improve the tool's design.
