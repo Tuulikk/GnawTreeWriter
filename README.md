@@ -118,22 +118,30 @@ To solve the problem of "Agent Amnesia," we built **ALF**. It's a structural jou
 GnawTreeWriter ships with built-in agent guidance so AI assistants **actively
 choose AST edits over text-replace** — not just as one option among many.
 
-**One-line setup** in any VS Code workspace with Copilot: install the binary,
-then open the repo. These files do the rest:
+**Best setup — VSCode Extension (works in all projects):**
+
+Install the extension once, and GnawTreeWriter MCP is available in every
+VSCode window automatically. Uses the same `mcpServerDefinitionProviders` API as
+Gnaw Checkpoint and Gnaw Dokubase.
+
+```bash
+# Sideload from the repo:
+cp -r extensions/vscode ~/.vscode/extensions/gnaw-software.gnawtreewriter-mcp
+# Then Reload Window (Ctrl+Shift+P)
+```
 
 | File | Role |
 |---|---|
-| `.vscode/mcp.json` | Registers `gnawtreewriter` as a stdio MCP server (no port, no daemon) |
+| `extensions/vscode/package.json` | Extension manifest with `mcpServerDefinitionProviders` |
+| `extensions/vscode/src/extension.js` | Registers `gnawtreewriter mcp stdio` globally |
 | `.github/copilot-instructions.md` | Always-on policy: AST-first, text-replace as fallback |
 | `.github/instructions/gnawtreewriter-edit.instructions.md` | File-scoped policy (triggers on `.py .rs .ts .go .cpp ...`) |
 | `AGENTS.md` | Same rule for CLI agents (Opencode, Claude Code, Gemini CLI) |
 
 **Prerequisite:** `gnawtreewriter` in PATH (`cargo install --path .`).
 
-**All projects, not just this one:** copy the instruction to
-`~/.config/Code/User/prompts/gnawtreewriter.instructions.md` and register the
-server in `~/.config/Code/User/mcp.json`. See
-[docs/EDITOR_INTEGRATION.md](docs/EDITOR_INTEGRATION.md) for the full walkthrough.
+See [docs/EDITOR_INTEGRATION.md](docs/EDITOR_INTEGRATION.md) for full walkthrough
+including the workspace `.vscode/mcp.json` fallback method.
 
 The policy in plain English: *for code in AST-supported files, use
 `mcp_gnawtreewrite_edit_node` / `semantic_edit` first; fall back to

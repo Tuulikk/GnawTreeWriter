@@ -69,8 +69,8 @@ Det gör det mycket lättare att binda editor-knappar eller shell-alias.
 ---
 
 ## VS Code (GUI)
-Det finns två sätt att använda GnawTreeWriter i VS Code: **tasks** (manuella) och
-**MCP-integration** (agent-driven via Copilot Chat). Båda är konfigurerade i repot.
+Det finns flera sätt att använda GnawTreeWriter i VS Code, från enklast till
+mest integrerat.
 
 ### 1. Tasks (manuell körning)
 Fil: `.vscode/tasks.json`
@@ -79,12 +79,48 @@ Fil: `.vscode/tasks.json`
 
 Tips:
 - Använd `MCP: Start server (foreground)` vid debugging (se loggen direkt).
-- `MCP: Test` kör en komplett runda och stoppar servern automatiskt — perfekt att använda i CI lokalt.
+- `MCP: Test` kör en komplett runda och stoppar servern automatiskt.
 
-### 2. MCP-integration (Copilot Chat → AST-edits) ⭐ rekommenderas
+### 2. VSCode Extension (rekommenderas — alla projekt) ⭐
+Den bästa metoden. Ett äkta VSCode-tillägg som använder
+`mcpServerDefinitionProviders`-API:et (samma mönster som Gnaw Checkpoint och
+Gnaw Dokubase). Tillägget registrerar GnawTreeWriter som MCP-server i **alla**
+VSCode-fönster — ingen manuell konfiguration av mcp.json eller settings.json.
+
+**Installera:**
+```bash
+# Extensionen finns i repot: extensions/vscode/
+# Kopiera till VSCodes extensions-katalog:
+cp -r extensions/vscode ~/.vscode/extensions/gnaw-software.gnawtreewriter-mcp
+
+# Eller paketera med vsce och installera:
+cd extensions/vscode
+npm install -g @vscode/vsce
+vsce package
+code --install-extension gnawtreewriter-mcp-0.1.0.vsix
+```
+
+**Aktivera:**
+1. `Developer: Reload Window` (Ctrl+Shift+P).
+2. Verifiera: Command Palette → `MCP: List Servers` → `GnawTreeWriter` = **Connected**.
+
+**Vad tillägget gör:**
+- Startar `gnawtreewriter mcp stdio` som bakgrundsprocess
+- Exponerar alla AST-verktyg för Copilot (analyze, edit_node, semantic_edit, batch, undo...)
+- Fungerar i alla workspaces — inga `.vscode/mcp.json` eller `settings.json`-poster behövs
+- `gnawtreewriter.binaryPath` inställning för custom binary-sökväg (lämna tom för auto-detect)
+
+**Konfiguration:**
+| Inställning | Syfte |
+|---|---|
+| `gnawtreewriter.binaryPath` | Custom sökväg till `gnawtreewriter` binary. Stödjer `${userHome}` och `${env:VAR}`. |
+
+Auto-detect letar i `~/.cargo/bin/`, `~/.local/bin/`, PATH.
+
+### 3. Workspace MCP-registrering (per repo)
 Fil: `.vscode/mcp.json`
-Detta låter Copilot-agenten i chat direkt anropa GnawTreeWriter som AST-editor.
-Ingen port, ingen daemon — stdio per Copilot-session.
+Låter ett enskilt repo registrera GnawTreeWriter via workspace-config. Fungerar
+men kräver godkännande vid första öppning och gäller bara i detta repo.
 
 ```json
 {
@@ -101,27 +137,20 @@ Ingen port, ingen daemon — stdio per Copilot-session.
 Aktivera:
 1. `Developer: Reload Window` (Ctrl+Shift+P).
 2. Godkänn toast "MCP server gnawtreewriter wants to run".
-3. Verifiera: Command Palette → `MCP: List Servers` — `gnawtreewriter` ska vara
-   **Connected** med 8+ tools (analyze, list_nodes, edit_node, semantic_edit, ...).
-4. Be Copilot: *"Byt namn på funktionen X i src/cli.rs"* — agenten använder
-   `mcp_gnawtreewrite_edit_node`/`semantic_edit` istället för text-replace.
-
-Förutsättning: `gnawtreewriter` i PATH (t.ex. `cargo install --path .`).
+3. Verifiera: Command Palette → `MCP: List Servers` — `gnawtreewriter` = Connected.
 
 ### Agent-vägledning (så Copilot faktiskt väljer GnawTreeWriter)
 Bara att MCP finns räcker inte — agenten måste veta *när* och *varför* den ska
-välja AST framför text-replace. Tre filer etablerar denna vägledning:
+välja AST framför text-replace. Fyra filer etablerar denna vägledning:
 
 | Fil | Scope | Roll |
 |---|---|---|
 | `.github/copilot-instructions.md` | detta workspace | Always-on regel för Copilot |
 | `.github/instructions/gnawtreewriter-edit.instructions.md` | detta workspace | Triggar på kod-filtyper via `applyTo` |
-| `AGENTS.md` | detta workspace | Samma regel för CLI-agenter (Opencode, Claude Code, ...) |
+| `AGENTS.md` | detta workspace | Samma regel för CLI-agenter |
+| `~/.config/Code/User/prompts/gnawtreewriter.instructions.md` | alla projekt | User-level instruction (följer med settings sync) |
 
-För att samma regel ska gälla i **alla projekt**, lägg motsvarande instruction i
-`~/.config/Code/User/prompts/gnawtreewriter.instructions.md` och registrera
-MCP-servern i `~/.config/Code/User/mcp.json` (eller
-`settings.json` → `github.copilot.chat.mcpServers`).
+Förutsättning: `gnawtreewriter` i PATH (t.ex. `cargo install --path .`).
 
 ---
 
