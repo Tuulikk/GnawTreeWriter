@@ -117,27 +117,12 @@ code --install-extension gnawtreewriter-mcp-0.1.0.vsix
 
 Auto-detect letar i `~/.cargo/bin/`, `~/.local/bin/`, PATH.
 
-### 3. Workspace MCP-registrering (per repo)
-Fil: `.vscode/mcp.json`
-Låter ett enskilt repo registrera GnawTreeWriter via workspace-config. Fungerar
-men kräver godkännande vid första öppning och gäller bara i detta repo.
+### 3. Workspace MCP-registrering (per repo) — deprecated
+Redan ersatt av VSCode-tillägget ovan. `.vscode/mcp.json` har tagits bort från
+repot för att undvika dubbla inlägg i "Configure Tools"-vyn.
 
-```json
-{
-  "servers": {
-    "gnawtreewriter": {
-      "type": "stdio",
-      "command": "gnawtreewriter",
-      "args": ["mcp", "stdio"]
-    }
-  }
-}
-```
-
-Aktivera:
-1. `Developer: Reload Window` (Ctrl+Shift+P).
-2. Godkänn toast "MCP server gnawtreewriter wants to run".
-3. Verifiera: Command Palette → `MCP: List Servers` — `gnawtreewriter` = Connected.
+För befintliga installationer: ta bort user-level `mcp.json`-posterna under
+`~/.config/Code/User/` för att undvika konflikter.
 
 ### Agent-vägledning (så Copilot faktiskt väljer GnawTreeWriter)
 Bara att MCP finns räcker inte — agenten måste veta *när* och *varför* den ska

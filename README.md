@@ -140,8 +140,7 @@ cp -r extensions/vscode ~/.vscode/extensions/gnaw-software.gnawtreewriter-mcp
 
 **Prerequisite:** `gnawtreewriter` in PATH (`cargo install --path .`).
 
-See [docs/EDITOR_INTEGRATION.md](docs/EDITOR_INTEGRATION.md) for full walkthrough
-including the workspace `.vscode/mcp.json` fallback method.
+See [docs/EDITOR_INTEGRATION.md](docs/EDITOR_INTEGRATION.md) for full walkthrough.
 
 The policy in plain English: *for code in AST-supported files, use
 `mcp_gnawtreewrite_edit_node` / `semantic_edit` first; fall back to
