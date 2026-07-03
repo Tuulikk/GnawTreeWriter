@@ -4,11 +4,11 @@ This repository **is** GnawTreeWriter — a tree-based (AST) code editor. The to
 is available to you in this workspace as MCP tools prefixed `mcp_gnawtreewrite_*`.
 Use it; do not ignore it.
 
-## Editing policy: AST-first, text-replace as fallback
+## Mandatory editing policy
 
 For code changes in this repository, **default to GnawTreeWriter** for editing.
-Use text-based tools (`replace_string_in_file`, `insert_edit_into_file`) only as
-fallback, when one of these is true:
+Reach for text-based tools (`replace_string_in_file`, `insert_edit_into_file`)
+only as **fallback** when one of these is true:
 
 - The file type is not AST-parseable (see list below)
 - The change is purely prose, comments-only, or in a non-code file (README, CHANGELOG, docs)
