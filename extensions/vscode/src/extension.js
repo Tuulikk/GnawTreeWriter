@@ -6,7 +6,7 @@ const path = require("path");
 const fs = require("fs");
 
 // ── Binary resolution ─────────────────────────────────────────────────
-// Ordning: (1) config → (2) ~/.cargo/bin/ → (3) PATH (fallback)
+// Ordning: (1) config → (2) ~/.cargo/bin/ → (3) PATH $PATH → (4) which
 
 function findBinary() {
   const config = vscode.workspace.getConfiguration("gnawtreewriter");
@@ -35,12 +35,27 @@ function findBinary() {
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
+      console.log(`GnawTreeWriter MCP: found at ${candidate}`);
       return candidate;
     }
   }
 
-  // Final fallback: let Node.js resolve from PATH
-  return "gnawtreewriter";
+  // Scan PATH directories (extension host may have different PATH than shell)
+  const pathDirs = (process.env.PATH || "").split(":");
+  for (const dir of pathDirs) {
+    const candidate = path.join(dir, "gnawtreewriter");
+    try {
+      if (fs.existsSync(candidate)) {
+        console.log(`GnawTreeWriter MCP: found in PATH at ${candidate}`);
+        return candidate;
+      }
+    } catch (e) {
+      // skip invalid paths
+    }
+  }
+
+  // Final fallback — warn user
+  return null;
 }
 
 // ── MCP Provider ──────────────────────────────────────────────────────
@@ -63,16 +78,16 @@ class GnawTreeWriterMcpProvider {
   provideMcpServerDefinitions(token) {
     const bin = findBinary();
 
-    // Warn once if the resolved binary doesn't exist (PATH fallback may still work)
-    if (!fs.existsSync(bin)) {
+    if (!bin) {
       if (!this._warned) {
         this._warned = true;
         vscode.window.showWarningMessage(
-          "GnawTreeWriter: binary not found on disk. Install with: " +
+          "GnawTreeWriter: binary not found. Install with: " +
           "`cargo install --path /path/to/GnawTreeWriter` or set " +
           "`gnawtreewriter.binaryPath` in settings."
         );
       }
+      return [];
     }
 
     const label = "GnawTreeWriter";
@@ -82,6 +97,13 @@ class GnawTreeWriterMcpProvider {
       ["mcp", "stdio"],
     );
 
+    // Set cwd — VSCode may need it for PATH-based resolution (Checkpoint pattern)
+    const folders = vscode.workspace.workspaceFolders;
+    if (folders && folders.length > 0) {
+      def.cwd = folders[0].uri;
+    }
+
+    console.log(`GnawTreeWriter MCP: definition provided — bin=${bin}, cwd=${def.cwd ? def.cwd.fsPath : '(none)'}`);
     return [def];
   }
 }
@@ -101,6 +123,9 @@ function activate(context) {
       provider,
     ),
   );
+
+  // Fire change event after registration so VSCode re-queries immediately
+  provider._changeEmitter.fire();
 
   console.log("GnawTreeWriter MCP provider activated");
 }
