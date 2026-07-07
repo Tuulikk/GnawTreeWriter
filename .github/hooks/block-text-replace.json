@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "command": "python3",
+        "args": ["scripts/hooks/block-text-replace.py"],
+        "timeout": 10,
+        "description": "Block text-replace tools on AST-supported files — force GnawTreeWriter usage"
+      }
+    ]
+  }
+}
