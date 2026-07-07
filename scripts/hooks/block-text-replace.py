@@ -19,11 +19,24 @@ import sys
 import os
 
 # File extensions supported by GnawTreeWriter
+# Källa: README.md (26+ programming languages)
 AST_EXTENSIONS = {
-    ".py", ".rs", ".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hxx",
-    ".h++", ".java", ".zig", ".ts", ".tsx", ".js", ".jsx", ".sh",
-    ".bash", ".php", ".html", ".qml", ".go", ".css", ".yaml", ".yml",
-    ".toml", ".xml", ".md", ".markdown",
+    # Python, Rust, C/C++
+    ".py", ".rs", ".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hxx", ".h++",
+    # Java, Kotlin, C#, Dart, Swift, Zig
+    ".java", ".kt", ".kts", ".cs", ".dart", ".swift", ".zig",
+    # TypeScript, JavaScript
+    ".ts", ".tsx", ".mts", ".cts", ".d.ts", ".js", ".jsx", ".cjs", ".mjs",
+    # Shell
+    ".sh", ".bash",
+    # PHP, Go, SQL
+    ".php", ".go", ".sql",
+    # Web
+    ".html", ".css", ".svelte", ".vue",
+    # QML, YAML, TOML, XML, JSON
+    ".qml", ".yaml", ".yml", ".toml", ".xml", ".json",
+    # Markdown
+    ".md", ".markdown",
 }
 
 # Tools to block (text-replace tools that GnawTreeWriter should replace)
