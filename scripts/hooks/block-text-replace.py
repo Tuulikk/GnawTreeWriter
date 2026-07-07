@@ -39,16 +39,37 @@ AST_EXTENSIONS = {
     ".md", ".markdown",
 }
 
-# Tools to block (text-replace tools that GnawTreeWriter should replace)
+# Tools to block (VSCode edit tools that GnawTreeWriter should replace)
 BLOCKED_TOOLS = {
     "replace_string_in_file",
     "insert_edit_into_file",
 }
 
-# Mapping from blocked tool to suggested GnawTreeWriter alternative
+# Terminal tools to inspect for text-replace commands
+SHELL_TOOLS = {
+    "run_in_terminal",
+    "send_to_terminal",
+    "run_in_shell",
+}
+
+# Command patterns that indicate text-replace operations (case-insensitive)
+# Agent might run these via terminal to bypass the VSCode tool blocks
+BLOCKED_COMMAND_PATTERNS = [
+    r'\bsed\s+-i\b',           # sed -i (in-place edit)
+    r'\bperl\s+-pi\b',         # perl -pi (in-place perl)
+    r'\bawk\s+.*\bfprintf\b',  # awk with fprintf (file write)
+    r'\bcat\s+.*>\s*\S+',      # cat redirect to file
+    r'\bprintf\b.*>\s*\S+',    # printf redirect to file
+    r'\becho\b.*>\s*\S+',      # echo redirect to file
+    r'\btee\b\s+\S+',          # tee to file
+]
+
+# Mapping from blocked tool/shell to suggested GnawTreeWriter alternative
 TOOL_SUGGESTIONS = {
     "replace_string_in_file": "mcp_gnawtreewrite_edit_node or mcp_gnawtreewrite_semantic_edit",
     "insert_edit_into_file": "mcp_gnawtreewrite_insert_node or mcp_gnawtreewrite_semantic_insert",
+    "run_in_terminal": "mcp_gnawtreewrite_edit_node or mcp_gnawtreewrite_semantic_edit",
+    "send_to_terminal": "mcp_gnawtreewrite_edit_node or mcp_gnawtreewrite_semantic_edit",
 }
 
 
@@ -76,6 +97,48 @@ def get_file_path(input_data):
     return None
 
 
+def find_ast_files_in_command(command):
+    """
+    Scan a command string for file arguments with AST-supported extensions.
+    Returns the first matching file path, or None.
+    """
+    import re
+    if not command or not isinstance(command, str):
+        return None
+
+    # Split into tokens and check each one
+    tokens = command.split()
+    for token in tokens:
+        # Strip quotes and common flags
+        clean = token.strip("'\"")
+        # Skip flags
+        if clean.startswith("-"):
+            continue
+        # Skip shell operators
+        if clean in (">", ">>", "<", "|", "&&", "||", ";"):
+            continue
+        # Check if it looks like a file path with an AST extension
+        _, ext = os.path.splitext(clean)
+        if ext.lower() in AST_EXTENSIONS:
+            return clean
+
+    return None
+
+
+def has_blocked_command_pattern(command):
+    """
+    Check if a command contains a blocked text-replace pattern.
+    """
+    import re
+    if not command or not isinstance(command, str):
+        return False
+    cmd_lower = command.lower()
+    for pattern in BLOCKED_COMMAND_PATTERNS:
+        if re.search(pattern, cmd_lower):
+            return True
+    return False
+
+
 def is_ast_supported(file_path):
     """Check if the file extension is supported by GnawTreeWriter."""
     if not file_path or not isinstance(file_path, str):
@@ -89,7 +152,33 @@ def handle_pre_tool_use(input_data):
     tool_name = input_data.get("toolName") or input_data.get("tool", {}).get("name", "")
     arguments = input_data.get("arguments") or input_data.get("tool", {}).get("arguments", {})
 
-    # Only block text-replace tools
+    # ── Block shell text-replace commands ────────────────────────────
+    if tool_name in SHELL_TOOLS and isinstance(arguments, dict):
+        command = arguments.get("command") or arguments.get("text") or ""
+        if command and has_blocked_command_pattern(command):
+            ast_file = find_ast_files_in_command(command)
+            if ast_file:
+                return {
+                    "hookSpecificOutput": {
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": (
+                            f"Terminal text-replace command blocked for {ast_file}. "
+                            f"GnawTreeWriter supports this file type. "
+                            f"Use mcp_gnawtreewrite_edit_node instead."
+                        ),
+                    },
+                    "systemMessage": (
+                        f"CRITICAL: You attempted to use a terminal text-replace "
+                        f"command ({command[:80]}...) on {ast_file}. "
+                        f"This was BLOCKED. "
+                        f"Use mcp_gnawtreewrite_edit_node or "
+                        f"mcp_gnawtreewrite_semantic_edit instead."
+                    ),
+                }
+        # Not a blocked shell command — allow
+        return {"hookSpecificOutput": {"permissionDecision": "allow"}}
+
+    # ── Block VSCode text-replace tools ──────────────────────────────
     if tool_name not in BLOCKED_TOOLS:
         return {"hookSpecificOutput": {"permissionDecision": "allow"}}
 
