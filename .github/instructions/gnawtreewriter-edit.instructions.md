@@ -16,10 +16,22 @@ AST, so changes are surgical and syntax-validated before the file is written.
 - Reading a specific block without printing the whole file (token-efficient)
 - Multi-step changes where you want preview + atomic application via `batch`
 
-## When text-replace is acceptable (fallback only)
+## When text-replace is acceptable (blocked on AST files — do not use)
+Text-replace tools (`replace_string_in_file`, `write_file`, `create_file`,
+`insert_edit_into_file`) are BLOCKED by hooks on AST-supported files.
+
+If a GnawTreeWriter tool fails:
+1. Read the error carefully — it tells you what went wrong
+2. Try a different approach: `edit_node` with explicit path instead of
+   `semantic_edit`, or `insert_node` instead of `semantic_insert`
+3. If the AI-powered tools (`semantic_edit`, `semantic_insert`) fail,
+   use the path-based tools (`edit_node`, `insert_node`, `read_node`)
+   which don't require AI model inference
+4. **Do NOT fall back to text-replace** — it is blocked and will fail
+
+Text-replace is ONLY acceptable when:
 - The change is to prose, comments only, or non-code content
-- The file type is **not** in the supported list (`.py .rs .ts .js .go .cpp .java .php .qml .yaml ...`)
-- An AST operation has failed and you have retried once with corrected input
+- The file type is **not** in the supported list
 
 ## Mandatory workflow for AST edits
 1. **Verify the target** — if unsure of the node path, call `mcp_gnawtreewrite_list_nodes` or `mcp_gnawtreewrite_search_nodes` first.
@@ -47,10 +59,11 @@ break syntax invisibly (e.g., unbalanced braces after a partial replace).
 `mcp_gnawtreewrite_edit_node` validates the AST before write, so a malformed
 edit is rejected rather than committed.
 
-## Don't loop on failure
+## Don't loop on failure — try a different approach
 If an AST edit fails:
 1. Read the error (often a wrong node path or malformed code).
 2. Verify the path with `list_nodes` or `search_nodes`.
-3. Retry once with corrected input.
-4. If it still fails, fall back to `replace_string_in_file` and note that you did.
+3. Try a different tool: if `semantic_edit` fails, use `edit_node` with
+   explicit path; if `semantic_insert` fails, use `insert_node`.
+4. **Do NOT fall back to `replace_string_in_file`** — it is blocked.
 Do **not** retry the same call more than twice.

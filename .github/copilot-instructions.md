@@ -6,13 +6,16 @@ Use it; do not ignore it.
 
 ## Mandatory editing policy
 
-For code changes in this repository, **default to GnawTreeWriter** for editing.
-Reach for text-based tools (`replace_string_in_file`, `insert_edit_into_file`)
-only as **fallback** when one of these is true:
+For code changes in this repository, **you MUST use GnawTreeWriter** for editing.
+Text-based tools (`replace_string_in_file`, `insert_edit_into_file`,
+`write_file`, `create_file`) are BLOCKED by hooks on AST-supported files.
+If one GnawTreeWriter tool fails, try another approach — use `edit_node`
+with explicit path instead of `semantic_edit`, or `insert_node` instead of
+`semantic_insert`.
 
+Text-based tools are acceptable ONLY when:
 - The file type is not AST-parseable (see list below)
 - The change is purely prose, comments-only, or in a non-code file (README, CHANGELOG, docs)
-- An AST operation has failed twice with corrected input and you must recover
 
 ### Why this rule exists
 GnawTreeWriter validates syntax **before** writing, targets the smallest possible

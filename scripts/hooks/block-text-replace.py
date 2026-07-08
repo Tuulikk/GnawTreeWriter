@@ -39,10 +39,12 @@ AST_EXTENSIONS = {
     ".md", ".markdown",
 }
 
-# Tools to block (VSCode edit tools that GnawTreeWriter should replace)
+# Tools to block (VSCode edit/write tools that GnawTreeWriter should replace)
 BLOCKED_TOOLS = {
     "replace_string_in_file",
     "insert_edit_into_file",
+    "write_file",
+    "create_file",
 }
 
 # Terminal tools to inspect for text-replace commands
@@ -68,6 +70,8 @@ BLOCKED_COMMAND_PATTERNS = [
 TOOL_SUGGESTIONS = {
     "replace_string_in_file": "mcp_gnawtreewrite_edit_node or mcp_gnawtreewrite_semantic_edit",
     "insert_edit_into_file": "mcp_gnawtreewrite_insert_node or mcp_gnawtreewrite_semantic_insert",
+    "write_file": "mcp_gnawtreewrite_insert_node (to insert new code) or mcp_gnawtreewrite_edit_node (to modify existing)",
+    "create_file": "mcp_gnawtreewrite_insert_node (to add new content) — GnawTreeWriter can create new files via insert",
     "run_in_terminal": "mcp_gnawtreewrite_edit_node or mcp_gnawtreewrite_semantic_edit",
     "send_to_terminal": "mcp_gnawtreewrite_edit_node or mcp_gnawtreewrite_semantic_edit",
 }
