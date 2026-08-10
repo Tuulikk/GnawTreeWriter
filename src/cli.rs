@@ -1828,7 +1828,7 @@ Use --no-preview to write batch file"
         #[cfg(not(feature = "modernbert"))]
         {
             let _ = (file_path, query, content, source_file, narrative, force);
-            Self::err_modernbert_disabled()?;
+            return Self::err_modernbert_disabled();
         }
     }
 
