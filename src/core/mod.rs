@@ -47,6 +47,9 @@ pub struct GnawTreeWriter {
     source_code: String,
     tree: TreeNode,
     transaction_log: TransactionLog,
+    /// Senast skapade backup-sökväg (spec-gtw-backup-id.md, Väg A).
+    /// Sätts i create_backup efter lyckad write. None om ingen edit skett.
+    last_backup: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,10 +92,17 @@ impl GnawTreeWriter {
             source_code,
             tree,
             transaction_log,
+            last_backup: None,
         })
     }
 
-    pub(crate) fn create_backup(&self) -> Result<PathBuf> {
+    /// Senast skapade backup-sökväg (None om ingen edit skett).
+    /// Exponerar backup-id:t som motor2-gtw behöver (spec-gtw-backup-id.md).
+    pub fn last_backup_path(&self) -> Option<PathBuf> {
+        self.last_backup.clone()
+    }
+
+    pub(crate) fn create_backup(&mut self) -> Result<PathBuf> {
         let file_name = Path::new(&self.file_path)
             .file_name()
             .and_then(|n| n.to_str())
@@ -118,6 +128,10 @@ impl GnawTreeWriter {
 
         fs::write(&backup_path, serde_json::to_string_pretty(&backup_data)?)
             .context(format!("Failed to write backup: {}", backup_path.display()))?;
+
+        // Spec-gtw-backup-id.md (Väg A): spara sökvägen så last_backup_path()
+        // kan exponera backup-id:t för motor2-gtw (work_unit → gtw_backup).
+        self.last_backup = Some(backup_path.clone());
 
         Ok(backup_path)
     }

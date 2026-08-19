@@ -228,7 +228,7 @@ impl Batch {
             }
 
             // Ensure project root and writer
-            let writer = GnawTreeWriter::new(&fd.file)
+            let mut writer = GnawTreeWriter::new(&fd.file)
                 .with_context(|| format!("Failed to open file for backup: {}", fd.file))?;
             // create backup
             let backup_path = writer.create_backup().with_context(|| {

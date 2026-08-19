@@ -1683,7 +1683,7 @@ Use --no-preview to write batch file"
         }
         #[cfg(not(feature = "modernbert"))]
         {
-            let _ = (query, file_path, deep);
+            let _ = (query, file_path, deep, auto_index);
             Self::err_modernbert_disabled()?;
         }
         Ok(())
@@ -3111,7 +3111,7 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
                 println!("Validation failed: The proposed insert would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e);
                 return Ok(());
             }
-            let writer = GnawTreeWriter::new(file)?;
+            let mut writer = GnawTreeWriter::new(file)?;
             writer.create_backup()?;
             let current_dir = std::env::current_dir()?;
             let project_root = find_project_root(&current_dir);
@@ -3214,7 +3214,7 @@ Use --no-preview to actually apply the change."
         }
 
         // Apply: create backup, log transaction, write file
-        let writer = GnawTreeWriter::new(file)?;
+        let mut writer = GnawTreeWriter::new(file)?;
         writer.create_backup()?;
 
         let before_hash = crate::core::calculate_content_hash(&original);
