@@ -90,15 +90,19 @@ impl MarkdownParser {
             if let Some(caps) = header_regex.captures(line) {
                 let level = caps.get(1).unwrap().as_str().len();
                 let text = caps.get(2).unwrap().as_str();
-
-                children.push(TreeNode { start_col: 0, end_col: 0, 
+                // Kolumn-span = HELA radens text (1..len+1). Utan korrekta
+                // kolumner (0,0) använder edit_node fallback-grenen som byter
+                // hela raden och tappar "### "-prefixet — "span-överlapp" vid
+                // efterföljande list-edits (2026-08-19, roadmap.md).
+                let line_len = line.chars().count();
+                children.push(TreeNode { start_col: 1, end_col: line_len + 1,
                     id: format!("{}", children.len()),
                     path: format!("{}", children.len()),
                     node_type: format!("heading_{}", level),
                     content: text.to_string(),
                     start_line: line_num,
                     end_line: line_num,
-                    children: vec![TreeNode { start_col: 0, end_col: 0, 
+                    children: vec![TreeNode { start_col: 1, end_col: line_len + 1,
                         id: format!("{}.level", children.len()),
                         path: format!("{}.level", children.len()),
                         node_type: "level".to_string(),
@@ -186,7 +190,10 @@ impl MarkdownParser {
                 let mut item_nodes = Vec::new();
                 for (idx, item) in list_items.iter().enumerate() {
                     let parsed_inline = self.parse_inline(item);
-                    let item_children = vec![TreeNode { start_col: 0, end_col: 0, 
+                    // Kolumn-span = hela radens text (1..len+1) — annars används
+                    // fallback-grenen som tappar "- "/"1. "-prefixet vid edit.
+                    let item_line = lines.get(start_line + idx).map(|l| l.chars().count()).unwrap_or(item.chars().count());
+                    let item_children = vec![TreeNode { start_col: 1, end_col: item_line + 1,
                         id: format!("{}.{}.text", children.len(), idx),
                         path: format!("{}.{}.text", children.len(), idx),
                         node_type: "text".to_string(),
@@ -196,18 +203,18 @@ impl MarkdownParser {
                         children: parsed_inline,
                     }];
 
-                    item_nodes.push(TreeNode { start_col: 0, end_col: 0, 
+                    item_nodes.push(TreeNode { start_col: 1, end_col: item_line + 1,
                         id: format!("{}.{}", children.len(), idx),
                         path: format!("{}.{}", children.len(), idx),
                         node_type: "list_item".to_string(),
                         content: item.to_string(),
                         start_line: start_line + idx,
                         end_line: start_line + idx,
-                        children: item_children, 
+                        children: item_children,
                     });
                 }
 
-                children.push(TreeNode { start_col: 0, end_col: 0, 
+                children.push(TreeNode { start_col: 1, end_col: lines.get(start_line).map(|l| l.chars().count() + 1).unwrap_or(1),
                     id: format!("{}", children.len()),
                     path: format!("{}", children.len()),
                     node_type: format!("list_{}", list_type),
@@ -457,5 +464,35 @@ impl MarkdownParser {
         }
 
         children
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// KOLUMN-REG.RESSION (2026-08-19): rubrik- och list-noder hade start_col/end_col
+    /// = 0, vilket fick edit_node att använda fallback-grenen (hel-radsbyte) som
+    /// tappade "### "/"- "-prefixet — "span-överlapp" vid roadmap-edits. Med
+    /// korrekta kolumner används den kirurgiska grenen som bevarar prefix/suffix.
+    #[test]
+    fn markdown_nodes_have_real_column_spans() {
+        let parser = MarkdownParser::new();
+        let md = "### Funktioner\n- Punkt ett\n- Punkt två\n";
+        let root = parser.parse_legacy(md).unwrap();
+
+        let heading = root.children.iter().find(|n| n.node_type.starts_with("heading_")).expect("rubrik-nod");
+        assert!(heading.start_col > 0, "rubrik start_col ska vara > 0 (var 0 → fallback-edit): {}", heading.start_col);
+        assert!(heading.end_col > heading.start_col, "rubrik end_col ska täcka raden");
+
+        let list = root.children.iter().find(|n| n.node_type.starts_with("list_")).expect("list-nod");
+        assert!(list.start_col > 0, "list start_col ska vara > 0: {}", list.start_col);
+        assert!(!list.children.is_empty(), "list ska ha items");
+        let first_item = &list.children[0];
+        assert!(first_item.start_col > 0, "list_item start_col ska vara > 0: {}", first_item.start_col);
+        assert!(
+            first_item.end_col > first_item.start_col,
+            "list_item end_col ska täcka raden (annars tappas '- '-prefixet vid edit)"
+        );
     }
 }
