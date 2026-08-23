@@ -1,7 +1,9 @@
 //! Secret detection for safe AI context sharing.
 //!
-//! Scans source code for patterns that match known credential formats
-//! (API keys, tokens, private keys, etc.) and optionally redacts them.
+//! Combines custom regex patterns with the `secrets_scanner` crate for
+//! comprehensive credential detection. Two layers:
+//! 1. Custom patterns (AWS, GitHub, GitLab, Stripe, JWT, etc.)
+//! 2. secrets_scanner (Aho-Corasick + regex + entropy gating)
 
 use regex::Regex;
 use serde::Serialize;
@@ -19,16 +21,16 @@ pub struct DetectedSecret {
     pub confidence: f64,
 }
 
-/// Scan source code for secrets.
+/// Scan source code for secrets using both custom patterns and secrets_scanner.
 pub fn scan_for_secrets(source: &str) -> Vec<DetectedSecret> {
     let mut secrets = Vec::new();
 
+    // Layer 1: Custom patterns
     for (line_num, line) in source.lines().enumerate() {
         for pattern in SECRET_PATTERNS.iter() {
             let re = pattern.get_regex();
             if let Some(mat) = re.find(line) {
                 let matched = mat.as_str();
-                // Don't flag obviously safe strings
                 if is_likely_safe(matched) {
                     continue;
                 }
@@ -39,6 +41,43 @@ pub fn scan_for_secrets(source: &str) -> Vec<DetectedSecret> {
                     confidence: pattern.confidence,
                 });
             }
+        }
+    }
+
+    // Layer 2: secrets_scanner (entropy + pattern based)
+    if let Ok(scanner) = secrets_scanner::Scanner::new() {
+        let result = scanner.scan_bytes_detailed("source", source.as_bytes());
+
+        for finding in &result.findings {
+            let line_num = finding.line;
+
+            // Check if we already detected this on this line
+            let already_found = secrets.iter().any(|s| s.line == line_num);
+            if already_found {
+                continue;
+            }
+
+            // Extract the matched text from the line
+            let line_start = source.lines().take(line_num - 1).map(|l| l.len() + 1).sum::<usize>();
+            let line_text = source.lines().nth(line_num - 1).unwrap_or("");
+            let col = finding.col.saturating_sub(1);
+            let end_col = finding.end_col.saturating_sub(1);
+            let matched = if col < line_text.len() && end_col <= line_text.len() {
+                &line_text[col..end_col]
+            } else {
+                continue;
+            };
+
+            if is_likely_safe(matched) {
+                continue;
+            }
+
+            secrets.push(DetectedSecret {
+                line: line_num,
+                pattern: finding.rule_id.clone(),
+                preview: redact_secret(matched),
+                confidence: 0.6,
+            });
         }
     }
 
