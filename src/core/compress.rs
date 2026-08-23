@@ -406,4 +406,101 @@ fn test_something() {
         assert!(result.code.contains("#[cfg(test)]"));
         assert!(result.code.contains("fn test_something()"));
     }
+
+    #[test]
+    fn test_compress_rust_generics() {
+        let source = r#"fn process<T: Debug>(item: T) -> String {
+    format!("{:?}", item)
+}"#;
+        let result = compress(source, "rs");
+        assert!(result.code.contains("fn process<T: Debug>(item: T)"));
+        assert!(result.code.contains("⋮----"));
+        assert!(!result.code.contains("format!"));
+    }
+
+    #[test]
+    fn test_compress_closure() {
+        let source = r#"let add = |a: i32, b: i32| -> i32 {
+    a + b
+};"#;
+        let result = compress(source, "rs");
+        assert!(result.code.contains("|a: i32, b: i32|"));
+        assert!(result.code.contains("⋮----"));
+    }
+
+    #[test]
+    fn test_compress_python_decorator() {
+        let source = r#"@decorator
+def my_function():
+    pass
+
+@staticmethod
+def helper():
+    return 42"#;
+        let result = compress(source, "py");
+        assert!(result.code.contains("@decorator"));
+        assert!(result.code.contains("def my_function()"));
+        assert!(result.code.contains("@staticmethod"));
+        assert!(result.code.contains("def helper()"));
+    }
+
+    #[test]
+    fn test_compress_match_with_arms() {
+        let source = r#"fn classify(x: i32) -> &'static str {
+    match x {
+        0 => "zero",
+        1..=5 => "small",
+        _ => "large",
+    }
+}"#;
+        let result = compress(source, "rs");
+        assert!(result.code.contains("fn classify(x: i32)"));
+        assert!(result.code.contains("match x"));
+    }
+
+    #[test]
+    fn test_compress_nested_if() {
+        let source = r#"fn check(a: bool, b: bool) -> i32 {
+    if a {
+        if b { 1 } else { 2 }
+    } else {
+        0
+    }
+}"#;
+        let result = compress(source, "rs");
+        assert!(result.code.contains("fn check(a: bool, b: bool)"));
+        assert!(result.code.contains("⋮----"));
+    }
+
+    #[test]
+    fn test_compress_multiline_signature() {
+        let source = r#"pub fn complex_function(
+    first: String,
+    second: Vec<u8>,
+    third: Option<Box<dyn Error>>,
+) -> Result<(), MyError> {
+    Ok(())
+}"#;
+        let result = compress(source, "rs");
+        assert!(result.code.contains("pub fn complex_function("));
+        assert!(result.code.contains("first: String"));
+        assert!(result.code.contains("Result<(), MyError>"));
+        assert!(result.code.contains("⋮----"));
+    }
+
+    #[test]
+    fn test_compress_trait_with_default_impl() {
+        let source = r#"trait Logger {
+    fn log(&self, msg: &str);
+    
+    fn log_error(&self, err: &str) {
+        self.log(&format!("ERROR: {}", err));
+    }
+}"#;
+        let result = compress(source, "rs");
+        assert!(result.code.contains("trait Logger"));
+        assert!(result.code.contains("fn log(&self, msg: &str)"));
+        // log_error has a default implementation, should be compressed
+        assert!(result.code.contains("fn log_error(&self, err: &str)"));
+    }
 }

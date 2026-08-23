@@ -149,7 +149,7 @@ pub mod mcp_server {
                                 "type": "object",
                                 "properties": {
                                     "path": { "type": "string", "description": "Root directory to pack (default: current directory)" },
-                                    "format": { "type": "string", "enum": ["markdown", "json", "plain"], "description": "Output format (default: markdown)" },
+                                    "format": { "type": "string", "enum": ["markdown", "json", "plain", "xml"], "description": "Output format (default: markdown)" },
                                     "compress": { "type": "boolean", "description": "Compress function bodies (default: false)" },
                                     "include": { "type": "string", "description": "Comma-separated file extensions to include" },
                                     "ignore": { "type": "string", "description": "Comma-separated patterns to ignore" },

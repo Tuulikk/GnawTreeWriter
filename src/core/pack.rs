@@ -18,6 +18,8 @@ pub enum PackFormat {
     Json,
     /// Plain text with markers.
     Plain,
+    /// XML format (Repomix-compatible).
+    Xml,
 }
 
 impl PackFormat {
@@ -25,6 +27,7 @@ impl PackFormat {
         match s.to_lowercase().as_str() {
             "json" => PackFormat::Json,
             "plain" | "text" => PackFormat::Plain,
+            "xml" => PackFormat::Xml,
             _ => PackFormat::Markdown,
         }
     }
@@ -155,6 +158,7 @@ pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
         PackFormat::Markdown => format_markdown(&file_entries, options),
         PackFormat::Json => format_json(&file_entries, options)?,
         PackFormat::Plain => format_plain(&file_entries, options),
+        PackFormat::Xml => format_xml(&file_entries, options),
     };
 
     if options.compress {
@@ -363,6 +367,61 @@ fn format_plain(files: &[(String, String, String)], options: &PackOptions) -> St
     }
 
     output
+}
+
+fn format_xml(files: &[(String, String, String)], options: &PackOptions) -> String {
+    let mut output = String::new();
+
+    output.push_str("<repository>\n");
+
+    if let Some(ref instructions) = options.instructions {
+        output.push_str(&format!("  <instructions>{}</instructions>\n", xml_escape(instructions)));
+    }
+
+    output.push_str("  <files>\n");
+
+    for (tree_path, _display_path, content) in files {
+        let display_content = if options.compress {
+            match crate::parser::get_parser(Path::new(tree_path)) {
+                Ok(parser) => {
+                    if let Ok(tree) = parser.parse(content) {
+                        let compressed = compress_source(content, &tree);
+                        compressed.code
+                    } else {
+                        content.clone()
+                    }
+                }
+                Err(_) => content.clone(),
+            }
+        } else {
+            content.clone()
+        };
+
+        let tokens = estimate_code_tokens(&display_content);
+        let lines = content.lines().count();
+
+        output.push_str(&format!(
+            "  <file path=\"{}\" tokens=\"{}\" lines=\"{}\">\n",
+            xml_escape(tree_path), tokens, lines
+        ));
+        output.push_str("    <content><![CDATA[");
+        output.push_str(&display_content);
+        output.push_str("]]></content>\n");
+        output.push_str("  </file>\n");
+    }
+
+    output.push_str("  </files>\n");
+    output.push_str("</repository>\n");
+
+    output
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 #[cfg(test)]
