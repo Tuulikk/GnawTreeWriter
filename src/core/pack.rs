@@ -209,14 +209,14 @@ fn format_markdown(files: &[(String, String, String)], options: &PackOptions) ->
     }
     output.push_str("```\n\n");
 
-    // Summary table (uses display_path for readability)
+    // Summary table
     output.push_str("## Summary\n\n");
     output.push_str("| File | Tokens | Lines |\n");
     output.push_str("|------|--------|-------|\n");
-    for (_, display_path, content) in files {
+    for (tree_path, _, content) in files {
         let tokens = estimate_code_tokens(content);
         let lines = content.lines().count();
-        output.push_str(&format!("| {} | {} | {} |\n", display_path, tokens, lines));
+        output.push_str(&format!("| {} | {} | {} |\n", tree_path, tokens, lines));
     }
     output.push_str("\n");
 
@@ -253,7 +253,7 @@ fn format_markdown(files: &[(String, String, String)], options: &PackOptions) ->
         };
 
         let lines = display_content.lines().count();
-        output.push_str(&format!("### {}{} [{} lines]\n\n", display_path, tokens, lines));
+        output.push_str(&format!("### {}{} [{} lines]\n\n", tree_path, tokens, lines));
         output.push_str(&format!("```{}\n{}\n```\n\n", ext, display_content));
     }
 
@@ -291,7 +291,7 @@ fn format_json(files: &[(String, String, String)], options: &PackOptions) -> Res
             .unwrap_or("text");
 
         file_array.push(serde_json::json!({
-            "path": display_path,
+            "path": tree_path,
             "content": display_content,
             "tokens": tokens,
             "lines": lines,
@@ -357,7 +357,7 @@ fn format_plain(files: &[(String, String, String)], options: &PackOptions) -> St
             String::new()
         };
 
-        output.push_str(&format!("--- {}{} ---\n", display_path, tokens));
+        output.push_str(&format!("--- {}{} ---\n", tree_path, tokens));
         output.push_str(&display_content);
         output.push_str("\n\n");
     }
