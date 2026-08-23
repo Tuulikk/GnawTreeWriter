@@ -81,6 +81,7 @@ pub struct PackResult {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PackFileInfo {
     pub path: String,
+    pub tree_path: String,
     pub tokens: usize,
     pub lines: usize,
 }
@@ -110,10 +111,13 @@ pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
     let mut pack_files = Vec::new();
     let mut total_tokens = 0usize;
     let mut compressed_tokens = 0usize;
-    let mut file_entries: Vec<(String, String)> = Vec::new(); // (path, content)
+    let mut file_entries: Vec<(String, String, String)> = Vec::new(); // (tree_path, display_path, content)
 
     for path in &files {
-        // Get path relative to project root for display
+        // Tree path: relative to cwd (what walker returns)
+        let tree_path = path.to_string_lossy().to_string();
+
+        // Display path: relative to project root
         let rel_path = path
             .strip_prefix(&project_root)
             .or_else(|_| path.strip_prefix(root))
@@ -138,11 +142,12 @@ pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
 
             pack_files.push(PackFileInfo {
                 path: rel_path.clone(),
+                tree_path: tree_path.clone(),
                 tokens,
                 lines,
             });
 
-            file_entries.push((rel_path, content));
+            file_entries.push((tree_path, rel_path, content));
         }
     }
 
@@ -168,7 +173,7 @@ pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
     })
 }
 
-fn format_markdown(files: &[(String, String)], options: &PackOptions) -> String {
+fn format_markdown(files: &[(String, String, String)], options: &PackOptions) -> String {
     let mut output = String::new();
 
     // Header with metadata
@@ -180,12 +185,12 @@ fn format_markdown(files: &[(String, String)], options: &PackOptions) -> String 
         output.push_str("\n\n");
     }
 
-    // Tree structure overview
+    // Tree structure overview (uses tree_path for directory hierarchy)
     output.push_str("## Structure\n\n");
     output.push_str("```\n");
     let mut prev_dir = String::new();
-    for (path, _) in files {
-        let dir = Path::new(path)
+    for (tree_path, _, _) in files {
+        let dir = Path::new(tree_path)
             .parent()
             .and_then(|p| p.to_str())
             .unwrap_or("");
@@ -195,37 +200,37 @@ fn format_markdown(files: &[(String, String)], options: &PackOptions) -> String 
             }
             prev_dir = dir.to_string();
         }
-        let name = Path::new(path)
+        let name = Path::new(tree_path)
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or(path);
+            .unwrap_or(tree_path);
         let indent = if dir.is_empty() { "" } else { "  " };
         output.push_str(&format!("{}{}\n", indent, name));
     }
     output.push_str("```\n\n");
 
-    // Summary table
+    // Summary table (uses display_path for readability)
     output.push_str("## Summary\n\n");
     output.push_str("| File | Tokens | Lines |\n");
     output.push_str("|------|--------|-------|\n");
-    for (path, content) in files {
+    for (_, display_path, content) in files {
         let tokens = estimate_code_tokens(content);
         let lines = content.lines().count();
-        output.push_str(&format!("| {} | {} | {} |\n", path, tokens, lines));
+        output.push_str(&format!("| {} | {} | {} |\n", display_path, tokens, lines));
     }
     output.push_str("\n");
 
-    // File contents
+    // File contents (uses display_path for headers, tree_path for parsing)
     output.push_str("## Files\n\n");
 
-    for (path, content) in files {
-        let ext = Path::new(path)
+    for (tree_path, display_path, content) in files {
+        let ext = Path::new(tree_path)
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("text");
 
         let display_content = if options.compress {
-            match crate::parser::get_parser(Path::new(path)) {
+            match crate::parser::get_parser(Path::new(tree_path)) {
                 Ok(parser) => {
                     if let Ok(tree) = parser.parse(content) {
                         let compressed = compress_source(content, &tree);
@@ -248,20 +253,20 @@ fn format_markdown(files: &[(String, String)], options: &PackOptions) -> String 
         };
 
         let lines = display_content.lines().count();
-        output.push_str(&format!("### {}{} [{} lines]\n\n", path, tokens, lines));
+        output.push_str(&format!("### {}{} [{} lines]\n\n", display_path, tokens, lines));
         output.push_str(&format!("```{}\n{}\n```\n\n", ext, display_content));
     }
 
     output
 }
 
-fn format_json(files: &[(String, String)], options: &PackOptions) -> Result<String> {
+fn format_json(files: &[(String, String, String)], options: &PackOptions) -> Result<String> {
     let mut file_array = Vec::new();
     let mut total_lines = 0usize;
 
-    for (path, content) in files {
+    for (tree_path, display_path, content) in files {
         let display_content = if options.compress {
-            match crate::parser::get_parser(Path::new(path)) {
+            match crate::parser::get_parser(Path::new(tree_path)) {
                 Ok(parser) => {
                     if let Ok(tree) = parser.parse(content) {
                         let compressed = compress_source(content, &tree);
@@ -280,13 +285,13 @@ fn format_json(files: &[(String, String)], options: &PackOptions) -> Result<Stri
         let lines = content.lines().count();
         total_lines += lines;
 
-        let ext = Path::new(path)
+        let ext = Path::new(tree_path)
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("text");
 
         file_array.push(serde_json::json!({
-            "path": path,
+            "path": display_path,
             "content": display_content,
             "tokens": tokens,
             "lines": lines,
@@ -320,7 +325,7 @@ fn format_json(files: &[(String, String)], options: &PackOptions) -> Result<Stri
     Ok(serde_json::to_string_pretty(&output)?)
 }
 
-fn format_plain(files: &[(String, String)], options: &PackOptions) -> String {
+fn format_plain(files: &[(String, String, String)], options: &PackOptions) -> String {
     let mut output = String::new();
 
     output.push_str("=== PROJECT CONTEXT ===\n\n");
@@ -329,9 +334,9 @@ fn format_plain(files: &[(String, String)], options: &PackOptions) -> String {
         output.push_str(&format!("Instructions: {}\n\n", instructions));
     }
 
-    for (path, content) in files {
+    for (tree_path, display_path, content) in files {
         let display_content = if options.compress {
-            match crate::parser::get_parser(Path::new(path)) {
+            match crate::parser::get_parser(Path::new(tree_path)) {
                 Ok(parser) => {
                     if let Ok(tree) = parser.parse(content) {
                         let compressed = compress_source(content, &tree);
@@ -352,7 +357,7 @@ fn format_plain(files: &[(String, String)], options: &PackOptions) -> String {
             String::new()
         };
 
-        output.push_str(&format!("--- {}{} ---\n", path, tokens));
+        output.push_str(&format!("--- {}{} ---\n", display_path, tokens));
         output.push_str(&display_content);
         output.push_str("\n\n");
     }
