@@ -157,6 +157,7 @@ pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
 fn format_markdown(files: &[(String, String)], options: &PackOptions) -> String {
     let mut output = String::new();
 
+    // Header with metadata
     output.push_str("# Project Context\n\n");
 
     if let Some(ref instructions) = options.instructions {
@@ -165,6 +166,39 @@ fn format_markdown(files: &[(String, String)], options: &PackOptions) -> String 
         output.push_str("\n\n");
     }
 
+    // Tree structure overview
+    output.push_str("## Structure\n\n");
+    output.push_str("```\n");
+    let mut prev_dir = String::new();
+    for (path, _) in files {
+        let dir = Path::new(path)
+            .parent()
+            .and_then(|p| p.to_str())
+            .unwrap_or("");
+        if dir != prev_dir && !dir.is_empty() {
+            output.push_str(&format!("{}/\n", dir));
+            prev_dir = dir.to_string();
+        }
+        let name = Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(path);
+        output.push_str(&format!("  {}\n", name));
+    }
+    output.push_str("```\n\n");
+
+    // Summary table
+    output.push_str("## Summary\n\n");
+    output.push_str("| File | Tokens | Lines |\n");
+    output.push_str("|------|--------|-------|\n");
+    for (path, content) in files {
+        let tokens = estimate_code_tokens(content);
+        let lines = content.lines().count();
+        output.push_str(&format!("| {} | {} | {} |\n", path, tokens, lines));
+    }
+    output.push_str("\n");
+
+    // File contents
     output.push_str("## Files\n\n");
 
     for (path, content) in files {
@@ -196,7 +230,8 @@ fn format_markdown(files: &[(String, String)], options: &PackOptions) -> String 
             String::new()
         };
 
-        output.push_str(&format!("### {}{}\n\n", path, tokens));
+        let lines = display_content.lines().count();
+        output.push_str(&format!("### {}{} [{} lines]\n\n", path, tokens, lines));
         output.push_str(&format!("```{}\n{}\n```\n\n", ext, display_content));
     }
 
@@ -205,6 +240,7 @@ fn format_markdown(files: &[(String, String)], options: &PackOptions) -> String 
 
 fn format_json(files: &[(String, String)], options: &PackOptions) -> Result<String> {
     let mut file_array = Vec::new();
+    let mut total_lines = 0usize;
 
     for (path, content) in files {
         let display_content = if options.compress {
@@ -224,12 +260,20 @@ fn format_json(files: &[(String, String)], options: &PackOptions) -> Result<Stri
         };
 
         let tokens = estimate_code_tokens(&display_content);
+        let lines = content.lines().count();
+        total_lines += lines;
+
+        let ext = Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("text");
 
         file_array.push(serde_json::json!({
             "path": path,
             "content": display_content,
             "tokens": tokens,
-            "lines": content.lines().count(),
+            "lines": lines,
+            "language": ext,
         }));
     }
 
@@ -238,10 +282,21 @@ fn format_json(files: &[(String, String)], options: &PackOptions) -> Result<Stri
         .filter_map(|f| f.get("tokens").and_then(|t| t.as_u64()).map(|t| t as usize))
         .sum();
 
+    // Build language breakdown
+    let mut language_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for f in &file_array {
+        if let Some(lang) = f.get("language").and_then(|l| l.as_str()) {
+            *language_counts.entry(lang.to_string()).or_insert(0) += 1;
+        }
+    }
+
     let output = serde_json::json!({
         "instructions": options.instructions,
         "file_count": files.len(),
         "total_tokens": total_tokens,
+        "total_lines": total_lines,
+        "languages": language_counts,
+        "compress": options.compress,
         "files": file_array,
     });
 

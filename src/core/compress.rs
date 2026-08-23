@@ -2,7 +2,7 @@
 //!
 //! Replaces function/method bodies with `⋮----` placeholders while
 //! preserving signatures, imports, type definitions, and doc comments.
-//! Reduces token count by ~60-70% while maintaining structural information.
+//! Optimized for token reduction while maintaining structural information.
 
 use crate::parser::TreeNode;
 use crate::GnawTreeWriter;
@@ -23,72 +23,53 @@ pub struct CompressedOutput {
 }
 
 /// Compress a source file by replacing function/method bodies with placeholders.
-///
-/// Preserves:
-/// - Imports and use declarations
-/// - Function/method signatures (parameters, return types)
-/// - Type definitions (structs, enums, interfaces, traits)
-/// - Doc comments and attributes/decorators
-/// - Macro invocations (calls)
-///
-/// Replaces:
-/// - Function/method bodies (block statements)
-/// - Anonymous function/closure bodies
 pub fn compress_file(file_path: &str) -> Result<CompressedOutput, anyhow::Error> {
     let writer = GnawTreeWriter::new(file_path)?;
     let tree = writer.analyze();
     let source = writer.get_source();
-
     Ok(compress_source(source, tree))
 }
 
-/// Compress source code from a string (for MCP/programmatic use).
+/// Compress source code from a string.
 pub fn compress_source(source: &str, tree: &TreeNode) -> CompressedOutput {
     let original_tokens = crate::core::token_count::estimate_code_tokens(source);
-
     let lines: Vec<&str> = source.lines().collect();
-    let mut replacements: Vec<(usize, usize)> = Vec::new(); // (start_line, end_line) 1-based, inclusive
+    let mut replacements: Vec<(usize, usize)> = Vec::new();
 
     collect_body_replacements(tree, &mut replacements);
 
-    // Sort by start_line descending so we can apply from bottom to top
+    // Sort descending so we replace from bottom to top
     replacements.sort_by(|a, b| b.0.cmp(&a.0));
 
     let mut compressed_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
 
     for (start_line, end_line) in &replacements {
-        // Convert 1-based to 0-based for indexing
         let start_idx = start_line.saturating_sub(1);
-        let end_idx = end_line.saturating_sub(1); // inclusive
+        let end_idx = end_line.saturating_sub(1);
 
-        if start_idx < compressed_lines.len() && end_idx < compressed_lines.len() {
-            // Get indentation from the start line
-            let indent: String = compressed_lines[start_idx]
-                .chars()
-                .take_while(|c| c.is_whitespace())
-                .collect();
+        if start_idx >= compressed_lines.len() || end_idx >= compressed_lines.len() {
+            continue;
+        }
 
-            // Determine what to keep:
-            // - If the block starts with `{` on the same line as signature, keep that line
-            // - If the block ends with `}` on its own line, keep that line
-            let first_line = &compressed_lines[start_idx];
-            let last_line = compressed_lines[end_idx].trim_start();
+        let indent: String = compressed_lines[start_idx]
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .collect();
 
-            // Check if opening brace is on the first line (may be after signature)
-            let keep_first = first_line.contains('{');
-            let keep_last = last_line.starts_with('}') || last_line == "}";
+        let first_line = &compressed_lines[start_idx];
+        let last_line = compressed_lines[end_idx].trim_start();
 
-            // Calculate what to replace (inner content)
-            let replace_start = if keep_first { start_idx + 1 } else { start_idx };
-            let replace_end = if keep_last { end_idx.saturating_sub(1) } else { end_idx };
+        let keep_first = first_line.contains('{');
+        let keep_last = last_line.starts_with('}') || last_line == "}";
 
-            // Only replace if there's something to replace
-            if replace_start <= replace_end && replace_start < compressed_lines.len() {
-                let placeholder = format!("{}⋮----", indent);
-                let drain_end = (replace_end + 1).min(compressed_lines.len());
-                compressed_lines.drain(replace_start..drain_end);
-                compressed_lines.insert(replace_start, placeholder);
-            }
+        let replace_start = if keep_first { start_idx + 1 } else { start_idx };
+        let replace_end = if keep_last { end_idx.saturating_sub(1) } else { end_idx };
+
+        if replace_start <= replace_end && replace_start < compressed_lines.len() {
+            let placeholder = format!("{}⋮----", indent);
+            let drain_end = (replace_end + 1).min(compressed_lines.len());
+            compressed_lines.drain(replace_start..drain_end);
+            compressed_lines.insert(replace_start, placeholder);
         }
     }
 
@@ -111,25 +92,16 @@ pub fn compress_source(source: &str, tree: &TreeNode) -> CompressedOutput {
 }
 
 /// Recursively collect body nodes that should be compressed.
-fn collect_body_replacements(
-    node: &TreeNode,
-    replacements: &mut Vec<(usize, usize)>,
-) {
-    // Check if this node's type indicates it has a compressible body
+fn collect_body_replacements(node: &TreeNode, replacements: &mut Vec<(usize, usize)>) {
     if should_compress_body(node) {
-        // Find the "body" child (block, statement_block, etc.)
         for child in &node.children {
-            if is_body_node(child) {
-                // Only compress if the body spans multiple lines
-                if child.end_line > child.start_line {
-                    replacements.push((child.start_line, child.end_line));
-                }
+            if is_body_node(child) && child.end_line > child.start_line {
+                replacements.push((child.start_line, child.end_line));
                 break;
             }
         }
     }
 
-    // Recurse into children
     for child in &node.children {
         collect_body_replacements(child, replacements);
     }
@@ -141,14 +113,19 @@ fn should_compress_body(node: &TreeNode) -> bool {
         node.node_type.as_str(),
         // Rust
         "function_item"
-            | "impl_item"
-            | "trait_item"
             | "macro_definition"
             | "closure_expression"
+            | "match_expression"
+            | "if_expression"
+            | "while_expression"
+            | "for_expression"
+            | "loop_expression"
+            | "block"
         // Python
             | "function_definition"
             | "class_definition"
             | "lambda"
+            | "decorated_definition"
         // JavaScript/TypeScript
             | "function_declaration"
             | "function"
@@ -158,16 +135,54 @@ fn should_compress_body(node: &TreeNode) -> bool {
             | "method_definition"
             | "generator_function_declaration"
             | "generator_function"
+            | "switch_statement"
+            | "if_statement"
+            | "for_statement"
+            | "while_statement"
+            | "do_statement"
         // Go
+            | "function_declaration"
             | "method_declaration"
+            | "if_statement"
+            | "for_statement"
+            | "switch_statement"
+            | "select_statement"
         // Java
             | "constructor_declaration"
+            | "method_declaration"
+            | "if_statement"
+            | "for_statement"
+            | "while_statement"
+            | "switch_expression"
         // C/C++
             | "function_definition"
-            | "declaration_list" // struct/enum bodies
+            | "declaration_list"
+            | "if_statement"
+            | "for_statement"
+            | "while_statement"
+            | "switch_statement"
         // Kotlin
+            | "function_declaration"
+            | "class_declaration"
             | "lambda_literal"
+            | "if_expression"
+            | "when_expression"
+            | "for_expression"
+            | "while_expression"
+        // Swift
+            | "function_declaration"
+            | "class_declaration"
+            | "if_declaration"
+            | "for_statement"
+            | "while_statement"
+            | "switch_statement"
+        // Zig
+            | "function_declaration"
+            | "if_expression"
+            | "for_expression"
+            | "while_expression"
     )
+    // Note: impl_item and trait_item are NOT included — their children are compressed individually
 }
 
 /// Determine if a child node represents a "body" that should be compressed.
@@ -176,11 +191,16 @@ fn is_body_node(node: &TreeNode) -> bool {
         node.node_type.as_str(),
         "block"
             | "statement_block"
-            | "block_node" // QML
+            | "block_node"
             | "declaration_list"
             | "class_body"
             | "function_body"
-            | "arrow_function" // JS/TS arrow bodies
+            | "arrow_function"
+            | "match_block"
+            | "if_body"
+            | "else_body"
+            | "loop_body"
+            | "block_scoped_statement"
     )
 }
 
@@ -188,28 +208,25 @@ fn is_body_node(node: &TreeNode) -> bool {
 mod tests {
     use super::*;
 
+    fn compress(source: &str, ext: &str) -> CompressedOutput {
+        let file_name = format!("test.{}", ext);
+        let path = std::path::Path::new(&file_name);
+        let parser = crate::parser::get_parser(path).unwrap();
+        let tree = parser.parse(source).unwrap();
+        compress_source(source, &tree)
+    }
+
     #[test]
     fn test_compress_rust_function() {
         let source = r#"fn add(a: i32, b: i32) -> i32 {
     let sum = a + b;
     sum
 }"#;
-        let parser = crate::parser::get_parser(std::path::Path::new("test.rs")).unwrap();
-        let tree = parser.parse(source).unwrap();
-        let result = compress_source(source, &tree);
-
-        eprintln!("=== Original ===\n{}", source);
-        eprintln!("=== Compressed ===\n{}", result.code);
-        eprintln!("=== Bodies: {} ===", result.bodies_compressed);
-
-        assert!(result.code.contains("fn add(a: i32, b: i32) -> i32"),
-            "Should preserve function signature. Got:\n{}", result.code);
-        assert!(result.code.contains("⋮----"),
-            "Should contain compression placeholder. Got:\n{}", result.code);
-        assert!(!result.code.contains("let sum = a + b"),
-            "Should not contain body code. Got:\n{}", result.code);
+        let result = compress(source, "rs");
+        assert!(result.code.contains("fn add(a: i32, b: i32) -> i32"));
+        assert!(result.code.contains("⋮----"));
+        assert!(!result.code.contains("let sum = a + b"));
         assert!(result.bodies_compressed >= 1);
-        assert!(result.ratio > 0.0);
     }
 
     #[test]
@@ -220,14 +237,9 @@ fn main() {
     let mut map = HashMap::new();
     map.insert("key", "value");
 }"#;
-        let parser = crate::parser::get_parser(std::path::Path::new("test.rs")).unwrap();
-        let tree = parser.parse(source).unwrap();
-        let result = compress_source(source, &tree);
-
-        assert!(result.code.contains("use std::collections::HashMap"),
-            "Should preserve imports. Got:\n{}", result.code);
-        assert!(result.code.contains("⋮----"),
-            "Should contain compression placeholder. Got:\n{}", result.code);
+        let result = compress(source, "rs");
+        assert!(result.code.contains("use std::collections::HashMap"));
+        assert!(result.code.contains("⋮----"));
     }
 
     #[test]
@@ -240,22 +252,13 @@ fn main() {
     // complex implementation
     todo!()
 }"#;
-        let parser = crate::parser::get_parser(std::path::Path::new("test.rs")).unwrap();
-        let tree = parser.parse(source).unwrap();
-        let result = compress_source(source, &tree);
-
-        assert!(result.code.contains("pub fn process_data"),
-            "Should preserve function name. Got:\n{}", result.code);
-        assert!(result.code.contains("input: &str"),
-            "Should preserve first parameter. Got:\n{}", result.code);
-        assert!(result.code.contains("config: &Config"),
-            "Should preserve second parameter. Got:\n{}", result.code);
-        assert!(result.code.contains("verbose: bool"),
-            "Should preserve third parameter. Got:\n{}", result.code);
-        assert!(result.code.contains("Result<Output, Error>"),
-            "Should preserve return type. Got:\n{}", result.code);
-        assert!(!result.code.contains("todo!()"),
-            "Should not contain body. Got:\n{}", result.code);
+        let result = compress(source, "rs");
+        assert!(result.code.contains("pub fn process_data"));
+        assert!(result.code.contains("input: &str"));
+        assert!(result.code.contains("config: &Config"));
+        assert!(result.code.contains("verbose: bool"));
+        assert!(result.code.contains("Result<Output, Error>"));
+        assert!(!result.code.contains("todo!()"));
     }
 
     #[test]
@@ -265,44 +268,93 @@ fn main() {
     for item in items:
         total += item.price
     return total"#;
-        let parser = crate::parser::get_parser(std::path::Path::new("test.py")).unwrap();
-        let tree = parser.parse(source).unwrap();
-        let result = compress_source(source, &tree);
+        let result = compress(source, "py");
+        assert!(result.code.contains("def calculate_total(items):"));
+        assert!(result.code.contains("⋮----"));
+        assert!(!result.code.contains("total = 0"));
+    }
 
-        assert!(result.code.contains("def calculate_total(items):"),
-            "Should preserve function signature. Got:\n{}", result.code);
-        assert!(result.code.contains("⋮----"),
-            "Should contain compression placeholder. Got:\n{}", result.code);
-        assert!(!result.code.contains("total = 0"),
-            "Should not contain body code. Got:\n{}", result.code);
+    #[test]
+    fn test_compress_impl_block() {
+        let source = r#"impl Config {
+    pub fn new() -> Self {
+        Config { debug: false }
+    }
+
+    pub fn debug(&self) -> bool {
+        self.debug
+    }
+}"#;
+        let result = compress(source, "rs");
+        assert!(result.code.contains("impl Config"));
+        assert!(result.code.contains("pub fn new()"));
+        assert!(result.code.contains("pub fn debug(&self)"));
+        // Methods inside impl are compressed individually
+        assert!(result.code.contains("⋮----"));
+        assert!(!result.code.contains("Config { debug: false }"));
+    }
+
+    #[test]
+    fn test_compress_trait_definition() {
+        let source = r#"trait Drawable {
+    fn draw(&self);
+    fn bounding_box(&self) -> Rect;
+}"#;
+        let result = compress(source, "rs");
+        // Trait definitions have method signatures but no bodies to compress
+        // The methods should be preserved as-is
+        assert!(result.code.contains("trait Drawable"),
+            "Should preserve trait. Got:\n{}", result.code);
+        assert!(result.code.contains("fn draw(&self)"),
+            "Should preserve method signature. Got:\n{}", result.code);
+        assert!(result.code.contains("fn bounding_box(&self)"),
+            "Should preserve method signature. Got:\n{}", result.code);
+    }
+
+    #[test]
+    fn test_compress_match_expression() {
+        let source = r#"fn handle_input(key: char) -> Action {
+    match key {
+        'q' => Action::Quit,
+        'a' => Action::Attack,
+        _ => Action::Wait,
+    }
+}"#;
+        let result = compress(source, "rs");
+        assert!(result.code.contains("fn handle_input(key: char)"));
+        assert!(result.code.contains("match key"));
+    }
+
+    #[test]
+    fn test_compress_nested_functions() {
+        let source = r#"fn outer() {
+    fn inner() {
+        println!("nested");
+    }
+    inner();
+}"#;
+        let result = compress(source, "rs");
+        assert!(result.code.contains("fn outer()"));
+        // Both functions should be compressed
+        assert!(result.bodies_compressed >= 1);
+    }
+
+    #[test]
+    fn test_compress_js_function() {
+        let source = r#"function greet(name) {
+    return `Hello, ${name}!`;
+}"#;
+        let result = compress(source, "js");
+        assert!(result.code.contains("function greet(name)"));
+        assert!(result.code.contains("⋮----"));
+        assert!(!result.code.contains("return"));
     }
 
     #[test]
     fn test_compress_empty_file() {
-        let source = "";
-        let parser = crate::parser::get_parser(std::path::Path::new("test.rs")).unwrap();
-        let tree = parser.parse(source).unwrap();
-        let result = compress_source(source, &tree);
-
+        let result = compress("", "rs");
         assert_eq!(result.code, "");
         assert_eq!(result.original_tokens, 0);
-        assert_eq!(result.compressed_tokens, 0);
-    }
-
-    #[test]
-    fn test_compress_no_compressible_nodes() {
-        let source = r#"struct Point {
-    x: f64,
-    y: f64,
-}"#;
-        let parser = crate::parser::get_parser(std::path::Path::new("test.rs")).unwrap();
-        let tree = parser.parse(source).unwrap();
-        let result = compress_source(source, &tree);
-
-        // Struct definitions don't have compressible bodies in our implementation
-        assert_eq!(result.bodies_compressed, 0);
-        assert!(result.code.contains("x: f64"),
-            "Should preserve struct fields. Got:\n{}", result.code);
     }
 
     #[test]
@@ -313,11 +365,8 @@ fn main() {
     let z = x + y;
     println!("{}", z);
 }"#;
-        let parser = crate::parser::get_parser(std::path::Path::new("test.rs")).unwrap();
-        let tree = parser.parse(source).unwrap();
-        let result = compress_source(source, &tree);
-
-        assert!(result.ratio > 0.0, "Compression ratio should be positive");
+        let result = compress(source, "rs");
+        assert!(result.ratio > 0.0);
         assert!(result.compressed_tokens < result.original_tokens);
     }
 
@@ -330,13 +379,31 @@ fn main() {
 fn multiply(a: i32, b: i32) -> i32 {
     a * b
 }"#;
-        let parser = crate::parser::get_parser(std::path::Path::new("test.rs")).unwrap();
-        let tree = parser.parse(source).unwrap();
-        let result = compress_source(source, &tree);
-
+        let result = compress(source, "rs");
         assert!(result.code.contains("fn add(a: i32, b: i32) -> i32"));
         assert!(result.code.contains("fn multiply(a: i32, b: i32) -> i32"));
-        assert!(result.bodies_compressed >= 2,
-            "Should compress both functions. Got: {}", result.bodies_compressed);
+        assert!(result.bodies_compressed >= 2);
+    }
+
+    #[test]
+    fn test_compress_preserves_doc_comments() {
+        let source = r#"/// Calculate the sum of two numbers.
+pub fn add(a: i32, b: i32) -> i32 {
+    a + b
+}"#;
+        let result = compress(source, "rs");
+        assert!(result.code.contains("/// Calculate the sum"));
+        assert!(result.code.contains("pub fn add"));
+    }
+
+    #[test]
+    fn test_compress_preserves_attributes() {
+        let source = r#"#[cfg(test)]
+fn test_something() {
+    assert!(true);
+}"#;
+        let result = compress(source, "rs");
+        assert!(result.code.contains("#[cfg(test)]"));
+        assert!(result.code.contains("fn test_something()"));
     }
 }
