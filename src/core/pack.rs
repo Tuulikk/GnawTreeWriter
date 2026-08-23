@@ -95,6 +95,9 @@ pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
 
     let files = walk_source_files_filtered(root, &ext_refs);
 
+    // Find the actual project root (where .git or .gnawtreewriter_session.json is)
+    let project_root = crate::core::find_project_root(root);
+
     // Filter out files matching ignore patterns
     let files: Vec<PathBuf> = files
         .into_iter()
@@ -110,11 +113,22 @@ pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
     let mut file_entries: Vec<(String, String)> = Vec::new(); // (path, content)
 
     for path in &files {
+        // Get path relative to project root for display
         let rel_path = path
-            .strip_prefix(root)
+            .strip_prefix(&project_root)
+            .or_else(|_| path.strip_prefix(root))
             .unwrap_or(path)
             .to_string_lossy()
             .to_string();
+
+        // If strip_prefix gave empty (single file case), use the filename
+        let rel_path = if rel_path.is_empty() {
+            path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default()
+        } else {
+            rel_path
+        };
 
         if let Ok(content) = std::fs::read_to_string(path) {
             let tokens = estimate_code_tokens(&content);
@@ -175,15 +189,18 @@ fn format_markdown(files: &[(String, String)], options: &PackOptions) -> String 
             .parent()
             .and_then(|p| p.to_str())
             .unwrap_or("");
-        if dir != prev_dir && !dir.is_empty() {
-            output.push_str(&format!("{}/\n", dir));
+        if dir != prev_dir {
+            if !dir.is_empty() {
+                output.push_str(&format!("{}/\n", dir));
+            }
             prev_dir = dir.to_string();
         }
         let name = Path::new(path)
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or(path);
-        output.push_str(&format!("  {}\n", name));
+        let indent = if dir.is_empty() { "" } else { "  " };
+        output.push_str(&format!("{}{}\n", indent, name));
     }
     output.push_str("```\n\n");
 
