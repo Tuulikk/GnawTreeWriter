@@ -937,4 +937,28 @@ Don't assume your edit is correct. GnawTreeWriter is a surgical tool; a single m
 
 ---
 
+## AI-Friendly Features
+
+For complete documentation on AI-optimized features, see [docs/AI_FRIENDLY.md](docs/AI_FRIENDLY.md).
+
+### Quick Commands
+```bash
+# Token-aware analysis
+gnawtreewriter analyze src/main.rs --format summary
+
+# Code compression (~70% reduction)
+gnawtreewriter compress src/main.rs --stats
+
+# Project packing for AI context
+gnawtreewriter pack . --compress --format markdown
+
+# Intelligent file curation
+gnawtreewriter curate "authentication" --max-tokens 5000
+```
+
+### MCP Tools
+All features available as MCP tools: `compress`, `pack`, `curate`
+
+---
+
 *Version 2.0 - Rewritten to focus on contributing and dogfooding rather than end-user usage*
