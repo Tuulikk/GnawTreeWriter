@@ -1,11 +1,11 @@
 //! gnaw-inspect: Advanced code intelligence for GnawTreeWriter
 
 use crate::GnawTreeWriter;
+use crate::core::file_walker::walk_source_files_filtered;
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use walkdir::WalkDir;
 
 /// Inspect mode
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -145,29 +145,13 @@ fn inspect_project(
         InspectMode::Full => "full",
     };
 
-    for entry in WalkDir::new(search_dir)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-    {
-        let path = entry.path();
-        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            if matches!(ext.to_lowercase().as_str(), 
-                "rs" | "py" | "js" | "ts" | "go" | "java" | "c" | "cpp" | "h" | "hpp") 
-            {
-                // Skip common non-source dirs
-                let skip = path.components().any(|c| {
-                    let s = c.as_os_str().to_string_lossy();
-                    s == "target" || s == "node_modules" || s == ".git" || s.starts_with('.')
-                });
-                if skip { continue; }
+    let exts = ["rs", "py", "js", "ts", "go", "java", "c", "cpp", "h", "hpp"];
+    let files = walk_source_files_filtered(search_dir, &exts);
 
-                if let Ok(result) = inspect_file(&path.to_string_lossy(), mode, symbol) {
-                    if !result.findings.is_empty() {
-                        results.push(result);
-                    }
-                }
+    for path in &files {
+        if let Ok(result) = inspect_file(&path.to_string_lossy(), mode, symbol) {
+            if !result.findings.is_empty() {
+                results.push(result);
             }
         }
     }

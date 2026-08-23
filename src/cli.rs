@@ -181,6 +181,46 @@ enum Commands {
         #[arg(short, long, default_value = "2")]
         depth: usize,
     },
+    /// Compress source code by replacing function bodies with placeholders
+    Compress {
+        file_path: String,
+        #[arg(short, long)]
+        output: Option<String>,
+        #[arg(short, long)]
+        stats: bool,
+    },
+    /// Pack entire project into AI-optimized format
+    Pack {
+        #[arg(default_value = ".")]
+        path: String,
+        #[arg(short, long, default_value = "markdown")]
+        format: String,
+        #[arg(short, long)]
+        compress: bool,
+        #[arg(short, long)]
+        output: Option<String>,
+        #[arg(short, long)]
+        include: Option<String>,
+        #[arg(short, long)]
+        ignore: Option<String>,
+        #[arg(short, long)]
+        instructions: Option<String>,
+    },
+    /// Curate context for an AI agent based on task description
+    Curate {
+        /// Task description (what the agent is working on)
+        task: String,
+        #[arg(short, long, default_value = ".")]
+        path: String,
+        #[arg(short, long, default_value = "auto")]
+        strategy: String,
+        #[arg(short, long, default_value = "8000")]
+        max_tokens: usize,
+        #[arg(short, long, default_value = "20")]
+        max_files: usize,
+        #[arg(short, long)]
+        output: Option<String>,
+    },
     /// Comprehensive health check of the system
     Status,
     /// Generate a semantic code quality report
@@ -1008,6 +1048,15 @@ impl Cli {
             Commands::Skeleton { file_path, depth } => {
                 Self::handle_skeleton(&file_path, depth)?;
             }
+            Commands::Compress { file_path, output, stats } => {
+                Self::handle_compress(&file_path, output.as_deref(), stats)?;
+            }
+            Commands::Pack { path, format, compress, output, include, ignore, instructions } => {
+                Self::handle_pack(&path, &format, compress, output.as_deref(), include.as_deref(), ignore.as_deref(), instructions.as_deref())?;
+            }
+            Commands::Curate { task, path, strategy, max_tokens, max_files, output } => {
+                Self::handle_curate(&task, &path, &strategy, max_tokens, max_files, output.as_deref())?;
+            }
             Commands::Status => {
                 Self::handle_health_check().await?;
             }
@@ -1536,6 +1585,139 @@ Use --no-preview to write batch file"
 
         let mut count = 0;
         build(tree, 0, max_depth, &mut count);
+        Ok(())
+    }
+
+    fn handle_compress(file_path: &str, output: Option<&str>, show_stats: bool) -> Result<()> {
+        let result = crate::core::compress::compress_file(file_path)?;
+
+        if show_stats {
+            eprintln!("Compressed: {}", file_path);
+            eprintln!("  Original tokens:   {}", result.original_tokens);
+            eprintln!("  Compressed tokens: {}", result.compressed_tokens);
+            eprintln!("  Bodies compressed: {}", result.bodies_compressed);
+            eprintln!("  Reduction:         {:.1}%", result.ratio * 100.0);
+        }
+
+        match output {
+            Some(out_path) => {
+                std::fs::write(out_path, &result.code)?;
+                if show_stats {
+                    eprintln!("  Written to:        {}", out_path);
+                }
+            }
+            None => {
+                println!("{}", result.code);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_pack(
+        path: &str,
+        format: &str,
+        compress: bool,
+        output: Option<&str>,
+        include: Option<&str>,
+        ignore: Option<&str>,
+        instructions: Option<&str>,
+    ) -> Result<()> {
+        let root = std::path::Path::new(path);
+        if !root.exists() {
+            return Err(anyhow::anyhow!("Path does not exist: {}", path));
+        }
+
+        let include_exts: Vec<String> = include
+            .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
+            .unwrap_or_default();
+
+        let ignore_patterns: Vec<String> = ignore
+            .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
+            .unwrap_or_default();
+
+        let options = crate::core::pack::PackOptions {
+            format: crate::core::pack::PackFormat::from_str(format),
+            compress,
+            tokens: true,
+            include_extensions: include_exts,
+            ignore_patterns,
+            instructions: instructions.map(|s| s.to_string()),
+            output: output.map(|s| s.to_string()),
+        };
+
+        let result = crate::core::pack::pack_project(root, &options)?;
+
+        eprintln!("Packed {} files", result.file_count);
+        eprintln!("  Total tokens:     {}", result.total_tokens);
+        if compress {
+            eprintln!("  Compressed tokens: {}", result.compressed_tokens);
+        }
+
+        match output {
+            Some(out_path) => {
+                std::fs::write(out_path, &result.content)?;
+                eprintln!("  Written to:       {}", out_path);
+            }
+            None => {
+                println!("{}", result.content);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_curate(
+        task: &str,
+        path: &str,
+        strategy: &str,
+        max_tokens: usize,
+        max_files: usize,
+        output: Option<&str>,
+    ) -> Result<()> {
+        let root = std::path::Path::new(path);
+        if !root.exists() {
+            return Err(anyhow::anyhow!("Path does not exist: {}", path));
+        }
+
+        let strategy = crate::core::curator::CurationStrategy::from_str(strategy);
+        let result = crate::core::curator::curate_context(root, task, strategy, max_tokens, max_files)?;
+
+        eprintln!("{}", result.summary);
+        eprintln!();
+
+        // Build output content
+        let mut content = String::new();
+        content.push_str(&format!("# Curated Context\n\n"));
+        content.push_str(&format!("**Task:** {}\n", task));
+        content.push_str(&format!("**Strategy:** {}\n", result.strategy));
+        content.push_str(&format!("**Files:** {} ({} tokens)\n\n", result.files.len(), result.total_tokens));
+
+        for f in &result.files {
+            content.push_str(&format!("## {} (score: {:.2}, {} tokens)\n", f.path, f.score, f.tokens));
+            content.push_str(&format!("**Reason:** {}\n\n", f.reason));
+
+            // Include file content
+            let full_path = root.join(&f.path);
+            if let Ok(file_content) = std::fs::read_to_string(&full_path) {
+                let ext = std::path::Path::new(&f.path)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("text");
+                content.push_str(&format!("```{}\n{}\n```\n\n", ext, file_content));
+            }
+        }
+
+        match output {
+            Some(out_path) => {
+                std::fs::write(out_path, &content)?;
+                eprintln!("Written to: {}", out_path);
+            }
+            None => {
+                println!("{}", content);
+            }
+        }
+
         Ok(())
     }
 
@@ -2587,33 +2769,40 @@ Use --no-preview to perform the restoration"
                 println!("  ✅ Transaction logging");
             }
             Some("ai") => {
-                println!("🤖 GNAWSENSE: AI-POWERED NAVIGATION & ACTION");
-                println!("============================================");
+                println!("🤖 AI-FRIENDLY CONTEXT TOOLS");
+                println!("============================");
                 println!();
-                println!("1. Semantic Search (Project-wide):");
-                println!("   gnawtreewriter sense \"how is file backup handled?\"");
-                println!("   # Uses ModernBERT to find relevant files semantically.");
+                println!("1. Token-Aware Analysis:");
+                println!("   gnawtreewriter analyze src/main.rs --format summary");
+                println!("   # Shows token count per file with context window warnings.");
                 println!();
-                println!("2. Semantic Zoom (Within file):");
-                println!("   gnawtreewriter sense \"where is the database connection?\" src/db.rs");
-                println!("   # Finds specific functions or classes by meaning.");
+                println!("2. Code Compression (~70% token reduction):");
+                println!("   gnawtreewriter compress src/main.rs --stats");
+                println!("   # Replaces function bodies with ⋮---- placeholders.");
                 println!();
-                println!("3. Agentic Journaling (ALF):");
+                println!("3. Project Packing for AI Context:");
+                println!("   gnawtreewriter pack . --compress --format markdown");
+                println!("   gnawtreewriter pack src/ --include rs,py --instructions \"Focus on auth\"");
+                println!("   # Packages entire project with token counts and optional compression.");
+                println!();
+                println!("4. Intelligent Context Curation:");
+                println!("   gnawtreewriter curate \"authentication login\" --max-tokens 5000");
+                println!("   gnawtreewriter curate \"database\" --strategy recent");
+                println!("   # Selects only relevant files instead of dumping everything.");
+                println!();
+                println!("5. Secret Detection (auto in pack):");
+                println!("   gnawtreewriter pack . --format json  # Secrets auto-redacted");
+                println!("   # Detects AWS keys, GitHub tokens, JWT, private keys, etc.");
+                println!();
+                println!("6. Semantic Search (GnawSense):");
+                println!("   gnawtreewriter sense \"how is backup handled?\"");
+                println!("   gnawtreewriter sense \"database connection\" src/db.rs");
+                println!();
+                println!("7. Agentic Journaling (ALF):");
                 println!("   gnawtreewriter alf \"Refactoring for scalability\" --kind intent");
-                println!("   gnawtreewriter alf --list                                   # See history");
                 println!();
-                println!("4. Engineering Reports:");
-                println!("   gnawtreewriter ai report --limit 5                          # Show recent work");
-                println!("   gnawtreewriter ai report --output docs/evolution.md         # Save to file");
-                println!();
-                println!("5. Semantic Insertion (The magic!):");
-                println!("   gnawtreewriter sense-insert main.rs \"the main function\" \"println!(\\\"Init...\\\");\" --preview");
-                println!("   # Inserts code near a landmark without needing paths.");
-                println!();
-                println!("**Key Benefits:**");
-                println!("  ✅ 100% Local - Powered by ModernBERT (requires modernbert feature)");
-                println!("  ✅ Precision - Bridges the gap between intent and AST structure");
-                println!("  ✅ Agent-Friendly - Allows AI agents to navigate autonomously");
+                println!("**MCP Tools Available:**");
+                println!("  • compress, pack, curate, analyze, sense, sense-insert");
             }
             Some("scaffolding") => {
                 println!("🏗️  STRUCTURAL SCAFFOLDING EXAMPLES");
@@ -3039,7 +3228,13 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
             match GnawTreeWriter::new(file_path) {
                 Ok(writer) => {
                     let tree = writer.analyze();
-                    results.push(serde_json::to_value(tree)?);
+                    let source = writer.get_source();
+                    let tokens = crate::core::token_count::estimate_code_tokens(source);
+                    let mut tree_json = serde_json::to_value(tree)?;
+                    if let Some(obj) = tree_json.as_object_mut() {
+                        obj.insert("estimated_tokens".to_string(), serde_json::json!(tokens));
+                    }
+                    results.push(tree_json);
                 }
                 Err(e) => {
                     eprintln!("Warning: Failed to analyze {}: {}", file_path, e);
@@ -3049,16 +3244,25 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
 
         match format {
             "summary" => {
+                let mut total_tokens = 0usize;
                 println!("Analyzed {} files", results.len());
                 for (i, result) in results.iter().enumerate() {
                     if let Some(file_path) = all_files.get(i) {
-                        println!("File: {}", file_path);
+                        let tokens = result.get("estimated_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                        total_tokens += tokens;
+                        println!("File: {} ({} tokens)", file_path, tokens);
                         if let Some(children) = result.get("children") {
                             if let Some(array) = children.as_array() {
                                 println!("  Nodes: {}", array.len());
                             }
                         }
                     }
+                }
+                println!("\nTotal estimated tokens: {}", total_tokens);
+                if total_tokens > 8000 {
+                    println!("⚠️  Warning: Exceeds typical 8k context window");
+                } else if total_tokens > 4000 {
+                    println!("ℹ️  Note: Exceeds 4k — consider using compress or skeleton for overview");
                 }
             }
             _ => {

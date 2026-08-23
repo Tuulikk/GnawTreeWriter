@@ -1,11 +1,11 @@
 //! gnaw-blast: Change Impact Analysis
 
 use crate::{GnawTreeWriter, TreeNode};
+use crate::core::file_walker::walk_source_files_filtered;
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{HashSet};
 use std::path::Path;
-use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ImpactLevel {
@@ -192,30 +192,14 @@ pub fn find_callers_project(target: &str, directory: Option<&str>) -> Result<Vec
     let search_dir = directory.map(Path::new).unwrap_or_else(|| current_dir.as_path());
     let mut all_callers = Vec::new();
 
-    for entry in WalkDir::new(search_dir)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-    {
-        let path = entry.path();
-        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            if matches!(ext.to_lowercase().as_str(), 
-                "rs" | "py" | "js" | "ts" | "go" | "java") 
-            {
-                let skip = path.components().any(|c| {
-                    let s = c.as_os_str().to_string_lossy();
-                    s == "target" || s == "node_modules" || s == ".git"
-                });
-                if skip { continue; }
+    let files = walk_source_files_filtered(search_dir, &["rs", "py", "js", "ts", "go", "java"]);
 
-                let file_str = path.to_string_lossy().to_string();
-                if let Ok(writer) = GnawTreeWriter::new(&file_str) {
-                    let tree = writer.analyze();
-                    let callers = find_callers_in_file(tree, target, &file_str);
-                    all_callers.extend(callers);
-                }
-            }
+    for path in &files {
+        let file_str = path.to_string_lossy().to_string();
+        if let Ok(writer) = GnawTreeWriter::new(&file_str) {
+            let tree = writer.analyze();
+            let callers = find_callers_in_file(tree, target, &file_str);
+            all_callers.extend(callers);
         }
     }
 

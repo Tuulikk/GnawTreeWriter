@@ -4,6 +4,7 @@ use std::collections::{HashSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::fs;
 use crate::parser::TreeNode;
+use crate::core::file_walker::walk_source_files;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum RelationType {
@@ -48,29 +49,11 @@ impl RelationalIndexer {
     /// Scan a directory and build relations between files recursively
     pub fn index_directory(&mut self, dir_path: &Path) -> Result<Vec<FileGraph>> {
         let mut graphs = Vec::new();
-        use walkdir::WalkDir;
         
         // 1. First pass: Collect all definitions in the directory recursively
-        for entry in WalkDir::new(dir_path)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
-        {
-            let path = entry.path();
-            
-            // Skip hidden directories and common build/environment folders relative to dir_path
-            let relative_path = path.strip_prefix(dir_path).unwrap_or(path);
-            let is_ignored = relative_path.components().any(|c| {
-                let s = c.as_os_str().to_str().unwrap_or("");
-                s.starts_with('.') || s == "venv" || s == "node_modules" || s == "target" || s == "__pycache__" || s == "env"
-            });
-            
-            if is_ignored {
-                continue;
-            }
-
-            if let Ok(content) = fs::read_to_string(path) {
-                if let Ok(parser) = crate::parser::get_parser(path) {
+        for path in walk_source_files(dir_path) {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(parser) = crate::parser::get_parser(&path) {
                     if let Ok(tree) = parser.parse(&content) {
                         let mut defs = HashMap::new();
                         self.collect_definitions(&tree, &mut defs);

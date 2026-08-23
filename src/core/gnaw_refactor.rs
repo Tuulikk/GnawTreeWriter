@@ -1,10 +1,10 @@
 //! gnaw-refactor: Automated code refactoring
 
 use crate::{GnawTreeWriter, TreeNode};
+use crate::core::file_walker::walk_source_files_filtered;
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::HashSet;
-use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum RefactorKind {
@@ -146,34 +146,20 @@ fn find_and_rename_references(old_name: &str, new_name: &str) -> Result<Vec<Chan
     let current_dir = std::env::current_dir()?;
     let old_lower = old_name.to_lowercase();
 
-    for entry in WalkDir::new(&current_dir)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-    {
-        let path = entry.path();
-        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            if matches!(ext.to_lowercase().as_str(), "rs" | "py" | "js" | "ts") {
-                let skip = path.components().any(|c| {
-                    let s = c.as_os_str().to_string_lossy();
-                    s == "target" || s == "node_modules" || s == ".git"
-                });
-                if skip { continue; }
+    let files = walk_source_files_filtered(&current_dir, &["rs", "py", "js", "ts"]);
 
-                let file_str = path.to_string_lossy().to_string();
-                if let Ok(writer) = GnawTreeWriter::new(&file_str) {
-                    let tree = writer.analyze();
-                    for node in collect_nodes_matching(tree, &old_lower) {
-                        changes.push(Change {
-                            file: file_str.clone(),
-                            line: node.start_line,
-                            old_name: node.content.clone(),
-                            new_name: new_name.to_string(),
-                            change_type: "reference".to_string(),
-                        });
-                    }
-                }
+    for path in &files {
+        let file_str = path.to_string_lossy().to_string();
+        if let Ok(writer) = GnawTreeWriter::new(&file_str) {
+            let tree = writer.analyze();
+            for node in collect_nodes_matching(tree, &old_lower) {
+                changes.push(Change {
+                    file: file_str.clone(),
+                    line: node.start_line,
+                    old_name: node.content.clone(),
+                    new_name: new_name.to_string(),
+                    change_type: "reference".to_string(),
+                });
             }
         }
     }

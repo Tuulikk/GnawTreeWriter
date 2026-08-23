@@ -130,6 +130,50 @@ pub mod mcp_server {
                             }
                         },
                         {
+                            "name": "compress",
+                            "title": "Compress source code",
+                            "description": "Replace function/method bodies with placeholders to reduce token count while preserving signatures and structure.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string" }
+                                },
+                                "required": ["file_path"]
+                            }
+                        },
+                        {
+                            "name": "pack",
+                            "title": "Pack project for AI",
+                            "description": "Pack entire project into AI-optimized format with token counts and optional compression.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "path": { "type": "string", "description": "Root directory to pack (default: current directory)" },
+                                    "format": { "type": "string", "enum": ["markdown", "json", "plain"], "description": "Output format (default: markdown)" },
+                                    "compress": { "type": "boolean", "description": "Compress function bodies (default: false)" },
+                                    "include": { "type": "string", "description": "Comma-separated file extensions to include" },
+                                    "ignore": { "type": "string", "description": "Comma-separated patterns to ignore" },
+                                    "instructions": { "type": "string", "description": "Custom instructions to include in output" }
+                                }
+                            }
+                        },
+                        {
+                            "name": "curate",
+                            "title": "Curate context for AI agent",
+                            "description": "Intelligently select the most relevant files for a task, instead of dumping the entire project.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "task": { "type": "string", "description": "Task description (what the agent is working on)" },
+                                    "path": { "type": "string", "description": "Root directory (default: current directory)" },
+                                    "strategy": { "type": "string", "enum": ["relevance", "recent", "deps", "auto"], "description": "Curation strategy (default: auto)" },
+                                    "max_tokens": { "type": "integer", "description": "Maximum total tokens (default: 8000)" },
+                                    "max_files": { "type": "integer", "description": "Maximum number of files (default: 20)" }
+                                },
+                                "required": ["task"]
+                            }
+                        },
+                        {
                             "name": "get_semantic_report",
                             "title": "Generate semantic quality report",
                             "description": "Analyze code quality using AI.",
@@ -305,6 +349,27 @@ pub mod mcp_server {
                         let fp = validate_arg("file_path")?;
                         let max_depth = arguments.get("max_depth").and_then(Value::as_u64).unwrap_or(2) as usize;
                         Ok(handle_get_skeleton(fp, max_depth))
+                    },
+                    "compress" => {
+                        let fp = validate_arg("file_path")?;
+                        Ok(handle_compress(fp))
+                    },
+                    "pack" => {
+                        let path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
+                        let format = arguments.get("format").and_then(Value::as_str).unwrap_or("markdown");
+                        let compress = arguments.get("compress").and_then(Value::as_bool).unwrap_or(false);
+                        let include = arguments.get("include").and_then(Value::as_str);
+                        let ignore = arguments.get("ignore").and_then(Value::as_str);
+                        let instructions = arguments.get("instructions").and_then(Value::as_str);
+                        Ok(handle_pack(path, format, compress, include, ignore, instructions))
+                    },
+                    "curate" => {
+                        let task = validate_arg("task")?;
+                        let path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
+                        let strategy = arguments.get("strategy").and_then(Value::as_str).unwrap_or("auto");
+                        let max_tokens = arguments.get("max_tokens").and_then(Value::as_u64).unwrap_or(8000) as usize;
+                        let max_files = arguments.get("max_files").and_then(Value::as_u64).unwrap_or(20) as usize;
+                        Ok(handle_curate(task, path, strategy, max_tokens, max_files))
                     },
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
@@ -547,8 +612,16 @@ pub mod mcp_server {
 
     fn handle_analyze(file_path: &str) -> Value {
         match GnawTreeWriter::new(file_path) {
-            Ok(w) => json!({"content": [{ "type": "text", "text": format!("Analyzed {}", file_path)}], "data": w.analyze()}), // Corrected: escaped curly brace
-            Err(e) => tool_error(format!("IO error: {}", e)), // Corrected: escaped curly brace
+            Ok(w) => {
+                let source = w.get_source();
+                let tokens = crate::core::token_count::estimate_code_tokens(source);
+                let mut tree_json = serde_json::to_value(w.analyze()).unwrap_or(json!(null));
+                if let Some(obj) = tree_json.as_object_mut() {
+                    obj.insert("estimated_tokens".to_string(), json!(tokens));
+                }
+                json!({"content": [{ "type": "text", "text": format!("Analyzed {} ({} tokens)", file_path, tokens)}], "data": tree_json})
+            }
+            Err(e) => tool_error(format!("IO error: {}", e)),
         }
     }
 
@@ -619,6 +692,103 @@ pub mod mcp_server {
                 tool_success(format!("Skeleton of {}", file_path), Some(json!({"skeleton": s})))
             }
             Err(e) => tool_error(format!("IO error: {}", e)),
+        }
+    }
+
+    fn handle_compress(file_path: &str) -> Value {
+        match crate::core::compress::compress_file(file_path) {
+            Ok(result) => {
+                tool_success(
+                    format!("Compressed {} ({} → {} tokens, {:.0}% reduction)",
+                        file_path, result.original_tokens, result.compressed_tokens, result.ratio * 100.0),
+                    Some(json!({
+                        "code": result.code,
+                        "original_tokens": result.original_tokens,
+                        "compressed_tokens": result.compressed_tokens,
+                        "bodies_compressed": result.bodies_compressed,
+                        "ratio": result.ratio
+                    }))
+                )
+            }
+            Err(e) => tool_error(format!("Compression failed: {}", e)),
+        }
+    }
+
+    fn handle_pack(
+        path: &str,
+        format: &str,
+        compress: bool,
+        include: Option<&str>,
+        ignore: Option<&str>,
+        instructions: Option<&str>,
+    ) -> Value {
+        let root = std::path::Path::new(path);
+        if !root.exists() {
+            return tool_error(format!("Path does not exist: {}", path));
+        }
+
+        let include_exts: Vec<String> = include
+            .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
+            .unwrap_or_default();
+
+        let ignore_patterns: Vec<String> = ignore
+            .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
+            .unwrap_or_default();
+
+        let options = crate::core::pack::PackOptions {
+            format: crate::core::pack::PackFormat::from_str(format),
+            compress,
+            tokens: true,
+            include_extensions: include_exts,
+            ignore_patterns,
+            instructions: instructions.map(|s| s.to_string()),
+            output: None,
+        };
+
+        match crate::core::pack::pack_project(root, &options) {
+            Ok(result) => {
+                tool_success(
+                    format!("Packed {} files ({} tokens)", result.file_count, result.total_tokens),
+                    Some(json!({
+                        "content": result.content,
+                        "file_count": result.file_count,
+                        "total_tokens": result.total_tokens,
+                        "compressed_tokens": result.compressed_tokens,
+                        "files": result.files
+                    }))
+                )
+            }
+            Err(e) => tool_error(format!("Pack failed: {}", e)),
+        }
+    }
+
+    fn handle_curate(
+        task: &str,
+        path: &str,
+        strategy: &str,
+        max_tokens: usize,
+        max_files: usize,
+    ) -> Value {
+        let root = std::path::Path::new(path);
+        if !root.exists() {
+            return tool_error(format!("Path does not exist: {}", path));
+        }
+
+        let strategy = crate::core::curator::CurationStrategy::from_str(strategy);
+
+        match crate::core::curator::curate_context(root, task, strategy, max_tokens, max_files) {
+            Ok(result) => {
+                tool_success(
+                    format!("Curated {} files ({} tokens)", result.files.len(), result.total_tokens),
+                    Some(json!({
+                        "files": result.files,
+                        "total_tokens": result.total_tokens,
+                        "strategy": result.strategy,
+                        "summary": result.summary
+                    }))
+                )
+            }
+            Err(e) => tool_error(format!("Curation failed: {}", e)),
         }
     }
 

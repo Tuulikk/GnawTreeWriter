@@ -1,11 +1,11 @@
 //! gnaw-find: Find AST nodes across project files
 
 use crate::{GnawTreeWriter, TreeNode};
+use crate::core::file_walker::walk_source_files_filtered;
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
-use walkdir::WalkDir;
 
 /// gnaw-find: Search AST nodes across project files
 pub fn find_nodes(
@@ -31,26 +31,7 @@ pub fn find_nodes(
     let mut files: Vec<std::path::PathBuf> = Vec::new();
 
     if recursive {
-        for entry in WalkDir::new(search_dir)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
-        {
-            let path = entry.path();
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                if exts.iter().any(|e| e.eq_ignore_ascii_case(ext)) {
-                    // Skip common non-source dirs
-                    let skip = path.components().any(|c| {
-                        let s = c.as_os_str().to_string_lossy();
-                        s == "target" || s == "node_modules" || s == ".git" || s.starts_with('.')
-                    });
-                    if !skip {
-                        files.push(path.to_path_buf());
-                    }
-                }
-            }
-        }
+        files = walk_source_files_filtered(search_dir, &exts);
     }
 
     if files.is_empty() {

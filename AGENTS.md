@@ -27,7 +27,7 @@ edit the codebase, the way it is meant to be used.
 
 ### How to reach the tool
 - **In VSCode / Copilot Chat**: MCP tools prefixed `mcp_gnawtreewrite_*`
-  (`edit_node`, `semantic_edit`, `insert_node`, `batch`, `preview_edit`, ...).
+  (`edit_node`, `semantic_edit`, `insert_node`, `batch`, `preview_edit`, `compress`, `pack`, `curate`, ...).
 - **In a terminal / CLI agent**: the `gnawtreewriter` binary
   (`gnawtreewriter edit <file> <path> -`, `gnawtreewriter batch <spec.json>`, ...).
 

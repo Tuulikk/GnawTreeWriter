@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use crate::llm::{GnawSenseBroker, SemanticIndexManager, NodeEmbedding, AiModel, DeviceType};
 use crate::parser::{get_parser, TreeNode};
-use walkdir::WalkDir;
+use crate::core::file_walker::walk_source_files;
 use std::fs;
 
 pub struct ProjectIndexer {
@@ -34,22 +34,11 @@ impl ProjectIndexer {
             target_path.to_path_buf()
         };
 
-        for entry in WalkDir::new(&target_path)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file()) 
-        {
-            let path = entry.path();
-            
-            // Skip hidden directories (like .git, .gnawtreewriter_ai)
-            if path.components().any(|c| c.as_os_str().to_str().map(|s| s.starts_with('.')).unwrap_or(false)) {
-                continue;
-            }
-
-            if let Ok(parser) = get_parser(path) {
+        for path in walk_source_files(&target_path) {
+            if let Ok(parser) = get_parser(&path) {
                 // Try to strip prefix safely
                 let file_path_str = path.strip_prefix(&self.project_root)
-                    .unwrap_or(path) // Fallback to full path if prefix doesn't match
+                    .unwrap_or(&path) // Fallback to full path if prefix doesn't match
                     .to_string_lossy()
                     .to_string();
 

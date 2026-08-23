@@ -1,3 +1,27 @@
+## [0.9.5] - 2026-08-23
+
+### Added
+- **AI-Friendly Context Tools** (inspired by Repomix analysis):
+  - `compress` command: Replace function bodies with `⋮----` placeholders (~70% token reduction)
+  - `pack` command: Package entire project into AI-optimized format (markdown/json/plain)
+  - `curate` command: Intelligent file selection based on task description
+  - Token counting in `analyze` output (estimated_tokens field)
+  - Secret detection and redaction (18 patterns: AWS, GitHub, GitLab, Stripe, JWT, etc.)
+  - Git-aware file walking (respects .gitignore, replaces hardcoded skip-lists)
+
+- **New MCP tools**: `compress`, `pack`, `curate`
+
+- **New modules**:
+  - `file_walker.rs`: Git-aware traversal using `ignore` crate
+  - `token_count.rs`: Heuristic token estimation for LLM context planning
+  - `compress.rs`: AST-based code compression
+  - `pack.rs`: Project packaging with token budgets
+  - `secrets.rs`: Credential detection and redaction
+  - `curator.rs`: Multi-strategy context curation (relevance, git changes, dependencies)
+
+### Changed
+- Replaced hardcoded skip-lists in `gnaw_find`, `blast`, `inspect`, `gnaw_refactor`, `project_indexer`, `relational_index` with unified git-aware walker
+
 ## [0.9.4] - 2026-04-30
 
 ### Added
