@@ -1439,6 +1439,7 @@ dependencies = [
  "ignore",
  "md5",
  "pulldown-cmark",
+ "rayon",
  "regex",
  "reqwest",
  "secrets_scanner",

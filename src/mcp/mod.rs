@@ -18,6 +18,7 @@ pub mod mcp_server {
         routing::post,
         Router,
     };
+    use rayon::prelude::*;
     use serde::{Deserialize, Serialize};
     use serde_json::{json, Value};
     use similar::{ChangeTag, TextDiff};
@@ -1116,14 +1117,23 @@ pub mod mcp_server {
     }
 
     fn handle_index_entities_batch(paths: &[String], include_private: bool) -> Value {
+        // Parallel: index each file independently (order preserved).
+        let results: Vec<Result<crate::core::index_entities::EntityIndex, String>> = paths
+            .par_iter()
+            .map(|path| {
+                crate::core::index_entities::index_entities(path, include_private)
+                    .map_err(|e| e.to_string())
+            })
+            .collect();
+
         let mut all_entities = Vec::new();
         let mut all_imports = Vec::new();
         let mut all_exports = Vec::new();
         let mut errors = Vec::new();
         let mut total_entities = 0usize;
 
-        for path in paths {
-            match crate::core::index_entities::index_entities(path, include_private) {
+        for (path, result) in paths.iter().zip(results) {
+            match result {
                 Ok(result) => {
                     total_entities += result.entity_count;
                     all_imports.extend(result.imports);
@@ -1135,7 +1145,7 @@ pub mod mcp_server {
                     }));
                 }
                 Err(e) => {
-                    errors.push(json!({"file": path, "error": e.to_string()}));
+                    errors.push(json!({"file": path, "error": e}));
                 }
             }
         }
@@ -1155,13 +1165,22 @@ pub mod mcp_server {
     }
 
     fn handle_index_relations_batch(paths: &[String]) -> Value {
+        // Parallel: index each file independently (order preserved).
+        let results: Vec<Result<crate::core::index_relations::RelationIndex, String>> = paths
+            .par_iter()
+            .map(|path| {
+                crate::core::index_relations::index_relations(path)
+                    .map_err(|e| e.to_string())
+            })
+            .collect();
+
         let mut all_relations = Vec::new();
         let mut combined_summary: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         let mut errors = Vec::new();
         let mut total_relations = 0usize;
 
-        for path in paths {
-            match crate::core::index_relations::index_relations(path) {
+        for (path, result) in paths.iter().zip(results) {
+            match result {
                 Ok(result) => {
                     total_relations += result.relations.len();
                     for (k, v) in &result.summary {
@@ -1174,7 +1193,7 @@ pub mod mcp_server {
                     }));
                 }
                 Err(e) => {
-                    errors.push(json!({"file": path, "error": e.to_string()}));
+                    errors.push(json!({"file": path, "error": e}));
                 }
             }
         }

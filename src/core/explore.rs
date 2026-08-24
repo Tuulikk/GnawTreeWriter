@@ -11,6 +11,7 @@ use crate::core::token_count::estimate_code_tokens;
 use crate::parser::TreeNode;
 use crate::GnawTreeWriter;
 use anyhow::Result;
+use rayon::prelude::*;
 use serde::Serialize;
 use std::path::Path;
 
@@ -235,31 +236,39 @@ fn explore_directory(target: &Path) -> Result<ExploreNode> {
     let mut total_tokens = 0usize;
     let mut total_lines = 0usize;
 
-    for path in &files {
-        let name = path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown")
-            .to_string();
+    // Parallel: read + summarize each file independently (order preserved).
+    let file_nodes: Vec<ExploreNode> = files
+        .par_iter()
+        .map(|path| {
+            let name = path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
 
-        let content = std::fs::read_to_string(path).unwrap_or_default();
-        let tokens = estimate_code_tokens(&content);
-        let lines = content.lines().count();
-        total_tokens += tokens;
-        total_lines += lines;
+            let content = std::fs::read_to_string(path).unwrap_or_default();
+            let tokens = estimate_code_tokens(&content);
+            let lines = content.lines().count();
 
-        // Get skeletal summary for this file
-        let summary = get_file_summary(path);
+            // Get skeletal summary for this file
+            let summary = get_file_summary(path);
 
-        children.push(ExploreNode {
-            name: name.clone(),
-            path: name.clone(),
-            node_type: "file".to_string(),
-            tokens,
-            lines,
-            children: summary,
-            drill_down: format!("explore --path \"{}\" --level 2", path.display()),
-            content: None,
-        });
+            ExploreNode {
+                name: name.clone(),
+                path: name.clone(),
+                node_type: "file".to_string(),
+                tokens,
+                lines,
+                children: summary,
+                drill_down: format!("explore --path \"{}\" --level 2", path.display()),
+                content: None,
+            }
+        })
+        .collect();
+
+    for node in &file_nodes {
+        total_tokens += node.tokens;
+        total_lines += node.lines;
+        children.push(node.clone());
     }
 
     // Sort by tokens descending

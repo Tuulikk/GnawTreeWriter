@@ -7,6 +7,7 @@ use crate::core::compress::compress_source;
 use crate::core::file_walker::walk_source_files_filtered;
 use crate::core::token_count::estimate_code_tokens;
 use anyhow::Result;
+use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 
 /// Output format for pack command.
@@ -102,6 +103,25 @@ fn should_compress(options: &PackOptions, token_count: usize) -> bool {
     options.compress && (options.compress_threshold == 0 || token_count >= options.compress_threshold)
 }
 
+/// Compress a single file's source; falls back to the original content.
+fn compress_file(options: &PackOptions, tree_path: &str, content: &str) -> String {
+    let content_tokens = estimate_code_tokens(content);
+    if !should_compress(options, content_tokens) {
+        return content.to_string();
+    }
+    match crate::parser::get_parser(Path::new(tree_path)) {
+        Ok(parser) => {
+            if let Ok(tree) = parser.parse(content) {
+                let compressed = compress_source(content, &tree);
+                compressed.code
+            } else {
+                content.to_string()
+            }
+        }
+        Err(_) => content.to_string(),
+    }
+}
+
 /// Pack a project into an AI-optimized format.
 pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
     let ext_refs: Vec<&str> = options
@@ -124,54 +144,60 @@ pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
         })
         .collect();
 
-    let mut pack_files = Vec::new();
-    let mut total_tokens = 0usize;
-    let mut secrets_redacted = 0usize;
-    let mut file_entries: Vec<(String, String, String)> = Vec::new(); // (tree_path, display_path, content)
+    // Parallel: read + redact + count tokens per file. Results keep input order.
+    let processed: Vec<(PackFileInfo, String, String, String, usize)> = files
+        .par_iter()
+        .filter_map(|path| {
+            // Tree path: relative to cwd (what walker returns)
+            let tree_path = path.to_string_lossy().to_string();
 
-    for path in &files {
-        // Tree path: relative to cwd (what walker returns)
-        let tree_path = path.to_string_lossy().to_string();
+            // Display path: relative to project root
+            let rel_path = path
+                .strip_prefix(&project_root)
+                .or_else(|_| path.strip_prefix(root))
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
 
-        // Display path: relative to project root
-        let rel_path = path
-            .strip_prefix(&project_root)
-            .or_else(|_| path.strip_prefix(root))
-            .unwrap_or(path)
-            .to_string_lossy()
-            .to_string();
+            // If strip_prefix gave empty (single file case), use the filename
+            let rel_path = if rel_path.is_empty() {
+                path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            } else {
+                rel_path
+            };
 
-        // If strip_prefix gave empty (single file case), use the filename
-        let rel_path = if rel_path.is_empty() {
-            path.file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default()
-        } else {
-            rel_path
-        };
-
-        if let Ok(content) = std::fs::read_to_string(path) {
+            let content = std::fs::read_to_string(path).ok()?;
             let (content, redacted) = if options.redact_secrets {
                 crate::core::secrets::redact_secrets(&content)
             } else {
                 (content, 0)
             };
-            secrets_redacted += redacted;
 
             let tokens = estimate_code_tokens(&content);
-            total_tokens += tokens;
-
             let lines = content.lines().count();
 
-            pack_files.push(PackFileInfo {
+            let info = PackFileInfo {
                 path: rel_path.clone(),
                 tree_path: tree_path.clone(),
                 tokens,
                 lines,
-            });
+            };
+            Some((info, tree_path, rel_path, content, redacted))
+        })
+        .collect();
 
-            file_entries.push((tree_path, rel_path, content));
-        }
+    let mut pack_files = Vec::new();
+    let mut total_tokens = 0usize;
+    let mut secrets_redacted = 0usize;
+    let mut file_entries: Vec<(String, String, String)> = Vec::new(); // (tree_path, display_path, content)
+
+    for (info, tree_path, rel_path, content, redacted) in processed {
+        secrets_redacted += redacted;
+        total_tokens += info.tokens;
+        pack_files.push(info);
+        file_entries.push((tree_path, rel_path, content));
     }
 
     let content = match options.format {
@@ -248,31 +274,20 @@ fn format_markdown(files: &[(String, String, String)], options: &PackOptions) ->
     // File contents (uses display_path for headers, tree_path for parsing)
     output.push_str("## Files\n\n");
 
-    for (tree_path, _display_path, content) in files {
+    // Parallel: compress each file's content up front (order preserved).
+    let display_contents: Vec<String> = files
+        .par_iter()
+        .map(|(tree_path, _, content)| compress_file(options, tree_path, content))
+        .collect();
+
+    for ((tree_path, _display_path, _content), display_content) in files.iter().zip(&display_contents) {
         let ext = Path::new(tree_path)
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("text");
 
-        let content_tokens = estimate_code_tokens(content);
-        let display_content = if should_compress(options, content_tokens) {
-            match crate::parser::get_parser(Path::new(tree_path)) {
-                Ok(parser) => {
-                    if let Ok(tree) = parser.parse(content) {
-                        let compressed = compress_source(content, &tree);
-                        compressed.code
-                    } else {
-                        content.clone()
-                    }
-                }
-                Err(_) => content.clone(),
-            }
-        } else {
-            content.clone()
-        };
-
         let tokens = if options.tokens {
-            let t = estimate_code_tokens(&display_content);
+            let t = estimate_code_tokens(display_content);
             format!(" ({} tokens)", t)
         } else {
             String::new()
@@ -290,25 +305,14 @@ fn format_json(files: &[(String, String, String)], options: &PackOptions) -> Res
     let mut file_array = Vec::new();
     let mut total_lines = 0usize;
 
-    for (tree_path, _display_path, content) in files {
-        let content_tokens = estimate_code_tokens(content);
-        let display_content = if should_compress(options, content_tokens) {
-            match crate::parser::get_parser(Path::new(tree_path)) {
-                Ok(parser) => {
-                    if let Ok(tree) = parser.parse(content) {
-                        let compressed = compress_source(content, &tree);
-                        compressed.code
-                    } else {
-                        content.clone()
-                    }
-                }
-                Err(_) => content.clone(),
-            }
-        } else {
-            content.clone()
-        };
+    // Parallel: compress each file's content up front (order preserved).
+    let display_contents: Vec<String> = files
+        .par_iter()
+        .map(|(tree_path, _, content)| compress_file(options, tree_path, content))
+        .collect();
 
-        let tokens = estimate_code_tokens(&display_content);
+    for ((tree_path, _display_path, content), display_content) in files.iter().zip(&display_contents) {
+        let tokens = estimate_code_tokens(display_content);
         let lines = content.lines().count();
         total_lines += lines;
 
@@ -361,32 +365,21 @@ fn format_plain(files: &[(String, String, String)], options: &PackOptions) -> St
         output.push_str(&format!("Instructions: {}\n\n", instructions));
     }
 
-    for (tree_path, _display_path, content) in files {
-        let content_tokens = estimate_code_tokens(content);
-        let display_content = if should_compress(options, content_tokens) {
-            match crate::parser::get_parser(Path::new(tree_path)) {
-                Ok(parser) => {
-                    if let Ok(tree) = parser.parse(content) {
-                        let compressed = compress_source(content, &tree);
-                        compressed.code
-                    } else {
-                        content.clone()
-                    }
-                }
-                Err(_) => content.clone(),
-            }
-        } else {
-            content.clone()
-        };
+    // Parallel: compress each file's content up front (order preserved).
+    let display_contents: Vec<String> = files
+        .par_iter()
+        .map(|(tree_path, _, content)| compress_file(options, tree_path, content))
+        .collect();
 
+    for ((tree_path, _display_path, _content), display_content) in files.iter().zip(&display_contents) {
         let tokens = if options.tokens {
-            format!(" [{} tokens]", estimate_code_tokens(&display_content))
+            format!(" [{} tokens]", estimate_code_tokens(display_content))
         } else {
             String::new()
         };
 
         output.push_str(&format!("--- {}{} ---\n", tree_path, tokens));
-        output.push_str(&display_content);
+        output.push_str(display_content);
         output.push_str("\n\n");
     }
 
@@ -404,25 +397,14 @@ fn format_xml(files: &[(String, String, String)], options: &PackOptions) -> Stri
 
     output.push_str("  <files>\n");
 
-    for (tree_path, _display_path, content) in files {
-        let content_tokens = estimate_code_tokens(content);
-        let display_content = if should_compress(options, content_tokens) {
-            match crate::parser::get_parser(Path::new(tree_path)) {
-                Ok(parser) => {
-                    if let Ok(tree) = parser.parse(content) {
-                        let compressed = compress_source(content, &tree);
-                        compressed.code
-                    } else {
-                        content.clone()
-                    }
-                }
-                Err(_) => content.clone(),
-            }
-        } else {
-            content.clone()
-        };
+    // Parallel: compress each file's content up front (order preserved).
+    let display_contents: Vec<String> = files
+        .par_iter()
+        .map(|(tree_path, _, content)| compress_file(options, tree_path, content))
+        .collect();
 
-        let tokens = estimate_code_tokens(&display_content);
+    for ((tree_path, _display_path, content), display_content) in files.iter().zip(&display_contents) {
+        let tokens = estimate_code_tokens(display_content);
         let lines = content.lines().count();
 
         output.push_str(&format!(
@@ -430,7 +412,7 @@ fn format_xml(files: &[(String, String, String)], options: &PackOptions) -> Stri
             xml_escape(tree_path), tokens, lines
         ));
         output.push_str("    <content><![CDATA[");
-        output.push_str(&display_content);
+        output.push_str(display_content);
         output.push_str("]]></content>\n");
         output.push_str("  </file>\n");
     }
