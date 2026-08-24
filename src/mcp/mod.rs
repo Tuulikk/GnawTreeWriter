@@ -174,6 +174,33 @@ pub mod mcp_server {
                             }
                         },
                         {
+                            "name": "search_semantic",
+                            "title": "Semantic code search",
+                            "description": "Search code by meaning across the entire project. Good for finding 'how is X implemented?' without knowing file names.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": { "type": "string", "description": "Semantic search query (e.g. 'how is authentication handled?')" },
+                                    "file_path": { "type": "string", "description": "Optional: limit search to this file (zoom mode)" },
+                                    "max_results": { "type": "integer", "description": "Maximum results (default: 10)" }
+                                },
+                                "required": ["query"]
+                            }
+                        },
+                        {
+                            "name": "diff_since",
+                            "title": "Detect changes since last index",
+                            "description": "Compare current project state against a previous git commit or timestamp. Returns added/modified/deleted files.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "since_commit": { "type": "string", "description": "Git commit hash to compare against" },
+                                    "since_date": { "type": "string", "description": "ISO date to compare from (e.g. '2026-08-20')" },
+                                    "include_uncommitted": { "type": "boolean", "description": "Include uncommitted changes (default: true)" }
+                                }
+                            }
+                        },
+                        {
                             "name": "get_semantic_report",
                             "title": "Generate semantic quality report",
                             "description": "Analyze code quality using AI.",
@@ -370,6 +397,18 @@ pub mod mcp_server {
                         let max_tokens = arguments.get("max_tokens").and_then(Value::as_u64).unwrap_or(8000) as usize;
                         let max_files = arguments.get("max_files").and_then(Value::as_u64).unwrap_or(20) as usize;
                         Ok(handle_curate(task, path, strategy, max_tokens, max_files))
+                    },
+                    "search_semantic" => {
+                        let query = validate_arg("query")?;
+                        let file_path = arguments.get("file_path").and_then(Value::as_str);
+                        let max_results = arguments.get("max_results").and_then(Value::as_u64).unwrap_or(10) as usize;
+                        Ok(handle_search_semantic(state, query, file_path, max_results).await)
+                    },
+                    "diff_since" => {
+                        let since_commit = arguments.get("since_commit").and_then(Value::as_str);
+                        let since_date = arguments.get("since_date").and_then(Value::as_str);
+                        let include_uncommitted = arguments.get("include_uncommitted").and_then(Value::as_bool).unwrap_or(true);
+                        Ok(handle_diff_since(since_commit, since_date, include_uncommitted))
                     },
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
@@ -812,6 +851,175 @@ pub mod mcp_server {
             let _ = file_path;
             tool_error("ModernBERT feature not enabled.".into())
         }
+    }
+
+    async fn handle_search_semantic(state: Arc<AppState>, query: &str, file_path: Option<&str>, max_results: usize) -> Value {
+        #[cfg(feature = "modernbert")]
+        {
+            let mgr = match crate::llm::ai_manager::AiManager::new(&state.project_root) {
+                Ok(m) => m,
+                Err(e) => return tool_error(e.to_string()),
+            };
+
+            let broker = match crate::llm::GnawSenseBroker::new(&state.project_root) {
+                Ok(b) => b,
+                Err(e) => return tool_error(e.to_string()),
+            };
+
+            match broker.sense(query, file_path).await {
+                Ok(crate::llm::SenseResponse::Satelite { matches }) => {
+                    let results: Vec<Value> = matches.iter().take(max_results).map(|m| {
+                        json!({
+                            "file": m.file_path,
+                            "node_path": m.node_path,
+                            "score": m.score,
+                        })
+                    }).collect();
+                    tool_success(
+                        format!("Found {} matches for \"{}\"", results.len(), query),
+                        Some(json!({"matches": results, "query": query, "mode": "satellite"}))
+                    )
+                }
+                Ok(crate::llm::SenseResponse::Zoom { file_path: fp, nodes, impact }) => {
+                    let results: Vec<Value> = nodes.iter().take(max_results).map(|n| {
+                        json!({
+                            "path": n.path,
+                            "preview": n.preview,
+                            "score": n.score,
+                        })
+                    }).collect();
+                    tool_success(
+                        format!("Found {} nodes in {} for \"{}\"", results.len(), fp, query),
+                        Some(json!({"matches": results, "query": query, "file": fp, "mode": "zoom", "impact": impact}))
+                    )
+                }
+                Err(e) => tool_error(format!("Semantic search failed: {}", e)),
+            }
+        }
+        #[cfg(not(feature = "modernbert"))]
+        {
+            let _ = state;
+            let _ = query;
+            let _ = file_path;
+            let _ = max_results;
+            tool_error("ModernBERT feature not enabled. Install with --features modernbert.".into())
+        }
+    }
+
+    fn handle_diff_since(since_commit: Option<&str>, since_date: Option<&str>, include_uncommitted: bool) -> Value {
+        let project_root = std::env::current_dir().unwrap_or_default();
+
+        // Get current HEAD
+        let current_head = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&project_root)
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+
+        // Determine the reference point
+        let ref_point = since_commit
+            .or(since_date)
+            .unwrap_or("HEAD");
+
+        // Get changed files
+        let mut changed_files: Vec<Value> = Vec::new();
+
+        // Committed changes
+        let log_range = if let Some(commit) = since_commit {
+            format!("{}..HEAD", commit)
+        } else if let Some(date) = since_date {
+            format!("{}..HEAD", date)
+        } else {
+            "HEAD~1..HEAD".to_string()
+        };
+
+        if let Ok(output) = std::process::Command::new("git")
+            .args(["diff", "--name-status", &log_range])
+            .current_dir(&project_root)
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let parts: Vec<&str> = line.splitn(2, '\t').collect();
+                if parts.len() == 2 {
+                    let status = match parts[0] {
+                        "A" => "added",
+                        "D" => "deleted",
+                        "M" => "modified",
+                        "R" => "renamed",
+                        _ => "unknown",
+                    };
+                    changed_files.push(json!({
+                        "path": parts[1],
+                        "status": status,
+                        "source": "committed"
+                    }));
+                }
+            }
+        }
+
+        // Uncommitted changes
+        if include_uncommitted {
+            if let Ok(output) = std::process::Command::new("git")
+                .args(["status", "--porcelain"])
+                .current_dir(&project_root)
+                .output()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    if line.len() >= 3 {
+                        let status_code = &line[..2];
+                        let path = line[3..].trim();
+                        let status = if status_code.starts_with('M') || status_code.ends_with('M') {
+                            "modified"
+                        } else if status_code.starts_with('A') || status_code.starts_with('?') {
+                            "untracked"
+                        } else if status_code.starts_with('D') || status_code.ends_with('D') {
+                            "deleted"
+                        } else {
+                            "changed"
+                        };
+
+                        // Skip if already in committed list
+                        let already_listed = changed_files.iter().any(|f| {
+                            f.get("path").and_then(Value::as_str) == Some(path)
+                        });
+                        if !already_listed {
+                            changed_files.push(json!({
+                                "path": path,
+                                "status": status,
+                                "source": "uncommitted"
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+
+        let added = changed_files.iter().filter(|f| f.get("status").and_then(Value::as_str) == Some("added")).count();
+        let modified = changed_files.iter().filter(|f| f.get("status").and_then(Value::as_str) == Some("modified")).count();
+        let deleted = changed_files.iter().filter(|f| f.get("status").and_then(Value::as_str) == Some("deleted")).count();
+        let untracked = changed_files.iter().filter(|f| f.get("status").and_then(Value::as_str) == Some("untracked")).count();
+
+        tool_success(
+            format!("Changes since {}: {} files ({} added, {} modified, {} deleted, {} untracked)",
+                ref_point, changed_files.len(), added, modified, deleted, untracked),
+            Some(json!({
+                "reference": ref_point,
+                "current_head": current_head,
+                "changed_files": changed_files,
+                "stats": {
+                    "total": changed_files.len(),
+                    "added": added,
+                    "modified": modified,
+                    "deleted": deleted,
+                    "untracked": untracked
+                }
+            }))
+        )
     }
 
         fn handle_search_nodes(file_path: &str, pattern: &str) -> Value {
