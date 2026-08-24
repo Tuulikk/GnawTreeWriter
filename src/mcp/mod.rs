@@ -236,6 +236,18 @@ pub mod mcp_server {
                             }
                         },
                         {
+                            "name": "explore",
+                            "title": "Explore project with zoom levels",
+                            "description": "Map-like navigation: overview (dirs+tokens), directory (files+summaries), file (signatures), full (source).",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "target": { "type": "string", "description": "Path to explore (file or directory, default: project root)" },
+                                    "level": { "type": "string", "enum": ["0", "1", "2", "3", "overview", "directory", "file", "full"], "description": "Zoom level (default: auto)" }
+                                }
+                            }
+                        },
+                        {
                             "name": "get_semantic_report",
                             "title": "Generate semantic quality report",
                             "description": "Analyze code quality using AI.",
@@ -465,6 +477,11 @@ pub mod mcp_server {
                     },
                     "save_state" => {
                         Ok(handle_save_state())
+                    },
+                    "explore" => {
+                        let target = arguments.get("target").and_then(Value::as_str).unwrap_or("");
+                        let level = arguments.get("level").and_then(Value::as_str).unwrap_or("0");
+                        Ok(handle_explore(target, level))
                     },
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
@@ -1191,6 +1208,28 @@ pub mod mcp_server {
                 )
             }
             Err(e) => tool_error(format!("Failed to save state: {}", e)),
+        }
+    }
+
+    fn handle_explore(target: &str, level_str: &str) -> Value {
+        let root = std::env::current_dir().unwrap_or_default();
+        let level = crate::core::explore::ZoomLevel::parse(level_str);
+
+        match crate::core::explore::explore(&root, target, level) {
+            Ok(result) => {
+                tool_success(
+                    format!("Explored '{}' at level {:?} ({} tokens, {} lines)",
+                        result.path, result.level, result.node.tokens, result.node.lines),
+                    Some(json!({
+                        "path": result.path,
+                        "level": format!("{:?}", result.level),
+                        "node": result.node,
+                        "available_levels": result.available_levels.iter()
+                            .map(|l| format!("{:?}", l)).collect::<Vec<_>>(),
+                    }))
+                )
+            }
+            Err(e) => tool_error(format!("Explore failed: {}", e)),
         }
     }
 

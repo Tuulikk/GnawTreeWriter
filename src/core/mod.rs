@@ -22,6 +22,7 @@ pub mod blueprint;
 pub mod diff_parser;
 pub mod guardian;
 pub mod diagnostics;
+pub mod explore;
 pub mod healer;
 pub mod index_entities;
 pub mod index_relations;

@@ -230,6 +230,17 @@ enum Commands {
         #[arg(short, long, default_value = "json")]
         format: String,
     },
+    /// Explore project with zoom levels (map-like navigation)
+    Explore {
+        /// Path to explore (file or directory)
+        #[arg(default_value = "")]
+        target: String,
+        /// Zoom level: 0=overview, 1=directory, 2=file, 3=full
+        #[arg(short, long, default_value = "0")]
+        level: String,
+        #[arg(short, long, default_value = "json")]
+        format: String,
+    },
     /// Comprehensive health check of the system
     Status,
     /// Generate a semantic code quality report
@@ -1069,6 +1080,9 @@ impl Cli {
             Commands::Stats { path, format } => {
                 Self::handle_stats(&path, &format)?;
             }
+            Commands::Explore { target, level, format } => {
+                Self::handle_explore(&target, &level, &format)?;
+            }
             Commands::Status => {
                 Self::handle_health_check().await?;
             }
@@ -1785,6 +1799,64 @@ Use --no-preview to write batch file"
         }
 
         Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn handle_explore(target: &str, level_str: &str, format: &str) -> Result<()> {
+        let root = std::env::current_dir()?;
+        let level = crate::core::explore::ZoomLevel::parse(level_str);
+        let result = crate::core::explore::explore(&root, target, level)?;
+
+        match format {
+            "json" => {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            "text" | "summary" => {
+                Self::print_explore_tree(&result.node, 0);
+                println!("\nTokens: {} | Lines: {} | Level: {:?}",
+                    result.node.tokens, result.node.lines, result.level);
+                let levels: Vec<String> = result.available_levels.iter()
+                    .map(|l| format!("{:?}", l))
+                    .collect();
+                println!("Available zoom: {}", levels.join(", "));
+            }
+            _ => {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn print_explore_tree(node: &crate::core::explore::ExploreNode, depth: usize) {
+        let indent = "  ".repeat(depth);
+        let type_icon = match node.node_type.as_str() {
+            "project" => "📦",
+            "directory" => "📁",
+            "file" => "📄",
+            "function" | "method" => "⚡",
+            "struct" => "🏗️",
+            "enum" => "📋",
+            "impl" => "🔧",
+            "trait" | "class" => "📐",
+            _ => "•",
+        };
+
+        if node.node_type == "file" || node.node_type == "project" {
+            println!("{}{} {} ({} tokens, {} lines)",
+                indent, type_icon, node.name, node.tokens, node.lines);
+        } else {
+            println!("{}{} {} ({} tokens)", indent, type_icon, node.name, node.tokens);
+        }
+
+        // Show children (limited for readability)
+        let show = if depth >= 2 { 3 } else { 10 };
+        for child in node.children.iter().take(show) {
+            Self::print_explore_tree(child, depth + 1);
+        }
+        if node.children.len() > show {
+            println!("{}  ... and {} more", indent, node.children.len() - show);
+        }
     }
 
     async fn handle_semantic_report(file_path: &str) -> Result<()> {
