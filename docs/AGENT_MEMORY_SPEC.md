@@ -530,7 +530,7 @@ Memory System:
 ### Fas 1: Befintliga verktyg (inga GTW-ändringar)
 - Memory System ansluter till GTW via MCP
 - Använder `analyze`, `sense`, `search_nodes`, `inspect`, `pack`, `stats`
-- **Status:** Redan möjligt
+- **Klar:** 2026-08-23
 
 ### Fas 2: Nya MCP-verktyg (GTW-ändringar)
 - `index_entities` — entitetsextraktion
@@ -539,18 +539,18 @@ Memory System:
 - `temporal_index` — git-baserat tidsindex
 - `diff_since` — inkrementell delta-rapportering
 - State-fil (`.gnawtreewriter_state.json`) för session-övergående tracking
-- **Estimat:** 2-3 veckors utveckling
+- **Klar:** 2026-08-24
 
 ### Fas 3: Optimering
 - Inkrementell indexering (endast ändrade filer)
-- Caching av index-resultat
+- State + diff_since-samverkan
 - Batch-frågor (flera filer i en anrop)
-- **Estimat:** 1-2 veckor
+- **Klar:** 2026-08-24
 
 ### Fas 4: Distribution
 - GTW som embedded library (inte bara CLI/MCP)
 - FFI-bindningar för andra språk (Python, Node.js)
-- **Estimat:** 2-4 veckor
+- **Status:** Ej påbörjad
 
 ---
 
