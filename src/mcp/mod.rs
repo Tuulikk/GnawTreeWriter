@@ -203,27 +203,27 @@ pub mod mcp_server {
                         },
                         {
                             "name": "index_entities",
-                            "title": "Extract entities from source file",
-                            "description": "Extract functions, structs, enums, impls, and other entities from a file for knowledge graph indexing.",
+                            "title": "Extract entities from source file(s)",
+                            "description": "Extract functions, structs, enums, impls, and other entities from one or more files for knowledge graph indexing.",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
-                                    "file_path": { "type": "string", "description": "Path to the file to analyze" },
+                                    "file_path": { "type": "string", "description": "Path to a single file to analyze" },
+                                    "file_paths": { "type": "array", "items": {"type": "string"}, "description": "Multiple files to analyze (batch mode)" },
                                     "include_private": { "type": "boolean", "description": "Include private entities (default: false)" }
-                                },
-                                "required": ["file_path"]
+                                }
                             }
                         },
                         {
                             "name": "index_relations",
-                            "title": "Extract relations between entities",
-                            "description": "Extract call relationships, imports, type usage, and impl relationships from a file for knowledge graph edges.",
+                            "title": "Extract relations from source file(s)",
+                            "description": "Extract call relationships, imports, type usage, and impl relationships from one or more files for knowledge graph edges.",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
-                                    "file_path": { "type": "string", "description": "Path to the file to analyze" }
-                                },
-                                "required": ["file_path"]
+                                    "file_path": { "type": "string", "description": "Path to a single file to analyze" },
+                                    "file_paths": { "type": "array", "items": {"type": "string"}, "description": "Multiple files to analyze (batch mode)" }
+                                }
                             }
                         },
                         {
@@ -447,13 +447,21 @@ pub mod mcp_server {
                         Ok(handle_diff_since(since_commit, since_date, include_uncommitted, use_saved_state))
                     },
                     "index_entities" => {
-                        let fp = validate_arg("file_path")?;
+                        let paths = resolve_file_paths(&arguments);
                         let include_private = arguments.get("include_private").and_then(Value::as_bool).unwrap_or(false);
-                        Ok(handle_index_entities(fp, include_private))
+                        if paths.is_empty() {
+                            Err("No file_path or file_paths provided".into())
+                        } else {
+                            Ok(handle_index_entities_batch(&paths, include_private))
+                        }
                     },
                     "index_relations" => {
-                        let fp = validate_arg("file_path")?;
-                        Ok(handle_index_relations(fp))
+                        let paths = resolve_file_paths(&arguments);
+                        if paths.is_empty() {
+                            Err("No file_path or file_paths provided".into())
+                        } else {
+                            Ok(handle_index_relations_batch(&paths))
+                        }
                     },
                     "save_state" => {
                         Ok(handle_save_state())
@@ -1074,6 +1082,21 @@ pub mod mcp_server {
         )
     }
 
+    /// Resolve file paths from either file_path (single) or file_paths (batch).
+    fn resolve_file_paths(arguments: &Value) -> Vec<String> {
+        // Try file_paths array first
+        if let Some(paths) = arguments.get("file_paths").and_then(Value::as_array) {
+            return paths.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect();
+        }
+        // Fall back to single file_path
+        if let Some(path) = arguments.get("file_path").and_then(Value::as_str) {
+            return vec![path.to_string()];
+        }
+        vec![]
+    }
+
     fn handle_index_entities(file_path: &str, include_private: bool) -> Value {
         match crate::core::index_entities::index_entities(file_path, include_private) {
             Ok(result) => {
@@ -1110,6 +1133,84 @@ pub mod mcp_server {
             }
             Err(e) => tool_error(format!("Relation indexing failed: {}", e)),
         }
+    }
+
+    fn handle_index_entities_batch(paths: &[String], include_private: bool) -> Value {
+        let mut all_entities = Vec::new();
+        let mut all_imports = Vec::new();
+        let mut all_exports = Vec::new();
+        let mut errors = Vec::new();
+        let mut total_entities = 0usize;
+
+        for path in paths {
+            match crate::core::index_entities::index_entities(path, include_private) {
+                Ok(result) => {
+                    total_entities += result.entity_count;
+                    all_imports.extend(result.imports);
+                    all_exports.extend(result.exports);
+                    all_entities.push(json!({
+                        "file": result.file,
+                        "entity_count": result.entity_count,
+                        "entities": result.entities,
+                    }));
+                }
+                Err(e) => {
+                    errors.push(json!({"file": path, "error": e.to_string()}));
+                }
+            }
+        }
+
+        tool_success(
+            format!("Indexed {} entities from {} files ({} errors)",
+                total_entities, paths.len(), errors.len()),
+            Some(json!({
+                "file_count": paths.len(),
+                "total_entities": total_entities,
+                "total_imports": all_imports.len(),
+                "total_exports": all_exports.len(),
+                "files": all_entities,
+                "errors": errors,
+            }))
+        )
+    }
+
+    fn handle_index_relations_batch(paths: &[String]) -> Value {
+        let mut all_relations = Vec::new();
+        let mut combined_summary: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut errors = Vec::new();
+        let mut total_relations = 0usize;
+
+        for path in paths {
+            match crate::core::index_relations::index_relations(path) {
+                Ok(result) => {
+                    total_relations += result.relations.len();
+                    for (k, v) in &result.summary {
+                        *combined_summary.entry(k.clone()).or_insert(0) += v;
+                    }
+                    all_relations.push(json!({
+                        "file": result.file,
+                        "relation_count": result.relations.len(),
+                        "relations": result.relations,
+                    }));
+                }
+                Err(e) => {
+                    errors.push(json!({"file": path, "error": e.to_string()}));
+                }
+            }
+        }
+
+        tool_success(
+            format!("Indexed {} relations from {} files ({})",
+                total_relations, paths.len(),
+                combined_summary.iter().map(|(k,v)| format!("{}:{}", k, v)).collect::<Vec<_>>().join(", ")),
+            Some(json!({
+                "file_count": paths.len(),
+                "total_relations": total_relations,
+                "summary": combined_summary,
+                "files": all_relations,
+                "errors": errors,
+            }))
+        )
     }
 
     fn handle_save_state() -> Value {
