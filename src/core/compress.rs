@@ -111,76 +111,44 @@ fn collect_body_replacements(node: &TreeNode, replacements: &mut Vec<(usize, usi
 fn should_compress_body(node: &TreeNode) -> bool {
     matches!(
         node.node_type.as_str(),
-        // Rust
-        "function_item"
-            | "macro_definition"
-            | "closure_expression"
-            | "match_expression"
-            | "if_expression"
-            | "while_expression"
-            | "for_expression"
-            | "loop_expression"
-            | "block"
-        // Python
-            | "function_definition"
-            | "class_definition"
-            | "lambda"
-            | "decorated_definition"
-        // JavaScript/TypeScript
-            | "function_declaration"
-            | "function"
-            | "arrow_function"
-            | "class_declaration"
-            | "class"
-            | "method_definition"
-            | "generator_function_declaration"
-            | "generator_function"
-            | "switch_statement"
-            | "if_statement"
-            | "for_statement"
-            | "while_statement"
-            | "do_statement"
-        // Go
-            | "function_declaration"
-            | "method_declaration"
-            | "if_statement"
-            | "for_statement"
-            | "switch_statement"
-            | "select_statement"
-        // Java
-            | "constructor_declaration"
-            | "method_declaration"
-            | "if_statement"
-            | "for_statement"
-            | "while_statement"
-            | "switch_expression"
-        // C/C++
-            | "function_definition"
-            | "declaration_list"
-            | "if_statement"
-            | "for_statement"
-            | "while_statement"
-            | "switch_statement"
-        // Kotlin
-            | "function_declaration"
-            | "class_declaration"
-            | "lambda_literal"
-            | "if_expression"
-            | "when_expression"
-            | "for_expression"
-            | "while_expression"
-        // Swift
-            | "function_declaration"
-            | "class_declaration"
-            | "if_declaration"
-            | "for_statement"
-            | "while_statement"
-            | "switch_statement"
-        // Zig
-            | "function_declaration"
-            | "if_expression"
-            | "for_expression"
-            | "while_expression"
+        // ── Functions & methods ──
+        "function_item"                    // Rust
+        | "function_definition"            // Python, C/C++
+        | "function_declaration"           // JS/TS/Go/Java/Kotlin/Swift/Zig
+        | "function"                       // JS/TS shorthand
+        | "method_definition"              // JS/TS class methods
+        | "method_declaration"             // Go/Java
+        | "constructor_declaration"        // Java
+        | "arrow_function"                 // JS/TS
+        | "generator_function_declaration" // JS/TS
+        | "generator_function"             // JS/TS
+        | "lambda"                         // Python
+        | "lambda_literal"                 // Kotlin
+        | "closure_expression"             // Rust
+        | "macro_definition"               // Rust
+        // ── Classes & structs ──
+        | "class_definition"               // Python
+        | "class_declaration"              // JS/TS/Kotlin/Swift
+        | "class"                          // JS/TS shorthand
+        | "decorated_definition"           // Python
+        // ── Control flow ──
+        | "if_expression"                  // Rust/Kotlin/Zig
+        | "if_statement"                   // JS/TS/Go/Java/C/C++
+        | "if_declaration"                 // Swift
+        | "match_expression"               // Rust
+        | "when_expression"                // Kotlin
+        | "switch_statement"               // JS/TS/Go/C/C++
+        | "switch_expression"              // Java
+        | "select_statement"               // Go
+        | "for_expression"                 // Rust/Kotlin/Zig
+        | "for_statement"                  // JS/TS/Go/Java/C/C++
+        | "while_expression"               // Rust/Kotlin/Zig
+        | "while_statement"                // JS/TS/Java/C/C++
+        | "loop_expression"                // Rust
+        | "do_statement"                   // JS/TS
+        // ── Other bodies ──
+        | "block"                          // Rust generic blocks
+        | "declaration_list"               // C/C++ struct/enum bodies
     )
     // Note: impl_item and trait_item are NOT included — their children are compressed individually
 }

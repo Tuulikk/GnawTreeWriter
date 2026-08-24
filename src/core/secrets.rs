@@ -63,7 +63,6 @@ pub fn scan_for_secrets(source: &str) -> Vec<DetectedSecret> {
             }
 
             // Extract the matched text from the line
-            let line_start = source.lines().take(line_num - 1).map(|l| l.len() + 1).sum::<usize>();
             let line_text = source.lines().nth(line_num - 1).unwrap_or("");
             let col = finding.col.saturating_sub(1);
             let end_col = finding.end_col.saturating_sub(1);

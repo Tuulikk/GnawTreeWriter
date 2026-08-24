@@ -82,25 +82,15 @@ pub fn curate_context(
         &["rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "c", "cpp", "h", "hpp"],
     );
 
-    let mut scored_files: Vec<CuratedFile> = Vec::new();
-
-    match strategy {
-        CurationStrategy::Relevance => {
-            scored_files = score_by_relevance(&files, root, task);
-        }
-        CurationStrategy::RecentChanges => {
-            scored_files = score_by_recent_changes(&files, root);
-        }
-        CurationStrategy::Dependencies => {
-            scored_files = score_by_dependencies(&files, root, task);
-        }
+    let mut scored_files = match strategy {
+        CurationStrategy::Relevance => score_by_relevance(&files, root, task),
+        CurationStrategy::RecentChanges => score_by_recent_changes(&files, root),
+        CurationStrategy::Dependencies => score_by_dependencies(&files, root, task),
         CurationStrategy::Auto => {
-            // Combine all strategies with weights
             let relevance = score_by_relevance(&files, root, task);
             let recent = score_by_recent_changes(&files, root);
             let deps = score_by_dependencies(&files, root, task);
 
-            // Merge scores: relevance 0.5, recent 0.3, deps 0.2
             let mut score_map: HashMap<String, (f64, String, usize, usize)> = HashMap::new();
 
             for f in &relevance {
@@ -127,18 +117,14 @@ pub fn curate_context(
                 }
             }
 
-            scored_files = score_map
+            score_map
                 .into_iter()
                 .map(|(path, (score, reason, tokens, lines))| CuratedFile {
-                    path,
-                    score,
-                    reason,
-                    tokens,
-                    lines,
+                    path, score, reason, tokens, lines,
                 })
-                .collect();
+                .collect()
         }
-    }
+    };
 
     // Sort by score descending
     scored_files.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));

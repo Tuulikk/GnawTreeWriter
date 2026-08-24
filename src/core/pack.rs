@@ -118,7 +118,6 @@ pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
 
     let mut pack_files = Vec::new();
     let mut total_tokens = 0usize;
-    let mut compressed_tokens = 0usize;
     let mut secrets_redacted = 0usize;
     let mut file_entries: Vec<(String, String, String)> = Vec::new(); // (tree_path, display_path, content)
 
@@ -174,12 +173,12 @@ pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
         PackFormat::Xml => format_xml(&file_entries, options),
     };
 
-    if options.compress {
+    let compressed_tokens = if options.compress {
         // Re-count compressed tokens from the final output
-        compressed_tokens = estimate_code_tokens(&content);
+        estimate_code_tokens(&content)
     } else {
-        compressed_tokens = total_tokens;
-    }
+        total_tokens
+    };
 
     Ok(PackResult {
         content,
@@ -241,7 +240,7 @@ fn format_markdown(files: &[(String, String, String)], options: &PackOptions) ->
     // File contents (uses display_path for headers, tree_path for parsing)
     output.push_str("## Files\n\n");
 
-    for (tree_path, display_path, content) in files {
+    for (tree_path, _display_path, content) in files {
         let ext = Path::new(tree_path)
             .extension()
             .and_then(|e| e.to_str())
@@ -282,7 +281,7 @@ fn format_json(files: &[(String, String, String)], options: &PackOptions) -> Res
     let mut file_array = Vec::new();
     let mut total_lines = 0usize;
 
-    for (tree_path, display_path, content) in files {
+    for (tree_path, _display_path, content) in files {
         let display_content = if options.compress {
             match crate::parser::get_parser(Path::new(tree_path)) {
                 Ok(parser) => {
@@ -352,7 +351,7 @@ fn format_plain(files: &[(String, String, String)], options: &PackOptions) -> St
         output.push_str(&format!("Instructions: {}\n\n", instructions));
     }
 
-    for (tree_path, display_path, content) in files {
+    for (tree_path, _display_path, content) in files {
         let display_content = if options.compress {
             match crate::parser::get_parser(Path::new(tree_path)) {
                 Ok(parser) => {

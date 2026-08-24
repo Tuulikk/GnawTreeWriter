@@ -3,7 +3,6 @@
 //! Uses tiktoken (OpenAI's BPE tokenizer) for accurate token counting.
 //! Falls back to a heuristic if tiktoken initialization fails.
 
-use std::collections::HashSet;
 use std::sync::LazyLock;
 use tiktoken_rs::cl100k_base;
 
