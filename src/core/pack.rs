@@ -23,7 +23,7 @@ pub enum PackFormat {
 }
 
 impl PackFormat {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "json" => PackFormat::Json,
             "plain" | "text" => PackFormat::Plain,
@@ -235,7 +235,7 @@ fn format_markdown(files: &[(String, String, String)], options: &PackOptions) ->
         let lines = content.lines().count();
         output.push_str(&format!("| {} | {} | {} |\n", tree_path, tokens, lines));
     }
-    output.push_str("\n");
+    output.push('\n');
 
     // File contents (uses display_path for headers, tree_path for parsing)
     output.push_str("## Files\n\n");

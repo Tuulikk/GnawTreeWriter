@@ -39,7 +39,7 @@ pub fn compress_source(source: &str, tree: &TreeNode) -> CompressedOutput {
     collect_body_replacements(tree, &mut replacements);
 
     // Sort descending so we replace from bottom to top
-    replacements.sort_by(|a, b| b.0.cmp(&a.0));
+    replacements.sort_by_key(|&(start, _)| std::cmp::Reverse(start));
 
     let mut compressed_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
 

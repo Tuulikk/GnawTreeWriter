@@ -31,7 +31,7 @@ pub enum CurationStrategy {
 }
 
 impl CurationStrategy {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "recent" | "changes" | "git" => CurationStrategy::RecentChanges,
             "deps" | "dependencies" | "callers" => CurationStrategy::Dependencies,
@@ -524,12 +524,12 @@ mod tests {
 
     #[test]
     fn test_strategy_from_str() {
-        assert_eq!(CurationStrategy::from_str("relevance"), CurationStrategy::Relevance);
-        assert_eq!(CurationStrategy::from_str("recent"), CurationStrategy::RecentChanges);
-        assert_eq!(CurationStrategy::from_str("git"), CurationStrategy::RecentChanges);
-        assert_eq!(CurationStrategy::from_str("deps"), CurationStrategy::Dependencies);
-        assert_eq!(CurationStrategy::from_str("auto"), CurationStrategy::Auto);
-        assert_eq!(CurationStrategy::from_str("smart"), CurationStrategy::Auto);
+        assert_eq!(CurationStrategy::parse("relevance"), CurationStrategy::Relevance);
+        assert_eq!(CurationStrategy::parse("recent"), CurationStrategy::RecentChanges);
+        assert_eq!(CurationStrategy::parse("git"), CurationStrategy::RecentChanges);
+        assert_eq!(CurationStrategy::parse("deps"), CurationStrategy::Dependencies);
+        assert_eq!(CurationStrategy::parse("auto"), CurationStrategy::Auto);
+        assert_eq!(CurationStrategy::parse("smart"), CurationStrategy::Auto);
     }
 
     #[test]

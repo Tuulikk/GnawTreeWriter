@@ -10,7 +10,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const STATE_FILE: &str = ".gnawtreewriter_state.json";
 

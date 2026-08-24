@@ -1626,6 +1626,7 @@ Use --no-preview to write batch file"
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn handle_pack(
         path: &str,
         format: &str,
@@ -1650,7 +1651,7 @@ Use --no-preview to write batch file"
             .unwrap_or_default();
 
         let options = crate::core::pack::PackOptions {
-            format: crate::core::pack::PackFormat::from_str(format),
+            format: crate::core::pack::PackFormat::parse(format),
             compress,
             tokens: true,
             include_extensions: include_exts,
@@ -1697,7 +1698,7 @@ Use --no-preview to write batch file"
             return Err(anyhow::anyhow!("Path does not exist: {}", path));
         }
 
-        let strategy = crate::core::curator::CurationStrategy::from_str(strategy);
+        let strategy = crate::core::curator::CurationStrategy::parse(strategy);
         let result = crate::core::curator::curate_context(root, task, strategy, max_tokens, max_files)?;
 
         eprintln!("{}", result.summary);
@@ -1705,7 +1706,7 @@ Use --no-preview to write batch file"
 
         // Build output content
         let mut content = String::new();
-        content.push_str(&format!("# Curated Context\n\n"));
+        content.push_str("# Curated Context\n\n");
         content.push_str(&format!("**Task:** {}\n", task));
         content.push_str(&format!("**Strategy:** {}\n", result.strategy));
         content.push_str(&format!("**Files:** {} ({} tokens)\n\n", result.files.len(), result.total_tokens));

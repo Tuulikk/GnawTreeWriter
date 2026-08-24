@@ -219,8 +219,6 @@ fn extract_doc_comment(node: &TreeNode, lines: &[&str]) -> Option<String> {
         if line.starts_with("///") || line.starts_with("//!") {
             let doc_text = line.trim_start_matches('/').trim();
             doc_lines.insert(0, doc_text.to_string());
-        } else if line.starts_with("#[") || line.is_empty() || line.starts_with("//") {
-            break;
         } else {
             break;
         }

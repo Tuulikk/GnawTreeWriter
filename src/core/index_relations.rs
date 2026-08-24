@@ -204,7 +204,7 @@ fn extract_type_usage(tree: &TreeNode, file_path: &str, lines: &[&str], relation
             for param in &child.children {
                 if param.node_type == "parameters" || param.node_type == "type_annotation"
                     || param.node_type == "return_type" {
-                    extract_type_refs(param, file_path, lines, relations, &child);
+                    extract_type_refs(param, file_path, lines, relations, child);
                 }
             }
         }
@@ -216,7 +216,7 @@ fn extract_type_usage(tree: &TreeNode, file_path: &str, lines: &[&str], relation
     }
 }
 
-fn extract_type_refs(node: &TreeNode, file_path: &str, lines: &[&str], relations: &mut Vec<Relation>, context: &TreeNode) {
+fn extract_type_refs(node: &TreeNode, file_path: &str, _lines: &[&str], relations: &mut Vec<Relation>, context: &TreeNode) {
     if node.node_type == "type_identifier" || node.node_type == "scoped_type_identifier" {
         let type_name = node.get_name().unwrap_or(node.content.trim().to_string());
         let context_name = context.get_name().unwrap_or_default();
@@ -231,7 +231,7 @@ fn extract_type_refs(node: &TreeNode, file_path: &str, lines: &[&str], relations
         }
     }
     for child in &node.children {
-        extract_type_refs(child, file_path, lines, relations, context);
+        extract_type_refs(child, file_path, _lines, relations, context);
     }
 }
 

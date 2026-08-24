@@ -831,7 +831,7 @@ pub mod mcp_server {
             .unwrap_or_default();
 
         let options = crate::core::pack::PackOptions {
-            format: crate::core::pack::PackFormat::from_str(format),
+            format: crate::core::pack::PackFormat::parse(format),
             compress,
             tokens: true,
             include_extensions: include_exts,
@@ -870,7 +870,7 @@ pub mod mcp_server {
             return tool_error(format!("Path does not exist: {}", path));
         }
 
-        let strategy = crate::core::curator::CurationStrategy::from_str(strategy);
+        let strategy = crate::core::curator::CurationStrategy::parse(strategy);
 
         match crate::core::curator::curate_context(root, task, strategy, max_tokens, max_files) {
             Ok(result) => {
@@ -912,7 +912,7 @@ pub mod mcp_server {
     async fn handle_search_semantic(state: Arc<AppState>, query: &str, file_path: Option<&str>, max_results: usize) -> Value {
         #[cfg(feature = "modernbert")]
         {
-            let mgr = match crate::llm::ai_manager::AiManager::new(&state.project_root) {
+            let _mgr = match crate::llm::ai_manager::AiManager::new(&state.project_root) {
                 Ok(m) => m,
                 Err(e) => return tool_error(e.to_string()),
             };
@@ -1095,44 +1095,6 @@ pub mod mcp_server {
             return vec![path.to_string()];
         }
         vec![]
-    }
-
-    fn handle_index_entities(file_path: &str, include_private: bool) -> Value {
-        match crate::core::index_entities::index_entities(file_path, include_private) {
-            Ok(result) => {
-                tool_success(
-                    format!("Indexed {} entities from {} ({} imports, {} exports)",
-                        result.entity_count, file_path, result.imports.len(), result.exports.len()),
-                    Some(json!({
-                        "file": result.file,
-                        "entity_count": result.entity_count,
-                        "imports": result.imports,
-                        "exports": result.exports,
-                        "entities": result.entities,
-                    }))
-                )
-            }
-            Err(e) => tool_error(format!("Entity indexing failed: {}", e)),
-        }
-    }
-
-    fn handle_index_relations(file_path: &str) -> Value {
-        match crate::core::index_relations::index_relations(file_path) {
-            Ok(result) => {
-                tool_success(
-                    format!("Indexed {} relations from {} ({})",
-                        result.relations.len(), file_path,
-                        result.summary.iter().map(|(k,v)| format!("{}:{}", k, v)).collect::<Vec<_>>().join(", ")),
-                    Some(json!({
-                        "file": result.file,
-                        "relation_count": result.relations.len(),
-                        "summary": result.summary,
-                        "relations": result.relations,
-                    }))
-                )
-            }
-            Err(e) => tool_error(format!("Relation indexing failed: {}", e)),
-        }
     }
 
     fn handle_index_entities_batch(paths: &[String], include_private: bool) -> Value {

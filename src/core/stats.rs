@@ -1,9 +1,7 @@
 //! Project statistics and analysis for AI context planning.
 
-use crate::core::compress::compress_source;
 use crate::core::file_walker::walk_source_files_filtered;
 use crate::core::token_count::estimate_code_tokens;
-use crate::GnawTreeWriter;
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -97,7 +95,7 @@ pub fn analyze_project(root: &Path) -> Result<ProjectStats> {
         entry.2 += lines;
 
         // Check if file is compressible (has function bodies)
-        let compressible = path.extension().and_then(|e| e.to_str()).map_or(false, |ext| {
+        let compressible = path.extension().and_then(|e| e.to_str()).is_some_and(|ext| {
             matches!(ext, "rs" | "py" | "js" | "ts" | "tsx" | "jsx" | "go" | "java" | "c" | "cpp" | "kt" | "swift")
         });
 
@@ -110,7 +108,7 @@ pub fn analyze_project(root: &Path) -> Result<ProjectStats> {
     }
 
     // Sort by tokens descending, take top 15
-    all_files.sort_by(|a, b| b.tokens.cmp(&a.tokens));
+    all_files.sort_by_key(|f| std::cmp::Reverse(f.tokens));
     let largest_files: Vec<FileInfo> = all_files.into_iter().take(15).collect();
 
     // Build language stats
@@ -121,10 +119,10 @@ pub fn analyze_project(root: &Path) -> Result<ProjectStats> {
             file_count: count,
             total_tokens: tokens,
             total_lines: lines,
-            avg_tokens_per_file: if count > 0 { tokens / count } else { 0 },
+            avg_tokens_per_file: tokens / count.max(1),
         })
         .collect();
-    languages.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+    languages.sort_by_key(|l| std::cmp::Reverse(l.total_tokens));
 
     // Compression estimate (rough: 70% of compressible tokens can be saved)
     let compressible_tokens: usize = languages.iter()
