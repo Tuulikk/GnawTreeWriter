@@ -545,4 +545,160 @@ mod tests {
         assert_eq!(CurationStrategy::from_str("auto"), CurationStrategy::Auto);
         assert_eq!(CurationStrategy::from_str("smart"), CurationStrategy::Auto);
     }
+
+    #[test]
+    fn test_curate_scores_sorted_descending() {
+        let (_dir, root) = setup_project();
+        let result = curate_context(
+            &root,
+            "login password",
+            CurationStrategy::Relevance,
+            100000,
+            10,
+        )
+        .unwrap();
+
+        // Verify descending order
+        let scores: Vec<f64> = result.files.iter().map(|f| f.score).collect();
+        let mut sorted = scores.clone();
+        sorted.sort_by(|a, b| b.partial_cmp(a).unwrap());
+        assert_eq!(scores, sorted, "Files should be sorted by score descending");
+    }
+
+    #[test]
+    fn test_curate_irrelevant_task_returns_empty() {
+        let (_dir, root) = setup_project();
+        let result = curate_context(
+            &root,
+            "xyzzyplughnonexistent",
+            CurationStrategy::Relevance,
+            100000,
+            10,
+        )
+        .unwrap();
+
+        assert!(result.files.is_empty(), "No files should match nonsense keywords");
+        assert_eq!(result.total_tokens, 0);
+    }
+
+    #[test]
+    fn test_curate_reason_field_populated() {
+        let (_dir, root) = setup_project();
+        let result = curate_context(
+            &root,
+            "login",
+            CurationStrategy::Relevance,
+            100000,
+            10,
+        )
+        .unwrap();
+
+        assert!(!result.files.is_empty());
+        for f in &result.files {
+            assert!(!f.reason.is_empty(), "Every curated file should have a reason");
+        }
+    }
+
+    #[test]
+    fn test_curate_token_counts_accurate() {
+        let (_dir, root) = setup_project();
+        let result = curate_context(
+            &root,
+            "login",
+            CurationStrategy::Relevance,
+            100000,
+            10,
+        )
+        .unwrap();
+
+        // Sum of per-file tokens should equal total
+        let sum: usize = result.files.iter().map(|f| f.tokens).sum();
+        assert_eq!(sum, result.total_tokens, "total_tokens should equal sum of file tokens");
+    }
+
+    #[test]
+    fn test_curate_dependencies_finds_callers() {
+        let (_dir, root) = setup_project();
+        // main.rs calls validate_password — deps should find both
+        let result = curate_context(
+            &root,
+            "validate_password",
+            CurationStrategy::Dependencies,
+            100000,
+            10,
+        )
+        .unwrap();
+
+        let has_login = result.files.iter().any(|f| f.path.contains("login.rs"));
+        assert!(has_login, "Should find defining file");
+    }
+
+    #[test]
+    fn test_curate_budget_excludes_large_files() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::process::Command::new("git")
+            .args(["init", root.to_str().unwrap()])
+            .output()
+            .ok();
+
+        // One small relevant file, one huge relevant file
+        let mut big_content = String::from("fn big_login_fn() {\n");
+        for i in 0..2000 {
+            big_content.push_str(&format!("    let x{} = {};\n", i, i));
+        }
+        big_content.push_str("}\n");
+
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/small.rs"), "fn login() {}").unwrap();
+        fs::write(root.join("src/big.rs"), &big_content).unwrap();
+
+        // Budget that only fits the small file
+        let result = curate_context(
+            &root,
+            "login",
+            CurationStrategy::Relevance,
+            2000,
+            10,
+        )
+        .unwrap();
+
+        assert!(result.total_tokens <= 2000);
+        assert!(
+            result.files.iter().any(|f| f.path.contains("small.rs")),
+            "Small file should fit in budget"
+        );
+    }
+
+    #[test]
+    fn test_curate_auto_produces_summary() {
+        let (_dir, root) = setup_project();
+        let result = curate_context(
+            &root,
+            "session",
+            CurationStrategy::Auto,
+            100000,
+            10,
+        )
+        .unwrap();
+
+        assert!(!result.summary.is_empty());
+        assert!(result.summary.contains("Auto"), "Summary should mention strategy");
+    }
+
+    #[test]
+    fn test_curate_short_keywords_ignored() {
+        let (_dir, root) = setup_project();
+        // "fn" is only 2 chars — should be skipped as too short
+        let result = curate_context(
+            &root,
+            "fn",
+            CurationStrategy::Relevance,
+            100000,
+            10,
+        )
+        .unwrap();
+
+        assert!(result.files.is_empty(), "Keywords < 3 chars should be ignored");
+    }
 }

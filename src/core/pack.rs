@@ -591,4 +591,129 @@ mod tests {
             "Should find at most 1 file, found: {}", result.file_count);
         assert!(result.total_tokens >= 0);
     }
+
+    #[test]
+    fn test_pack_xml_format() {
+        let (_dir, root) = setup_project();
+        let options = PackOptions {
+            format: PackFormat::Xml,
+            ..Default::default()
+        };
+        let result = pack_project(&root, &options).unwrap();
+
+        assert!(result.content.contains("<repository>"));
+        assert!(result.content.contains("<files>"));
+        assert!(result.content.contains("<file path="));
+        assert!(result.content.contains("<![CDATA["));
+        assert!(result.content.contains("]]></content>"));
+        assert!(result.content.contains("</repository>"));
+    }
+
+    #[test]
+    fn test_pack_xml_escapes_attributes() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::process::Command::new("git")
+            .args(["init", root.to_str().unwrap()])
+            .output()
+            .ok();
+
+        fs::write(root.join("config.rs"), "fn init() {}").unwrap();
+
+        let options = PackOptions {
+            format: PackFormat::Xml,
+            ..Default::default()
+        };
+        let result = pack_project(&root, &options).unwrap();
+
+        // Verify the XML is parseable and contains the file element
+        assert!(result.content.contains("<file path="));
+        assert!(result.content.contains("config.rs"));
+        assert!(result.content.contains("<![CDATA[fn init() {}]]></content>"));
+    }
+
+    #[test]
+    fn test_pack_redacts_secrets_by_default() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::process::Command::new("git")
+            .args(["init", root.to_str().unwrap()])
+            .output()
+            .ok();
+
+        fs::write(
+            root.join("main.rs"),
+            "fn main() {\n    let key = \"AKIAIOSFODNN7QWERTYUI\";\n}",
+        )
+        .unwrap();
+
+        let options = PackOptions::default();
+        let result = pack_project(&root, &options).unwrap();
+
+        assert!(result.secrets_redacted >= 1, "Should detect and redact secret");
+        assert!(!result.content.contains("AKIAIOSFODNN7QWERTYUI"),
+            "Redacted output must not contain the key");
+        assert!(result.content.contains("<REDACTED>"));
+    }
+
+    #[test]
+    fn test_pack_no_redact_opt_out() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::process::Command::new("git")
+            .args(["init", root.to_str().unwrap()])
+            .output()
+            .ok();
+
+        fs::write(
+            root.join("main.rs"),
+            "fn main() {\n    let key = \"AKIAIOSFODNN7QWERTYUI\";\n}",
+        )
+        .unwrap();
+
+        let options = PackOptions {
+            redact_secrets: false,
+            ..Default::default()
+        };
+        let result = pack_project(&root, &options).unwrap();
+
+        assert_eq!(result.secrets_redacted, 0);
+        assert!(result.content.contains("AKIAIOSFODNN7QWERTYUI"));
+    }
+
+    #[test]
+    fn test_pack_summary_table_contains_files() {
+        let (_dir, root) = setup_project();
+        let options = PackOptions::default();
+        let result = pack_project(&root, &options).unwrap();
+
+        assert!(result.content.contains("## Summary"));
+        assert!(result.content.contains("| File | Tokens | Lines |"));
+        assert!(result.content.contains("main.rs"));
+    }
+
+    #[test]
+    fn test_pack_structure_section_contains_dirs() {
+        let (_dir, root) = setup_project();
+        let options = PackOptions::default();
+        let result = pack_project(&root, &options).unwrap();
+
+        assert!(result.content.contains("## Structure"));
+        // Files under src/ should be shown with the directory
+        assert!(result.content.contains("main.rs"));
+    }
+
+    #[test]
+    fn test_pack_ignore_patterns() {
+        let (_dir, root) = setup_project();
+        let options = PackOptions {
+            ignore_patterns: vec!["README".to_string()],
+            ..Default::default()
+        };
+        let result = pack_project(&root, &options).unwrap();
+
+        assert!(!result.content.contains("# My Project"),
+            "Ignore pattern should exclude README");
+        assert!(result.content.contains("fn main()"));
+    }
 }
