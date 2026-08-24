@@ -201,6 +201,19 @@ pub mod mcp_server {
                             }
                         },
                         {
+                            "name": "index_entities",
+                            "title": "Extract entities from source file",
+                            "description": "Extract functions, structs, enums, impls, and other entities from a file for knowledge graph indexing.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string", "description": "Path to the file to analyze" },
+                                    "include_private": { "type": "boolean", "description": "Include private entities (default: false)" }
+                                },
+                                "required": ["file_path"]
+                            }
+                        },
+                        {
                             "name": "get_semantic_report",
                             "title": "Generate semantic quality report",
                             "description": "Analyze code quality using AI.",
@@ -409,6 +422,11 @@ pub mod mcp_server {
                         let since_date = arguments.get("since_date").and_then(Value::as_str);
                         let include_uncommitted = arguments.get("include_uncommitted").and_then(Value::as_bool).unwrap_or(true);
                         Ok(handle_diff_since(since_commit, since_date, include_uncommitted))
+                    },
+                    "index_entities" => {
+                        let fp = validate_arg("file_path")?;
+                        let include_private = arguments.get("include_private").and_then(Value::as_bool).unwrap_or(false);
+                        Ok(handle_index_entities(fp, include_private))
                     },
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
@@ -1020,6 +1038,25 @@ pub mod mcp_server {
                 }
             }))
         )
+    }
+
+    fn handle_index_entities(file_path: &str, include_private: bool) -> Value {
+        match crate::core::index_entities::index_entities(file_path, include_private) {
+            Ok(result) => {
+                tool_success(
+                    format!("Indexed {} entities from {} ({} imports, {} exports)",
+                        result.entity_count, file_path, result.imports.len(), result.exports.len()),
+                    Some(json!({
+                        "file": result.file,
+                        "entity_count": result.entity_count,
+                        "imports": result.imports,
+                        "exports": result.exports,
+                        "entities": result.entities,
+                    }))
+                )
+            }
+            Err(e) => tool_error(format!("Entity indexing failed: {}", e)),
+        }
     }
 
         fn handle_search_nodes(file_path: &str, pattern: &str) -> Value {

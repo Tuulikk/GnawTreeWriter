@@ -23,6 +23,7 @@ pub mod diff_parser;
 pub mod guardian;
 pub mod diagnostics;
 pub mod healer;
+pub mod index_entities;
 pub mod pack;
 pub mod report;
 pub mod restoration_engine;
