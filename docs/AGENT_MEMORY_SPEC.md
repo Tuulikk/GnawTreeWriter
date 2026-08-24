@@ -40,7 +40,207 @@ grundläggande arkitektur.
 
 **Princip:** GTW projektinstanser är **stateless intelligens-tjänster**.
 De lagrar inget persistent — de analyserar och returnerar. Det externa
-systemet ansvarar för lagring,Historik och multi-projekt-anslutning.
+systemet ansvarar för lagring, historik och multi-projekt-anslutning.
+
+---
+
+## 3. Designöverväganden
+
+### 3.1 Deterministiska entitets-ID:n
+
+**Problem:** Om entitets-ID bygger på radnummer (t.ex. `gtw:project:file.rs:12`)
+skapas spöknoder eller dubbletter när kod flyttas.
+
+**Lösning:** ID:n ska vara deterministiska, baserade på modul + namn:
+
+```
+gtw:{project}:{module_path}:{entity_kind}:{entity_name}
+```
+
+Exempel:
+```
+gtw:project_a:src/auth/login.rs:function:validate_password
+gtw:project_a:src/auth/login.rs:struct:AuthConfig
+```
+
+Detta möjliggör **upsert** (ersätt) per entitet utan att bry sig om
+radnummer. Memory System kan säkert radera gamla entiteter för en fil
+och lägga till nya utan risk för dubbletter.
+
+### 3.2 Paginering och filtrering
+
+**Problem:** Stora projekt kan producera enorma JSON-responser som äter
+upp agentens kontextfönster.
+
+**Lösning:** Alla nya verktyg ska ha inbyggd paginering:
+
+```json
+{
+  "tool": "index_entities",
+  "args": {
+    "file_path": "src/main.rs",
+    "visibility": "public",
+    "entity_types": ["function", "struct"],
+    "limit": 50,
+    "offset": 0
+  }
+}
+```
+
+Filtreringsalternativ:
+- `visibility`: `"public"` | `"private"` | `"all"` (default: `"all"`)
+- `entity_types`: lista av typer att inkludera
+- `limit` / `offset`: paginering
+- `min_tokens`: filer med färre tokens än denna inkluderas ej
+
+### 3.3 Caching av semantisk sökning
+
+**Problem:** ModernBERT (571 MB) laddas vid kallstart (~3.3s i release).
+Varje MCP-anrop som trigar `sense` skulle betala denna kostnad.
+
+**Lösning:** GTW behöver en långgående process (daemon eller connection pool)
+som håller modellen i minnet. Förslag:
+
+1. **Daemon-läge:** `gnawtreewriter daemon` som lyssnar på MCP-anrop
+   och håller ModernBERT + BPE-cachen i minnet. Startas av Memory System
+   vid projektanslutning.
+2. **LazyLock:** Befintligt för tiktoken BPE. Utöka till ModernBERT-modellen
+   (redan delvis gjort i `ai_manager.rs` med `Arc<Mutex<>>`).
+3. **Preferens:** Memory System startar GTW-demon per projekt och håller
+   anslutningen öppen.
+
+### 3.4 Temporalt index: ocommittade ändringar
+
+**Problem:** `temporal_index` baserat på git-logg missar lokala ändringar
+som ej är committade.
+
+**Lösning:** Komplettera med `git status` / `git diff` för att fånga
+dirty working tree:
+
+```
+temporal_index:
+  committed:    git log --since="2026-08-17" --until="2026-08-24"
+  uncommitted:  git diff --name-only + git status --porcelain
+```
+
+Memory System kan då fråga: "vilka ändringar finns det inklusive
+ej committade?"
+
+### 3.5 Filövervakning
+
+**Fråga:** Ska GTW ha inbyggd file-watcher?
+
+**Svar:** GTW behöver inte driva övervakningen själv, men kan erbjuda
+stöd om plattformen har det:
+
+| Plattform | Mekanism | GTW-stöd |
+|-----------|----------|----------|
+| Linux | inotify / fanotify | `inotifywait` via CLI |
+| macOS | FSEvents | `fswatch` via CLI |
+| Cross-platform | `notify` crate (Rust) | `gnawtreewriter watch` |
+
+Förslag: `gnawtreewriter watch --format json` som emitterar
+filändringar som JSON-events:
+
+```json
+{"event": "modified", "path": "src/auth/login.rs", "timestamp": "2026-08-24T13:00:00Z"}
+{"event": "created", "path": "src/auth/mfa.rs", "timestamp": "2026-08-24T13:00:01Z"}
+```
+
+Memory System kan prenumerera på denna ström och trigga
+om-indexering automatiskt. Filövervakningens kärna bör ligga
+i `notify`-cratet (Rust, cross-platform), inte i GTW:s kärna.
+
+### 3.6 Inkrementell tracking och delta-rapportering
+
+**Problem:** Utan stateмежду sessioner måste Memory System fråga GTW om
+hela projektet vid varje anrop — onödig prestandakostnad.
+
+**Lösning:** GTW sparar ett lättviktigt state-fil i projektroten:
+
+```
+.gnawtreewriter_state.json
+{
+  "last_analyzed": "2026-08-24T13:00:00Z",
+  "git_head": "abc123def",
+  "file_hashes": {
+    "src/auth/login.rs": "a1b2c3...",
+    "src/auth/session.rs": "d4e5f6...",
+    "src/main.rs": "789abc..."
+  }
+}
+```
+
+**Nytt MCP-verktyg: `diff_since`**
+
+```json
+{
+  "tool": "diff_since",
+  "args": {
+    "since_commit": "abc123def",
+    "include_uncommitted": true
+  },
+  "result": {
+    "since_commit": "abc123def",
+    "current_commit": "xyz789abc",
+    "changed_files": [
+      {
+        "path": "src/auth/login.rs",
+        "status": "modified",
+        "old_hash": "a1b2c3...",
+        "new_hash": "x9y8z7...",
+        "diff_stat": "+12 -5"
+      },
+      {
+        "path": "src/auth/mfa.rs",
+        "status": "added",
+        "new_hash": "m1n2o3...",
+        "diff_stat": "+87 -0"
+      },
+      {
+        "path": "src/auth/legacy.rs",
+        "status": "deleted",
+        "old_hash": "p4q5r6..."
+      }
+    ],
+    "uncommitted": [
+      {
+        "path": "src/auth/login.rs",
+        "status": "modified",
+        "diff_stat": "+3 -1"
+      }
+    ],
+    "stats": {
+      "files_added": 1,
+      "files_modified": 1,
+      "files_deleted": 1,
+      "uncommitted_changes": 1
+    }
+  }
+}
+```
+
+**Användningsflöde:**
+
+```
+Memory System: "Vad har ändrats sen index X?"
+  → GTW diff_since(since_commit: "abc123")
+  → GTW: "3 filer ändrades, 1 ocommittad"
+  → Memory System: Uppdatera bara de filerna
+  → GTW: analyze/endex_entities för de specifika filerna
+```
+
+**Fördelar:**
+- Memory System betalar bara för analysering av ändrade filer
+- Ocommittade ändringar fångas utan extra anrop
+- Deterministiska fil-hasher (SHA256) gör att samma innehåll
+  alltid får samma hash — inga dubbletter vid om-indexering
+- State-filen är liten (~1KB) och kan versionhanteras
+
+**Implementation i GTW:**
+- Spara state efter varje `analyze`/`pack`-anrop
+- `diff_since`: jämför HEAD, beräkna SHA256 per ändrad fil
+- State-filen skapas automatiskt vid första körningen
 
 ---
 
@@ -230,7 +430,7 @@ Memory System → Agent: [lista med funktioner + kontext]
 
 ```json
 {
-  "id": "gtw:project_a:src/auth/login.rs:validate_password",
+  "id": "gtw:project_a:src/auth/login.rs:function:validate_password",
   "type": "function",
   "name": "validate_password",
   "signature": "pub fn validate_password(password: &str) -> bool",
@@ -243,6 +443,11 @@ Memory System → Agent: [lista med funktioner + kontext]
   "last_indexed": "2026-08-24T13:00:00Z"
 }
 ```
+
+**ID-format:** `gtw:{project}:{file}:{entity_type}:{entity_name}`
+- Deterministiskt — identiskt oavsett radnummer
+- Möjliggör säker upsert utan dubbletter
+- Filen i ID:t är relativ sökväg (ej absolut)
 
 ### 5.2 Relation
 
@@ -326,6 +531,8 @@ Memory System:
 - `index_relations` — beroendekartläggning
 - `search_semantic` — utökad semantisk sökning utan filnamn
 - `temporal_index` — git-baserat tidsindex
+- `diff_since` — inkrementell delta-rapportering
+- State-fil (`.gnawtreewriter_state.json`) för session-övergående tracking
 - **Estimat:** 2-3 veckors utveckling
 
 ### Fas 3: Optimering
