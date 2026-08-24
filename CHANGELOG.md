@@ -1,3 +1,22 @@
+## [0.9.6] - 2026-08-24
+
+### Added
+- **`explore` command**: Map-like navigation with 4 zoom levels (overview / directory / file / full), each node carrying token counts and drill-down hints.
+- **Session-level parse cache** (`parse_cache.rs`): Files parsed once are reused across tool calls in the same session — no redundant AST parses.
+- **`pack --compress-threshold N`**: Compress only files larger than N tokens; 0 (default) compresses everything.
+- **`scripts/benchmark_ai.sh`**: Reproducible benchmark for explore/pack/index/state operations.
+
+### Changed
+- **Parallel processing (rayon)**: pack, explore (directory level), and MCP index batch handlers now run across all CPU cores. Output order is preserved — results remain byte-identical to the sequential versions.
+
+### Performance (measured on own codebase, 79 files / 169k tokens)
+| Operation | Before | After |
+|---|---|---|
+| pack --compress | 676 ms | 335 ms (-50%) |
+| explore directory (level 1) | 318 ms | 130 ms (-59%) |
+| index_entities (20 files) | 177 ms | 107 ms (-40%) |
+| index_relations (20 files) | 84 ms | 40 ms (-52%) |
+
 ## [0.9.5] - 2026-08-23
 
 ### Added
