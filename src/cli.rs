@@ -223,6 +223,13 @@ enum Commands {
         #[arg(short, long)]
         output: Option<String>,
     },
+    /// Analyze project for AI context planning
+    Stats {
+        #[arg(default_value = ".")]
+        path: String,
+        #[arg(short, long, default_value = "json")]
+        format: String,
+    },
     /// Comprehensive health check of the system
     Status,
     /// Generate a semantic code quality report
@@ -1059,6 +1066,9 @@ impl Cli {
             Commands::Curate { task, path, strategy, max_tokens, max_files, output } => {
                 Self::handle_curate(&task, &path, &strategy, max_tokens, max_files, output.as_deref())?;
             }
+            Commands::Stats { path, format } => {
+                Self::handle_stats(&path, &format)?;
+            }
             Commands::Status => {
                 Self::handle_health_check().await?;
             }
@@ -1722,6 +1732,54 @@ Use --no-preview to write batch file"
             }
             None => {
                 println!("{}", content);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_stats(path: &str, format: &str) -> Result<()> {
+        let root = std::path::Path::new(path);
+        if !root.exists() {
+            return Err(anyhow::anyhow!("Path does not exist: {}", path));
+        }
+
+        let stats = crate::core::stats::analyze_project(root)?;
+
+        match format {
+            "json" => {
+                println!("{}", serde_json::to_string_pretty(&stats)?);
+            }
+            "summary" | "text" => {
+                println!("=== Project Stats ===");
+                println!("Files: {}", stats.total_files);
+                println!("Total tokens: {}", stats.total_tokens);
+                println!("Total lines: {}", stats.total_lines);
+                println!();
+                println!("Languages:");
+                for lang in &stats.languages {
+                    println!("  {}: {} files, {} tokens (avg {})",
+                        lang.name, lang.file_count, lang.total_tokens, lang.avg_tokens_per_file);
+                }
+                println!();
+                println!("Largest files:");
+                for f in stats.largest_files.iter().take(10) {
+                    println!("  {} ({} tokens, {} lines)", f.path, f.tokens, f.lines);
+                }
+                println!();
+                println!("Compression: {}", stats.compression_estimate.recommendation);
+                println!();
+                println!("Context windows:");
+                for w in &stats.context_windows {
+                    let status = if w.fits { "✓ fits" } else { "✗ too large" };
+                    let bar_len = (w.utilization * 20.0).min(20.0) as usize;
+                    let bar = "#".repeat(bar_len);
+                    println!("  {:24} {:>10} tokens  [{:<20}] {:.0}%  {}",
+                        w.name, w.max_tokens, bar, w.utilization * 100.0, status);
+                }
+            }
+            _ => {
+                println!("{}", serde_json::to_string_pretty(&stats)?);
             }
         }
 

@@ -28,6 +28,7 @@ pub mod report;
 pub mod restoration_engine;
 pub mod scaffold;
 pub mod secrets;
+pub mod stats;
 pub mod tag_manager;
 pub mod label_manager;
 pub mod macro_dispatcher;
