@@ -856,6 +856,7 @@ pub mod mcp_server {
             instructions: instructions.map(|s| s.to_string()),
             output: None,
             redact_secrets: true,
+            compress_threshold: 0,
         };
 
         match crate::core::pack::pack_project(root, &options) {

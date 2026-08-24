@@ -207,6 +207,8 @@ enum Commands {
         instructions: Option<String>,
         #[arg(long)]
         no_redact: bool,
+        #[arg(long, default_value = "0")]
+        compress_threshold: usize,
     },
     /// Curate context for an AI agent based on task description
     Curate {
@@ -1071,8 +1073,8 @@ impl Cli {
             Commands::Compress { file_path, output, stats } => {
                 Self::handle_compress(&file_path, output.as_deref(), stats)?;
             }
-            Commands::Pack { path, format, compress, output, include, ignore, instructions, no_redact } => {
-                Self::handle_pack(&path, &format, compress, output.as_deref(), include.as_deref(), ignore.as_deref(), instructions.as_deref(), !no_redact)?;
+            Commands::Pack { path, format, compress, output, include, ignore, instructions, no_redact, compress_threshold } => {
+                Self::handle_pack(&path, &format, compress, output.as_deref(), include.as_deref(), ignore.as_deref(), instructions.as_deref(), !no_redact, compress_threshold)?;
             }
             Commands::Curate { task, path, strategy, max_tokens, max_files, output } => {
                 Self::handle_curate(&task, &path, &strategy, max_tokens, max_files, output.as_deref())?;
@@ -1650,6 +1652,7 @@ Use --no-preview to write batch file"
         ignore: Option<&str>,
         instructions: Option<&str>,
         redact_secrets: bool,
+        compress_threshold: usize,
     ) -> Result<()> {
         let root = std::path::Path::new(path);
         if !root.exists() {
@@ -1673,6 +1676,7 @@ Use --no-preview to write batch file"
             instructions: instructions.map(|s| s.to_string()),
             output: output.map(|s| s.to_string()),
             redact_secrets,
+            compress_threshold,
         };
 
         let result = crate::core::pack::pack_project(root, &options)?;

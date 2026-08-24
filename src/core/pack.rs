@@ -52,6 +52,8 @@ pub struct PackOptions {
     pub output: Option<String>,
     /// Whether to redact detected secrets (default: true).
     pub redact_secrets: bool,
+    /// Compress only files with more than this many tokens (0 = all).
+    pub compress_threshold: usize,
 }
 
 impl Default for PackOptions {
@@ -65,6 +67,7 @@ impl Default for PackOptions {
             instructions: None,
             output: None,
             redact_secrets: true,
+            compress_threshold: 0,
         }
     }
 }
@@ -92,6 +95,11 @@ pub struct PackFileInfo {
     pub tree_path: String,
     pub tokens: usize,
     pub lines: usize,
+}
+
+/// Check if a file should be compressed based on options and token count.
+fn should_compress(options: &PackOptions, token_count: usize) -> bool {
+    options.compress && (options.compress_threshold == 0 || token_count >= options.compress_threshold)
 }
 
 /// Pack a project into an AI-optimized format.
@@ -246,7 +254,8 @@ fn format_markdown(files: &[(String, String, String)], options: &PackOptions) ->
             .and_then(|e| e.to_str())
             .unwrap_or("text");
 
-        let display_content = if options.compress {
+        let content_tokens = estimate_code_tokens(content);
+        let display_content = if should_compress(options, content_tokens) {
             match crate::parser::get_parser(Path::new(tree_path)) {
                 Ok(parser) => {
                     if let Ok(tree) = parser.parse(content) {
@@ -282,7 +291,8 @@ fn format_json(files: &[(String, String, String)], options: &PackOptions) -> Res
     let mut total_lines = 0usize;
 
     for (tree_path, _display_path, content) in files {
-        let display_content = if options.compress {
+        let content_tokens = estimate_code_tokens(content);
+        let display_content = if should_compress(options, content_tokens) {
             match crate::parser::get_parser(Path::new(tree_path)) {
                 Ok(parser) => {
                     if let Ok(tree) = parser.parse(content) {
@@ -352,7 +362,8 @@ fn format_plain(files: &[(String, String, String)], options: &PackOptions) -> St
     }
 
     for (tree_path, _display_path, content) in files {
-        let display_content = if options.compress {
+        let content_tokens = estimate_code_tokens(content);
+        let display_content = if should_compress(options, content_tokens) {
             match crate::parser::get_parser(Path::new(tree_path)) {
                 Ok(parser) => {
                     if let Ok(tree) = parser.parse(content) {
@@ -394,7 +405,8 @@ fn format_xml(files: &[(String, String, String)], options: &PackOptions) -> Stri
     output.push_str("  <files>\n");
 
     for (tree_path, _display_path, content) in files {
-        let display_content = if options.compress {
+        let content_tokens = estimate_code_tokens(content);
+        let display_content = if should_compress(options, content_tokens) {
             match crate::parser::get_parser(Path::new(tree_path)) {
                 Ok(parser) => {
                     if let Ok(tree) = parser.parse(content) {
@@ -588,7 +600,6 @@ mod tests {
         // Should find .gitignore (it's a text file) but not notes.txt
         assert!(result.file_count <= 1,
             "Should find at most 1 file, found: {}", result.file_count);
-        assert!(result.total_tokens >= 0);
     }
 
     #[test]
