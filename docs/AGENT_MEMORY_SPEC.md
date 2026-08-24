@@ -153,10 +153,35 @@ i `notify`-cratet (Rust, cross-platform), inte i GTW:s kärna.
 
 ### 3.6 Inkrementell tracking och delta-rapportering
 
-**Problem:** Utan stateмежду sessioner måste Memory System fråga GTW om
+**Problem:** Utan state mellan sessioner måste Memory System fråga GTW om
 hela projektet vid varje anrop — onödig prestandakostnad.
 
-**Lösning:** GTW sparar ett lättviktigt state-fil i projektroten:
+**Kärnidé:** Git är den ultimata sanningen. GTW behöver bara kasta ett
+öga på git vid varje anrop för att veta exakt vad som hänt sedan sist.
+
+#### Diagnosflöde (3 nivåer)
+
+```
+Vid varje GTW-anrop:
+  Nivå 1: git rev-parse HEAD (~1ms)
+    → Jämför med state.git_head → "har någon committat?"
+
+  Nivå 2: git status --porcelain (~10ms)
+    → Fånga: modified (M), added (A), deleted (D), untracked (??)
+    → Täcker: andra agenter, manuella redigeringar, script
+
+  Nivå 3: SHA256 bara på flaggade filer (~100ms/fil)
+    → Verifiera faktiskt innehåll (inte bara metadata)
+```
+
+**Varför git istället för mtime:**
+- `git status --porcelain` täcker committed + ocommittade + untracked
+- ~10ms oavsett projektstorlek (git läser intern index, ej alla filer)
+- Git ser även ändringar från andra processer (via intern mtime-koll)
+- Git exkluderar redan `.gitignore`-filer automatiskt
+- Ingen risk för false positives från mtime-rollback
+
+#### State-fil
 
 ```
 .gnawtreewriter_state.json
@@ -164,14 +189,24 @@ hela projektet vid varje anrop — onödig prestandakostnad.
   "last_analyzed": "2026-08-24T13:00:00Z",
   "git_head": "abc123def",
   "file_hashes": {
-    "src/auth/login.rs": "a1b2c3...",
-    "src/auth/session.rs": "d4e5f6...",
-    "src/main.rs": "789abc..."
+    "src/auth/login.rs": "sha256:a1b2c3..."
   }
 }
 ```
 
-**Nytt MCP-verktyg: `diff_since`**
+#### Scenariotäckning
+
+| Scenario | Nivå | Detektion |
+|----------|------|-----------|
+| Annan agent committade | 1 | `git HEAD` skiljer sig |
+| Du redigerade manuellt | 2 | `git status` visar `M` |
+| Script ändrade utanför git | 2 | `git status` visar `??` eller `M` |
+| Någon skapade ny fil | 2 | `git status` visar `??` |
+| Någon raderade en fil | 2 | `git status` visar `D` |
+| Fil ändrades och ändrades tillbaka | 3 | SHA256-skiljer sig från state |
+| Filer utanför git (.env, genererade) | 2 | `??` + valfri mtime-override |
+
+#### Nytt MCP-verktyg: `diff_since`
 
 ```json
 {
@@ -184,63 +219,34 @@ hela projektet vid varje anrop — onödig prestandakostnad.
     "since_commit": "abc123def",
     "current_commit": "xyz789abc",
     "changed_files": [
-      {
-        "path": "src/auth/login.rs",
-        "status": "modified",
-        "old_hash": "a1b2c3...",
-        "new_hash": "x9y8z7...",
-        "diff_stat": "+12 -5"
-      },
-      {
-        "path": "src/auth/mfa.rs",
-        "status": "added",
-        "new_hash": "m1n2o3...",
-        "diff_stat": "+87 -0"
-      },
-      {
-        "path": "src/auth/legacy.rs",
-        "status": "deleted",
-        "old_hash": "p4q5r6..."
-      }
+      {"path": "src/auth/login.rs", "status": "modified", "diff_stat": "+12 -5"},
+      {"path": "src/auth/mfa.rs", "status": "added", "diff_stat": "+87 -0"}
     ],
     "uncommitted": [
-      {
-        "path": "src/auth/login.rs",
-        "status": "modified",
-        "diff_stat": "+3 -1"
-      }
+      {"path": "src/auth/login.rs", "status": "modified", "diff_stat": "+3 -1"}
     ],
-    "stats": {
-      "files_added": 1,
-      "files_modified": 1,
-      "files_deleted": 1,
-      "uncommitted_changes": 1
-    }
+    "stats": {"files_added": 1, "files_modified": 1, "files_deleted": 0, "uncommitted": 1}
   }
 }
 ```
 
-**Användningsflöde:**
+#### Användningsflöde
 
 ```
 Memory System: "Vad har ändrats sen index X?"
   → GTW diff_since(since_commit: "abc123")
-  → GTW: "3 filer ändrades, 1 ocommittad"
+  → GTW: "2 filer committade, 1 ocommittad"
   → Memory System: Uppdatera bara de filerna
-  → GTW: analyze/endex_entities för de specifika filerna
+  → GTW: analyze/index_entities för de specifika filerna
 ```
 
-**Fördelar:**
-- Memory System betalar bara för analysering av ändrade filer
-- Ocommittade ändringar fångas utan extra anrop
-- Deterministiska fil-hasher (SHA256) gör att samma innehåll
-  alltid får samma hash — inga dubbletter vid om-indexering
-- State-filen är liten (~1KB) och kan versionhanteras
+#### Fördelar
 
-**Implementation i GTW:**
-- Spara state efter varje `analyze`/`pack`-anrop
-- `diff_since`: jämför HEAD, beräkna SHA256 per ändrad fil
-- State-filen skapas automatiskt vid första körningen
+- Memory System betalar bara för ändrade filer
+- Ocommittade ändringar fångas utan extra anrop
+- Deterministiska SHA256-hasher = inga dubbletter vid om-indexering
+- State-filen är ~1KB och kan versionhanteras
+- Fungerar även utan git (fallback till mtime för enstaka filer)
 
 ---
 
