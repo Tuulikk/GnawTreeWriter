@@ -24,6 +24,7 @@ pub mod guardian;
 pub mod diagnostics;
 pub mod healer;
 pub mod index_entities;
+pub mod index_relations;
 pub mod pack;
 pub mod report;
 pub mod restoration_engine;

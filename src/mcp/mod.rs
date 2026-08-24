@@ -214,6 +214,18 @@ pub mod mcp_server {
                             }
                         },
                         {
+                            "name": "index_relations",
+                            "title": "Extract relations between entities",
+                            "description": "Extract call relationships, imports, type usage, and impl relationships from a file for knowledge graph edges.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string", "description": "Path to the file to analyze" }
+                                },
+                                "required": ["file_path"]
+                            }
+                        },
+                        {
                             "name": "get_semantic_report",
                             "title": "Generate semantic quality report",
                             "description": "Analyze code quality using AI.",
@@ -427,6 +439,10 @@ pub mod mcp_server {
                         let fp = validate_arg("file_path")?;
                         let include_private = arguments.get("include_private").and_then(Value::as_bool).unwrap_or(false);
                         Ok(handle_index_entities(fp, include_private))
+                    },
+                    "index_relations" => {
+                        let fp = validate_arg("file_path")?;
+                        Ok(handle_index_relations(fp))
                     },
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
@@ -1056,6 +1072,25 @@ pub mod mcp_server {
                 )
             }
             Err(e) => tool_error(format!("Entity indexing failed: {}", e)),
+        }
+    }
+
+    fn handle_index_relations(file_path: &str) -> Value {
+        match crate::core::index_relations::index_relations(file_path) {
+            Ok(result) => {
+                tool_success(
+                    format!("Indexed {} relations from {} ({})",
+                        result.relations.len(), file_path,
+                        result.summary.iter().map(|(k,v)| format!("{}:{}", k, v)).collect::<Vec<_>>().join(", ")),
+                    Some(json!({
+                        "file": result.file,
+                        "relation_count": result.relations.len(),
+                        "summary": result.summary,
+                        "relations": result.relations,
+                    }))
+                )
+            }
+            Err(e) => tool_error(format!("Relation indexing failed: {}", e)),
         }
     }
 
