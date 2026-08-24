@@ -28,3 +28,6 @@ GnawData/
 .dokubase.db
 .dokubase.db-shm
 .dokubase.db-wal
+
+# OpenCode checkpoints
+.opencode/
