@@ -7,6 +7,11 @@
 
 use regex::Regex;
 use serde::Serialize;
+use std::sync::LazyLock;
+
+static SCANNER: LazyLock<Option<secrets_scanner::Scanner>> = LazyLock::new(|| {
+    secrets_scanner::Scanner::from_bundled().ok()
+});
 
 /// A detected secret.
 #[derive(Debug, Clone, Serialize)]
@@ -45,7 +50,7 @@ pub fn scan_for_secrets(source: &str) -> Vec<DetectedSecret> {
     }
 
     // Layer 2: secrets_scanner (entropy + pattern based)
-    if let Ok(scanner) = secrets_scanner::Scanner::new() {
+    if let Some(scanner) = SCANNER.as_ref() {
         let result = scanner.scan_bytes_detailed("source", source.as_bytes());
 
         for finding in &result.findings {

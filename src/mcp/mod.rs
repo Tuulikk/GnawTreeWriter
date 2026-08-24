@@ -743,6 +743,7 @@ pub mod mcp_server {
             ignore_patterns,
             instructions: instructions.map(|s| s.to_string()),
             output: None,
+            redact_secrets: true,
         };
 
         match crate::core::pack::pack_project(root, &options) {

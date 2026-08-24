@@ -205,6 +205,8 @@ enum Commands {
         ignore: Option<String>,
         #[arg(short, long)]
         instructions: Option<String>,
+        #[arg(long)]
+        no_redact: bool,
     },
     /// Curate context for an AI agent based on task description
     Curate {
@@ -1051,8 +1053,8 @@ impl Cli {
             Commands::Compress { file_path, output, stats } => {
                 Self::handle_compress(&file_path, output.as_deref(), stats)?;
             }
-            Commands::Pack { path, format, compress, output, include, ignore, instructions } => {
-                Self::handle_pack(&path, &format, compress, output.as_deref(), include.as_deref(), ignore.as_deref(), instructions.as_deref())?;
+            Commands::Pack { path, format, compress, output, include, ignore, instructions, no_redact } => {
+                Self::handle_pack(&path, &format, compress, output.as_deref(), include.as_deref(), ignore.as_deref(), instructions.as_deref(), !no_redact)?;
             }
             Commands::Curate { task, path, strategy, max_tokens, max_files, output } => {
                 Self::handle_curate(&task, &path, &strategy, max_tokens, max_files, output.as_deref())?;
@@ -1622,6 +1624,7 @@ Use --no-preview to write batch file"
         include: Option<&str>,
         ignore: Option<&str>,
         instructions: Option<&str>,
+        redact_secrets: bool,
     ) -> Result<()> {
         let root = std::path::Path::new(path);
         if !root.exists() {
@@ -1644,6 +1647,7 @@ Use --no-preview to write batch file"
             ignore_patterns,
             instructions: instructions.map(|s| s.to_string()),
             output: output.map(|s| s.to_string()),
+            redact_secrets,
         };
 
         let result = crate::core::pack::pack_project(root, &options)?;
@@ -1652,6 +1656,9 @@ Use --no-preview to write batch file"
         eprintln!("  Total tokens:     {}", result.total_tokens);
         if compress {
             eprintln!("  Compressed tokens: {}", result.compressed_tokens);
+        }
+        if result.secrets_redacted > 0 {
+            eprintln!("  ⚠ Secrets redacted: {} (use --no-redact to disable)", result.secrets_redacted);
         }
 
         match output {

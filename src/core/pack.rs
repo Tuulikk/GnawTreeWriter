@@ -50,6 +50,8 @@ pub struct PackOptions {
     pub instructions: Option<String>,
     /// Output file path (None = stdout).
     pub output: Option<String>,
+    /// Whether to redact detected secrets (default: true).
+    pub redact_secrets: bool,
 }
 
 impl Default for PackOptions {
@@ -62,6 +64,7 @@ impl Default for PackOptions {
             ignore_patterns: vec![],
             instructions: None,
             output: None,
+            redact_secrets: true,
         }
     }
 }
@@ -77,6 +80,8 @@ pub struct PackResult {
     pub total_tokens: usize,
     /// Total compressed tokens (if compression enabled).
     pub compressed_tokens: usize,
+    /// Number of secrets redacted.
+    pub secrets_redacted: usize,
     /// Per-file information.
     pub files: Vec<PackFileInfo>,
 }
@@ -114,6 +119,7 @@ pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
     let mut pack_files = Vec::new();
     let mut total_tokens = 0usize;
     let mut compressed_tokens = 0usize;
+    let mut secrets_redacted = 0usize;
     let mut file_entries: Vec<(String, String, String)> = Vec::new(); // (tree_path, display_path, content)
 
     for path in &files {
@@ -138,6 +144,13 @@ pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
         };
 
         if let Ok(content) = std::fs::read_to_string(path) {
+            let (content, redacted) = if options.redact_secrets {
+                crate::core::secrets::redact_secrets(&content)
+            } else {
+                (content, 0)
+            };
+            secrets_redacted += redacted;
+
             let tokens = estimate_code_tokens(&content);
             total_tokens += tokens;
 
@@ -173,6 +186,7 @@ pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
         file_count: pack_files.len(),
         total_tokens,
         compressed_tokens,
+        secrets_redacted,
         files: pack_files,
     })
 }
