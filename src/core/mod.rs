@@ -27,6 +27,7 @@ pub mod healer;
 pub mod index_entities;
 pub mod index_relations;
 pub mod pack;
+pub mod parse_cache;
 pub mod report;
 pub mod restoration_engine;
 pub mod scaffold;
