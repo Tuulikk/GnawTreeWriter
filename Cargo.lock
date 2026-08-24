@@ -1437,6 +1437,7 @@ dependencies = [
  "hf-hub",
  "hyper 1.8.1",
  "ignore",
+ "md5",
  "pulldown-cmark",
  "regex",
  "reqwest",
@@ -2107,6 +2108,12 @@ name = "matchit"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
+
+[[package]]
+name = "md5"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ebb8d8732c6a6df3d8f032a82911cfc747e00efb95cc46e8d0acd5b5b88570c"
 
 [[package]]
 name = "memchr"

@@ -190,13 +190,14 @@ pub mod mcp_server {
                         {
                             "name": "diff_since",
                             "title": "Detect changes since last index",
-                            "description": "Compare current project state against a previous git commit or timestamp. Returns added/modified/deleted files.",
+                            "description": "Compare current project state against a previous git commit, date, or saved state. Returns added/modified/deleted files.",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
                                     "since_commit": { "type": "string", "description": "Git commit hash to compare against" },
                                     "since_date": { "type": "string", "description": "ISO date to compare from (e.g. '2026-08-20')" },
-                                    "include_uncommitted": { "type": "boolean", "description": "Include uncommitted changes (default: true)" }
+                                    "include_uncommitted": { "type": "boolean", "description": "Include uncommitted changes (default: true)" },
+                                    "use_saved_state": { "type": "boolean", "description": "Use saved state file if available (default: true)" }
                                 }
                             }
                         },
@@ -223,6 +224,15 @@ pub mod mcp_server {
                                     "file_path": { "type": "string", "description": "Path to the file to analyze" }
                                 },
                                 "required": ["file_path"]
+                            }
+                        },
+                        {
+                            "name": "save_state",
+                            "title": "Save project state for incremental tracking",
+                            "description": "Save current git HEAD and file hashes to .gnawtreewriter_state.json. Use after indexing to enable efficient diff_since.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {}
                             }
                         },
                         {
@@ -433,7 +443,8 @@ pub mod mcp_server {
                         let since_commit = arguments.get("since_commit").and_then(Value::as_str);
                         let since_date = arguments.get("since_date").and_then(Value::as_str);
                         let include_uncommitted = arguments.get("include_uncommitted").and_then(Value::as_bool).unwrap_or(true);
-                        Ok(handle_diff_since(since_commit, since_date, include_uncommitted))
+                        let use_saved_state = arguments.get("use_saved_state").and_then(Value::as_bool).unwrap_or(true);
+                        Ok(handle_diff_since(since_commit, since_date, include_uncommitted, use_saved_state))
                     },
                     "index_entities" => {
                         let fp = validate_arg("file_path")?;
@@ -443,6 +454,9 @@ pub mod mcp_server {
                     "index_relations" => {
                         let fp = validate_arg("file_path")?;
                         Ok(handle_index_relations(fp))
+                    },
+                    "save_state" => {
+                        Ok(handle_save_state())
                     },
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
@@ -940,35 +954,30 @@ pub mod mcp_server {
         }
     }
 
-    fn handle_diff_since(since_commit: Option<&str>, since_date: Option<&str>, include_uncommitted: bool) -> Value {
+    fn handle_diff_since(since_commit: Option<&str>, since_date: Option<&str>, include_uncommitted: bool, use_saved_state: bool) -> Value {
         let project_root = std::env::current_dir().unwrap_or_default();
 
-        // Get current HEAD
-        let current_head = std::process::Command::new("git")
-            .args(["rev-parse", "HEAD"])
-            .current_dir(&project_root)
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
-
         // Determine the reference point
-        let ref_point = since_commit
-            .or(since_date)
-            .unwrap_or("HEAD");
+        let (ref_point, from_commit) = if let Some(commit) = since_commit {
+            (commit.to_string(), commit.to_string())
+        } else if let Some(date) = since_date {
+            (date.to_string(), date.to_string())
+        } else if use_saved_state {
+            let state = crate::core::state::ProjectState::load(&project_root);
+            if !state.git_head.is_empty() {
+                (format!("saved_state ({})", &state.git_head[..8.min(state.git_head.len())]), state.git_head)
+            } else {
+                ("HEAD~1".to_string(), "HEAD~1".to_string())
+            }
+        } else {
+            ("HEAD~1".to_string(), "HEAD~1".to_string())
+        };
 
         // Get changed files
         let mut changed_files: Vec<Value> = Vec::new();
 
         // Committed changes
-        let log_range = if let Some(commit) = since_commit {
-            format!("{}..HEAD", commit)
-        } else if let Some(date) = since_date {
-            format!("{}..HEAD", date)
-        } else {
-            "HEAD~1..HEAD".to_string()
-        };
+        let log_range = format!("{}..HEAD", from_commit);
 
         if let Ok(output) = std::process::Command::new("git")
             .args(["diff", "--name-status", &log_range])
@@ -1038,6 +1047,15 @@ pub mod mcp_server {
         let deleted = changed_files.iter().filter(|f| f.get("status").and_then(Value::as_str) == Some("deleted")).count();
         let untracked = changed_files.iter().filter(|f| f.get("status").and_then(Value::as_str) == Some("untracked")).count();
 
+        let current_head = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&project_root)
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+
         tool_success(
             format!("Changes since {}: {} files ({} added, {} modified, {} deleted, {} untracked)",
                 ref_point, changed_files.len(), added, modified, deleted, untracked),
@@ -1091,6 +1109,25 @@ pub mod mcp_server {
                 )
             }
             Err(e) => tool_error(format!("Relation indexing failed: {}", e)),
+        }
+    }
+
+    fn handle_save_state() -> Value {
+        let project_root = std::env::current_dir().unwrap_or_default();
+        match crate::core::state::ProjectState::update(&project_root) {
+            Ok(state) => {
+                tool_success(
+                    format!("Saved state: HEAD={}, {} file hashes",
+                        &state.git_head[..8.min(state.git_head.len())],
+                        state.file_hashes.len()),
+                    Some(json!({
+                        "git_head": state.git_head,
+                        "file_count": state.file_hashes.len(),
+                        "last_analyzed": state.last_analyzed,
+                    }))
+                )
+            }
+            Err(e) => tool_error(format!("Failed to save state: {}", e)),
         }
     }
 
