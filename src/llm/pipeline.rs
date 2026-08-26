@@ -554,6 +554,10 @@ pub struct EditProposal {
     pub node_path: String,
     pub content: String,
     pub budget: crate::llm::TokenBudget,
+    /// The original source line the model targeted (for multi-edit).
+    pub old_line: String,
+    /// The replacement line text (for multi-edit).
+    pub new_line: String,
 }
 
 /// `edit --ask`: the model proposes a minimal old→new change; GTW finds the
@@ -642,6 +646,8 @@ pub fn propose_edit(
         );
     }
     let mut new_content = node_content.replacen(old_line.trim(), new.trim(), 1);
+    // Build the multi-edit replacement line, applying the same normalizations.
+    let mut new_line = new.trim().to_string();
     // If the replaced line ended with `;` but the new content does not, add it
     // back so the node stays valid (a small model often drops it).
     if old_line.trim().ends_with(';')
@@ -649,6 +655,7 @@ pub fn propose_edit(
         && !new_content.trim_end().ends_with('}')
     {
         new_content = format!("{};", new_content.trim_end());
+        new_line = format!("{};", new_line.trim_end());
     }
     // If the original line was a `let` declaration and the model only gave the
     // value expression (dropped `let x =`), keep the binding name.
@@ -661,6 +668,7 @@ pub fn propose_edit(
             .trim();
         if !binding.is_empty() {
             new_content = format!("let {} = {};", binding, new_content.trim().trim_end_matches(';'));
+            new_line = format!("let {} = {};", binding, new_line.trim().trim_end_matches(';'));
         }
     }
 
@@ -668,7 +676,109 @@ pub fn propose_edit(
         node_path,
         content: new_content,
         budget,
+        old_line: old_line.trim().to_string(),
+        new_line,
     })
+}
+
+/// `edit --ask --all`: the model gives a recurring snippet (old) and its
+/// replacement (new); GTW applies it to every occurrence in the file.
+pub fn propose_edit_all(
+    mgr: &AiManager,
+    file_path: &str,
+    request: &str,
+    resolution: crate::llm::Resolution,
+) -> Result<EditProposal> {
+    let task = TaskParams::from_resolution(resolution);
+    let start = std::time::Instant::now();
+
+    let writer = crate::GnawTreeWriter::new(file_path)
+        .with_context(|| format!("failed to parse {file_path}"))?;
+    let source = writer.get_source().to_string();
+
+    let preview_raw: String = source.chars().take(6000).collect();
+    let preview: String = preview_raw
+        .lines()
+        .enumerate()
+        .map(|(i, l)| format!("{:>4} | {}", i + 1, l))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let lang = std::path::Path::new(file_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let (findings, _, _) = crate::core::rules::check_code_with_builtin(&source, &lang);
+    let issues = crate::core::rules::format_findings_for_prompt(&findings);
+
+    let prompt = prompts::edit_ask_all_prompt(file_path, request, &preview, &issues);
+    let params = GenerateParams {
+        max_tokens: task.synth_tokens,
+        temperature: EXTRACT_TEMP,
+    };
+
+    let mut budget = crate::llm::TokenBudget::default();
+    budget.expected_input = mgr.estimate_tokens(&prompt);
+    budget.expected_output = params.max_tokens;
+    budget.estimate_seconds(&mgr.timing());
+
+    let gen = mgr.generate_lfm25(&prompt, params.max_tokens, params.temperature)?;
+    budget.actual_input = mgr.estimate_tokens(&prompt);
+    budget.record(&gen);
+    budget.actual_seconds = start.elapsed().as_secs_f64();
+
+    let (old, new) = match parse_old_new_proposal(&gen.text) {
+        Some(p) => p,
+        None => {
+            eprintln!("[edit-ask-all] raw model response:\n{}", gen.text);
+            anyhow::bail!("model did not return a valid edit proposal");
+        }
+    };
+    if old.trim().is_empty() || new.trim().is_empty() {
+        anyhow::bail!("model returned an empty old/new edit proposal");
+    }
+    let count = source.matches(old.trim()).count();
+    if count == 0 {
+        anyhow::bail!("model's 'old' snippet \"{}\" not found in file", old.trim());
+    }
+
+    Ok(EditProposal {
+        node_path: String::new(),
+        content: new.trim().to_string(),
+        budget,
+        old_line: old.trim().to_string(),
+        new_line: new.trim().to_string(),
+    })
+}
+
+/// Parse `{"old": "...", "new": "..."}` (for --all multi-edit).
+/// Takes the FIRST object only (the model may emit several).
+fn parse_old_new_proposal(s: &str) -> Option<(String, String)> {
+    let marker = s.find("{\"old\"")?;
+    let json_str = &s[marker..];
+    // Find the end of the first object: scan forward tracking brace depth.
+    let mut depth = 0i32;
+    let mut end = None;
+    for (i, c) in json_str.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let end = end?;
+    let json_str = &json_str[..=end];
+    let v: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    let old = v.get("old")?.as_str()?.to_string();
+    let new = v.get("new")?.as_str()?.to_string();
+    Some((old, new))
 }
 
 /// Find the smallest node that spans `line` AND whose content contains
@@ -704,10 +814,30 @@ fn find_node_containing_line<'a>(
 fn parse_edit_proposal(s: &str) -> Option<(usize, String)> {
     let marker = s.find("{\"line\"")?;
     let json_str = &s[marker..];
-    let end = json_str.rfind('}')?;
+    // Find the end of the first object (the model may emit several).
+    let mut depth = 0i32;
+    let mut end = None;
+    for (i, c) in json_str.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let end = end?;
     let json_str = &json_str[..=end];
     let v: serde_json::Value = serde_json::from_str(json_str).ok()?;
-    let line = v.get("line")?.as_u64()? as usize;
+    let line = match v.get("line") {
+        Some(serde_json::Value::Number(n)) => n.as_u64()? as usize,
+        Some(serde_json::Value::String(s)) => s.parse::<usize>().ok()?,
+        _ => return None,
+    };
     let new = v.get("new")?.as_str()?.to_string();
     Some((line, new))
 }

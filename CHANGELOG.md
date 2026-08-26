@@ -11,6 +11,7 @@
 - **Rule annotations in `edit --ask` prompts**: known rule violations in the file are injected into the LLM prompt so the model can avoid introducing/worsening them (rule-injected expertise). `edit --ask` switched to a line-based proposal format (`{"line": N, "new": "..."}`) — far more reliable for a small model than JSON-escaping whole code snippets.
 - **Agent-written rules (`rules add` + MCP `add_rule`)**: validate and append a semgrep-like rule to `gnawtreewriter.rules.yaml`. The pattern must compile for the language; invalid rules are rejected. Agents can now write rules to GTW through a tool.
 - **`lint --discover`**: the local LFM2.5 model proposes project-specific rules from linted files; each proposal is validated (must compile and match ≥1 file) before saving. Few-shot examples in the prompt make the model produce valid patterns.
+- **Multi-edit (`edit --ask "..." --all`)**: the model proposes a change for one occurrence; GTW applies the same replacement to every identical line/occurrence in the file, validating the whole file reparses before writing. Step 5: rule-guided consistent edits.
 - **Local LLM command extension (LFM2.5-1.2B, Q4)** behind the `mamba` feature:
   - `explain <file> [--node <path>]` — plain-language explanation of a code node
   - `summarize <dir>` — hierarchical AST-skeleton map-reduce summary

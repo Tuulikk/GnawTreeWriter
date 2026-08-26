@@ -118,6 +118,10 @@ enum Commands {
         /// Let the local LFM2.5 model find the node and propose new content
         #[arg(long, conflicts_with_all = ["content", "source_file", "node_path", "tag"])]
         ask: Option<String>,
+        /// With --ask: apply the change to every node matching the same
+        /// pattern (rule-guided multi-edit), not just the first occurrence
+        #[arg(long)]
+        all: bool,
         #[arg(short, long)]
         preview: bool,
         #[arg(long)]
@@ -731,13 +735,18 @@ impl Cli {
                 content,
                 source_file,
                 ask,
+                all,
                 preview,
                 unescape_newlines,
                 force,
                 narrative,
             } => {
                 if let Some(request) = ask {
-                    Self::handle_edit_ask(&file_path, &request, preview, force)?;
+                    if all {
+                        Self::handle_edit_ask_all(&file_path, &request, preview, force)?;
+                    } else {
+                        Self::handle_edit_ask(&file_path, &request, preview, force)?;
+                    }
                     return Ok(());
                 }
                 let preview = preview || global_dry_run;
@@ -2310,6 +2319,69 @@ Use --no-preview to write batch file"
     }
     #[cfg(not(feature = "mamba"))]
     fn handle_edit_ask(_file_path: &str, _request: &str, _preview: bool, _force: bool) -> Result<()> {
+        Self::err_mamba_disabled()
+    }
+
+    /// `edit --ask "request" --all` — the model proposes a change for one
+    /// occurrence; GTW applies the same old→new replacement to every matching
+    /// line in the file (rule-guided multi-edit).
+    #[cfg(feature = "mamba")]
+    fn handle_edit_ask_all(file_path: &str, request: &str, preview: bool, force: bool) -> Result<()> {
+        let json_mode = std::env::var("GNAW_JSON").is_ok();
+        let project_root = find_project_root(&std::env::current_dir()?);
+        let mgr = crate::llm::AiManager::new(&project_root)?;
+        let res = crate::llm::Resolution::Auto;
+
+        println!("🤖 Asking local model to propose a change across all occurrences: \"{}\"", request);
+        let proposal = crate::llm::pipeline::propose_edit(&mgr, file_path, request, res)?;
+        let old_line = proposal.old_line.clone();
+        let new_line = proposal.new_line.clone();
+        println!("   replacing every \"{}\" → \"{}\"\n", old_line, new_line);
+
+        let mut source = std::fs::read_to_string(file_path)?;
+        let count = source.matches(&old_line).count();
+        if count == 0 {
+            anyhow::bail!("no occurrences of \"{}\" found in {}", old_line, file_path);
+        }
+        println!("   found {} occurrence(s)", count);
+
+        if !force {
+            // Preview: show the replacement without writing.
+            let previewed = source.replace(&old_line, &new_line);
+            print_diff(&source, &previewed);
+            Self::print_budget(&proposal.budget);
+            if !force {
+                println!("\n💡 Pass --force to apply all {} replacement(s).", count);
+            }
+            return Ok(());
+        }
+
+        if json_mode {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "replaced": count,
+                    "old": old_line,
+                    "new": new_line,
+                    "tokens": proposal.budget,
+                })
+            );
+            return Ok(());
+        }
+
+        // Apply: replace all occurrences, then validate the whole file parses.
+        source = source.replace(&old_line, &new_line);
+        let parser = crate::parser::get_parser(std::path::Path::new(file_path))?;
+        parser
+            .parse(&source)
+            .map_err(|e| anyhow::anyhow!("replacement produced invalid syntax: {}", e))?;
+        std::fs::write(file_path, &source)?;
+        println!("✅ Applied {} replacement(s) in {}", count, file_path);
+        Self::print_budget(&proposal.budget);
+        Ok(())
+    }
+    #[cfg(not(feature = "mamba"))]
+    fn handle_edit_ask_all(_file_path: &str, _request: &str, _preview: bool, _force: bool) -> Result<()> {
         Self::err_mamba_disabled()
     }
 

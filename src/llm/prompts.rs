@@ -125,6 +125,35 @@ pub fn edit_ask_prompt(
     )
 }
 
+/// Prompt for `edit --ask --all`: the model gives a recurring snippet (old)
+/// and its replacement (new); GTW applies it to every occurrence. `old` must
+/// appear verbatim multiple times.
+pub fn edit_ask_all_prompt(
+    file_path: &str,
+    request: &str,
+    file_preview: &str,
+    issues: &str,
+) -> String {
+    let issues_block = if issues.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n{issues}\n")
+    };
+    format!(
+        "You are editing the file {file_path}. The user wants: \"{request}\"\n\
+         {issues_block}\
+         Here is the relevant part of the file (line numbers shown):\n\n{file_preview}\n\n\
+         The change should apply to MULTIPLE occurrences. Respond with EXACTLY this JSON:\n\
+         {{\"old\": \"<exact recurring snippet>\", \"new\": \"<its replacement>\"}}\n\n\
+         Rules:\n\
+         - old: a SHORT snippet that appears VERBATIM multiple times (e.g. \".unwrap()\")\n\
+         - new: its replacement (e.g. \".expect(\\\"failed\\\")\")\n\
+         - Do NOT include line numbers or full lines unless they are identical\n\
+         - escape double quotes as \\\"; keep each on one JSON line\n\
+         JSON:"
+    )
+}
+
 /// Prompt for `lint --discover`: propose project-specific lint rules from a
 /// code sample. The model returns a JSON array of rules.
 pub fn discover_rules_prompt(code_sample: &str) -> String {

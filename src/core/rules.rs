@@ -60,6 +60,8 @@ pub struct Finding {
     pub file: String,
     pub line: usize,
     pub column: usize,
+    /// AST node path of the matched node (for surgical multi-edit).
+    pub node_path: String,
     /// Captured `$X` bindings (name -> matched content).
     pub captures: HashMap<String, String>,
 }
@@ -490,6 +492,7 @@ fn match_pattern_recursive(
             file: file.to_string(),
             line: source.start_line,
             column: source.start_col,
+            node_path: source.path.clone(),
             captures,
         });
     }
