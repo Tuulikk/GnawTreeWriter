@@ -93,19 +93,34 @@ pub fn synthesize_answer_prompt(
     )
 }
 
-/// Prompt for `edit --ask`: propose a minimal old→new change.
-/// The model gives the exact existing snippet to replace and its replacement;
-/// GTW finds the containing AST node and validates before applying.
-pub fn edit_ask_prompt(file_path: &str, request: &str, file_preview: &str) -> String {
+/// Prompt for `edit --ask`: propose a line-based change.
+/// The model gives the line number to change and the new line content; GTW
+/// finds the containing AST node and validates before applying. Line-based
+/// output avoids fragile JSON escaping of code snippets (a small-model pain).
+/// `issues` is an optional annotation of known rule violations in the file.
+pub fn edit_ask_prompt(
+    file_path: &str,
+    request: &str,
+    file_preview: &str,
+    issues: &str,
+) -> String {
+    let issues_block = if issues.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n{issues}\n")
+    };
     format!(
-        "You are editing the file {file_path}. The user wants: \"{request}\"\n\n\
-         Here is the relevant part of the file:\n\n{file_preview}\n\n\
+        "You are editing the file {file_path}. The user wants: \"{request}\"\n\
+         {issues_block}\
+         Here is the relevant part of the file (line numbers shown):\n\n{file_preview}\n\n\
          Respond with EXACTLY this JSON, no other text:\n\
-         {{\"old\": \"<exact existing code to replace>\", \"new\": \"<replacement code>\"}}\n\n\
+         {{\"line\": <line number>, \"new\": \"<new content for that line>\"}}\n\n\
          Rules:\n\
-         - old must appear VERBATIM in the file (copy it exactly, including whitespace)\n\
-         - new is the replacement for that exact snippet — keep it minimal and valid\n\
-         - escape newlines as \\n; keep each on one JSON line\n\
+         - line: the 1-based line number from the preview that must change\n\
+         - new: the FULL replacement text for that line (no line number prefix)\n\
+         - Keep the change minimal; do not change other lines\n\
+         - If known issues are listed above, your new line must not introduce or worsen them\n\
+         - escape double quotes in new as \\\"; keep it on one JSON line\n\
          JSON:"
     )
 }

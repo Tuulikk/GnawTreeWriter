@@ -391,6 +391,27 @@ pub fn check_code_with_builtin(code: &str, language: &str) -> (Vec<Finding>, usi
     (findings, skipped, has_error)
 }
 
+/// Format findings as compact prompt annotations, one per line:
+/// `⚠️ line N [rule_id] message`. Empty string when there are no findings.
+pub fn format_findings_for_prompt(findings: &[Finding]) -> String {
+    if findings.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("Known issues in this file (from lint rules):\n");
+    for f in findings {
+        let sev = match f.severity {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+            Severity::Info => "info",
+        };
+        out.push_str(&format!(
+            "- line {} [{}] ({}) {}\n",
+            f.line, f.rule_id, sev, f.message
+        ));
+    }
+    out
+}
+
 fn match_pattern_recursive(
     pattern: &TreeNode,
     source: &TreeNode,

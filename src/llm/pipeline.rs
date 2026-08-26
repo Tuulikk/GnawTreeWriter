@@ -574,10 +574,26 @@ pub fn propose_edit(
     let tree = writer.analyze();
     let source = writer.get_source().to_string();
 
-    // Give the model a bounded preview of the file (small files fully).
-    let preview: String = source.chars().take(6000).collect();
+    // Give the model a bounded, line-numbered preview (small files fully).
+    let preview_raw: String = source.chars().take(6000).collect();
+    let preview: String = preview_raw
+        .lines()
+        .enumerate()
+        .map(|(i, l)| format!("{:>4} | {}", i + 1, l))
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    let prompt = prompts::edit_ask_prompt(file_path, request, &preview);
+    // Rule-injected expertise: annotate known rule violations in the file so
+    // the model can avoid introducing/worsening them (spec step 3).
+    let lang = std::path::Path::new(file_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let (findings, _, _) = crate::core::rules::check_code_with_builtin(&source, &lang);
+    let issues = crate::core::rules::format_findings_for_prompt(&findings);
+
+    let prompt = prompts::edit_ask_prompt(file_path, request, &preview, &issues);
     let params = GenerateParams {
         max_tokens: task.synth_tokens,
         temperature: EXTRACT_TEMP,
@@ -593,29 +609,60 @@ pub fn propose_edit(
     budget.record(&gen);
     budget.actual_seconds = start.elapsed().as_secs_f64();
 
-    // Parse the old→new proposal.
-    let (old, new) = match parse_edit_proposal(&gen.text) {
+    // Parse the line-based proposal: {line, new}.
+    let (line, new) = match parse_edit_proposal(&gen.text) {
         Some(p) => p,
         None => {
             eprintln!("[edit-ask] raw model response:\n{}", gen.text);
             anyhow::bail!("model did not return a valid edit proposal");
         }
     };
-    if old.trim().is_empty() || new.trim().is_empty() {
-        anyhow::bail!("model returned an empty old/new edit proposal");
+    if new.trim().is_empty() {
+        anyhow::bail!("model returned an empty edit proposal");
     }
 
-    // Find the smallest AST node whose content contains `old`, then replace
-    // `old`→`new` within that node's content. This keeps the edit surgical.
-    let node = find_containing_node(tree, &old)
-        .ok_or_else(|| anyhow::anyhow!("could not find the snippet to replace in {file_path}"))?;
-    let node_path = node.path.clone();
-    let old_trim = old.trim();
-    let node_content = node.content.clone();
-    if !node_content.contains(old_trim) {
-        anyhow::bail!("model's 'old' snippet does not appear verbatim in node {node_path}");
+    // Read the target line from the source, then find the smallest AST node
+    // containing that line and replace the line's text inside it.
+    let source_lines: Vec<&str> = source.lines().collect();
+    if line == 0 || line > source_lines.len() {
+        anyhow::bail!(
+            "model proposed line {line}, but the file has {} lines",
+            source_lines.len()
+        );
     }
-    let new_content = node_content.replacen(old_trim, new.trim(), 1);
+    let old_line = source_lines[line - 1];
+    let node = find_node_containing_line(tree, line, old_line.trim())
+        .ok_or_else(|| anyhow::anyhow!("could not find a node on line {line} in {file_path}"))?;
+    let node_path = node.path.clone();
+    let node_content = node.content.clone();
+    if !node_content.contains(old_line.trim()) {
+        anyhow::bail!(
+            "model's target line does not appear in node {node_path}: {}",
+            old_line.trim()
+        );
+    }
+    let mut new_content = node_content.replacen(old_line.trim(), new.trim(), 1);
+    // If the replaced line ended with `;` but the new content does not, add it
+    // back so the node stays valid (a small model often drops it).
+    if old_line.trim().ends_with(';')
+        && !new_content.trim_end().ends_with(';')
+        && !new_content.trim_end().ends_with('}')
+    {
+        new_content = format!("{};", new_content.trim_end());
+    }
+    // If the original line was a `let` declaration and the model only gave the
+    // value expression (dropped `let x =`), keep the binding name.
+    if old_line.trim().starts_with("let ") && !new_content.trim().starts_with("let ") {
+        let binding = old_line
+            .trim()
+            .strip_prefix("let ")
+            .and_then(|s| s.split('=').next())
+            .unwrap_or("")
+            .trim();
+        if !binding.is_empty() {
+            new_content = format!("let {} = {};", binding, new_content.trim().trim_end_matches(';'));
+        }
+    }
 
     Ok(EditProposal {
         node_path,
@@ -624,34 +671,43 @@ pub fn propose_edit(
     })
 }
 
-/// Find the deepest node whose content contains `needle`.
-fn find_containing_node<'a>(
+/// Find the smallest node that spans `line` AND whose content contains
+/// `line_text`. Prefers the smallest such node (the actual statement).
+fn find_node_containing_line<'a>(
     node: &'a crate::parser::TreeNode,
-    needle: &str,
+    line: usize,
+    line_text: &str,
 ) -> Option<&'a crate::parser::TreeNode> {
-    let needle = needle.trim();
-    if !node.content.contains(needle) {
+    if line < node.start_line || line > node.end_line {
         return None;
     }
-    // Prefer a deeper match.
+    let mut best: Option<&crate::parser::TreeNode> = None;
     for child in &node.children {
-        if let Some(found) = find_containing_node(child, needle) {
-            return Some(found);
+        if let Some(found) = find_node_containing_line(child, line, line_text) {
+            best = Some(found);
         }
     }
-    Some(node)
+    // If a child matched, prefer it; otherwise use this node if it contains
+    // the line text (meaningful node, not just a spanning container).
+    if let Some(b) = best {
+        return Some(b);
+    }
+    if node.content.contains(line_text) && !node.content.trim().is_empty() {
+        Some(node)
+    } else {
+        None
+    }
 }
 
-/// Parse the model's JSON edit proposal, leniently. Looks for the
-/// `{"old"` marker specifically, because `new` may itself contain braces
-/// that a naive first-`{` scan would grab.
-fn parse_edit_proposal(s: &str) -> Option<(String, String)> {
-    let marker = s.find("{\"old\"")?;
+/// Parse the model's JSON edit proposal (line-based): `{"line": N, "new": "..."}`.
+/// Looks for the `{"line"` marker because `new` may contain braces.
+fn parse_edit_proposal(s: &str) -> Option<(usize, String)> {
+    let marker = s.find("{\"line\"")?;
     let json_str = &s[marker..];
     let end = json_str.rfind('}')?;
     let json_str = &json_str[..=end];
     let v: serde_json::Value = serde_json::from_str(json_str).ok()?;
-    let old = v.get("old")?.as_str()?.to_string();
+    let line = v.get("line")?.as_u64()? as usize;
     let new = v.get("new")?.as_str()?.to_string();
-    Some((old, new))
+    Some((line, new))
 }
