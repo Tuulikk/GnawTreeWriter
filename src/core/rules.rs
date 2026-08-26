@@ -9,6 +9,7 @@ use crate::parser::{ParserEngine, TreeNode};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Severity of a rule finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -30,7 +31,7 @@ impl Severity {
 }
 
 /// A single lint rule.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct Rule {
     pub id: String,
     pub language: String,
@@ -45,7 +46,7 @@ fn default_severity() -> Severity {
 }
 
 /// YAML container for a rules file.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, serde::Serialize)]
 pub struct RulesFile {
     pub rules: Vec<Rule>,
 }
@@ -77,6 +78,49 @@ pub fn load_rules_yaml(yaml: &str) -> Result<Vec<Rule>> {
     let file: RulesFile = serde_yaml::from_str(yaml)
         .context("failed to parse rules YAML")?;
     Ok(file.rules)
+}
+
+/// Serialize rules back to YAML (for saving project rules).
+pub fn rules_to_yaml(rules: &[Rule]) -> Result<String> {
+    let file = RulesFile {
+        rules: rules.to_vec(),
+    };
+    serde_yaml::to_string(&file).context("failed to serialize rules")
+}
+
+/// The default project rules file path (cwd-based).
+pub fn project_rules_path() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("gnawtreewriter.rules.yaml")
+}
+
+/// Load project rules from `gnawtreewriter.rules.yaml` if it exists.
+pub fn load_project_rules() -> Result<Vec<Rule>> {
+    let path = project_rules_path();
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let yaml = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    load_rules_yaml(&yaml)
+}
+
+/// Append a rule to the project rules file (creating it if needed).
+/// Returns Err if a rule with the same id already exists.
+pub fn append_project_rule(rule: &Rule) -> Result<()> {
+    let mut rules = load_project_rules()?;
+    if rules.iter().any(|r| r.id == rule.id) {
+        anyhow::bail!(
+            "rule '{}' already exists in {}",
+            rule.id,
+            project_rules_path().display()
+        );
+    }
+    rules.push(rule.clone());
+    let yaml = rules_to_yaml(&rules)?;
+    std::fs::write(project_rules_path(), yaml)
+        .with_context(|| format!("failed to write {}", project_rules_path().display()))
 }
 
 /// Compile a rule: parse its pattern with the rule's language parser and mark

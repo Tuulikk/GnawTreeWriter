@@ -124,3 +124,30 @@ pub fn edit_ask_prompt(
          JSON:"
     )
 }
+
+/// Prompt for `lint --discover`: propose project-specific lint rules from a
+/// code sample. The model returns a JSON array of rules.
+pub fn discover_rules_prompt(code_sample: &str) -> String {
+    format!(
+        "You are analyzing a codebase to find project-specific lint rules.\n\
+         Here are code samples:\n\n{code_sample}\n\n\
+         Propose 2-4 semgrep-style rules that capture recurring problems or \
+         project-specific anti-patterns visible in this code.\n\n\
+         A rule's pattern is a SMALL, VALID code fragment with $X placeholders \
+         standing in for any expression. Examples of good patterns:\n\
+         - Rust: \"$X.unwrap()\", \"let _ = $X;\", \"return $X;\\nreturn $X;\"\n\
+         - Python: \"except:\\n    pass\", \"eval($X)\", \"$X == None\"\n\
+         - JS: \"console.log($X)\", \"$X == $Y\"\n\n\
+         Respond with EXACTLY a JSON array, no other text:\n\
+         [{{\"id\": \"unique_id\", \"language\": \"rust|python|javascript|...\", \
+         \"severity\": \"error|warning|info\", \
+         \"message\": \"why this is a problem\", \
+         \"pattern\": \"$X.unwrap()\"}}]\n\n\
+         Rules:\n\
+         - id: short lowercase id (e.g. proj_never_ignore)\n\
+         - language: must match the sample language\n\
+         - pattern: SMALL and VALID (a statement or expression with $X)\n\
+         - Prefer patterns that actually appear in the samples\n\
+         JSON:"
+    )
+}

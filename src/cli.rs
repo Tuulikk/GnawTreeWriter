@@ -420,6 +420,9 @@ enum Commands {
         /// Only run a specific rule by id
         #[arg(long)]
         rule: Option<String>,
+        /// Use the local LFM2.5 model to discover project-specific rules
+        #[arg(long)]
+        discover: bool,
     },
     /// Search for code semantically
     Sense {
@@ -472,6 +475,11 @@ enum Commands {
     Ai {
         #[command(subcommand)]
         command: AiSubcommands,
+    },
+    /// Manage lint rules (add, list)
+    Rules {
+        #[command(subcommand)]
+        command: RuleSubcommands,
     },
     /// Agentic Logging Framework
     Alf {
@@ -626,6 +634,27 @@ enum AiSubcommands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand)]
+enum RuleSubcommands {
+    /// Add a lint rule to gnawtreewriter.rules.yaml (validated before saving)
+    Add {
+        /// Rule id (unique, e.g. my_project_no_todo)
+        id: String,
+        /// Language the rule applies to (rust, python, javascript, ...)
+        language: String,
+        /// semgrep-like pattern with $X placeholders, e.g. "$X.unwrap()"
+        pattern: String,
+        /// Severity: error | warning | info (default: warning)
+        #[arg(long, default_value = "warning")]
+        severity: String,
+        /// Human-readable message for findings
+        #[arg(long)]
+        message: Option<String>,
+    },
+    /// List rules currently active (builtin + project)
+    List,
 }
 
 #[derive(Subcommand)]
@@ -1047,8 +1076,9 @@ impl Cli {
                 rules,
                 severity,
                 rule,
+                discover,
             } => {
-                Self::handle_lint(&paths, &format, recursive, rules.as_deref(), severity.as_deref(), rule.as_deref())?;
+                Self::handle_lint(&paths, &format, recursive, rules.as_deref(), severity.as_deref(), rule.as_deref(), discover)?;
             }
             Commands::DebugHash { content } => {
                 Self::handle_debug_hash(&content)?;
@@ -1154,6 +1184,14 @@ impl Cli {
             Commands::Scaffold { file_path, schema } => {
                 Self::handle_scaffold(&file_path, &schema)?;
             }
+            Commands::Rules { command } => match command {
+                RuleSubcommands::Add { id, language, pattern, severity, message } => {
+                    Self::handle_rules_add(&id, &language, &pattern, &severity, message.as_deref())?;
+                }
+                RuleSubcommands::List => {
+                    Self::handle_rules_list()?;
+                }
+            },
             Commands::Ai { command } => match command {
                 AiSubcommands::Setup { force } => {
                     Self::handle_ai_setup(force).await?;
@@ -4051,7 +4089,13 @@ Use without --preview to apply the clone"
         rules_file: Option<&str>,
         severity_filter: Option<&str>,
         rule_filter: Option<&str>,
+        discover: bool,
     ) -> Result<()> {
+        // `lint --discover`: use the local model to propose project-specific
+        // rules from the linted files, validate each, and save them.
+        if discover {
+            return Self::handle_lint_discover(paths);
+        }
         // Load and compile rules: builtin + project rules file + --rules file.
         let mut rules = Vec::new();
         rules.extend(
@@ -4203,6 +4247,185 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
             crate::core::rules::Severity::Warning => 2,
             crate::core::rules::Severity::Info => 1,
         }
+    }
+
+    /// `rules add`: validate a rule (pattern must compile) and append it to
+    /// gnawtreewriter.rules.yaml. The agent-facing way to write rules.
+    fn handle_rules_add(
+        id: &str,
+        language: &str,
+        pattern: &str,
+        severity: &str,
+        message: Option<&str>,
+    ) -> Result<()> {
+        let rule = crate::core::rules::Rule {
+            id: id.to_string(),
+            language: language.to_string(),
+            severity: crate::core::rules::Severity::parse(severity),
+            message: message.unwrap_or(&format!("Rule {} matched", id)).to_string(),
+            pattern: pattern.to_string(),
+        };
+
+        // Validate: the pattern must compile for the target language.
+        crate::core::rules::compile_rule(&rule)
+            .map_err(|e| anyhow::anyhow!("rule rejected: {}", e))?;
+
+        crate::core::rules::append_project_rule(&rule)?;
+        println!(
+            "✅ Rule '{}' added to {}",
+            id,
+            crate::core::rules::project_rules_path().display()
+        );
+        println!("   It is now active for `lint` and the edit guardian.");
+        Ok(())
+    }
+
+    /// `rules list`: show builtin + project rules.
+    fn handle_rules_list() -> Result<()> {
+        let builtin = crate::core::rules::load_rules_yaml(include_str!("../rules/builtin.yaml"))?;
+        let project = crate::core::rules::load_project_rules()?;
+        println!("── Builtin rules ({}) ──────────────", builtin.len());
+        for r in &builtin {
+            println!("  {} [{}] ({:?}) — {}", r.id, r.language, r.severity, r.message);
+        }
+        println!("── Project rules ({}) ──────────────", project.len());
+        if project.is_empty() {
+            println!("  (none — add with `rules add`)");
+        }
+        for r in &project {
+            println!("  {} [{}] ({:?}) — {}", r.id, r.language, r.severity, r.message);
+        }
+        Ok(())
+    }
+
+    /// `lint --discover`: have the local LFM2.5 model propose project-specific
+    /// rules from the linted files. Each proposal is validated (pattern must
+    /// compile and match at least once); valid ones are saved.
+    #[cfg(feature = "mamba")]
+    fn handle_lint_discover(paths: &[String]) -> Result<()> {
+        // Resolve the file list (same logic as handle_lint).
+        let mut all_files = Vec::new();
+        for path in paths {
+            let path_buf = std::path::PathBuf::from(path);
+            if path_buf.is_dir() {
+                all_files.extend(Self::find_supported_files(&path_buf)?);
+            } else {
+                all_files.push(path.clone());
+            }
+        }
+        if all_files.is_empty() {
+            println!("No files to analyze for rule discovery.");
+            return Ok(());
+        }
+
+        // Build a compact code sample: first ~300 chars of up to 5 files.
+        let mut sample = String::new();
+        for fp in all_files.iter().take(5) {
+            if let Ok(content) = std::fs::read_to_string(fp) {
+                let snippet: String = content.chars().take(300).collect();
+                sample.push_str(&format!("--- {} ---\n{}\n", fp, snippet));
+            }
+        }
+
+        let project_root = find_project_root(&std::env::current_dir()?);
+        let mgr = crate::llm::AiManager::new(&project_root)?;
+        let prompt = crate::llm::prompts::discover_rules_prompt(&sample);
+        println!("🤖 Analyzing code to discover project-specific rules...");
+        let gen = mgr.generate_lfm25(&prompt, 512, 0.2)?;
+
+        // Parse the proposed rules (JSON array).
+        let proposed: Vec<serde_json::Value> = Self::parse_rule_proposals(&gen.text)?;
+        if proposed.is_empty() {
+            println!("Model did not propose any rules.");
+            return Ok(());
+        }
+
+        let mut saved = 0usize;
+        let mut rejected = 0usize;
+        for p in &proposed {
+            let id = p.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let language = p.get("language").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let pattern = p.get("pattern").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let message = p.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let severity = p.get("severity").and_then(|v| v.as_str()).unwrap_or("warning");
+
+            if id.is_empty() || language.is_empty() || pattern.is_empty() {
+                rejected += 1;
+                continue;
+            }
+            let rule = crate::core::rules::Rule {
+                id,
+                language,
+                severity: crate::core::rules::Severity::parse(severity),
+                message,
+                pattern,
+            };
+            // Validate: compiles AND matches at least one linted file.
+            match crate::core::rules::compile_rule(&rule) {
+                Ok(compiled) => {
+                    let mut matched = false;
+                    for fp in &all_files {
+                        let ext = std::path::Path::new(fp)
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("");
+                        if !crate::core::rules::language_matches(&rule.language, ext) {
+                            continue;
+                        }
+                        if let Ok(writer) = crate::GnawTreeWriter::new(fp) {
+                            if !crate::core::rules::run_rule(&compiled, writer.analyze(), fp).is_empty() {
+                                matched = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !matched {
+                        eprintln!(
+                            "⚠️  rejecting '{}': rule did not match any linted file",
+                            rule.id
+                        );
+                        rejected += 1;
+                        continue;
+                    }
+                    match crate::core::rules::append_project_rule(&rule) {
+                        Ok(()) => {
+                            println!("✅ saved rule '{}'", rule.id);
+                            saved += 1;
+                        }
+                        Err(e) => {
+                            eprintln!("⚠️  {} (skipped)", e);
+                            rejected += 1;
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("⚠️  rejecting '{}': {}", rule.id, e);
+                    rejected += 1;
+                }
+            }
+        }
+        println!(
+            "\nDone: {} rule(s) saved, {} rejected.",
+            saved, rejected
+        );
+        println!(
+            "Active project rules: {}",
+            crate::core::rules::project_rules_path().display()
+        );
+        Ok(())
+    }
+    #[cfg(not(feature = "mamba"))]
+    fn handle_lint_discover(_paths: &[String]) -> Result<()> {
+        Self::err_mamba_disabled()
+    }
+
+    /// Parse the model's JSON array of proposed rules, leniently.
+    fn parse_rule_proposals(s: &str) -> Result<Vec<serde_json::Value>> {
+        let start = s.find('[').ok_or_else(|| anyhow::anyhow!("no rule array in model output"))?;
+        let end = s.rfind(']').ok_or_else(|| anyhow::anyhow!("unterminated rule array"))?;
+        let json: serde_json::Value = serde_json::from_str(&s[start..=end])
+            .map_err(|e| anyhow::anyhow!("invalid rule JSON: {}", e))?;
+        Ok(json.as_array().cloned().unwrap_or_default())
     }
     
         fn handle_doctor(format: Option<&str>) -> Result<()> {

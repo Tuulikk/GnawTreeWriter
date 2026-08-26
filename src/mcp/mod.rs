@@ -296,6 +296,22 @@ pub mod mcp_server {
                             }
                         },
                         {
+                            "name": "add_rule",
+                            "title": "Add a lint rule",
+                            "description": "Validate and add a semgrep-like lint rule to gnawtreewriter.rules.yaml. The pattern must be valid code for the language, with $X placeholders.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "id": { "type": "string", "description": "Unique rule id (e.g. proj_no_todo)" },
+                                    "language": { "type": "string", "description": "Language: rust, python, javascript, ..." },
+                                    "pattern": { "type": "string", "description": "Code pattern with $X placeholders, e.g. \"$X.unwrap()\"" },
+                                    "severity": { "type": "string", "enum": ["error", "warning", "info"], "description": "Severity (default: warning)" },
+                                    "message": { "type": "string", "description": "Human-readable message" }
+                                },
+                                "required": ["id", "language", "pattern"]
+                            }
+                        },
+                        {
                             "name": "get_semantic_report",
                             "title": "Generate semantic quality report",
                             "description": "Analyze code quality using AI.",
@@ -549,6 +565,14 @@ pub mod mcp_server {
                     "investigate" => {
                         let question = validate_arg("question")?;
                         Ok(handle_investigate(question))
+                    },
+                    "add_rule" => {
+                        let id = validate_arg("id")?;
+                        let language = validate_arg("language")?;
+                        let pattern = validate_arg("pattern")?;
+                        let severity = arguments.get("severity").and_then(Value::as_str).unwrap_or("warning");
+                        let message = arguments.get("message").and_then(Value::as_str);
+                        Ok(handle_add_rule(id, language, pattern, severity, message))
                     },
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
@@ -1417,6 +1441,32 @@ pub mod mcp_server {
     #[cfg(not(feature = "mamba"))]
     fn handle_investigate(_question: &str) -> Value {
         tool_error("investigate requires the 'mamba' feature. Recompile with --features mamba".to_string())
+    }
+
+    /// `add_rule`: validate and add a lint rule (agent-facing way to write rules).
+    fn handle_add_rule(id: &str, language: &str, pattern: &str, severity: &str, message: Option<&str>) -> Value {
+        let rule = crate::core::rules::Rule {
+            id: id.to_string(),
+            language: language.to_string(),
+            severity: crate::core::rules::Severity::parse(severity),
+            message: message.unwrap_or(&format!("Rule {} matched", id)).to_string(),
+            pattern: pattern.to_string(),
+        };
+        // Validate the pattern compiles for the language.
+        if let Err(e) = crate::core::rules::compile_rule(&rule) {
+            return tool_error(format!("Rule rejected: {}", e));
+        }
+        match crate::core::rules::append_project_rule(&rule) {
+            Ok(()) => tool_success(
+                format!("Rule '{}' added", id),
+                Some(json!({
+                    "id": id,
+                    "path": crate::core::rules::project_rules_path().to_string_lossy(),
+                    "active": true,
+                })),
+            ),
+            Err(e) => tool_error(format!("Failed to add rule: {}", e)),
+        }
     }
 
         fn handle_search_nodes(file_path: &str, pattern: &str) -> Value {
