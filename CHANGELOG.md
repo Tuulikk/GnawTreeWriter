@@ -1,3 +1,18 @@
+## [0.9.7] - 2026-08-25
+
+### Added
+- **Local LLM command extension (LFM2.5-1.2B, Q4)** behind the `mamba` feature:
+  - `explain <file> [--node <path>]` — plain-language explanation of a code node
+  - `summarize <dir>` — hierarchical AST-skeleton map-reduce summary
+  - `investigate "question"` — query expansion → index search → ranked answer with file references
+  - All three available as MCP tools (`explain`, `summarize`, `investigate`)
+  - `ai calibrate` — measures this machine's inference speed and saves a timing profile
+- **`--resolution` flag** (fast / balanced / thorough) on explain/summarize/investigate: trades speed vs detail via chunk size and output budgets.
+- **Token & time transparency**: every command reports a budget (`expected/actual tokens`, `calls`, `estimated/actual seconds`, truncation warning). No silent cut-offs.
+
+### Performance notes
+- LFM2.5 prefill in candle is ~O(seq²), so pipeline steps chunk to small sizes and feed compact AST skeletons instead of raw source (~98% smaller) — summarize went from >3 min/file to ~15s/file.
+
 ## [0.9.6] - 2026-08-24
 
 ### Added

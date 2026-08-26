@@ -223,9 +223,44 @@ gnawtreewriter diff-to-batch changes.patch --output batch.json   # preview
 gnawtreewriter batch batch.json                                   # apply atomically
 ```
 
+### LFM2.5: local LLM command extension
+
+A small local LLM (LFM2.5-1.2B, Q4, ~1 GB) extends the CLI with natural-language
+commands — no chat, no API keys, fully on-device. Built as fixed-step pipelines:
+Rust controls the flow, the model does focused understanding.
+
+```bash
+# Explain a code node in plain language
+gnawtreewriter explain src/core/pack.rs --node "1.2"
+
+# Hierarchically summarize a directory (AST-skeleton map-reduce)
+gnawtreewriter summarize src/core --max-files 20
+
+# Investigate a question across the codebase (query → search → answer)
+gnawtreewriter investigate "hur hanteras backup?"
+
+# Trade speed vs detail (fast / balanced / thorough)
+gnawtreewriter summarize src/core --resolution fast
+```
+
+Every command reports its cost — tokens and estimated vs actual time — so you
+always know what a task costs before and after running it:
+
+```
+── budget ───────────────────────────────
+  tokens: 1976 in / 356 out (expected) | 1980 in / 147 out (actual) | calls: 3
+  time:   ~137s (expected) | 147s (actual)
+```
+
+Time estimates use a **self-calibrated timing profile** measured on your own
+machine (`gnawtreewriter ai calibrate`) and saved to the AI config dir.
+
+Requires the `mamba` feature: `cargo build --release --features mamba` then
+`gnawtreewriter ai setup` to download the model.
+
 All of these are also available as MCP tools (`explore`, `pack`, `curate`, `compress`,
-`diff_to_batch`, `index_entities`, `index_relations`) for agents working through
-Claude Desktop, Zed, or VSCode.
+`diff_to_batch`, `index_entities`, `index_relations`, `explain`, `summarize`,
+`investigate`) for agents working through Claude Desktop, Zed, or VSCode.
 
 ## 🤖 AI Agent Integration (VS Code / Copilot)
 

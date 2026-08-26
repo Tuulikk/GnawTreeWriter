@@ -2,8 +2,12 @@ pub mod ai_manager;
 pub mod batch;
 pub mod gnaw_sense;
 pub mod llm_integration;
+#[cfg(feature = "mamba")]
+pub mod pipeline;
 #[cfg(feature = "modernbert")]
 pub mod project_indexer;
+#[cfg(feature = "mamba")]
+pub mod prompts;
 pub mod relational_index;
 pub mod semantic_index;
 

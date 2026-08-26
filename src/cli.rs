@@ -428,6 +428,28 @@ enum Commands {
         #[arg(long)]
         preview: bool,
     },
+    /// Explain a code node in plain language (LFM2.5)
+    Explain {
+        file: PathBuf,
+        #[arg(long)]
+        node: Option<String>,
+        #[arg(long, default_value = "auto")]
+        resolution: String,
+    },
+    /// Summarize a directory hierarchically (LFM2.5)
+    Summarize {
+        path: PathBuf,
+        #[arg(long, default_value_t = 50)]
+        max_files: usize,
+        #[arg(long, default_value = "auto")]
+        resolution: String,
+    },
+    /// Investigate a question across the codebase (LFM2.5)
+    Investigate {
+        question: String,
+        #[arg(long, default_value = "auto")]
+        resolution: String,
+    },
     /// Scaffold a new file
     Scaffold {
         file_path: PathBuf,
@@ -575,6 +597,9 @@ enum AiSubcommands {
     },
     /// Show AI status and installed models
     Status,
+    /// Measure this machine's inference speed and save a timing profile
+    /// (used for time estimates in explain/summarize/investigate)
+    Calibrate,
     /// Index the entire project for semantic search
     Index {
         /// Directory to index (defaults to project root)
@@ -1097,6 +1122,15 @@ impl Cli {
             Commands::SenseInsert { file, anchor, content, intent, preview } => {
                 Self::handle_sense_insert(file, anchor, content, intent, preview).await?;
             }
+            Commands::Explain { file, node, resolution } => {
+                Self::handle_explain(&file, node.as_deref(), &resolution)?;
+            }
+            Commands::Summarize { path, max_files, resolution } => {
+                Self::handle_summarize(&path, max_files, &resolution)?;
+            }
+            Commands::Investigate { question, resolution } => {
+                Self::handle_investigate(&question, &resolution)?;
+            }
             Commands::Scaffold { file_path, schema } => {
                 Self::handle_scaffold(&file_path, &schema)?;
             }
@@ -1106,6 +1140,9 @@ impl Cli {
                 }
                 AiSubcommands::Status => {
                     Self::handle_ai_status()?;
+                }
+                AiSubcommands::Calibrate => {
+                    Self::handle_ai_calibrate()?;
                 }
                 AiSubcommands::Index { path } => {
                     Self::handle_ai_index(path).await?;
@@ -2087,6 +2124,128 @@ Use --no-preview to write batch file"
         Ok(())
     }
 
+    /// Standardized error for when mamba feature is not enabled.
+    #[allow(dead_code)]
+    fn err_mamba_disabled() -> Result<()> {
+        let json_mode = std::env::var("GNAW_JSON").is_ok();
+        if json_mode {
+            let err = serde_json::json!({
+                "error": "mamba_disabled",
+                "message": "LFM2.5 feature not enabled. Recompile with: cargo build --release --features mamba"
+            });
+            println!("{}", serde_json::to_string(&err)?);
+        } else {
+            println!("Error: LFM2.5 commands require the 'mamba' feature.");
+            println!("Recompile with: cargo build --release --features mamba");
+        }
+        Ok(())
+    }
+
+    /// Print the token/time budget report for a command. Always shows expected
+    /// vs actual so truncation or cost drift is never silent.
+    #[cfg(feature = "mamba")]
+    fn print_budget(budget: &crate::llm::TokenBudget) {
+        println!("── budget ───────────────────────────────");
+        println!(
+            "  tokens: {} in / {} out (expected) | {} in / {} out (actual) | calls: {}",
+            budget.expected_input, budget.expected_output,
+            budget.actual_input, budget.actual_output,
+            budget.calls
+        );
+        println!(
+            "  time:   ~{:.0}s (expected) | {:.0}s (actual)",
+            budget.expected_seconds, budget.actual_seconds
+        );
+        if budget.truncated {
+            println!("  ⚠️  hit the output budget — answer may be cut off");
+        }
+        println!("─────────────────────────────────────────");
+    }
+
+    /// `explain` — explain a code node with LFM2.5.
+    #[cfg(feature = "mamba")]
+    fn handle_explain(file: &PathBuf, node: Option<&str>, resolution: &str) -> Result<()> {
+        let json_mode = std::env::var("GNAW_JSON").is_ok();
+        let project_root = find_project_root(&std::env::current_dir()?);
+        let mgr = crate::llm::AiManager::new(&project_root)?;
+        let res = crate::llm::Resolution::parse(resolution);
+        let (explanation, budget) =
+            crate::llm::pipeline::explain_node(&mgr, file.to_str().unwrap_or(""), node, res)?;
+        if json_mode {
+            println!(
+                "{}",
+                serde_json::json!({ "explanation": explanation, "tokens": budget })
+            );
+        } else {
+            println!("{}\n", explanation);
+            Self::print_budget(&budget);
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "mamba"))]
+    fn handle_explain(_file: &PathBuf, _node: Option<&str>, _resolution: &str) -> Result<()> {
+        Self::err_mamba_disabled()
+    }
+
+    /// `summarize` — hierarchical directory summary with LFM2.5.
+    #[cfg(feature = "mamba")]
+    fn handle_summarize(path: &PathBuf, max_files: usize, resolution: &str) -> Result<()> {
+        let json_mode = std::env::var("GNAW_JSON").is_ok();
+        let project_root = find_project_root(&std::env::current_dir()?);
+        let mgr = crate::llm::AiManager::new(&project_root)?;
+        let res = crate::llm::Resolution::parse(resolution);
+        let (result, budget) = crate::llm::pipeline::summarize_dir(&mgr, path, max_files, res)?;
+        if json_mode {
+            println!(
+                "{}",
+                serde_json::json!({ "result": result, "tokens": budget })
+            );
+        } else {
+            println!("\n📁 {}\n", result.directory);
+            for (name, summary) in &result.file_summaries {
+                println!("  {}: {}", name, summary);
+            }
+            println!("\n📂 Directory: {}", result.directory_summary);
+            if !result.project_summary.is_empty() {
+                println!("\n🏗️  Project: {}", result.project_summary);
+            }
+            println!();
+            Self::print_budget(&budget);
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "mamba"))]
+    fn handle_summarize(_path: &PathBuf, _max_files: usize, _resolution: &str) -> Result<()> {
+        Self::err_mamba_disabled()
+    }
+
+    /// `investigate` — answer a question across the codebase with LFM2.5.
+    #[cfg(feature = "mamba")]
+    fn handle_investigate(question: &str, resolution: &str) -> Result<()> {
+        let json_mode = std::env::var("GNAW_JSON").is_ok();
+        let project_root = find_project_root(&std::env::current_dir()?);
+        let mgr = crate::llm::AiManager::new(&project_root)?;
+        let res = crate::llm::Resolution::parse(resolution);
+        let (result, budget) = crate::llm::pipeline::investigate(&mgr, question, res)?;
+        if json_mode {
+            println!(
+                "{}",
+                serde_json::json!({ "result": result, "tokens": budget })
+            );
+        } else {
+            println!("\n🔍 Terms: {}", result.terms.join(", "));
+            println!("\n{}", result.answer);
+            println!("\n📎 Candidates: {}", result.candidates.join(", "));
+            println!();
+            Self::print_budget(&budget);
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "mamba"))]
+    fn handle_investigate(_question: &str, _resolution: &str) -> Result<()> {
+        Self::err_mamba_disabled()
+    }
+
     fn handle_blueprint(output_path: Option<&str>) -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
@@ -2424,10 +2583,35 @@ Use --no-preview to write batch file"
         println!("\n🧠 GnawTreeWriter AI Status");
         println!("===========================");
         println!("ModernBERT: {}", if status.modern_bert_installed { "✅ Installed".green() } else { "❌ Not found (run 'ai setup')".red() });
+        #[cfg(feature = "mamba")]
+        println!("LFM2.5:     {}", if status.lfm25_installed { "✅ Installed".green() } else { "❌ Not found (run 'ai setup')".red() });
         println!("Cache Dir:  {}", status.cache_dir.display());
         println!("Device:     CPU");
         println!();
         Ok(())
+    }
+
+    /// Measure this machine's inference speed and save the timing profile.
+    #[cfg(feature = "mamba")]
+    fn handle_ai_calibrate() -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        let mgr = crate::llm::ai_manager::AiManager::new(&project_root)?;
+
+        println!("⏱️  Calibrating timing on this machine (a few short inference passes)...");
+        println!("   This requires the LFM2.5 model. Run 'ai setup' first if missing.");
+        let profile = mgr.calibrate_timing()?;
+
+        println!("\n✅ Timing profile calibrated and saved:");
+        println!("   prefill: {:.3} s/token", profile.prefill_s_per_token);
+        println!("   decode:  {:.3} s/token", profile.decode_s_per_token);
+        println!("   overhead: {:.1} s/call", profile.call_overhead_s);
+        println!("   Time estimates in explain/summarize/investigate now use these values.");
+        Ok(())
+    }
+    #[cfg(not(feature = "mamba"))]
+    fn handle_ai_calibrate() -> Result<()> {
+        Self::err_mamba_disabled()
     }
 
     async fn handle_ai_index(path: Option<PathBuf>) -> Result<()> {

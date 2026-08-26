@@ -249,6 +249,41 @@ pub mod mcp_server {
                             }
                         },
                         {
+                            "name": "explain",
+                            "title": "Explain a code node",
+                            "description": "Explain a code node in plain language using the local LFM2.5 model.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string", "description": "Path to the file" },
+                                    "node": { "type": "string", "description": "AST node path (optional; default: whole file)" }
+                                }
+                            }
+                        },
+                        {
+                            "name": "summarize",
+                            "title": "Summarize a directory",
+                            "description": "Hierarchical directory summary using the local LFM2.5 model.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "path": { "type": "string", "description": "Directory to summarize" },
+                                    "max_files": { "type": "integer", "description": "Max files to summarize (default: 50)" }
+                                }
+                            }
+                        },
+                        {
+                            "name": "investigate",
+                            "title": "Investigate a question",
+                            "description": "Answer a question about the codebase using the local LFM2.5 model.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "question": { "type": "string", "description": "The question to investigate" }
+                                }
+                            }
+                        },
+                        {
                             "name": "get_semantic_report",
                             "title": "Generate semantic quality report",
                             "description": "Analyze code quality using AI.",
@@ -483,6 +518,20 @@ pub mod mcp_server {
                         let target = arguments.get("target").and_then(Value::as_str).unwrap_or("");
                         let level = arguments.get("level").and_then(Value::as_str).unwrap_or("0");
                         Ok(handle_explore(target, level))
+                    },
+                    "explain" => {
+                        let fp = validate_arg("file_path")?;
+                        let node = arguments.get("node").and_then(Value::as_str);
+                        Ok(handle_explain(fp, node))
+                    },
+                    "summarize" => {
+                        let path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
+                        let max_files = arguments.get("max_files").and_then(Value::as_u64).unwrap_or(50) as usize;
+                        Ok(handle_summarize(path, max_files))
+                    },
+                    "investigate" => {
+                        let question = validate_arg("question")?;
+                        Ok(handle_investigate(question))
                     },
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
@@ -1251,6 +1300,63 @@ pub mod mcp_server {
             }
             Err(e) => tool_error(format!("Explore failed: {}", e)),
         }
+    }
+
+    #[cfg(feature = "mamba")]
+    fn handle_explain(file_path: &str, node: Option<&str>) -> Value {
+        let root = std::env::current_dir().unwrap_or_default();
+        let project_root = crate::core::find_project_root(&root);
+        match crate::llm::AiManager::new(&project_root) {
+            Ok(mgr) => match crate::llm::pipeline::explain_node(&mgr, file_path, node, crate::llm::Resolution::Auto) {
+                Ok((explanation, budget)) => {
+                    tool_success("Explained node".to_string(), Some(json!({ "explanation": explanation, "tokens": budget })))
+                }
+                Err(e) => tool_error(format!("Explain failed: {}", e)),
+            },
+            Err(e) => tool_error(format!("AiManager init failed: {}", e)),
+        }
+    }
+    #[cfg(not(feature = "mamba"))]
+    fn handle_explain(_file_path: &str, _node: Option<&str>) -> Value {
+        tool_error("explain requires the 'mamba' feature. Recompile with --features mamba".to_string())
+    }
+
+    #[cfg(feature = "mamba")]
+    fn handle_summarize(path: &str, max_files: usize) -> Value {
+        let root = std::env::current_dir().unwrap_or_default();
+        let project_root = crate::core::find_project_root(&root);
+        match crate::llm::AiManager::new(&project_root) {
+            Ok(mgr) => match crate::llm::pipeline::summarize_dir(&mgr, std::path::Path::new(path), max_files, crate::llm::Resolution::Auto) {
+                Ok((result, budget)) => {
+                    tool_success("Summarized directory".to_string(), Some(json!({ "result": result, "tokens": budget })))
+                }
+                Err(e) => tool_error(format!("Summarize failed: {}", e)),
+            },
+            Err(e) => tool_error(format!("AiManager init failed: {}", e)),
+        }
+    }
+    #[cfg(not(feature = "mamba"))]
+    fn handle_summarize(_path: &str, _max_files: usize) -> Value {
+        tool_error("summarize requires the 'mamba' feature. Recompile with --features mamba".to_string())
+    }
+
+    #[cfg(feature = "mamba")]
+    fn handle_investigate(question: &str) -> Value {
+        let root = std::env::current_dir().unwrap_or_default();
+        let project_root = crate::core::find_project_root(&root);
+        match crate::llm::AiManager::new(&project_root) {
+            Ok(mgr) => match crate::llm::pipeline::investigate(&mgr, question, crate::llm::Resolution::Auto) {
+                Ok((result, budget)) => {
+                    tool_success("Investigation complete".to_string(), Some(json!({ "result": result, "tokens": budget })))
+                }
+                Err(e) => tool_error(format!("Investigate failed: {}", e)),
+            },
+            Err(e) => tool_error(format!("AiManager init failed: {}", e)),
+        }
+    }
+    #[cfg(not(feature = "mamba"))]
+    fn handle_investigate(_question: &str) -> Value {
+        tool_error("investigate requires the 'mamba' feature. Recompile with --features mamba".to_string())
     }
 
         fn handle_search_nodes(file_path: &str, pattern: &str) -> Value {
