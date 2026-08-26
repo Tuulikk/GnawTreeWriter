@@ -360,6 +360,10 @@ pub fn run_rule(rule: &CompiledRule, tree: &TreeNode, file: &str) -> Vec<Finding
     for root in &rule.pattern_roots {
         match_pattern_recursive(root, tree, rule, file, &mut findings);
     }
+    // Deduplicate: the same code location can be matched as several nodes
+    // (e.g. a statement and its inner children). Keep the first per location.
+    let mut seen: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    findings.retain(|f| seen.insert((f.line, f.column)));
     findings
 }
 
@@ -648,6 +652,25 @@ mod tests {
         );
         let findings = run_rule(&rule, &tree, "test.rs");
         assert_eq!(findings.len(), 1, "only unwrap should match");
+    }
+
+    #[test]
+    fn test_no_duplicate_findings() {
+        // A statement wrapper + inner child can both match the same pattern;
+        // run_rule must report each code location only once.
+        let rule = compile("$X.unwrap()", "rust");
+        let tree = parse_source(
+            "fn f() { let a = x.unwrap(); let b = x.unwrap(); }",
+            "rust",
+        );
+        let findings = run_rule(&rule, &tree, "test.rs");
+        assert_eq!(findings.len(), 2, "two separate unwrap calls expected");
+
+        // Distinct locations but same content must both be reported.
+        let lines: Vec<usize> = findings.iter().map(|f| f.line).collect();
+        assert_eq!(lines, vec![1, 1]);
+        let cols: Vec<usize> = findings.iter().map(|f| f.column).collect();
+        assert_ne!(cols[0], cols[1], "different columns are separate findings");
     }
 
     #[test]

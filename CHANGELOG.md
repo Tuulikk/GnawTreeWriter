@@ -14,6 +14,7 @@
 - **Multi-edit (`edit --ask "..." --all`)**: the model proposes a change for one occurrence; GTW applies the same replacement to every identical line/occurrence in the file, validating the whole file reparses before writing. Step 5: rule-guided consistent edits.
 - **Docs**: README "Rules Engine" section, ROADMAP Phase 8 updated (all 5 rule steps + LLM missions marked done), RULES_ENGINE_SPEC.md marked implemented.
 - **Rule library expanded**: 19 builtin rules across rust (7), python (4), javascript (4), typescript (2) — original formulations of well-known anti-patterns (not copied from semgrep-rules; the license forbids redistributing them). Written with `$X` placeholders for the structural matcher.
+- **Duplicate-finding fix**: `run_rule` now deduplicates findings by code location `(line, column)`, so a statement and its inner child matching the same pattern are reported once, not several times. Verified: bare `except: pass` reports once; separate `unwrap()` calls keep their own findings.
 - **Local LLM command extension (LFM2.5-1.2B, Q4)** behind the `mamba` feature:
   - `explain <file> [--node <path>]` — plain-language explanation of a code node
   - `summarize <dir>` — hierarchical AST-skeleton map-reduce summary
