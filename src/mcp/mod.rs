@@ -261,6 +261,18 @@ pub mod mcp_server {
                             }
                         },
                         {
+                            "name": "edit_ask",
+                            "title": "Propose an AST edit with the local LLM",
+                            "description": "Let the local LFM2.5 model propose a minimal edit for a request; the proposal is validated against the AST (Duplex Loop) and returned as a preview. Apply via edit_node.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": { "type": "string", "description": "Path to the file to edit" },
+                                    "request": { "type": "string", "description": "What to change, in plain language" }
+                                }
+                            }
+                        },
+                        {
                             "name": "summarize",
                             "title": "Summarize a directory",
                             "description": "Hierarchical directory summary using the local LFM2.5 model.",
@@ -523,6 +535,11 @@ pub mod mcp_server {
                         let fp = validate_arg("file_path")?;
                         let node = arguments.get("node").and_then(Value::as_str);
                         Ok(handle_explain(fp, node))
+                    },
+                    "edit_ask" => {
+                        let fp = validate_arg("file_path")?;
+                        let request = validate_arg("request")?;
+                        Ok(handle_edit_ask(fp, request))
                     },
                     "summarize" => {
                         let path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
@@ -1319,6 +1336,49 @@ pub mod mcp_server {
     #[cfg(not(feature = "mamba"))]
     fn handle_explain(_file_path: &str, _node: Option<&str>) -> Value {
         tool_error("explain requires the 'mamba' feature. Recompile with --features mamba".to_string())
+    }
+
+    /// `edit_ask`: propose a validated AST edit. Returns the target node,
+    /// the new content, and a preview diff — it does NOT apply.
+    #[cfg(feature = "mamba")]
+    fn handle_edit_ask(file_path: &str, request: &str) -> Value {
+        let root = std::env::current_dir().unwrap_or_default();
+        let project_root = crate::core::find_project_root(&root);
+        match crate::llm::AiManager::new(&project_root) {
+            Ok(mgr) => match crate::llm::pipeline::propose_edit(&mgr, file_path, request, crate::llm::Resolution::Auto) {
+                Ok(proposal) => {
+                    // Validate via the Duplex Loop before returning.
+                    match crate::GnawTreeWriter::new(file_path) {
+                        Ok(mut writer) => {
+                            let op = crate::core::EditOperation::Edit {
+                                node_path: proposal.node_path.clone(),
+                                content: proposal.content.clone(),
+                            };
+                            match writer.preview_edit(op) {
+                                Ok(modified) => tool_success(
+                                    "Validated edit proposal".to_string(),
+                                    Some(json!({
+                                        "node_path": proposal.node_path,
+                                        "content": proposal.content,
+                                        "valid": true,
+                                        "preview": modified,
+                                        "tokens": proposal.budget,
+                                    })),
+                                ),
+                                Err(e) => tool_error(format!("Proposed edit failed validation: {}", e)),
+                            }
+                        }
+                        Err(e) => tool_error(format!("Failed to open {}: {}", file_path, e)),
+                    }
+                }
+                Err(e) => tool_error(format!("Edit proposal failed: {}", e)),
+            },
+            Err(e) => tool_error(format!("AiManager init failed: {}", e)),
+        }
+    }
+    #[cfg(not(feature = "mamba"))]
+    fn handle_edit_ask(_file_path: &str, _request: &str) -> Value {
+        tool_error("edit_ask requires the 'mamba' feature. Recompile with --features mamba".to_string())
     }
 
     #[cfg(feature = "mamba")]

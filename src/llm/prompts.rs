@@ -92,3 +92,20 @@ pub fn synthesize_answer_prompt(
          in the answer. Be concise (under 200 words).\n\n{body}\n\nAnswer:"
     )
 }
+
+/// Prompt for `edit --ask`: propose a minimal old→new change.
+/// The model gives the exact existing snippet to replace and its replacement;
+/// GTW finds the containing AST node and validates before applying.
+pub fn edit_ask_prompt(file_path: &str, request: &str, file_preview: &str) -> String {
+    format!(
+        "You are editing the file {file_path}. The user wants: \"{request}\"\n\n\
+         Here is the relevant part of the file:\n\n{file_preview}\n\n\
+         Respond with EXACTLY this JSON, no other text:\n\
+         {{\"old\": \"<exact existing code to replace>\", \"new\": \"<replacement code>\"}}\n\n\
+         Rules:\n\
+         - old must appear VERBATIM in the file (copy it exactly, including whitespace)\n\
+         - new is the replacement for that exact snippet — keep it minimal and valid\n\
+         - escape newlines as \\n; keep each on one JSON line\n\
+         JSON:"
+    )
+}

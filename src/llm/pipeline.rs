@@ -547,3 +547,111 @@ pub struct InvestigateResult {
     pub candidates: Vec<String>,
     pub answer: String,
 }
+
+/// Proposed edit from the model: which node to replace and with what content.
+#[derive(Debug)]
+pub struct EditProposal {
+    pub node_path: String,
+    pub content: String,
+    pub budget: crate::llm::TokenBudget,
+}
+
+/// `edit --ask`: the model proposes a minimal old→new change; GTW finds the
+/// AST node containing `old`, applies the replacement *inside* that node, and
+/// returns the full new node content. The caller runs it through the Duplex
+/// Loop (preview_edit) before applying — the AST validates the model's intent.
+pub fn propose_edit(
+    mgr: &AiManager,
+    file_path: &str,
+    request: &str,
+    resolution: crate::llm::Resolution,
+) -> Result<EditProposal> {
+    let task = TaskParams::from_resolution(resolution);
+    let start = std::time::Instant::now();
+
+    let writer = crate::GnawTreeWriter::new(file_path)
+        .with_context(|| format!("failed to parse {file_path}"))?;
+    let tree = writer.analyze();
+    let source = writer.get_source().to_string();
+
+    // Give the model a bounded preview of the file (small files fully).
+    let preview: String = source.chars().take(6000).collect();
+
+    let prompt = prompts::edit_ask_prompt(file_path, request, &preview);
+    let params = GenerateParams {
+        max_tokens: task.synth_tokens,
+        temperature: EXTRACT_TEMP,
+    };
+
+    let mut budget = crate::llm::TokenBudget::default();
+    budget.expected_input = mgr.estimate_tokens(&prompt);
+    budget.expected_output = params.max_tokens;
+    budget.estimate_seconds(&mgr.timing());
+
+    let gen = mgr.generate_lfm25(&prompt, params.max_tokens, params.temperature)?;
+    budget.actual_input = mgr.estimate_tokens(&prompt);
+    budget.record(&gen);
+    budget.actual_seconds = start.elapsed().as_secs_f64();
+
+    // Parse the old→new proposal.
+    let (old, new) = match parse_edit_proposal(&gen.text) {
+        Some(p) => p,
+        None => {
+            eprintln!("[edit-ask] raw model response:\n{}", gen.text);
+            anyhow::bail!("model did not return a valid edit proposal");
+        }
+    };
+    if old.trim().is_empty() || new.trim().is_empty() {
+        anyhow::bail!("model returned an empty old/new edit proposal");
+    }
+
+    // Find the smallest AST node whose content contains `old`, then replace
+    // `old`→`new` within that node's content. This keeps the edit surgical.
+    let node = find_containing_node(tree, &old)
+        .ok_or_else(|| anyhow::anyhow!("could not find the snippet to replace in {file_path}"))?;
+    let node_path = node.path.clone();
+    let old_trim = old.trim();
+    let node_content = node.content.clone();
+    if !node_content.contains(old_trim) {
+        anyhow::bail!("model's 'old' snippet does not appear verbatim in node {node_path}");
+    }
+    let new_content = node_content.replacen(old_trim, new.trim(), 1);
+
+    Ok(EditProposal {
+        node_path,
+        content: new_content,
+        budget,
+    })
+}
+
+/// Find the deepest node whose content contains `needle`.
+fn find_containing_node<'a>(
+    node: &'a crate::parser::TreeNode,
+    needle: &str,
+) -> Option<&'a crate::parser::TreeNode> {
+    let needle = needle.trim();
+    if !node.content.contains(needle) {
+        return None;
+    }
+    // Prefer a deeper match.
+    for child in &node.children {
+        if let Some(found) = find_containing_node(child, needle) {
+            return Some(found);
+        }
+    }
+    Some(node)
+}
+
+/// Parse the model's JSON edit proposal, leniently. Looks for the
+/// `{"old"` marker specifically, because `new` may itself contain braces
+/// that a naive first-`{` scan would grab.
+fn parse_edit_proposal(s: &str) -> Option<(String, String)> {
+    let marker = s.find("{\"old\"")?;
+    let json_str = &s[marker..];
+    let end = json_str.rfind('}')?;
+    let json_str = &json_str[..=end];
+    let v: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    let old = v.get("old")?.as_str()?.to_string();
+    let new = v.get("new")?.as_str()?.to_string();
+    Some((old, new))
+}

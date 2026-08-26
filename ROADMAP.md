@@ -10,20 +10,71 @@ The roadmap is divided into two sections:
 
 ---
 
-## Current Status: v0.8.5 (Released 2026-01-27)
+## Current Status: v0.9.7 (Released 2026-08-25)
 
-### ✅ Completed Features (The Handbook Update)
+### ✅ Completed Since v0.8.5
 
-- **The Architect Handbook**: Consolidated quickstart guide for high-level engineering.
-- **Human-Readable Sessions**: Support for naming sessions (aliases) for easier restoration.
-- **Safe Content Injection**: Added `@file` syntax to the `edit` command to bypass shell escaping issues.
-- **The Helpful Guard**: Proactive CLI error handling with strategic advice and tips.
+- **Performance**: Parallelized file processing (rayon) — pack 50% faster, explore 59% faster, indexing 40-52% faster. Explore command (4 zoom levels). Parse cache.
+- **AI Context Tools**: `explore`, `pack` (+`--compress-threshold`), `curate`, `compress`, `diff-to-batch`, `stats`.
+- **Local LLM command extension (LFM2.5)**: `explain`, `summarize`, `investigate` — fixed-step pipelines on a small local model (Q4, ~1 GB, CPU).
+- **Token & time transparency**: Every LLM command reports a budget (expected/actual tokens, calls, estimated/actual seconds, truncation warning).
+- **Self-calibrating timing**: `ai calibrate` measures this machine's inference speed and persists a `TimingProfile` for accurate time estimates.
 
 ---
 
 # 🌍 Open Source Roadmap
 
 All features in this section are and will remain **free and open source** under the project license.
+
+---
+
+## Phase 8: Local LLM Command Extension 🔄 IN PROGRESS
+**Target: v0.9.x → v0.10**
+
+### What shipped (v0.9.7)
+
+A small local LLM (**LFM2.5-1.2B, Q4 GGUF, ~1 GB**) extends the CLI with natural-language commands, built as **fixed-step pipelines** — Rust controls the flow, the model does focused understanding. No chat, no agentic loop, no API keys.
+
+- [x] **`explain <file> [--node <path>]`** — plain-language explanation of an AST node
+- [x] **`summarize <dir>`** — hierarchical AST-skeleton map-reduce summary
+- [x] **`investigate "question"`** — query expansion → index search → ranked answer with file references
+- [x] **MCP tools**: `explain`, `summarize`, `investigate`
+- [x] **`--resolution` flag** (fast / balanced / thorough) — trades speed vs detail
+- [x] **Token & time budget reporting** on every command
+- [x] **`ai calibrate`** — self-measured timing profile per machine
+
+### Architecture
+
+```
+src/llm/
+├── ai_manager.rs   — LFM2.5 via candle quantized_lfm2 (GGUF), Mutex-guarded generate()
+├── pipeline.rs     — fixed-step pipelines: explain, summarize (map-reduce), investigate
+├── prompts.rs      — deterministic prompt templates per step
+└── (TimingProfile) — self-calibrated prefill/decode times, persisted to config
+```
+
+### Design notes (learned the hard way)
+
+- **Model choice**: evaluated Mamba3 — ecosystem immature, no q4, `mamba-rs` CPU path is F32-only with hard arch limits (headdim ≤ 32, d_state ≤ 64). Pivoted to LFM2.5: mature GGUF/q4 (QAD Q4_0 ≈ 97% of BF16), candle support, active development.
+- **Prefill is ~O(seq²)** in candle's LFM2 — a 2048-token prefill takes ~140s. Every step must stay small (~300 tokens), and `summarize` feeds **compact AST skeletons** (~98% smaller than raw source) instead of raw code. Summarize went from >3 min/file to ~15s/file.
+- **Let the model stop itself**: EOS bias on `<|im_end|>` so generation ends naturally; truncation is always reported, never silent.
+
+### Next LLM missions (planned)
+
+Ranked by GTW uniqueness and value:
+
+1. **`edit --ask "change X to Y"`** — the loop-closer: LLM proposes an AST edit, the Duplex Loop validates syntax, the Guardian checks structural integrity, preview shown before apply. The AST is *why* a small model is viable for edits — it never needs mechanical precision (line numbers, braces); it states intent and the tree handles placement. Error mode shifts from "touched the wrong place" (text-edit models) to "proposed wrong content" (caught by validation).
+2. **`curate` as digest** — run a suite of deterministic GTW tools (explore, index_entities, gnaw_find), feed condensed excerpts to the LLM, return a synthesized investigation with tool citations (`via explore: src/auth/login.rs`). A meta-pipeline: the LLM orchestrates GTW's reliable tools and distills.
+3. **`review` + `commit-msg`** — review an uncommitted diff (`diff_since`) for bugs/risks before commit; generate commit messages from diff + ALF intent.
+4. **`impact "what breaks if I change X?"`** — relations graph (`index_relations`, `gnaw_graph`) provides candidates, LLM ranks and explains. Deterministic graph + LLM synthesis.
+5. **`query "find all places we handle auth"`** — natural language → AST search with structured results (node paths), not just text.
+6. **`complexity` / `test-gen` / `impl-stub`** — structural analysis, test generation, implementation stubs, all inserted as validated AST nodes.
+
+### Open questions
+
+- **Model upgrade path**: LFM2.5-2.6B exists — same arch, ~2× size, better quality. `--resolution thorough` could map to it, or a model-selection setting.
+- **KV/state reset between calls**: verify candle's LFM2 ModelWeights fully resets between sequential generations (context leak vs measured prefill cost).
+- **Chunk quality**: AST skeletons are fast but lossy — for `thorough` resolution, consider hybrid (skeleton + targeted raw excerpts).
 
 ---
 

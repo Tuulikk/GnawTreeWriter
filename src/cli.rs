@@ -107,14 +107,17 @@ enum Commands {
     /// Replace the content of a specific node
     Edit {
         file_path: String,
-        #[arg(required_unless_present = "tag")]
+        #[arg(required_unless_present = "tag", required_unless_present = "ask")]
         node_path: Option<String>,
         #[arg(long)]
         tag: Option<String>,
-        #[arg(required_unless_present = "source_file")]
+        #[arg(required_unless_present = "source_file", required_unless_present = "ask")]
         content: Option<String>,
         #[arg(long, conflicts_with = "content")]
         source_file: Option<String>,
+        /// Let the local LFM2.5 model find the node and propose new content
+        #[arg(long, conflicts_with_all = ["content", "source_file", "node_path", "tag"])]
+        ask: Option<String>,
         #[arg(short, long)]
         preview: bool,
         #[arg(long)]
@@ -689,11 +692,16 @@ impl Cli {
                 tag,
                 content,
                 source_file,
+                ask,
                 preview,
                 unescape_newlines,
                 force,
                 narrative,
             } => {
+                if let Some(request) = ask {
+                    Self::handle_edit_ask(&file_path, &request, preview, force)?;
+                    return Ok(());
+                }
                 let preview = preview || global_dry_run;
 
                 // Resolve target path from --tag flag, 'tag:<name>' positional, or explicit node_path
@@ -2160,6 +2168,99 @@ Use --no-preview to write batch file"
             println!("  ⚠️  hit the output budget — answer may be cut off");
         }
         println!("─────────────────────────────────────────");
+    }
+
+    /// `edit --ask "request"` — let the local LLM propose an AST edit, validate
+    /// it through the Duplex Loop (preview), and apply if it parses.
+    #[cfg(feature = "mamba")]
+    fn handle_edit_ask(file_path: &str, request: &str, preview: bool, force: bool) -> Result<()> {
+        let json_mode = std::env::var("GNAW_JSON").is_ok();
+        let project_root = find_project_root(&std::env::current_dir()?);
+        let mgr = crate::llm::AiManager::new(&project_root)?;
+        let res = crate::llm::Resolution::Auto;
+
+        println!("🤖 Asking local model to propose an edit for: \"{}\"", request);
+        let proposal = crate::llm::pipeline::propose_edit(&mgr, file_path, request, res)?;
+        println!("   target node: {}", proposal.node_path);
+        println!("   proposed content ({} chars)\n", proposal.content.len());
+
+        // Duplex Loop: validate the proposal against the AST before touching disk.
+        let mut writer = crate::GnawTreeWriter::new(file_path)?;
+        let op = crate::core::EditOperation::Edit {
+            node_path: proposal.node_path.clone(),
+            content: proposal.content.clone(),
+        };
+        let modified = match writer.preview_edit(op.clone()) {
+            Ok(m) => m,
+            Err(e) => {
+                anyhow::bail!(
+                    "❌ Proposed edit failed syntax validation — NOT applied.\n{}\n\
+                     Tip: rephrase the request or edit the node manually.",
+                    e
+                );
+            }
+        };
+
+        // Structural check: after the edit, the target node must still be the
+        // same AST type. Catches proposals that replace e.g. a let_declaration
+        // with something unrelated (a small model's most common failure).
+        let orig_type = writer
+            .analyze()
+            .find_path(&proposal.node_path)
+            .map(|n| n.node_type.clone());
+        let new_tree = match crate::parser::get_parser(std::path::Path::new(file_path))
+            .and_then(|p| p.parse(&modified).map_err(anyhow::Error::from))
+        {
+            Ok(t) => t,
+            Err(_) => {
+                anyhow::bail!(
+                    "❌ Proposed edit does not reparse cleanly — NOT applied.\n\
+                     Tip: rephrase the request or edit the node manually."
+                );
+            }
+        };
+        let new_type = new_tree.find_path(&proposal.node_path).map(|n| n.node_type.clone());
+        if let (Some(old_t), Some(new_t)) = (orig_type, new_type) {
+            if old_t != new_t {
+                anyhow::bail!(
+                    "❌ Proposed edit would change node type {old_t} → {new_t} — NOT applied.\n\
+                     Tip: rephrase the request to keep the change minimal."
+                );
+            }
+        }
+
+        if json_mode {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "node_path": proposal.node_path,
+                    "content": proposal.content,
+                    "valid": true,
+                    "tokens": proposal.budget,
+                })
+            );
+            return Ok(());
+        }
+
+        // Show the diff (preview or actual).
+        let old_node = writer.analyze().clone().find_path(&proposal.node_path).cloned();
+        if preview || !force {
+            println!("--- Proposed diff (run with --force to apply) ---");
+            print_diff(writer.get_source(), &modified);
+            Self::print_budget(&proposal.budget);
+            if !force {
+                println!("\n💡 Pass --force to apply this edit.");
+            }
+        } else {
+            writer.edit(op, false)?;
+            Self::show_visual_diff(&writer, &proposal.node_path, old_node.as_ref(), None);
+            Self::print_budget(&proposal.budget);
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "mamba"))]
+    fn handle_edit_ask(_file_path: &str, _request: &str, _preview: bool, _force: bool) -> Result<()> {
+        Self::err_mamba_disabled()
     }
 
     /// `explain` — explain a code node with LFM2.5.

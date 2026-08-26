@@ -9,6 +9,8 @@
   - `ai calibrate` — measures this machine's inference speed and saves a timing profile
 - **`--resolution` flag** (fast / balanced / thorough) on explain/summarize/investigate: trades speed vs detail via chunk size and output budgets.
 - **Token & time transparency**: every command reports a budget (`expected/actual tokens`, `calls`, `estimated/actual seconds`, truncation warning). No silent cut-offs.
+- **`edit --ask "request"`** (+ MCP `edit_ask`): the local model proposes a minimal old→new change; GTW finds the containing AST node, applies the replacement inside it, and validates through the Duplex Loop before apply. The AST places, the model states intent — a small model stays viable because it never needs mechanical precision.
+- **ROADMAP.md**: updated to current status (v0.9.7) with a new Phase 8 (Local LLM Command Extension) section and the planned LLM missions.
 
 ### Performance notes
 - LFM2.5 prefill in candle is ~O(seq²), so pipeline steps chunk to small sizes and feed compact AST skeletons instead of raw source (~98% smaller) — summarize went from >3 min/file to ~15s/file.
