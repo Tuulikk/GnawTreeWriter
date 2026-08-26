@@ -266,6 +266,33 @@ impl GnawTreeWriter {
         // Calculate after hash
         let after_hash = calculate_content_hash(&modified_code);
 
+        // RULES GUARDIAN: run builtin rules on the new code. Error-severity
+        // findings block the edit (unless --force); warnings are printed.
+        if !force {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let (findings, _skipped, has_error) =
+                crate::core::rules::check_code_with_builtin(&modified_code, ext);
+            if has_error {
+                let msgs: Vec<String> = findings
+                    .iter()
+                    .filter(|f| f.severity == crate::core::rules::Severity::Error)
+                    .map(|f| f.message.clone())
+                    .collect();
+                return Err(anyhow::anyhow!(
+                    "🛑 RULES GUARDIAN BLOCK: edit would introduce rule violations.\n- {}\nUse --force to override.",
+                    msgs.join("\n- ")
+                ));
+            }
+            for f in findings {
+                let sev = match f.severity {
+                    crate::core::rules::Severity::Error => "error",
+                    crate::core::rules::Severity::Warning => "warning",
+                    crate::core::rules::Severity::Info => "info",
+                };
+                eprintln!("⚠️  RULES GUARDIAN {}: {}", sev, f.message);
+            }
+        }
+
         // Only create backup and write if validation passed
         self.create_backup()?;
 

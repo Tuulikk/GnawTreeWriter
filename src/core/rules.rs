@@ -317,6 +317,80 @@ pub fn run_rule(rule: &CompiledRule, tree: &TreeNode, file: &str) -> Vec<Finding
     findings
 }
 
+/// Compile a set of rules once and run them against source code text.
+/// Returns findings (empty if no rules match or none apply to this language).
+/// Rules that fail to compile are skipped (reported via `skipped`).
+pub fn check_code(
+    code: &str,
+    language: &str,
+    rules: &[Rule],
+) -> (Vec<Finding>, usize) {
+    let mut compiled: Vec<CompiledRule> = Vec::new();
+    let mut skipped = 0usize;
+    let mut applicable = 0usize;
+    for rule in rules {
+        if !language_matches(&rule.language, language) {
+            continue;
+        }
+        applicable += 1;
+        match compile_rule(rule) {
+            Ok(c) => compiled.push(c),
+            Err(_) => skipped += 1,
+        }
+    }
+    if applicable == 0 || compiled.is_empty() {
+        return (Vec::new(), skipped);
+    }
+    // Parse the code once, then run all compiled rules.
+    let parser = match crate::parser::get_parser_for_language(language) {
+        Ok(p) => p,
+        Err(_) => return (Vec::new(), skipped),
+    };
+    let tree = match parser.parse(code) {
+        Ok(t) => t,
+        Err(_) => return (Vec::new(), skipped), // invalid code is caught elsewhere
+    };
+    let mut findings = Vec::new();
+    for rule in &compiled {
+        findings.extend(run_rule(rule, &tree, ""));
+    }
+    (findings, skipped)
+}
+
+/// Whether a rule's language applies to a file's language/extension.
+pub fn language_matches(rule_language: &str, file_language: &str) -> bool {
+    let r = rule_language.to_lowercase();
+    let f = file_language.to_lowercase();
+    r == f
+        || (f == "rs" && r == "rust")
+        || (f == "py" && r == "python")
+        || (f == "js" && r == "javascript")
+        || (f == "ts" && r == "typescript")
+        || (f == "kt" && r == "kotlin")
+        || (f == "cs" && r == "csharp")
+        || (f == "sh" && r == "bash")
+}
+
+/// Load the builtin rules (once, cached).
+pub fn builtin_rules() -> Vec<Rule> {
+    static CACHE: std::sync::OnceLock<Vec<Rule>> = std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            load_rules_yaml(include_str!("../../rules/builtin.yaml"))
+                .unwrap_or_default()
+        })
+        .clone()
+}
+
+/// Run the builtin rules against source code text (for the edit guardian).
+/// Returns findings and whether any were error-severity.
+pub fn check_code_with_builtin(code: &str, language: &str) -> (Vec<Finding>, usize, bool) {
+    let rules = builtin_rules();
+    let (findings, skipped) = check_code(code, language, &rules);
+    let has_error = findings.iter().any(|f| f.severity == Severity::Error);
+    (findings, skipped, has_error)
+}
+
 fn match_pattern_recursive(
     pattern: &TreeNode,
     source: &TreeNode,

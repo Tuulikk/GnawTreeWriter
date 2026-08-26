@@ -4140,13 +4140,7 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
                         .to_lowercase();
                     for rule in &compiled {
                         // Only run rules whose language matches the file.
-                        let rule_lang = rule.rule.language.to_lowercase();
-                        let matches_lang = rule_lang == lang
-                            || (lang == "rs" && rule_lang == "rust")
-                            || (lang == "py" && rule_lang == "python")
-                            || (lang == "js" && rule_lang == "javascript")
-                            || (lang == "ts" && rule_lang == "typescript");
-                        if !matches_lang {
+                        if !crate::core::rules::language_matches(&rule.rule.language, &lang) {
                             continue;
                         }
                         for f in crate::core::rules::run_rule(rule, tree, file_path) {
