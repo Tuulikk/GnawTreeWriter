@@ -1,40 +1,152 @@
-# Built-in rules for GnawTreeWriter lint (v0.1 start set).
-# Format: semgrep-like code patterns with $VARIABLE placeholders.
+# Built-in rules for GnawTreeWriter lint.
+#
+# These are original formulations of well-known anti-patterns, written for
+# GTW's pattern engine (structural AST matching). They are not copied from
+# semgrep-rules or any other rule set — only the existence of the anti-patterns
+# themselves is common knowledge in the linting community.
+#
+# Format: code patterns with $X / $Y placeholders. `language` is required.
 
 rules:
-  # Rust: unwrap() on a Result/Option without handling the error case
+  # ── Rust ─────────────────────────────────────────────────────
+
+  # unwrap() panics on Err/None unless handled
   - id: rust_unwrap
     language: rust
     severity: warning
     message: "unwrap() panics on Err/None — consider handling the error case"
     pattern: "$X.unwrap()"
 
-  # Rust: self-assignment (a = a) — usually a bug
+  # Self-assignment (a = a) is almost always a bug
   - id: rust_self_assignment
     language: rust
     severity: error
     message: "Self-assignment (a = a) — likely a bug"
     pattern: "$X = $X"
 
-  # Python: bare except: pass silently swallows all errors
+  # todo!() / unimplemented!() left in shipped code
+  - id: rust_todo_in_place
+    language: rust
+    severity: warning
+    message: "todo!/unimplemented! left in code — finish or remove it"
+    pattern: "todo!()"
+
+  # panic!() in a library path is a blunt crash
+  - id: rust_panic
+    language: rust
+    severity: info
+    message: "panic!() aborts the process — prefer returning a Result/error"
+    pattern: "panic!($X)"
+
+  # unsafe blocks are a safety warning sign
+  - id: rust_unsafe
+    language: rust
+    severity: warning
+    message: "unsafe block — audit memory/pointer invariants carefully"
+    pattern: "unsafe { $X }"
+
+  # `let _ = expr` discards the result silently
+  - id: rust_discard_result
+    language: rust
+    severity: info
+    message: "`let _ = expr` discards a value/error — handle it explicitly if it matters"
+    pattern: "let _ = $X;"
+
+  # Compare to () / unit in a way that usually signals a mistake
+  - id: rust_redundant_return
+    language: rust
+    severity: info
+    message: "Redundant trailing return at the end of a block"
+    pattern: "return $X;\nreturn $X;"
+
+  # ── Python ───────────────────────────────────────────────────
+
+  # Bare except: without an exception type swallows everything
   - id: py_bare_except
     language: python
     severity: warning
-    message: "Bare except: pass silently swallows all exceptions"
+    message: "Bare except: silently swallows all exceptions — narrow the exception type"
     pattern: |
       except:
           pass
 
-  # Python: eval() of dynamic input is a security risk
+  # eval() of dynamic input is a code-injection risk
   - id: py_eval
     language: python
     severity: warning
     message: "eval() of dynamic input is a security risk"
     pattern: "eval($X)"
 
-  # JS/TS: console.log left in production code
+  # exec() of dynamic input is a code-injection risk (variant of eval)
+  - id: py_exec
+    language: python
+    severity: warning
+    message: "exec() of dynamic input is a security risk"
+    pattern: "exec($X)"
+
+  # Comparing with None using == instead of `is`
+  - id: py_none_equality
+    language: python
+    severity: warning
+    message: "Use 'is None' / 'is not None' instead of == / != None"
+    pattern: "$X == None"
+
+  # Print statement left behind in application code
+  - id: py_print_left
+    language: python
+    severity: info
+    message: "print() left in code — consider logging instead"
+    pattern: "print($X)"
+
+  # ── JavaScript / TypeScript ──────────────────────────────────
+
+  # console.log left in shipped code
   - id: js_console_log
     language: javascript
     severity: info
-    message: "console.log left in code — remove before shipping"
+    message: "console.log left in code — remove or gate behind a flag"
     pattern: "console.log($X)"
+
+  # Loose equality == instead of strict ===
+  - id: js_loose_equality
+    language: javascript
+    severity: warning
+    message: "Use strict equality === / !== instead of == / !="
+    pattern: "$X == $Y"
+
+  # eval() carries code-injection risk
+  - id: js_eval
+    language: javascript
+    severity: warning
+    message: "eval() executes dynamic code — avoid unless strictly necessary"
+    pattern: "eval($X)"
+
+  # Function declared with `var` instead of const/let (stale pattern)
+  - id: js_function_var
+    language: javascript
+    severity: info
+    message: "Prefer const/let over var"
+    pattern: "var $X = function ($Y) { $Z }"
+
+  # Setting innerHTML from variable content can enable XSS
+  - id: js_inner_html
+    language: javascript
+    severity: warning
+    message: "Setting innerHTML from variable content may enable XSS"
+    pattern: "$X.innerHTML = $Y"
+
+  # ── TypeScript ───────────────────────────────────────────────
+
+  # Any left in a typed codebase weakens type safety
+  - id: ts_any_cast
+    language: typescript
+    severity: info
+    message: "'as any' bypasses type checking — prefer a precise type"
+    pattern: "$X as any"
+
+  # Non-null assertion on a possibly-undefined value
+  - id: ts_non_null_assert
+    language: typescript
+    severity: warning
+    message: "Non-null assertion (!) — consider handling the null/undefined case"
+    pattern: "$X!"
