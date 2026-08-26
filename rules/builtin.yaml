@@ -1,0 +1,40 @@
+# Built-in rules for GnawTreeWriter lint (v0.1 start set).
+# Format: semgrep-like code patterns with $VARIABLE placeholders.
+
+rules:
+  # Rust: unwrap() on a Result/Option without handling the error case
+  - id: rust_unwrap
+    language: rust
+    severity: warning
+    message: "unwrap() panics on Err/None — consider handling the error case"
+    pattern: "$X.unwrap()"
+
+  # Rust: self-assignment (a = a) — usually a bug
+  - id: rust_self_assignment
+    language: rust
+    severity: error
+    message: "Self-assignment (a = a) — likely a bug"
+    pattern: "$X = $X"
+
+  # Python: bare except: pass silently swallows all errors
+  - id: py_bare_except
+    language: python
+    severity: warning
+    message: "Bare except: pass silently swallows all exceptions"
+    pattern: |
+      except:
+          pass
+
+  # Python: eval() of dynamic input is a security risk
+  - id: py_eval
+    language: python
+    severity: warning
+    message: "eval() of dynamic input is a security risk"
+    pattern: "eval($X)"
+
+  # JS/TS: console.log left in production code
+  - id: js_console_log
+    language: javascript
+    severity: info
+    message: "console.log left in code — remove before shipping"
+    pattern: "console.log($X)"

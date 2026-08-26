@@ -1,6 +1,12 @@
 ## [0.9.7] - 2026-08-25
 
 ### Added
+- **Rules engine (`lint --rules`)**: semgrep-like pattern matching against ASTs (spec: docs/RULES_ENGINE_SPEC.md).
+  - YAML rules with `$X` placeholders, compiled to structural AST matching in Rust
+  - Builtin rules (rust_unwrap, rust_self_assignment, py_bare_except, py_eval, js_console_log)
+  - Project rules auto-loaded from `gnawtreewriter.rules.yaml`
+  - `--rules <file>`, `--severity`, `--rule <id>` filters, JSON output
+  - `lint` is now real lint (structural rules), not just a parse check
 - **Local LLM command extension (LFM2.5-1.2B, Q4)** behind the `mamba` feature:
   - `explain <file> [--node <path>]` — plain-language explanation of a code node
   - `summarize <dir>` — hierarchical AST-skeleton map-reduce summary

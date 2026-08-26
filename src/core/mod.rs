@@ -30,6 +30,7 @@ pub mod pack;
 pub mod parse_cache;
 pub mod report;
 pub mod restoration_engine;
+pub mod rules;
 pub mod scaffold;
 pub mod secrets;
 pub mod stats;

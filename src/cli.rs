@@ -411,6 +411,15 @@ enum Commands {
         format: String,
         #[arg(long)]
         recursive: bool,
+        /// Path to a custom rules YAML file (default: builtin rules)
+        #[arg(long)]
+        rules: Option<String>,
+        /// Only report rules at or above this severity (error|warning|info)
+        #[arg(long)]
+        severity: Option<String>,
+        /// Only run a specific rule by id
+        #[arg(long)]
+        rule: Option<String>,
     },
     /// Search for code semantically
     Sense {
@@ -1035,8 +1044,11 @@ impl Cli {
                 paths,
                 format,
                 recursive,
+                rules,
+                severity,
+                rule,
             } => {
-                Self::handle_lint(&paths, &format, recursive)?;
+                Self::handle_lint(&paths, &format, recursive, rules.as_deref(), severity.as_deref(), rule.as_deref())?;
             }
             Commands::DebugHash { content } => {
                 Self::handle_debug_hash(&content)?;
@@ -4032,9 +4044,57 @@ Use without --preview to apply the clone"
         None
     }
 
-    fn handle_lint(paths: &[String], format: &str, recursive: bool) -> Result<()> {
-        // For now, lint is a wrapper around analyze with issue detection
-        // In the future, this could include actual linting rules
+    fn handle_lint(
+        paths: &[String],
+        format: &str,
+        recursive: bool,
+        rules_file: Option<&str>,
+        severity_filter: Option<&str>,
+        rule_filter: Option<&str>,
+    ) -> Result<()> {
+        // Load and compile rules: builtin + project rules file + --rules file.
+        let mut rules = Vec::new();
+        rules.extend(
+            crate::core::rules::load_rules_yaml(include_str!("../rules/builtin.yaml"))?,
+        );
+        // Project rules (gnawtreewriter.rules.yaml) override builtin by id.
+        if let Ok(cwd) = std::env::current_dir() {
+            let project_rules = cwd.join("gnawtreewriter.rules.yaml");
+            if project_rules.exists() {
+                if let Ok(yaml) = std::fs::read_to_string(&project_rules) {
+                    rules.extend(crate::core::rules::load_rules_yaml(&yaml)?);
+                }
+            }
+        }
+        if let Some(rf) = rules_file {
+            let yaml = std::fs::read_to_string(rf)
+                .map_err(|e| anyhow::anyhow!("failed to read rules file {}: {}", rf, e))?;
+            rules.extend(crate::core::rules::load_rules_yaml(&yaml)?);
+        }
+
+        // Compile all rules (fail loudly on invalid ones).
+        let mut compiled = Vec::new();
+        let mut skipped = 0usize;
+        for rule in &rules {
+            if let Some(sf) = severity_filter {
+                let min = crate::core::rules::Severity::parse(sf);
+                if Self::severity_rank(rule.severity) < Self::severity_rank(min) {
+                    continue;
+                }
+            }
+            if let Some(rf) = rule_filter {
+                if rule.id != rf {
+                    continue;
+                }
+            }
+            match crate::core::rules::compile_rule(rule) {
+                Ok(c) => compiled.push(c),
+                Err(e) => {
+                    eprintln!("⚠️  skipping rule '{}': {}", rule.id, e);
+                    skipped += 1;
+                }
+            }
+        }
 
         let mut all_files = Vec::new();
 
@@ -4070,14 +4130,49 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
         for file_path in &all_files {
             total_files += 1;
             match GnawTreeWriter::new(file_path) {
-                Ok(_writer) => {
-                    // For now, successful parsing means no syntax issues
-                    // Future: Add actual linting rules here
+                Ok(writer) => {
+                    let tree = writer.analyze();
+                    // Determine the file's language for rule matching.
+                    let lang = std::path::Path::new(file_path)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    for rule in &compiled {
+                        // Only run rules whose language matches the file.
+                        let rule_lang = rule.rule.language.to_lowercase();
+                        let matches_lang = rule_lang == lang
+                            || (lang == "rs" && rule_lang == "rust")
+                            || (lang == "py" && rule_lang == "python")
+                            || (lang == "js" && rule_lang == "javascript")
+                            || (lang == "ts" && rule_lang == "typescript");
+                        if !matches_lang {
+                            continue;
+                        }
+                        for f in crate::core::rules::run_rule(rule, tree, file_path) {
+                            issues.push(format!(
+                                "{}:{}:{} {} {}",
+                                f.file,
+                                f.line,
+                                f.column,
+                                match f.severity {
+                                    crate::core::rules::Severity::Error => "error",
+                                    crate::core::rules::Severity::Warning => "warning",
+                                    crate::core::rules::Severity::Info => "info",
+                                },
+                                f.message
+                            ));
+                        }
+                    }
                 }
                 Err(e) => {
                     issues.push(format!("{}:1:1 error {}", file_path, e));
                 }
             }
+        }
+
+        if skipped > 0 {
+            eprintln!("⚠️  {} rule(s) skipped due to errors.", skipped);
         }
 
         match format {
@@ -4105,6 +4200,15 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
             }
         }
         Ok(())
+    }
+
+    /// Numeric rank for severity filtering (error > warning > info).
+    fn severity_rank(s: crate::core::rules::Severity) -> u8 {
+        match s {
+            crate::core::rules::Severity::Error => 3,
+            crate::core::rules::Severity::Warning => 2,
+            crate::core::rules::Severity::Info => 1,
+        }
     }
     
         fn handle_doctor(format: Option<&str>) -> Result<()> {

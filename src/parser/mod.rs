@@ -233,3 +233,38 @@ pub fn get_parser(file_path: &Path) -> anyhow::Result<Box<dyn ParserEngine>> {
         }
     }
 }
+
+/// Get a parser by language name (for rule patterns, which have no file).
+pub fn get_parser_for_language(language: &str) -> anyhow::Result<Box<dyn ParserEngine>> {
+    let lower = language.to_lowercase();
+    let ext: &str = match lower.as_str() {
+        "rust" | "rs" => "rs",
+        "python" | "py" => "py",
+        "javascript" | "js" | "jsx" => "js",
+        "typescript" | "ts" | "tsx" => "ts",
+        "go" | "golang" => "go",
+        "java" => "java",
+        "c" => "c",
+        "cpp" | "c++" => "cpp",
+        "csharp" | "cs" => "cs",
+        "php" => "php",
+        "ruby" | "rb" => "rb",
+        "swift" => "swift",
+        "kotlin" | "kt" => "kt",
+        "bash" | "sh" | "shell" => "sh",
+        "zig" => "zig",
+        "qml" => "qml",
+        "css" => "css",
+        "html" => "html",
+        "xml" => "xml",
+        "yaml" | "yml" => "yaml",
+        "toml" => "toml",
+        "json" => "json",
+        "markdown" | "md" => "md",
+        "sql" => "sql",
+        other => other,
+    };
+    let placeholder = format!("placeholder.{ext}");
+    let path = std::path::Path::new(&placeholder);
+    get_parser(path)
+}
