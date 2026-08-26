@@ -258,9 +258,49 @@ machine (`gnawtreewriter ai calibrate`) and saved to the AI config dir.
 Requires the `mamba` feature: `cargo build --release --features mamba` then
 `gnawtreewriter ai setup` to download the model.
 
+### Rules Engine: pattern linting + LLM augmentation
+
+GTW has a semgrep-inspired rules engine built on its AST. Rules are simple
+code patterns with `$X` placeholders — they need no query syntax, just valid
+code:
+
+```yaml
+# gnawtreewriter.rules.yaml (project rules, auto-loaded)
+rules:
+  - id: no_unwrap
+    language: rust
+    severity: error
+    message: "unwrap() panics on Err/None"
+    pattern: "$X.unwrap()"
+```
+
+```bash
+# Lint with builtin rules (rust, python, js) + your project rules
+gnawtreewriter lint src/core --recursive
+gnawtreewriter lint src/core --severity error --format json
+
+# Add a rule yourself (validated before saving)
+gnawtreewriter rules add no_unwrap rust '$X.unwrap()' --severity error --message "unwrap panics"
+# -> also available as the MCP `add_rule` tool, so agents can write rules
+
+# Let the local model discover project-specific rules from your code
+gnawtreewriter lint src/core --discover
+```
+
+The rules engine does three things *without* a model (deterministic, free):
+- **`lint`**: finds rule violations across files
+- **Edit guardian**: after any edit, error-severity findings block it,
+  warnings are printed — *"does it parse?" → "is it good code?"*
+- **Prompt annotations**: `edit --ask` sees known violations before proposing,
+  so it avoids introducing new ones (zero extra token cost)
+
+And one thing *with* the local model:
+- **`edit --ask "..." --all`**: propose a change for one occurrence, apply it
+  consistently to every matching line (`multi-edit`)
+
 All of these are also available as MCP tools (`explore`, `pack`, `curate`, `compress`,
 `diff_to_batch`, `index_entities`, `index_relations`, `explain`, `summarize`,
-`investigate`) for agents working through Claude Desktop, Zed, or VSCode.
+`investigate`, `add_rule`) for agents working through Claude Desktop, Zed, or VSCode.
 
 ## 🤖 AI Agent Integration (VS Code / Copilot)
 

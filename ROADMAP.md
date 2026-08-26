@@ -38,19 +38,29 @@ A small local LLM (**LFM2.5-1.2B, Q4 GGUF, ~1 GB**) extends the CLI with natural
 - [x] **`explain <file> [--node <path>]`** — plain-language explanation of an AST node
 - [x] **`summarize <dir>`** — hierarchical AST-skeleton map-reduce summary
 - [x] **`investigate "question"`** — query expansion → index search → ranked answer with file references
-- [x] **MCP tools**: `explain`, `summarize`, `investigate`
+- [x] **`edit --ask` + `--all`** — LLM-proposed AST edits (line-based), multi-edit across occurrences
+- [x] **MCP tools**: `explain`, `summarize`, `investigate`, `add_rule`
 - [x] **`--resolution` flag** (fast / balanced / thorough) — trades speed vs detail
 - [x] **Token & time budget reporting** on every command
 - [x] **`ai calibrate`** — self-measured timing profile per machine
+- [x] **Rules engine (spec: docs/RULES_ENGINE_SPEC.md)** — semgrep-inspired pattern linting, all 5 steps:
+  - [x] Step 1 — rule format + structural AST matcher + `lint --rules`
+  - [x] Step 2 — edit guardian (error blocks, warning allows)
+  - [x] Step 3 — rule annotations injected into `edit --ask` prompts
+  - [x] Step 4 — `lint --discover` (LLM-written rules) + `rules add` / MCP `add_rule` (agent-written)
+  - [x] Step 5 — `edit --ask --all` multi-edit (consistent changes across occurrences)
 
 ### Architecture
 
 ```
 src/llm/
 ├── ai_manager.rs   — LFM2.5 via candle quantized_lfm2 (GGUF), Mutex-guarded generate()
-├── pipeline.rs     — fixed-step pipelines: explain, summarize (map-reduce), investigate
+├── pipeline.rs     — fixed-step pipelines: explain, summarize (map-reduce), investigate, edit-ask
 ├── prompts.rs      — deterministic prompt templates per step
 └── (TimingProfile) — self-calibrated prefill/decode times, persisted to config
+src/core/
+└── rules.rs        — pattern rules: compile ($X placeholders), structural match, lint, guardian
+```
 ```
 
 ### Design notes (learned the hard way)
@@ -59,22 +69,22 @@ src/llm/
 - **Prefill is ~O(seq²)** in candle's LFM2 — a 2048-token prefill takes ~140s. Every step must stay small (~300 tokens), and `summarize` feeds **compact AST skeletons** (~98% smaller than raw source) instead of raw code. Summarize went from >3 min/file to ~15s/file.
 - **Let the model stop itself**: EOS bias on `<|im_end|>` so generation ends naturally; truncation is always reported, never silent.
 
-### Next LLM missions (planned)
+### LLM missions — status
 
-Ranked by GTW uniqueness and value:
-
-1. **`edit --ask "change X to Y"`** — the loop-closer: LLM proposes an AST edit, the Duplex Loop validates syntax, the Guardian checks structural integrity, preview shown before apply. The AST is *why* a small model is viable for edits — it never needs mechanical precision (line numbers, braces); it states intent and the tree handles placement. Error mode shifts from "touched the wrong place" (text-edit models) to "proposed wrong content" (caught by validation).
-2. **`curate` as digest** — run a suite of deterministic GTW tools (explore, index_entities, gnaw_find), feed condensed excerpts to the LLM, return a synthesized investigation with tool citations (`via explore: src/auth/login.rs`). A meta-pipeline: the LLM orchestrates GTW's reliable tools and distills.
-3. **`review` + `commit-msg`** — review an uncommitted diff (`diff_since`) for bugs/risks before commit; generate commit messages from diff + ALF intent.
-4. **`impact "what breaks if I change X?"`** — relations graph (`index_relations`, `gnaw_graph`) provides candidates, LLM ranks and explains. Deterministic graph + LLM synthesis.
-5. **`query "find all places we handle auth"`** — natural language → AST search with structured results (node paths), not just text.
-6. **`complexity` / `test-gen` / `impl-stub`** — structural analysis, test generation, implementation stubs, all inserted as validated AST nodes.
+1. ✅ **`edit --ask "change X to Y"`** — the loop-closer: LLM proposes an AST edit, the Duplex Loop validates syntax, Guardian checks structure, preview before apply. The AST is why a small model is viable for edits — it never needs mechanical precision; it states intent and the tree places. Error mode shifts from "touched the wrong place" to "proposed wrong content" (caught by validation).
+2. ✅ **Rules engine (all 5 steps)** — see `docs/RULES_ENGINE_SPEC.md`. Pattern linting → edit guardian → prompt annotations → agent/LLM-written rules → multi-edit.
+3. ⬜ **`curate` as digest** — run a suite of deterministic GTW tools (explore, index_entities, gnaw_find), feed condensed excerpts to the LLM, return a synthesized investigation with tool citations. A meta-pipeline: the LLM orchestrates GTW's reliable tools and distills.
+4. ⬜ **`review` + `commit-msg`** — review an uncommitted diff (`diff_since`) for bugs/risks; generate commit messages from diff + ALF intent.
+5. ⬜ **`impact "what breaks if I change X?"`** — relations graph (`index_relations`, `gnaw_graph`) provides candidates, LLM ranks and explains.
+6. ⬜ **`query "find all places we handle auth"`** — natural language → AST search with structured results (node paths).
+7. ⬜ **`complexity` / `test-gen` / `impl-stub`** — structural analysis, test generation, implementation stubs, inserted as validated AST nodes.
 
 ### Open questions
 
-- **Model upgrade path**: LFM2.5-2.6B exists — same arch, ~2× size, better quality. `--resolution thorough` could map to it, or a model-selection setting.
+- **Model upgrade path**: LFM2.5-2.6B exists — same arch, ~2× size, better quality. Stronger small models are emerging; the pipeline format makes the model swappable behind `generate()`.
 - **KV/state reset between calls**: verify candle's LFM2 ModelWeights fully resets between sequential generations (context leak vs measured prefill cost).
 - **Chunk quality**: AST skeletons are fast but lossy — for `thorough` resolution, consider hybrid (skeleton + targeted raw excerpts).
+- **Rules engine depth**: no `pattern-inside`/`pattern-not`/`fix` yet (v0.1 scope) — the structural matcher is designed to extend to them.
 
 ---
 

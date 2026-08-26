@@ -1,6 +1,6 @@
 # Rules Engine: semgrep-liknande mönster → strukturell AST-matchning
 
-**Status:** Förslag (spec — inte implementerad)
+**Status:** Implementerad (v0.9.7) — alla 5 steg är byggda och verifierade
 **Syfte:** Ge GTW en snabb, deterministisk mönsterbaserad analysmotor (Ruff/semgrep-liknande), och låta den förstärka den lokala LLM:ens edit-förmåga genom att injicera kodmönster-expertis i prompten och edit-loopen.
 **Mål:** `lint` blir riktig lint; LLM:en får "gratis expertis" utan att byta modell.
 
@@ -144,17 +144,17 @@ gnawtreewriter lint <path> --rules <rules.yaml> [--severity error] [--format jso
 
 ---
 
-## 7. Stegindelning
+## 7. Stegindelning (alla ✅ implementerade i v0.9.7)
 
-| Steg | Innehåll | Värde | Beroende |
-|---|---|---|---|
-| **1** | Regel-motor: format, kompilator, `lint --rules`, inbyggda regler | `lint` blir riktig lint, Ruff-liknande | — |
-| **2** | Edit-guardian: regler på ny kod efter edit | Edit blir säkrare | 1 |
-| **3** | Prompt-kontext: regelträffar in i LLM-prompten | LLM:en ser problemen | 1 (+ mamba) |
-| **4** | Regel-generering: `lint --discover` | Projekt-specifika regler, GTW-unikt | 1, 3 (+ mamba) |
-| **5** | Rule-guided multi-edit | Konsekventa ändringar över filer | 2, 4 |
+| Steg | Innehåll | Status |
+|---|---|---|
+| **1** | Regel-motor: format, kompilator, `lint --rules`, inbyggda regler | ✅ |
+| **2** | Edit-guardian: regler på ny kod efter edit | ✅ |
+| **3** | Prompt-kontext: regelträffar in i LLM-prompten | ✅ |
+| **4** | Regel-generering: `lint --discover` + `rules add`/MCP `add_rule` | ✅ |
+| **5** | Rule-guided multi-edit: `edit --ask --all` | ✅ |
 
-**Steg 1 är LLM-oberoende och kan byggas/skickas för sig.** Steg 3-4 kräver `mamba`-featuren.
+**Steg 1-2 är LLM-oberoende.** Steg 3-5 kräver `mamba`-featuren.
 
 ---
 
@@ -178,4 +178,4 @@ gnawtreewriter lint <path> --rules <rules.yaml> [--severity error] [--format jso
 
 ---
 
-*Status: Förslag för genomgång. Byggs efter att öppna frågor är besvarade.*
+*Status: Implementerad i v0.9.7. Framtida utbyggnad: `pattern-inside`/`pattern-not`/`fix` samt `curate`-digest, `review`, `impact`, `query` (se ROADMAP Phase 8).*
