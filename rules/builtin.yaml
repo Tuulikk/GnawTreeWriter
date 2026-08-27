@@ -148,5 +148,173 @@ rules:
   - id: ts_non_null_assert
     language: typescript
     severity: warning
-    message: "Non-null assertion (!) — consider handling the null/undefined case"
+    message: "Non-null assertion (!) — handle the null/undefined case"
     pattern: "$X!"
+
+  # ── Go ───────────────────────────────────────────────────────
+
+  - id: go_self_assignment
+    language: go
+    severity: error
+    message: "Self-assignment (x = x) — likely a bug"
+    pattern: "$X = $X"
+
+  - id: go_discard_return
+    language: go
+    severity: info
+    message: "Discarded return value — handle the result or explicit underscore"
+    pattern: "_ = $X"
+
+  - id: go_panic
+    language: go
+    severity: warning
+    message: "panic() aborts the goroutine and panics; prefer returning errors"
+    pattern: "panic($X)"
+
+  - id: go_os_exit
+    language: go
+    severity: warning
+    message: "os.Exit() bypasses defers — consider returning instead"
+    pattern: "os.Exit($X)"
+
+  - id: go_fmt_println
+    language: go
+    severity: info
+    message: "fmt.Println() left in code — use structured logging or remove"
+    pattern: "fmt.Println($X)"
+
+  - id: go_defer_call
+    language: go
+    severity: info
+    message: "defer in non-automatically-closing code (no loop guard, no limit)"
+    pattern: "defer $X()"
+
+  - id: go_make_empty
+    language: go
+    severity: warning
+    message: "make() with zero capacity — likely missing a size hint"
+    pattern: "make($X)"
+
+  - id: go_infinite_loop
+    language: go
+    severity: warning
+    message: "for-range loop with empty body or bare for {} — verify intention"
+    pattern: "for { $X }"
+
+  - id: go_error_assigned_unused
+    language: go
+    severity: info
+    message: "Error assigned but only partially handled — consider full check"
+    pattern: "_ = $X()"
+
+  # ── Java ─────────────────────────────────────────────────────
+
+  - id: java_self_assignment
+    language: java
+    severity: error
+    message: "Self-assignment (x = x) — likely a bug"
+    pattern: "$X = $X"
+
+  - id: java_broad_catch
+    language: java
+    severity: warning
+    message: "Catching all Exceptions silently hides bugs — narrow the type"
+    pattern: "catch (Exception $X) { $Y }"
+
+  - id: java_system_out
+    language: java
+    severity: info
+    message: "System.out.println left in code — use a logger"
+    pattern: "System.out.println($X)"
+
+  - id: java_throw_new
+    language: java
+    severity: warning
+    message: "throw new RuntimeException — avoid raw RuntimeException, use specific types"
+    pattern: "throw new RuntimeException($X)"
+
+  - id: java_parse_int
+    language: java
+    severity: info
+    message: "Integer.parseInt() throws on invalid input — catch NumberFormatException or use safer alternative"
+    pattern: "Integer.parseInt($X)"
+
+  - id: java_new_object
+    language: java
+    severity: info
+    message: "Unnecessary Object allocation"
+    pattern: "new $X()"
+
+  - id: java_null_compare
+    language: java
+    severity: warning
+    message: "Comparing reference with null using == instead of .equals()"
+    pattern: "$X == null"
+
+  - id: java_synchronized
+    language: java
+    severity: info
+    message: "synchronized block — verify lock scope and deadlock safety"
+    pattern: "synchronized ($X)"
+
+  - id: java_return_null
+    language: java
+    severity: info
+    message: "Returning null — consider Optional or an empty default"
+    pattern: "return null"
+
+  # ── C ────────────────────────────────────────────────────────
+
+  - id: c_self_assignment
+    language: c
+    severity: error
+    message: "Self-assignment (x = x) — likely a bug"
+    pattern: "$X = $X"
+
+  - id: c_malloc_unchecked
+    language: c
+    severity: warning
+    message: "malloc() result not checked for NULL — add a check"
+    pattern: "$X = malloc($Y)"
+
+  - id: c_strcpy_unbounded
+    language: c
+    severity: error
+    message: "strcpy() with unbounded source — use strncpy or strlcpy"
+    pattern: "strcpy($X, $Y)"
+
+  - id: c_sprintf
+    language: c
+    severity: warning
+    message: "sprintf() has no length bound — prefer snprintf()"
+    pattern: "sprintf($X, $Y)"
+
+  - id: c_free_null_check
+    language: c
+    severity: info
+    message: "Freeing a pointer without checking for NULL first"
+    pattern: "free($X)"
+
+  - id: c_goto
+    language: c
+    severity: info
+    message: "goto statement — consider structured control flow"
+    pattern: "goto $X"
+
+  - id: c_printf_format
+    language: c
+    severity: info
+    message: "printf() — verify format string is not user-controlled"
+    pattern: "printf($X)"
+
+  - id: c_char_ptr
+    language: c
+    severity: info
+    message: "Using raw char* — consider const-correctness and bounds"
+    pattern: "char *$X"
+
+  - id: c_global mutable
+    language: c
+    severity: warning
+    message: "File-scope mutable static variable — thread-unsafe"
+    pattern: "static int $X"

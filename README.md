@@ -275,7 +275,7 @@ rules:
 ```
 
 ```bash
-# Lint with builtin rules (19 across rust/python/js/ts) + your project rules
+# Lint with builtin rules (46 across rust/python/js/ts/go/java/c) + your project rules
 gnawtreewriter lint src/core --recursive
 gnawtreewriter lint src/core --severity error --format json
 
