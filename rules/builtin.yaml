@@ -59,6 +59,27 @@ rules:
     message: "Redundant trailing return at the end of a block"
     pattern: "return $X;\nreturn $X;"
 
+  # Loop over a Vec with immediate collect — probably unnecessary allocation
+  - id: rust_collect_chain
+    language: rust
+    severity: info
+    message: "collect() right after iter() — verify this allocation is needed"
+    pattern: "$X.iter().collect()"
+
+  # Hardcoded magic number in a comparison or constructor
+  - id: rust_magic_number
+    language: rust
+    severity: info
+    message: "Magic number — consider naming it as a constant"
+    pattern: "let $X = 42"
+
+  # Unnecessary clone on a string slice
+  - id: rust_slice_clone
+    language: rust
+    severity: info
+    message: "Unnecessary .to_string() or .clone() on a &str"
+    pattern: "($X).to_string()"
+
   # ── Python ───────────────────────────────────────────────────
 
   # Bare except: without an exception type swallows everything
@@ -98,6 +119,42 @@ rules:
     message: "print() left in code — consider logging instead"
     pattern: "print($X)"
 
+  - id: py_raise_generic
+    language: python
+    severity: warning
+    message: "Raising bare Exception — use a more specific exception type"
+    pattern: "raise Exception($X)"
+
+  - id: py_assert_false
+    language: python
+    severity: warning
+    message: "assert False is unreachable — prefer raising an exception"
+    pattern: "assert False"
+
+  - id: py_import_star
+    language: python
+    severity: info
+    message: "from X import * — pollutes namespace and hides dependencies"
+    pattern: "import $X"
+
+  - id: py_bare_raise
+    language: python
+    severity: warning
+    message: "Bare raise without context — re-raise inside except with traceback"
+    pattern: "raise"
+
+  - id: py_comprehension
+    language: python
+    severity: info
+    message: "List comprehension in a non-comprehension scope — verify readability"
+    pattern: "[x for $X in $Y if $Z]"
+
+  - id: py_string_concat
+    language: python
+    severity: info
+    message: "String concatenation with + — use f-strings or join()"
+    pattern: "$X + $Y"
+
   # ── JavaScript / TypeScript ──────────────────────────────────
 
   # console.log left in shipped code
@@ -135,6 +192,42 @@ rules:
     message: "Setting innerHTML from variable content may enable XSS"
     pattern: "$X.innerHTML = $Y"
 
+  - id: js_alert
+    language: javascript
+    severity: info
+    message: "alert() left in code — remove before shipping"
+    pattern: "alert($X)"
+
+  - id: js_prompt
+    language: javascript
+    severity: info
+    message: "prompt() left in code — remove or replace with a proper input"
+    pattern: "prompt($X)"
+
+  - id: js_synchronous_xhr
+    language: javascript
+    severity: warning
+    message: "Synchronous XMLHttpRequest blocks the main thread — use async/fetch"
+    pattern: "XMLHttpRequest()"
+
+  - id: js_addEventListener
+    language: javascript
+    severity: info
+    message: "addEventListener without a corresponding removeEventListener can leak memory"
+    pattern: "$X.addEventListener($Y, $Z)"
+
+  - id: js_setTimeout_string
+    language: javascript
+    severity: warning
+    message: "setTimeout with a string argument is eval-like — use a function reference"
+    pattern: "setTimeout(\"$X\", $Y)"
+
+  - id: js_for_in
+    language: javascript
+    severity: warning
+    message: "for-in on object iterates over all enumerable properties including inherited ones — use Object.keys()"
+    pattern: "for ($X in $Y) { $Z }"
+
   # ── TypeScript ───────────────────────────────────────────────
 
   # Any left in a typed codebase weakens type safety
@@ -150,6 +243,48 @@ rules:
     severity: warning
     message: "Non-null assertion (!) — handle the null/undefined case"
     pattern: "$X!"
+
+  - id: ts_unknown
+    language: typescript
+    severity: info
+    message: "Using 'unknown' instead of 'any' in catch blocks"
+    pattern: "catch ($X: unknown) { $Y }"
+
+  - id: ts_undefined_check
+    language: typescript
+    severity: warning
+    message: "Comparing with == undefined instead of === undefined"
+    pattern: "$X == undefined"
+
+  - id: ts_enum_numeric
+    language: typescript
+    severity: info
+    message: "Numeric enum — prefer string enums or union types"
+    pattern: "enum $X { $Y = 1 }"
+
+  - id: ts_no_implicit_any
+    language: typescript
+    severity: warning
+    message: "Implicit 'any' type annotation — add a type annotation"
+    pattern: "($X: any) => $Y"
+
+  - id: ts_string_index
+    language: typescript
+    severity: info
+    message: "Indexing a Record with a string key — consider a typed key"
+    pattern: "$X[$Y as keyof $X]"
+
+  - id: ts_type_assertion
+    language: typescript
+    severity: warning
+    message: "Type assertion with 'as unknown as' — prefer a type guard"
+    pattern: "$X as unknown as $Y"
+
+  - id: ts_unused_import
+    language: typescript
+    severity: info
+    message: "Import may be unused — verify all symbols are consumed"
+    pattern: "import { $X } from \"$Y\""
 
   # ── Go ───────────────────────────────────────────────────────
 
@@ -318,3 +453,9 @@ rules:
     severity: warning
     message: "File-scope mutable static variable — thread-unsafe"
     pattern: "static int $X"
+
+  - id: c_realloc
+    language: c
+    severity: warning
+    message: "realloc() result not checked for NULL — handle reallocation failure"
+    pattern: "$X = realloc($Y, $Z)"

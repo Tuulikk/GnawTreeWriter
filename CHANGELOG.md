@@ -15,6 +15,7 @@
 - **Docs**: README "Rules Engine" section, ROADMAP Phase 8 updated (all 5 rule steps + LLM missions marked done), RULES_ENGINE_SPEC.md marked implemented.
 - **Rule library expanded**: 19 builtin rules across rust (7), python (4), javascript (4), typescript (2) — original formulations of well-known anti-patterns (not copied from semgrep-rules; the license forbids redistributing them). Written with `$X` placeholders for the structural matcher.
 - **30 more rules added** across go (9), java (10), c (9): self-assignment, error handling, memory safety, type safety, and concurrency anti-patterns. Builtin library now totals 46 rules across 7 languages.
+- **40+ more rules added** across all 7 languages, bringing the builtin library to ~70 rules (10 per language): raise/assert/imports for Python, alert/prompt/setTimeout/XHR/addEventListener for JS, catch unknown/undefined check/type assertion for TS, collect/magic number/slice clone for Rust, make/for-loop/defer for Go, Object/parseInt/synchronized for Java, malloc/free/sprintf/goto for C.
 - **Duplicate-finding fix**: `run_rule` now deduplicates findings by code location `(line, column)`, so a statement and its inner child matching the same pattern are reported once, not several times. Verified: bare `except: pass` reports once; separate `unwrap()` calls keep their own findings.
 - **Local LLM command extension (LFM2.5-1.2B, Q4)** behind the `mamba` feature:
   - `explain <file> [--node <path>]` — plain-language explanation of a code node
