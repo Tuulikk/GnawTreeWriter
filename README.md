@@ -2,6 +2,30 @@
 
 **AI-native tree-based code editor** - Edit code files based on AST structure levels with surgical precision, avoiding the common pitfalls of LLM-generated code.
 
+## 🚀 Version 0.9.7: Rules Engine & LLM Augmentation
+
+**New rules engine** with semgrep-inspired AST pattern matching, expanding `lint` from a syntax checker to a real code quality tool. Rules boost the local LLM's edit capability by injecting code-pattern expertise into prompts — without changing the model.
+
+**70 builtin rules** across 7 languages (10 per language: rust, python, javascript, typescript, go, java, c), written as original anti-pattern formulations. Agents can write rules too (`rules add`, MCP `add_rule`).
+
+**Duplex Loop 2.0**: after every edit, builtin rules check the new code. Error-severity findings block the edit (unless `--force`); warnings are printed. From "does it parse?" to "is it good code?"
+
+```bash
+# Real lint (not just parse-check)
+gnawtreewriter lint src/ --recursive --severity error
+gnawtreewriter lint src/ --discover            # model proposes project rules
+
+# LLM-proposed edits validated against rules
+gnawtreewriter edit src/main.rs --ask "fix the self-assignment bug" --force
+gnawtreewriter edit src/main.rs --ask "replace every unwrap with expect" --all
+```
+
+**MCP tools added**: `explain`, `summarize`, `investigate`, `add_rule` — all available to AI agents.
+
+**Roadmap**: Phase 8 (Local LLM) + Rules Engine steps 1–5 all marked complete. Spec at `docs/RULES_ENGINE_SPEC.md`.
+
+---
+
 ## 🚀 Version 0.9.6: Explore, Parallel Performance, Smarter Packs
 
 The AI-facing tooling gets a major upgrade in this release — faster, more explorable, and more flexible:
