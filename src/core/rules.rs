@@ -5,7 +5,7 @@
 //! language, then matched structurally against source ASTs in Rust — no
 //! tree-sitter query generation. See docs/RULES_ENGINE_SPEC.md.
 
-use crate::parser::{ParserEngine, TreeNode};
+use crate::parser::TreeNode;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;

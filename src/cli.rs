@@ -4492,6 +4492,9 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
     }
 
     /// Parse the model's JSON array of proposed rules, leniently.
+    /// Endast kompilerad med "mamba" — anropas bara från mamba-gated
+    /// handle_lint_discover (cfg-paritet, annars dead code-varning).
+    #[cfg(feature = "mamba")]
     fn parse_rule_proposals(s: &str) -> Result<Vec<serde_json::Value>> {
         let start = s.find('[').ok_or_else(|| anyhow::anyhow!("no rule array in model output"))?;
         let end = s.rfind(']').ok_or_else(|| anyhow::anyhow!("unterminated rule array"))?;
