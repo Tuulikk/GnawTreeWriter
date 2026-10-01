@@ -30,6 +30,45 @@ pub mod mcp_server {
     struct AppState {
         token: Option<String>,
         project_root: std::path::PathBuf,
+        /// Shared GnawSense broker so the ModernBERT model and the JIT file
+        /// index cache persist across MCP calls. Creating a fresh broker per
+        /// call reloaded the model and re-embedded files every time, blowing
+        /// client timeouts on large files.
+        #[cfg(feature = "modernbert")]
+        sense_broker: tokio::sync::OnceCell<std::sync::Arc<crate::llm::GnawSenseBroker>>,
+    }
+
+    #[cfg(feature = "modernbert")]
+    impl AppState {
+        async fn sense_broker(&self) -> Result<std::sync::Arc<crate::llm::GnawSenseBroker>> {
+            let root = self.project_root.clone();
+            self.sense_broker
+                .get_or_try_init(|| async move {
+                    crate::llm::GnawSenseBroker::new(&root).map(std::sync::Arc::new)
+                })
+                .await
+                .cloned()
+        }
+    }
+
+    impl AppState {
+        fn new(token: Option<String>, project_root: std::path::PathBuf) -> Self {
+            #[cfg(not(feature = "modernbert"))]
+            {
+                Self {
+                    token,
+                    project_root,
+                }
+            }
+            #[cfg(feature = "modernbert")]
+            {
+                Self {
+                    token,
+                    project_root,
+                    sense_broker: tokio::sync::OnceCell::new(),
+                }
+            }
+        }
     }
 
     /// A JSON-RPC request shape.
@@ -77,460 +116,507 @@ pub mod mcp_server {
 
     async fn process_request(state: Arc<AppState>, req: JsonRpcRequest) -> Result<Value, Value> {
         match req.method.as_str() {
-            "initialize" => {
-                Ok(json!({ 
-                    "protocolVersion": "2024-11-05",
-                    "serverInfo": {
-                        "name": env!("CARGO_PKG_NAME"),
-                        "version": env!("CARGO_PKG_VERSION")
-                    },
-                    "capabilities": {
-                        "tools": { "listChanged": true }
-                    }
-                }))
-            }
+            "initialize" => Ok(json!({
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {
+                    "name": env!("CARGO_PKG_NAME"),
+                    "version": env!("CARGO_PKG_VERSION")
+                },
+                "capabilities": {
+                    "tools": { "listChanged": true }
+                }
+            })),
 
-            "tools/list" => {
-                Ok(json!({
-                    "tools": [
-                        {
-                            "name": "analyze",
-                            "title": "Analyze file structure",
-                            "description": "Analyze a file and return its full AST structure.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string" }
-                                },
-                                "required": ["file_path"]
+            "tools/list" => Ok(json!({
+                "tools": [
+                    {
+                        "name": "analyze",
+                        "title": "Analyze file structure",
+                        "description": "Analyze a file and return its full AST structure.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string" }
+                            },
+                            "required": ["file_path"]
+                        }
+                    },
+                    {
+                        "name": "list_nodes",
+                        "title": "List nodes in file",
+                        "description": "Get a flat list of important nodes.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string" }
+                            },
+                            "required": ["file_path"]
+                        }
+                    },
+                    {
+                        "name": "get_skeleton",
+                        "title": "Get skeletal view",
+                        "description": "Get a high-level hierarchical overview of definitions.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string" },
+                                "max_depth": { "type": "integer" }
+                            },
+                            "required": ["file_path"]
+                        }
+                    },
+                    {
+                        "name": "compress",
+                        "title": "Compress source code",
+                        "description": "Replace function/method bodies with placeholders to reduce token count while preserving signatures and structure.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string" }
+                            },
+                            "required": ["file_path"]
+                        }
+                    },
+                    {
+                        "name": "pack",
+                        "title": "Pack project for AI",
+                        "description": "Pack entire project into AI-optimized format with token counts and optional compression.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "path": { "type": "string", "description": "Root directory to pack (default: current directory)" },
+                                "format": { "type": "string", "enum": ["markdown", "json", "plain", "xml"], "description": "Output format (default: markdown)" },
+                                "compress": { "type": "boolean", "description": "Compress function bodies (default: false)" },
+                                "include": { "type": "string", "description": "Comma-separated file extensions to include" },
+                                "ignore": { "type": "string", "description": "Comma-separated patterns to ignore" },
+                                "instructions": { "type": "string", "description": "Custom instructions to include in output" }
                             }
-                        },
-                        {
-                            "name": "list_nodes",
-                            "title": "List nodes in file",
-                            "description": "Get a flat list of important nodes.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string" }
-                                },
-                                "required": ["file_path"]
+                        }
+                    },
+                    {
+                        "name": "curate",
+                        "title": "Curate context for AI agent",
+                        "description": "Intelligently select the most relevant files for a task, instead of dumping the entire project.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "task": { "type": "string", "description": "Task description (what the agent is working on)" },
+                                "path": { "type": "string", "description": "Root directory (default: current directory)" },
+                                "strategy": { "type": "string", "enum": ["relevance", "recent", "deps", "auto"], "description": "Curation strategy (default: auto)" },
+                                "max_tokens": { "type": "integer", "description": "Maximum total tokens (default: 8000)" },
+                                "max_files": { "type": "integer", "description": "Maximum number of files (default: 20)" }
+                            },
+                            "required": ["task"]
+                        }
+                    },
+                    {
+                        "name": "search_semantic",
+                        "title": "Semantic code search",
+                        "description": "Search code by meaning across the entire project. Good for finding 'how is X implemented?' without knowing file names.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "query": { "type": "string", "description": "Semantic search query (e.g. 'how is authentication handled?')" },
+                                "file_path": { "type": "string", "description": "Optional: limit search to this file (zoom mode)" },
+                                "max_results": { "type": "integer", "description": "Maximum results (default: 10)" }
+                            },
+                            "required": ["query"]
+                        }
+                    },
+                    {
+                        "name": "diff_since",
+                        "title": "Detect changes since last index",
+                        "description": "Compare current project state against a previous git commit, date, or saved state. Returns added/modified/deleted files.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "since_commit": { "type": "string", "description": "Git commit hash to compare against" },
+                                "since_date": { "type": "string", "description": "ISO date to compare from (e.g. '2026-08-20')" },
+                                "include_uncommitted": { "type": "boolean", "description": "Include uncommitted changes (default: true)" },
+                                "use_saved_state": { "type": "boolean", "description": "Use saved state file if available (default: true)" }
                             }
-                        },
-                        {
-                            "name": "get_skeleton",
-                            "title": "Get skeletal view",
-                            "description": "Get a high-level hierarchical overview of definitions.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string" },
-                                    "max_depth": { "type": "integer" }
-                                },
-                                "required": ["file_path"]
+                        }
+                    },
+                    {
+                        "name": "index_entities",
+                        "title": "Extract entities from source file(s)",
+                        "description": "Extract functions, structs, enums, impls, and other entities from one or more files for knowledge graph indexing.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string", "description": "Path to a single file to analyze" },
+                                "file_paths": { "type": "array", "items": {"type": "string"}, "description": "Multiple files to analyze (batch mode)" },
+                                "include_private": { "type": "boolean", "description": "Include private entities (default: false)" }
                             }
-                        },
-                        {
-                            "name": "compress",
-                            "title": "Compress source code",
-                            "description": "Replace function/method bodies with placeholders to reduce token count while preserving signatures and structure.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string" }
-                                },
-                                "required": ["file_path"]
+                        }
+                    },
+                    {
+                        "name": "index_relations",
+                        "title": "Extract relations from source file(s)",
+                        "description": "Extract call relationships, imports, type usage, and impl relationships from one or more files for knowledge graph edges.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string", "description": "Path to a single file to analyze" },
+                                "file_paths": { "type": "array", "items": {"type": "string"}, "description": "Multiple files to analyze (batch mode)" }
                             }
-                        },
-                        {
-                            "name": "pack",
-                            "title": "Pack project for AI",
-                            "description": "Pack entire project into AI-optimized format with token counts and optional compression.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "path": { "type": "string", "description": "Root directory to pack (default: current directory)" },
-                                    "format": { "type": "string", "enum": ["markdown", "json", "plain", "xml"], "description": "Output format (default: markdown)" },
-                                    "compress": { "type": "boolean", "description": "Compress function bodies (default: false)" },
-                                    "include": { "type": "string", "description": "Comma-separated file extensions to include" },
-                                    "ignore": { "type": "string", "description": "Comma-separated patterns to ignore" },
-                                    "instructions": { "type": "string", "description": "Custom instructions to include in output" }
-                                }
+                        }
+                    },
+                    {
+                        "name": "save_state",
+                        "title": "Save project state for incremental tracking",
+                        "description": "Save current git HEAD and file hashes to .gnawtreewriter_state.json. Use after indexing to enable efficient diff_since.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {}
+                        }
+                    },
+                    {
+                        "name": "explore",
+                        "title": "Explore project with zoom levels",
+                        "description": "Map-like navigation: overview (dirs+tokens), directory (files+summaries), file (signatures), full (source).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "target": { "type": "string", "description": "Path to explore (file or directory, default: project root)" },
+                                "level": { "type": "string", "enum": ["0", "1", "2", "3", "overview", "directory", "file", "full"], "description": "Zoom level (default: auto)" }
                             }
-                        },
-                        {
-                            "name": "curate",
-                            "title": "Curate context for AI agent",
-                            "description": "Intelligently select the most relevant files for a task, instead of dumping the entire project.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "task": { "type": "string", "description": "Task description (what the agent is working on)" },
-                                    "path": { "type": "string", "description": "Root directory (default: current directory)" },
-                                    "strategy": { "type": "string", "enum": ["relevance", "recent", "deps", "auto"], "description": "Curation strategy (default: auto)" },
-                                    "max_tokens": { "type": "integer", "description": "Maximum total tokens (default: 8000)" },
-                                    "max_files": { "type": "integer", "description": "Maximum number of files (default: 20)" }
-                                },
-                                "required": ["task"]
+                        }
+                    },
+                    {
+                        "name": "explain",
+                        "title": "Explain a code node",
+                        "description": "Explain a code node in plain language using the local LFM2.5 model.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string", "description": "Path to the file" },
+                                "node": { "type": "string", "description": "AST node path (optional; default: whole file)" }
                             }
-                        },
-                        {
-                            "name": "search_semantic",
-                            "title": "Semantic code search",
-                            "description": "Search code by meaning across the entire project. Good for finding 'how is X implemented?' without knowing file names.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "query": { "type": "string", "description": "Semantic search query (e.g. 'how is authentication handled?')" },
-                                    "file_path": { "type": "string", "description": "Optional: limit search to this file (zoom mode)" },
-                                    "max_results": { "type": "integer", "description": "Maximum results (default: 10)" }
-                                },
-                                "required": ["query"]
+                        }
+                    },
+                    {
+                        "name": "edit_ask",
+                        "title": "Propose an AST edit with the local LLM",
+                        "description": "Let the local LFM2.5 model propose a minimal edit for a request; the proposal is validated against the AST (Duplex Loop) and returned as a preview. Apply via edit_node.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string", "description": "Path to the file to edit" },
+                                "request": { "type": "string", "description": "What to change, in plain language" }
                             }
-                        },
-                        {
-                            "name": "diff_since",
-                            "title": "Detect changes since last index",
-                            "description": "Compare current project state against a previous git commit, date, or saved state. Returns added/modified/deleted files.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "since_commit": { "type": "string", "description": "Git commit hash to compare against" },
-                                    "since_date": { "type": "string", "description": "ISO date to compare from (e.g. '2026-08-20')" },
-                                    "include_uncommitted": { "type": "boolean", "description": "Include uncommitted changes (default: true)" },
-                                    "use_saved_state": { "type": "boolean", "description": "Use saved state file if available (default: true)" }
-                                }
+                        }
+                    },
+                    {
+                        "name": "summarize",
+                        "title": "Summarize a directory",
+                        "description": "Hierarchical directory summary using the local LFM2.5 model.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "path": { "type": "string", "description": "Directory to summarize" },
+                                "max_files": { "type": "integer", "description": "Max files to summarize (default: 50)" }
                             }
-                        },
-                        {
-                            "name": "index_entities",
-                            "title": "Extract entities from source file(s)",
-                            "description": "Extract functions, structs, enums, impls, and other entities from one or more files for knowledge graph indexing.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string", "description": "Path to a single file to analyze" },
-                                    "file_paths": { "type": "array", "items": {"type": "string"}, "description": "Multiple files to analyze (batch mode)" },
-                                    "include_private": { "type": "boolean", "description": "Include private entities (default: false)" }
-                                }
+                        }
+                    },
+                    {
+                        "name": "investigate",
+                        "title": "Investigate a question",
+                        "description": "Answer a question about the codebase using the local LFM2.5 model.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "question": { "type": "string", "description": "The question to investigate" }
                             }
-                        },
-                        {
-                            "name": "index_relations",
-                            "title": "Extract relations from source file(s)",
-                            "description": "Extract call relationships, imports, type usage, and impl relationships from one or more files for knowledge graph edges.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string", "description": "Path to a single file to analyze" },
-                                    "file_paths": { "type": "array", "items": {"type": "string"}, "description": "Multiple files to analyze (batch mode)" }
-                                }
-                            }
-                        },
-                        {
-                            "name": "save_state",
-                            "title": "Save project state for incremental tracking",
-                            "description": "Save current git HEAD and file hashes to .gnawtreewriter_state.json. Use after indexing to enable efficient diff_since.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {}
-                            }
-                        },
-                        {
-                            "name": "explore",
-                            "title": "Explore project with zoom levels",
-                            "description": "Map-like navigation: overview (dirs+tokens), directory (files+summaries), file (signatures), full (source).",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "target": { "type": "string", "description": "Path to explore (file or directory, default: project root)" },
-                                    "level": { "type": "string", "enum": ["0", "1", "2", "3", "overview", "directory", "file", "full"], "description": "Zoom level (default: auto)" }
-                                }
-                            }
-                        },
-                        {
-                            "name": "explain",
-                            "title": "Explain a code node",
-                            "description": "Explain a code node in plain language using the local LFM2.5 model.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string", "description": "Path to the file" },
-                                    "node": { "type": "string", "description": "AST node path (optional; default: whole file)" }
-                                }
-                            }
-                        },
-                        {
-                            "name": "edit_ask",
-                            "title": "Propose an AST edit with the local LLM",
-                            "description": "Let the local LFM2.5 model propose a minimal edit for a request; the proposal is validated against the AST (Duplex Loop) and returned as a preview. Apply via edit_node.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string", "description": "Path to the file to edit" },
-                                    "request": { "type": "string", "description": "What to change, in plain language" }
-                                }
-                            }
-                        },
-                        {
-                            "name": "summarize",
-                            "title": "Summarize a directory",
-                            "description": "Hierarchical directory summary using the local LFM2.5 model.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "path": { "type": "string", "description": "Directory to summarize" },
-                                    "max_files": { "type": "integer", "description": "Max files to summarize (default: 50)" }
-                                }
-                            }
-                        },
-                        {
-                            "name": "investigate",
-                            "title": "Investigate a question",
-                            "description": "Answer a question about the codebase using the local LFM2.5 model.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "question": { "type": "string", "description": "The question to investigate" }
-                                }
-                            }
-                        },
-                        {
-                            "name": "add_rule",
-                            "title": "Add a lint rule",
-                            "description": "Validate and add a semgrep-like lint rule to gnawtreewriter.rules.yaml. The pattern must be valid code for the language, with $X placeholders.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "id": { "type": "string", "description": "Unique rule id (e.g. proj_no_todo)" },
-                                    "language": { "type": "string", "description": "Language: rust, python, javascript, ..." },
-                                    "pattern": { "type": "string", "description": "Code pattern with $X placeholders, e.g. \"$X.unwrap()\"" },
-                                    "severity": { "type": "string", "enum": ["error", "warning", "info"], "description": "Severity (default: warning)" },
-                                    "message": { "type": "string", "description": "Human-readable message" }
-                                },
-                                "required": ["id", "language", "pattern"]
-                            }
-                        },
-                        {
-                            "name": "get_semantic_report",
-                            "title": "Generate semantic quality report",
-                            "description": "Analyze code quality using AI.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string" }
-                                },
-                                "required": ["file_path"]
-                            }
-                        },
-                        {
-                            "name": "search_nodes",
-                            "title": "Search nodes by text",
-                            "description": "Find nodes containing specific text pattern.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string" },
-                                    "pattern": { "type": "string" }
-                                },
-                                "required": ["file_path", "pattern"]
-                            }
-                        },
-                        {
-                            "name": "read_node",
-                            "title": "Read node content",
-                            "description": "Get source code of a specific node.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string" },
-                                    "node_path": { "type": "string" }
-                                },
-                                "required": ["file_path", "node_path"]
-                            }
-                        },
-                        {
-                            "name": "edit_node",
-                            "title": "Edit node content",
-                            "description": "Replace node content safely.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string" },
-                                    "node_path": { "type": "string" },
-                                    "content": { "type": "string" }
-                                },
-                                "required": ["file_path", "node_path", "content"]
-                            }
-                        },
-                        {
-                            "name": "move_node",
-                            "title": "Move node to new location",
-                            "description": "Delete a node from one location and insert it at another. Atomically moves code across files.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "source_file": { "type": "string" },
-                                    "source_path": { "type": "string" },
-                                    "target_file": { "type": "string" },
-                                    "target_path": { "type": "string" }
-                                },
-                                "required": ["source_file", "source_path", "target_path"]
-                            }
-                        },
-                        {
-                            "name": "insert_node",
-                            "title": "Insert new content",
-                            "description": "Insert code into a parent node.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string" },
-                                    "parent_path": { "type": "string" },
-                                    "position": { "type": "integer" },
-                                    "content": { "type": "string" }
-                                },
-                                "required": ["file_path", "parent_path", "position", "content"]
-                            }
-                        },
-                        {
-                            "name": "preview_edit",
-                            "title": "Preview edit",
-                            "description": "Show a diff of what an edit would change without applying it.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string" },
-                                    "node_path": { "type": "string" },
-                                    "content": { "type": "string" }
-                                },
-                                "required": ["file_path", "node_path", "content"]
-                            }
-                        },
-                        {
-                            "name": "sense",
-                            "title": "Semantic Search (GnawSense)",
-                            "description": "Search for code semantically using AI. Good for finding where something is implemented when you only have a vague description.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "query": { "type": "string", "description": "Semantic query (e.g., 'how is backup handled?')" },
-                                    "file_path": { "type": "string", "description": "Optional: Limit search to this file (Zoom mode)" }
-                                },
-                                "required": ["query"]
-                            }
-                        },
-                        {
-                            "name": "semantic_insert",
-                            "title": "Semantic Insert (GnawSense)",
-                            "description": "Insert code near a semantic anchor point. Use this when you know WHAT the surrounding code does, but don't know the exact path.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string" },
-                                    "anchor_query": { "type": "string", "description": "Description of the code where you want to insert near (e.g., 'the backup initialization')" },
-                                    "content": { "type": "string", "description": "The new code to insert" },
-                                    "intent": { "type": "string", "description": "Where to insert: 'after' (default), 'before', or 'inside'" }
-                                },
-                                "required": ["file_path", "anchor_query", "content"]
-                            }
-                        },
-                        {
-                            "name": "semantic_edit",
-                            "title": "Semantic Edit (GnawSense)",
-                            "description": "Find a node semantically (e.g. 'the main loop') and replace its content. Perfect for surgical edits when you don't want to hunt for node paths.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "file_path": { "type": "string" },
-                                    "query": { "type": "string", "description": "Semantic description of what to edit (e.g. 'the backup initialization')" },
-                                    "content": { "type": "string", "description": "The new code content" }
-                                },
-                                "required": ["file_path", "query", "content"]
-                            }
-                        },
-                        { "name": "batch", "description": "Apply batch", "inputSchema": {"type":"object"} },
-                        { "name": "undo", "description": "Undo", "inputSchema": {"type":"object"} }
-                    ]
-                }))
-            }
+                        }
+                    },
+                    {
+                        "name": "add_rule",
+                        "title": "Add a lint rule",
+                        "description": "Validate and add a semgrep-like lint rule to gnawtreewriter.rules.yaml. The pattern must be valid code for the language, with $X placeholders.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string", "description": "Unique rule id (e.g. proj_no_todo)" },
+                                "language": { "type": "string", "description": "Language: rust, python, javascript, ..." },
+                                "pattern": { "type": "string", "description": "Code pattern with $X placeholders, e.g. \"$X.unwrap()\"" },
+                                "severity": { "type": "string", "enum": ["error", "warning", "info"], "description": "Severity (default: warning)" },
+                                "message": { "type": "string", "description": "Human-readable message" }
+                            },
+                            "required": ["id", "language", "pattern"]
+                        }
+                    },
+                    {
+                        "name": "get_semantic_report",
+                        "title": "Generate semantic quality report",
+                        "description": "Analyze code quality using AI.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string" }
+                            },
+                            "required": ["file_path"]
+                        }
+                    },
+                    {
+                        "name": "search_nodes",
+                        "title": "Search nodes by text",
+                        "description": "Find nodes containing specific text pattern.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string" },
+                                "pattern": { "type": "string" }
+                            },
+                            "required": ["file_path", "pattern"]
+                        }
+                    },
+                    {
+                        "name": "read_node",
+                        "title": "Read node content",
+                        "description": "Get source code of a specific node.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string" },
+                                "node_path": { "type": "string" }
+                            },
+                            "required": ["file_path", "node_path"]
+                        }
+                    },
+                    {
+                        "name": "edit_node",
+                        "title": "Edit node content",
+                        "description": "Replace node content safely.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string" },
+                                "node_path": { "type": "string" },
+                                "content": { "type": "string" }
+                            },
+                            "required": ["file_path", "node_path", "content"]
+                        }
+                    },
+                    {
+                        "name": "move_node",
+                        "title": "Move node to new location",
+                        "description": "Delete a node from one location and insert it at another. Atomically moves code across files.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "source_file": { "type": "string" },
+                                "source_path": { "type": "string" },
+                                "target_file": { "type": "string" },
+                                "target_path": { "type": "string" }
+                            },
+                            "required": ["source_file", "source_path", "target_path"]
+                        }
+                    },
+                    {
+                        "name": "insert_node",
+                        "title": "Insert new content",
+                        "description": "Insert code into a parent node.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string" },
+                                "parent_path": { "type": "string" },
+                                "position": { "type": "integer" },
+                                "content": { "type": "string" }
+                            },
+                            "required": ["file_path", "parent_path", "position", "content"]
+                        }
+                    },
+                    {
+                        "name": "preview_edit",
+                        "title": "Preview edit",
+                        "description": "Show a diff of what an edit would change without applying it.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string" },
+                                "node_path": { "type": "string" },
+                                "content": { "type": "string" }
+                            },
+                            "required": ["file_path", "node_path", "content"]
+                        }
+                    },
+                    {
+                        "name": "sense",
+                        "title": "Semantic Search (GnawSense)",
+                        "description": "Search for code semantically using AI. Good for finding where something is implemented when you only have a vague description.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "query": { "type": "string", "description": "Semantic query (e.g., 'how is backup handled?')" },
+                                "file_path": { "type": "string", "description": "Optional: Limit search to this file (Zoom mode)" }
+                            },
+                            "required": ["query"]
+                        }
+                    },
+                    {
+                        "name": "semantic_insert",
+                        "title": "Semantic Insert (GnawSense)",
+                        "description": "Insert code near a semantic anchor point. Use this when you know WHAT the surrounding code does, but don't know the exact path.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string" },
+                                "anchor_query": { "type": "string", "description": "Description of the code where you want to insert near (e.g., 'the backup initialization')" },
+                                "content": { "type": "string", "description": "The new code to insert" },
+                                "intent": { "type": "string", "description": "Where to insert: 'after' (default), 'before', or 'inside'" }
+                            },
+                            "required": ["file_path", "anchor_query", "content"]
+                        }
+                    },
+                    {
+                        "name": "semantic_edit",
+                        "title": "Semantic Edit (GnawSense)",
+                        "description": "Find a node semantically (e.g. 'the main loop') and replace its content. Perfect for surgical edits when you don't want to hunt for node paths.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": { "type": "string" },
+                                "query": { "type": "string", "description": "Semantic description of what to edit (e.g. 'the backup initialization')" },
+                                "content": { "type": "string", "description": "The new code content" }
+                            },
+                            "required": ["file_path", "query", "content"]
+                        }
+                    },
+                    { "name": "batch", "description": "Apply batch", "inputSchema": {"type":"object"} },
+                    { "name": "undo", "description": "Undo", "inputSchema": {"type":"object"} }
+                ]
+            })),
 
             "tools/call" => {
                 let params = req.params.unwrap_or_else(|| json!({}));
-                let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
-                let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+                let name = params
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let arguments = params
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
 
                 let validate_arg = |key: &str| -> Result<&str, Value> {
                     arguments.get(key).and_then(Value::as_str).ok_or_else(|| {
-                       let err = build_jsonrpc_error(
-                           req.id.clone(), 
-                           INVALID_PARAMS_CODE, 
-                           "Invalid parameters", 
-                           Some(json!({"field": key}))
-                       );
-                       serde_json::to_value(err).unwrap()
-                   })
+                        let err = build_jsonrpc_error(
+                            req.id.clone(),
+                            INVALID_PARAMS_CODE,
+                            "Invalid parameters",
+                            Some(json!({"field": key})),
+                        );
+                        serde_json::to_value(err).unwrap()
+                    })
                 };
 
                 match name {
                     "analyze" => {
                         let fp = validate_arg("file_path")?;
                         Ok(handle_analyze(fp))
-                    },
+                    }
                     "list_nodes" => {
                         let fp = validate_arg("file_path")?;
                         let filter = arguments.get("filter").and_then(Value::as_str);
-                        let max_depth = arguments.get("max_depth").and_then(Value::as_u64).map(|d| d as usize);
+                        let max_depth = arguments
+                            .get("max_depth")
+                            .and_then(Value::as_u64)
+                            .map(|d| d as usize);
                         Ok(handle_list_nodes(state, fp, filter, max_depth, false))
-                    },
+                    }
                     "get_skeleton" => {
                         let fp = validate_arg("file_path")?;
-                        let max_depth = arguments.get("max_depth").and_then(Value::as_u64).unwrap_or(2) as usize;
+                        let max_depth = arguments
+                            .get("max_depth")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(2) as usize;
                         Ok(handle_get_skeleton(fp, max_depth))
-                    },
+                    }
                     "compress" => {
                         let fp = validate_arg("file_path")?;
                         Ok(handle_compress(fp))
-                    },
+                    }
                     "pack" => {
                         let path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
-                        let format = arguments.get("format").and_then(Value::as_str).unwrap_or("markdown");
-                        let compress = arguments.get("compress").and_then(Value::as_bool).unwrap_or(false);
+                        let format = arguments
+                            .get("format")
+                            .and_then(Value::as_str)
+                            .unwrap_or("markdown");
+                        let compress = arguments
+                            .get("compress")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
                         let include = arguments.get("include").and_then(Value::as_str);
                         let ignore = arguments.get("ignore").and_then(Value::as_str);
                         let instructions = arguments.get("instructions").and_then(Value::as_str);
-                        Ok(handle_pack(path, format, compress, include, ignore, instructions))
-                    },
+                        Ok(handle_pack(
+                            path,
+                            format,
+                            compress,
+                            include,
+                            ignore,
+                            instructions,
+                        ))
+                    }
                     "curate" => {
                         let task = validate_arg("task")?;
                         let path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
-                        let strategy = arguments.get("strategy").and_then(Value::as_str).unwrap_or("auto");
-                        let max_tokens = arguments.get("max_tokens").and_then(Value::as_u64).unwrap_or(8000) as usize;
-                        let max_files = arguments.get("max_files").and_then(Value::as_u64).unwrap_or(20) as usize;
+                        let strategy = arguments
+                            .get("strategy")
+                            .and_then(Value::as_str)
+                            .unwrap_or("auto");
+                        let max_tokens = arguments
+                            .get("max_tokens")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(8000) as usize;
+                        let max_files = arguments
+                            .get("max_files")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(20) as usize;
                         Ok(handle_curate(task, path, strategy, max_tokens, max_files))
-                    },
+                    }
                     "search_semantic" => {
                         let query = validate_arg("query")?;
                         let file_path = arguments.get("file_path").and_then(Value::as_str);
-                        let max_results = arguments.get("max_results").and_then(Value::as_u64).unwrap_or(10) as usize;
+                        let max_results = arguments
+                            .get("max_results")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(10) as usize;
                         Ok(handle_search_semantic(state, query, file_path, max_results).await)
-                    },
+                    }
                     "diff_since" => {
                         let since_commit = arguments.get("since_commit").and_then(Value::as_str);
                         let since_date = arguments.get("since_date").and_then(Value::as_str);
-                        let include_uncommitted = arguments.get("include_uncommitted").and_then(Value::as_bool).unwrap_or(true);
-                        let use_saved_state = arguments.get("use_saved_state").and_then(Value::as_bool).unwrap_or(true);
-                        Ok(handle_diff_since(since_commit, since_date, include_uncommitted, use_saved_state))
-                    },
+                        let include_uncommitted = arguments
+                            .get("include_uncommitted")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(true);
+                        let use_saved_state = arguments
+                            .get("use_saved_state")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(true);
+                        Ok(handle_diff_since(
+                            since_commit,
+                            since_date,
+                            include_uncommitted,
+                            use_saved_state,
+                        ))
+                    }
                     "index_entities" => {
                         let paths = resolve_file_paths(&arguments);
-                        let include_private = arguments.get("include_private").and_then(Value::as_bool).unwrap_or(false);
+                        let include_private = arguments
+                            .get("include_private")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
                         if paths.is_empty() {
                             Err("No file_path or file_paths provided".into())
                         } else {
                             Ok(handle_index_entities_batch(&paths, include_private))
                         }
-                    },
+                    }
                     "index_relations" => {
                         let paths = resolve_file_paths(&arguments);
                         if paths.is_empty() {
@@ -538,110 +624,139 @@ pub mod mcp_server {
                         } else {
                             Ok(handle_index_relations_batch(&paths))
                         }
-                    },
-                    "save_state" => {
-                        Ok(handle_save_state())
-                    },
+                    }
+                    "save_state" => Ok(handle_save_state()),
                     "explore" => {
-                        let target = arguments.get("target").and_then(Value::as_str).unwrap_or("");
-                        let level = arguments.get("level").and_then(Value::as_str).unwrap_or("0");
+                        let target = arguments
+                            .get("target")
+                            .and_then(Value::as_str)
+                            .unwrap_or("");
+                        let level = arguments
+                            .get("level")
+                            .and_then(Value::as_str)
+                            .unwrap_or("0");
                         Ok(handle_explore(target, level))
-                    },
+                    }
                     "explain" => {
                         let fp = validate_arg("file_path")?;
                         let node = arguments.get("node").and_then(Value::as_str);
                         Ok(handle_explain(fp, node))
-                    },
+                    }
                     "edit_ask" => {
                         let fp = validate_arg("file_path")?;
                         let request = validate_arg("request")?;
                         Ok(handle_edit_ask(fp, request))
-                    },
+                    }
                     "summarize" => {
                         let path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
-                        let max_files = arguments.get("max_files").and_then(Value::as_u64).unwrap_or(50) as usize;
+                        let max_files = arguments
+                            .get("max_files")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(50) as usize;
                         Ok(handle_summarize(path, max_files))
-                    },
+                    }
                     "investigate" => {
                         let question = validate_arg("question")?;
                         Ok(handle_investigate(question))
-                    },
+                    }
                     "add_rule" => {
                         let id = validate_arg("id")?;
                         let language = validate_arg("language")?;
                         let pattern = validate_arg("pattern")?;
-                        let severity = arguments.get("severity").and_then(Value::as_str).unwrap_or("warning");
+                        let severity = arguments
+                            .get("severity")
+                            .and_then(Value::as_str)
+                            .unwrap_or("warning");
                         let message = arguments.get("message").and_then(Value::as_str);
                         Ok(handle_add_rule(id, language, pattern, severity, message))
-                    },
+                    }
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
                         Ok(handle_get_semantic_report(state, fp).await)
-                    },
+                    }
                     "search_nodes" => {
                         let fp = validate_arg("file_path")?;
                         let pattern = validate_arg("pattern")?;
                         Ok(handle_search_nodes(fp, pattern))
-                    },
+                    }
                     "read_node" => {
                         let fp = validate_arg("file_path")?;
                         let np = validate_arg("node_path")?;
                         Ok(handle_read_node(fp, np))
-                    },
+                    }
                     "edit_node" => {
                         let fp = validate_arg("file_path")?;
                         let np = validate_arg("node_path")?;
                         let c = validate_arg("content")?;
                         Ok(handle_edit_node_internal(state, fp, np, c))
-                    },
+                    }
                     "preview_edit" => {
                         let fp = validate_arg("file_path")?;
                         let np = validate_arg("node_path")?;
                         let c = validate_arg("content")?;
                         Ok(handle_preview_edit(fp, np, c))
-                    },
+                    }
                     "move_node" => {
                         let sf = validate_arg("source_file")?;
                         let sp = validate_arg("source_path")?;
-                        let tf = arguments.get("target_file").and_then(Value::as_str).unwrap_or(sf);
+                        let tf = arguments
+                            .get("target_file")
+                            .and_then(Value::as_str)
+                            .unwrap_or(sf);
                         let tp = validate_arg("target_path")?;
                         Ok(handle_move_node(state, sf, sp, tf, tp))
-                    },
+                    }
                     "insert_node" => {
-                         let fp = validate_arg("file_path")?;
-                         let pp = validate_arg("parent_path")?;
-                         let c = validate_arg("content")?;
-                         let pos = arguments.get("position").and_then(Value::as_u64).unwrap_or(1) as usize;
-                         Ok(handle_insert_node(state, fp, pp, pos, c))
-                    },
+                        let fp = validate_arg("file_path")?;
+                        let pp = validate_arg("parent_path")?;
+                        let c = validate_arg("content")?;
+                        let pos = arguments
+                            .get("position")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(1) as usize;
+                        Ok(handle_insert_node(state, fp, pp, pos, c))
+                    }
                     "sense" => {
                         let query = validate_arg("query")?;
                         let fp = arguments.get("file_path").and_then(Value::as_str);
                         Ok(handle_sense(state, query, fp).await)
-                    },
+                    }
                     "semantic_insert" => {
                         let fp = validate_arg("file_path")?;
                         let anchor = validate_arg("anchor_query")?;
                         let content = validate_arg("content")?;
-                        let intent = arguments.get("intent").and_then(Value::as_str).unwrap_or("after");
+                        let intent = arguments
+                            .get("intent")
+                            .and_then(Value::as_str)
+                            .unwrap_or("after");
                         Ok(handle_semantic_insert(state, fp, anchor, content, intent).await)
-                    },
+                    }
                     "semantic_edit" => {
                         let fp = validate_arg("file_path")?;
                         let query = validate_arg("query")?;
                         let content = validate_arg("content")?;
                         Ok(handle_semantic_edit(state, fp, query, content).await)
-                    },
-                    "batch" => Ok(json!({ "content": [{ "type": "text", "text": "Batch executed" }] })),
-                    "undo" => Ok(json!({ "content": [{ "type": "text", "text": "Undo executed" }] })),
+                    }
+                    "batch" => {
+                        Ok(json!({ "content": [{ "type": "text", "text": "Batch executed" }] }))
+                    }
+                    "undo" => {
+                        Ok(json!({ "content": [{ "type": "text", "text": "Undo executed" }] }))
+                    }
                     _ => {
-                        let err = build_jsonrpc_error(req.id, METHOD_NOT_FOUND_CODE, "Unknown tool", None);
+                        let err = build_jsonrpc_error(
+                            req.id,
+                            METHOD_NOT_FOUND_CODE,
+                            "Unknown tool",
+                            None,
+                        );
                         Err(serde_json::to_value(err).unwrap())
                     }
                 }
             }
             _ => {
-                let err = build_jsonrpc_error(req.id, METHOD_NOT_FOUND_CODE, "Method not found", None);
+                let err =
+                    build_jsonrpc_error(req.id, METHOD_NOT_FOUND_CODE, "Method not found", None);
                 Err(serde_json::to_value(err).unwrap())
             }
         }
@@ -655,24 +770,60 @@ pub mod mcp_server {
         if let Some(expected) = &state.token {
             match headers.get("authorization").and_then(|v| v.to_str().ok()) {
                 Some(s) if s == format!("Bearer {}", expected) => {} // Corrected: escaped curly brace
-                _ => return (StatusCode::UNAUTHORIZED, Json(json!({ // Corrected: escaped curly brace
-                    "jsonrpc": "2.0",
-                    "id": null,
-                    "error": { "code": -32001, "message": "Unauthorized" }
-                }))),
+                _ => {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({ // Corrected: escaped curly brace
+                            "jsonrpc": "2.0",
+                            "id": null,
+                            "error": { "code": -32001, "message": "Unauthorized" }
+                        })),
+                    )
+                }
             }
         }
 
         let parsed: JsonRpcRequest = match serde_json::from_value(req) {
             Ok(r) => r,
-            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "Parse error"}}))),
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(
+                        json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "Parse error"}}),
+                    ),
+                )
+            }
         };
-        
+
         let id = parsed.id.clone();
-        match process_request(state, parsed).await {
-            Ok(res) => (StatusCode::OK, Json(json!({"jsonrpc": "2.0", "id": id, "result": res}))), // Corrected: escaped curly brace
+        // Panic isolation: see serve_stdio. A panicking handler must yield a
+        // JSON-RPC internal error, not take down the connection task.
+        let spawned = {
+            let st = state.clone();
+            tokio::spawn(async move { process_request(st, parsed).await })
+        };
+        let outcome = match spawned.await {
+            Ok(inner) => inner,
+            Err(join_err) => Err(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {
+                    "code": -32603,
+                    "message": format!("Internal error (handler panicked): {}", join_err)
+                }
+            })),
+        };
+        match outcome {
+            Ok(res) => (
+                StatusCode::OK,
+                Json(json!({"jsonrpc": "2.0", "id": id, "result": res})),
+            ), // Corrected: escaped curly brace
             Err(err) => {
-                let code = err.get("error").and_then(|e| e.get("code")).and_then(|c| c.as_i64()).unwrap_or(0);
+                let code = err
+                    .get("error")
+                    .and_then(|e| e.get("code"))
+                    .and_then(|c| c.as_i64())
+                    .unwrap_or(0);
                 let status = match code {
                     INVALID_PARAMS_CODE => StatusCode::BAD_REQUEST,
                     METHOD_NOT_FOUND_CODE => StatusCode::NOT_FOUND,
@@ -689,7 +840,7 @@ pub mod mcp_server {
         let mut stdin = BufReader::new(tokio::io::stdin());
         let mut stdout = tokio::io::stdout();
         let project_root = std::env::current_dir()?;
-        let state = Arc::new(AppState { token: None, project_root });
+        let state = Arc::new(AppState::new(None, project_root));
 
         let mut line = String::new();
         while stdin.read_line(&mut line).await? > 0 {
@@ -708,7 +859,25 @@ pub mod mcp_server {
             };
 
             let id = req.id.clone();
-            match process_request(state.clone(), req).await {
+            // Run each request in its own task: a panic inside a handler
+            // (e.g. a parsing bug) must not unwind through the read loop and
+            // kill the whole stdio connection ("Not connected" on the host).
+            let spawned = {
+                let st = state.clone();
+                tokio::spawn(async move { process_request(st, req).await })
+            };
+            let outcome = match spawned.await {
+                Ok(inner) => inner,
+                Err(join_err) => Err(json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": {
+                        "code": -32603,
+                        "message": format!("Internal error (handler panicked): {}", join_err)
+                    }
+                })),
+            };
+            match outcome {
                 Ok(result) => {
                     let resp = json!({"jsonrpc": "2.0", "id": id, "result": result});
                     if let Ok(resp_str) = serde_json::to_string(&resp) {
@@ -718,7 +887,9 @@ pub mod mcp_server {
                     }
                 }
                 Err(err) => {
-                    let _ = stdout.write_all(serde_json::to_string(&err).unwrap_or_default().as_bytes()).await;
+                    let _ = stdout
+                        .write_all(serde_json::to_string(&err).unwrap_or_default().as_bytes())
+                        .await;
                     let _ = stdout.write_all(b"\n").await;
                     let _ = stdout.flush().await;
                 }
@@ -728,7 +899,9 @@ pub mod mcp_server {
         Ok(())
     }
 
-    fn tool_error(msg: String) -> Value { json!({"content": [{ "type": "text", "text": msg }], "isError": true}) }
+    fn tool_error(msg: String) -> Value {
+        json!({"content": [{ "type": "text", "text": msg }], "isError": true})
+    }
     fn tool_success(msg: String, data: Option<Value>) -> Value {
         let mut res = json!({"content": [{ "type": "text", "text": msg }]});
         if let Some(d) = data {
@@ -741,7 +914,9 @@ pub mod mcp_server {
 
     fn tool_success_with_pulse(msg: String, data: Option<Value>, pulse: Value) -> Value {
         let mut res = tool_success(msg, data);
-        res.as_object_mut().unwrap().insert("pulse".to_string(), pulse);
+        res.as_object_mut()
+            .unwrap()
+            .insert("pulse".to_string(), pulse);
         res
     }
 
@@ -756,17 +931,25 @@ pub mod mcp_server {
         let name = if let Ok(writer) = GnawTreeWriter::new(file_path) {
             let tree = writer.analyze();
             fn find_name(n: &TreeNode, p: &str) -> Option<String> {
-                if n.path == p { return n.get_name(); }
-                for c in &n.children { if let Some(nm) = find_name(c, p) { return Some(nm); } }
+                if n.path == p {
+                    return n.get_name();
+                }
+                for c in &n.children {
+                    if let Some(nm) = find_name(c, p) {
+                        return Some(nm);
+                    }
+                }
                 None
             }
             find_name(tree, node_path)
-        } else { None };
+        } else {
+            None
+        };
 
         if let Some(n) = name {
             // 2. Search for callers via RelationalIndexer
             let mut indexer = crate::llm::RelationalIndexer::new(&state.project_root);
-            
+
             // JIT: Index parent directory to catch local callers immediately
             if let Some(parent) = std::path::Path::new(file_path).parent() {
                 let _ = indexer.index_directory(parent);
@@ -777,19 +960,26 @@ pub mod mcp_server {
                 for graph in graphs {
                     for rel in graph.relations {
                         if rel.to_name == n && rel.relation_type == crate::llm::RelationType::Call {
-                             callers.push(json!({"file": graph.file_path, "path": rel.from_path}));
+                            callers.push(json!({"file": graph.file_path, "path": rel.from_path}));
                         }
                     }
                 }
                 pulse["related_nodes"] = json!(callers);
                 if !callers.is_empty() {
-                    pulse["hints"].as_array_mut().unwrap().push(json!(format!("Symbol '{}' is called in {} places. Consider verifying impact.", n, callers.len())));
+                    pulse["hints"].as_array_mut().unwrap().push(json!(format!(
+                        "Symbol '{}' is called in {} places. Consider verifying impact.",
+                        n,
+                        callers.len()
+                    )));
                 }
             }
         }
 
         // 3. Search for tests
-        let file_name = std::path::Path::new(file_path).file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        let file_name = std::path::Path::new(file_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
         let test_patterns = vec![
             format!("test_{}.rs", file_name),
             format!("{}_test.rs", file_name),
@@ -797,7 +987,7 @@ pub mod mcp_server {
             format!("{}_test.py", file_name),
             format!("tests/test_{}.rs", file_name),
         ];
-        
+
         let mut found_tests = Vec::new();
         for p in test_patterns {
             let path = state.project_root.join(p);
@@ -807,7 +997,9 @@ pub mod mcp_server {
         }
         pulse["test_files"] = json!(found_tests);
         if !found_tests.is_empty() {
-            pulse["hints"].as_array_mut().unwrap().push(json!("Found associated test files. Remember to update or run tests."));
+            pulse["hints"].as_array_mut().unwrap().push(json!(
+                "Found associated test files. Remember to update or run tests."
+            ));
         }
 
         pulse
@@ -828,44 +1020,65 @@ pub mod mcp_server {
         }
     }
 
-    
-
-        fn handle_list_nodes(state: Arc<AppState>, file_path: &str, filter: Option<&str>, max_depth: Option<usize>, all: bool) -> Value {
+    fn handle_list_nodes(
+        state: Arc<AppState>,
+        file_path: &str,
+        filter: Option<&str>,
+        max_depth: Option<usize>,
+        all: bool,
+    ) -> Value {
         match GnawTreeWriter::new(file_path) {
             Ok(w) => {
                 let label_mgr = LabelManager::load(&state.project_root).ok();
                 let mut nodes = Vec::new();
-                let effective_max_depth = if all { usize::MAX } else { max_depth.unwrap_or(3) };
-                
+                let effective_max_depth = if all {
+                    usize::MAX
+                } else {
+                    max_depth.unwrap_or(3)
+                };
+
                 fn collect(
-                    n: &TreeNode, 
-                    acc: &mut Vec<Value>, 
-                    fp: &str, 
-                    lm: &Option<LabelManager>, 
-                    filter: Option<&str>, 
-                    depth: usize, 
-                    max_d: usize
+                    n: &TreeNode,
+                    acc: &mut Vec<Value>,
+                    fp: &str,
+                    lm: &Option<LabelManager>,
+                    filter: Option<&str>,
+                    depth: usize,
+                    max_d: usize,
                 ) {
-                    if depth > max_d || acc.len() >= 5000 { return; }
-                    
+                    if depth > max_d || acc.len() >= 5000 {
+                        return;
+                    }
+
                     if filter.is_none() || filter.unwrap() == n.node_type {
-                        let labels = lm.as_ref().map(|mgr| mgr.get_labels(fp, &n.content)).unwrap_or_default();
+                        let labels = lm
+                            .as_ref()
+                            .map(|mgr| mgr.get_labels(fp, &n.content))
+                            .unwrap_or_default();
                         acc.push(json!({
-                            "path": n.path, 
-                            "type": n.node_type, 
-                            "name": n.get_name(), 
-                            "start": n.start_line, 
+                            "path": n.path,
+                            "type": n.node_type,
+                            "name": n.get_name(),
+                            "start": n.start_line,
                             "labels": labels
                         }));
                     }
-                    
-                    for c in &n.children { 
-                        collect(c, acc, fp, lm, filter, depth + 1, max_d); 
+
+                    for c in &n.children {
+                        collect(c, acc, fp, lm, filter, depth + 1, max_d);
                     }
                 }
-                
-                collect(w.analyze(), &mut nodes, file_path, &label_mgr, filter, 0, effective_max_depth);
-                
+
+                collect(
+                    w.analyze(),
+                    &mut nodes,
+                    file_path,
+                    &label_mgr,
+                    filter,
+                    0,
+                    effective_max_depth,
+                );
+
                 let mut msg = format!("Found {} nodes", nodes.len());
                 if nodes.len() >= 1000 {
                     msg.push_str(" (limit reached)");
@@ -876,23 +1089,36 @@ pub mod mcp_server {
         }
     }
 
-                fn handle_get_skeleton(file_path: &str, max_depth: usize) -> Value {
+    fn handle_get_skeleton(file_path: &str, max_depth: usize) -> Value {
         match GnawTreeWriter::new(file_path) {
             Ok(w) => {
                 let mut s = String::new();
                 let mut count = 0;
                 fn build(n: &TreeNode, out: &mut String, d: usize, md: usize, count: &mut usize) {
-                    if d > md || *count >= 500 { return; }
+                    if d > md || *count >= 500 {
+                        return;
+                    }
                     *count += 1;
-                    out.push_str(&format!("{}{} [{}] {}\n", "  ".repeat(d), n.path, n.node_type, n.get_name().unwrap_or_default()));
+                    out.push_str(&format!(
+                        "{}{} [{}] {}\n",
+                        "  ".repeat(d),
+                        n.path,
+                        n.node_type,
+                        n.get_name().unwrap_or_default()
+                    ));
                     if *count == 500 {
                         out.push_str("... (limit reached)\n");
                         return;
                     }
-                    for c in &n.children { build(c, out, d + 1, md, count); }
+                    for c in &n.children {
+                        build(c, out, d + 1, md, count);
+                    }
                 }
                 build(w.analyze(), &mut s, 0, max_depth, &mut count);
-                tool_success(format!("Skeleton of {}", file_path), Some(json!({"skeleton": s})))
+                tool_success(
+                    format!("Skeleton of {}", file_path),
+                    Some(json!({"skeleton": s})),
+                )
             }
             Err(e) => tool_error(format!("IO error: {}", e)),
         }
@@ -900,19 +1126,22 @@ pub mod mcp_server {
 
     fn handle_compress(file_path: &str) -> Value {
         match crate::core::compress::compress_file(file_path) {
-            Ok(result) => {
-                tool_success(
-                    format!("Compressed {} ({} → {} tokens, {:.0}% reduction)",
-                        file_path, result.original_tokens, result.compressed_tokens, result.ratio * 100.0),
-                    Some(json!({
-                        "code": result.code,
-                        "original_tokens": result.original_tokens,
-                        "compressed_tokens": result.compressed_tokens,
-                        "bodies_compressed": result.bodies_compressed,
-                        "ratio": result.ratio
-                    }))
-                )
-            }
+            Ok(result) => tool_success(
+                format!(
+                    "Compressed {} ({} → {} tokens, {:.0}% reduction)",
+                    file_path,
+                    result.original_tokens,
+                    result.compressed_tokens,
+                    result.ratio * 100.0
+                ),
+                Some(json!({
+                    "code": result.code,
+                    "original_tokens": result.original_tokens,
+                    "compressed_tokens": result.compressed_tokens,
+                    "bodies_compressed": result.bodies_compressed,
+                    "ratio": result.ratio
+                })),
+            ),
             Err(e) => tool_error(format!("Compression failed: {}", e)),
         }
     }
@@ -951,18 +1180,19 @@ pub mod mcp_server {
         };
 
         match crate::core::pack::pack_project(root, &options) {
-            Ok(result) => {
-                tool_success(
-                    format!("Packed {} files ({} tokens)", result.file_count, result.total_tokens),
-                    Some(json!({
-                        "content": result.content,
-                        "file_count": result.file_count,
-                        "total_tokens": result.total_tokens,
-                        "compressed_tokens": result.compressed_tokens,
-                        "files": result.files
-                    }))
-                )
-            }
+            Ok(result) => tool_success(
+                format!(
+                    "Packed {} files ({} tokens)",
+                    result.file_count, result.total_tokens
+                ),
+                Some(json!({
+                    "content": result.content,
+                    "file_count": result.file_count,
+                    "total_tokens": result.total_tokens,
+                    "compressed_tokens": result.compressed_tokens,
+                    "files": result.files
+                })),
+            ),
             Err(e) => tool_error(format!("Pack failed: {}", e)),
         }
     }
@@ -982,21 +1212,22 @@ pub mod mcp_server {
         let strategy = crate::core::curator::CurationStrategy::parse(strategy);
 
         match crate::core::curator::curate_context(root, task, strategy, max_tokens, max_files) {
-            Ok(result) => {
-                tool_success(
-                    format!("Curated {} files ({} tokens)", result.files.len(), result.total_tokens),
-                    Some(json!({
-                        "files": result.files,
-                        "total_tokens": result.total_tokens,
-                        "strategy": result.strategy,
-                        "summary": result.summary
-                    }))
-                )
-            }
+            Ok(result) => tool_success(
+                format!(
+                    "Curated {} files ({} tokens)",
+                    result.files.len(),
+                    result.total_tokens
+                ),
+                Some(json!({
+                    "files": result.files,
+                    "total_tokens": result.total_tokens,
+                    "strategy": result.strategy,
+                    "summary": result.summary
+                })),
+            ),
             Err(e) => tool_error(format!("Curation failed: {}", e)),
         }
     }
-
 
     async fn handle_get_semantic_report(state: Arc<AppState>, file_path: &str) -> Value {
         #[cfg(feature = "modernbert")]
@@ -1006,7 +1237,10 @@ pub mod mcp_server {
                 Err(e) => return tool_error(e.to_string()),
             };
             match mgr.generate_semantic_report(file_path).await {
-                Ok(report) => tool_success("Semantic report generated".into(), Some(json!({"report": report}))),
+                Ok(report) => tool_success(
+                    "Semantic report generated".into(),
+                    Some(json!({"report": report})),
+                ),
                 Err(e) => tool_error(e.to_string()),
             }
         }
@@ -1018,7 +1252,12 @@ pub mod mcp_server {
         }
     }
 
-    async fn handle_search_semantic(state: Arc<AppState>, query: &str, file_path: Option<&str>, max_results: usize) -> Value {
+    async fn handle_search_semantic(
+        state: Arc<AppState>,
+        query: &str,
+        file_path: Option<&str>,
+        max_results: usize,
+    ) -> Value {
         #[cfg(feature = "modernbert")]
         {
             let _mgr = match crate::llm::ai_manager::AiManager::new(&state.project_root) {
@@ -1033,29 +1272,43 @@ pub mod mcp_server {
 
             match broker.sense(query, file_path).await {
                 Ok(crate::llm::SenseResponse::Satelite { matches }) => {
-                    let results: Vec<Value> = matches.iter().take(max_results).map(|m| {
-                        json!({
-                            "file": m.file_path,
-                            "node_path": m.node_path,
-                            "score": m.score,
+                    let results: Vec<Value> = matches
+                        .iter()
+                        .take(max_results)
+                        .map(|m| {
+                            json!({
+                                "file": m.file_path,
+                                "node_path": m.node_path,
+                                "score": m.score,
+                            })
                         })
-                    }).collect();
+                        .collect();
                     tool_success(
                         format!("Found {} matches for \"{}\"", results.len(), query),
-                        Some(json!({"matches": results, "query": query, "mode": "satellite"}))
+                        Some(json!({"matches": results, "query": query, "mode": "satellite"})),
                     )
                 }
-                Ok(crate::llm::SenseResponse::Zoom { file_path: fp, nodes, impact }) => {
-                    let results: Vec<Value> = nodes.iter().take(max_results).map(|n| {
-                        json!({
-                            "path": n.path,
-                            "preview": n.preview,
-                            "score": n.score,
+                Ok(crate::llm::SenseResponse::Zoom {
+                    file_path: fp,
+                    nodes,
+                    impact,
+                }) => {
+                    let results: Vec<Value> = nodes
+                        .iter()
+                        .take(max_results)
+                        .map(|n| {
+                            json!({
+                                "path": n.path,
+                                "preview": n.preview,
+                                "score": n.score,
+                            })
                         })
-                    }).collect();
+                        .collect();
                     tool_success(
                         format!("Found {} nodes in {} for \"{}\"", results.len(), fp, query),
-                        Some(json!({"matches": results, "query": query, "file": fp, "mode": "zoom", "impact": impact}))
+                        Some(
+                            json!({"matches": results, "query": query, "file": fp, "mode": "zoom", "impact": impact}),
+                        ),
                     )
                 }
                 Err(e) => tool_error(format!("Semantic search failed: {}", e)),
@@ -1071,7 +1324,12 @@ pub mod mcp_server {
         }
     }
 
-    fn handle_diff_since(since_commit: Option<&str>, since_date: Option<&str>, include_uncommitted: bool, use_saved_state: bool) -> Value {
+    fn handle_diff_since(
+        since_commit: Option<&str>,
+        since_date: Option<&str>,
+        include_uncommitted: bool,
+        use_saved_state: bool,
+    ) -> Value {
         let project_root = std::env::current_dir().unwrap_or_default();
 
         // Determine the reference point
@@ -1082,7 +1340,13 @@ pub mod mcp_server {
         } else if use_saved_state {
             let state = crate::core::state::ProjectState::load(&project_root);
             if !state.git_head.is_empty() {
-                (format!("saved_state ({})", &state.git_head[..8.min(state.git_head.len())]), state.git_head)
+                (
+                    format!(
+                        "saved_state ({})",
+                        &state.git_head[..8.min(state.git_head.len())]
+                    ),
+                    state.git_head,
+                )
             } else {
                 ("HEAD~1".to_string(), "HEAD~1".to_string())
             }
@@ -1144,9 +1408,9 @@ pub mod mcp_server {
                         };
 
                         // Skip if already in committed list
-                        let already_listed = changed_files.iter().any(|f| {
-                            f.get("path").and_then(Value::as_str) == Some(path)
-                        });
+                        let already_listed = changed_files
+                            .iter()
+                            .any(|f| f.get("path").and_then(Value::as_str) == Some(path));
                         if !already_listed {
                             changed_files.push(json!({
                                 "path": path,
@@ -1159,10 +1423,22 @@ pub mod mcp_server {
             }
         }
 
-        let added = changed_files.iter().filter(|f| f.get("status").and_then(Value::as_str) == Some("added")).count();
-        let modified = changed_files.iter().filter(|f| f.get("status").and_then(Value::as_str) == Some("modified")).count();
-        let deleted = changed_files.iter().filter(|f| f.get("status").and_then(Value::as_str) == Some("deleted")).count();
-        let untracked = changed_files.iter().filter(|f| f.get("status").and_then(Value::as_str) == Some("untracked")).count();
+        let added = changed_files
+            .iter()
+            .filter(|f| f.get("status").and_then(Value::as_str) == Some("added"))
+            .count();
+        let modified = changed_files
+            .iter()
+            .filter(|f| f.get("status").and_then(Value::as_str) == Some("modified"))
+            .count();
+        let deleted = changed_files
+            .iter()
+            .filter(|f| f.get("status").and_then(Value::as_str) == Some("deleted"))
+            .count();
+        let untracked = changed_files
+            .iter()
+            .filter(|f| f.get("status").and_then(Value::as_str) == Some("untracked"))
+            .count();
 
         let current_head = std::process::Command::new("git")
             .args(["rev-parse", "HEAD"])
@@ -1174,8 +1450,15 @@ pub mod mcp_server {
             .unwrap_or_default();
 
         tool_success(
-            format!("Changes since {}: {} files ({} added, {} modified, {} deleted, {} untracked)",
-                ref_point, changed_files.len(), added, modified, deleted, untracked),
+            format!(
+                "Changes since {}: {} files ({} added, {} modified, {} deleted, {} untracked)",
+                ref_point,
+                changed_files.len(),
+                added,
+                modified,
+                deleted,
+                untracked
+            ),
             Some(json!({
                 "reference": ref_point,
                 "current_head": current_head,
@@ -1187,7 +1470,7 @@ pub mod mcp_server {
                     "deleted": deleted,
                     "untracked": untracked
                 }
-            }))
+            })),
         )
     }
 
@@ -1195,7 +1478,8 @@ pub mod mcp_server {
     fn resolve_file_paths(arguments: &Value) -> Vec<String> {
         // Try file_paths array first
         if let Some(paths) = arguments.get("file_paths").and_then(Value::as_array) {
-            return paths.iter()
+            return paths
+                .iter()
                 .filter_map(|v| v.as_str().map(|s| s.to_string()))
                 .collect();
         }
@@ -1241,8 +1525,12 @@ pub mod mcp_server {
         }
 
         tool_success(
-            format!("Indexed {} entities from {} files ({} errors)",
-                total_entities, paths.len(), errors.len()),
+            format!(
+                "Indexed {} entities from {} files ({} errors)",
+                total_entities,
+                paths.len(),
+                errors.len()
+            ),
             Some(json!({
                 "file_count": paths.len(),
                 "total_entities": total_entities,
@@ -1250,7 +1538,7 @@ pub mod mcp_server {
                 "total_exports": all_exports.len(),
                 "files": all_entities,
                 "errors": errors,
-            }))
+            })),
         )
     }
 
@@ -1259,13 +1547,13 @@ pub mod mcp_server {
         let results: Vec<Result<crate::core::index_relations::RelationIndex, String>> = paths
             .par_iter()
             .map(|path| {
-                crate::core::index_relations::index_relations(path)
-                    .map_err(|e| e.to_string())
+                crate::core::index_relations::index_relations(path).map_err(|e| e.to_string())
             })
             .collect();
 
         let mut all_relations = Vec::new();
-        let mut combined_summary: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut combined_summary: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         let mut errors = Vec::new();
         let mut total_relations = 0usize;
 
@@ -1289,34 +1577,41 @@ pub mod mcp_server {
         }
 
         tool_success(
-            format!("Indexed {} relations from {} files ({})",
-                total_relations, paths.len(),
-                combined_summary.iter().map(|(k,v)| format!("{}:{}", k, v)).collect::<Vec<_>>().join(", ")),
+            format!(
+                "Indexed {} relations from {} files ({})",
+                total_relations,
+                paths.len(),
+                combined_summary
+                    .iter()
+                    .map(|(k, v)| format!("{}:{}", k, v))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Some(json!({
                 "file_count": paths.len(),
                 "total_relations": total_relations,
                 "summary": combined_summary,
                 "files": all_relations,
                 "errors": errors,
-            }))
+            })),
         )
     }
 
     fn handle_save_state() -> Value {
         let project_root = std::env::current_dir().unwrap_or_default();
         match crate::core::state::ProjectState::update(&project_root) {
-            Ok(state) => {
-                tool_success(
-                    format!("Saved state: HEAD={}, {} file hashes",
-                        &state.git_head[..8.min(state.git_head.len())],
-                        state.file_hashes.len()),
-                    Some(json!({
-                        "git_head": state.git_head,
-                        "file_count": state.file_hashes.len(),
-                        "last_analyzed": state.last_analyzed,
-                    }))
-                )
-            }
+            Ok(state) => tool_success(
+                format!(
+                    "Saved state: HEAD={}, {} file hashes",
+                    &state.git_head[..8.min(state.git_head.len())],
+                    state.file_hashes.len()
+                ),
+                Some(json!({
+                    "git_head": state.git_head,
+                    "file_count": state.file_hashes.len(),
+                    "last_analyzed": state.last_analyzed,
+                })),
+            ),
             Err(e) => tool_error(format!("Failed to save state: {}", e)),
         }
     }
@@ -1326,19 +1621,19 @@ pub mod mcp_server {
         let level = crate::core::explore::ZoomLevel::parse(level_str);
 
         match crate::core::explore::explore(&root, target, level) {
-            Ok(result) => {
-                tool_success(
-                    format!("Explored '{}' at level {:?} ({} tokens, {} lines)",
-                        result.path, result.level, result.node.tokens, result.node.lines),
-                    Some(json!({
-                        "path": result.path,
-                        "level": format!("{:?}", result.level),
-                        "node": result.node,
-                        "available_levels": result.available_levels.iter()
-                            .map(|l| format!("{:?}", l)).collect::<Vec<_>>(),
-                    }))
-                )
-            }
+            Ok(result) => tool_success(
+                format!(
+                    "Explored '{}' at level {:?} ({} tokens, {} lines)",
+                    result.path, result.level, result.node.tokens, result.node.lines
+                ),
+                Some(json!({
+                    "path": result.path,
+                    "level": format!("{:?}", result.level),
+                    "node": result.node,
+                    "available_levels": result.available_levels.iter()
+                        .map(|l| format!("{:?}", l)).collect::<Vec<_>>(),
+                })),
+            ),
             Err(e) => tool_error(format!("Explore failed: {}", e)),
         }
     }
@@ -1348,10 +1643,16 @@ pub mod mcp_server {
         let root = std::env::current_dir().unwrap_or_default();
         let project_root = crate::core::find_project_root(&root);
         match crate::llm::AiManager::new(&project_root) {
-            Ok(mgr) => match crate::llm::pipeline::explain_node(&mgr, file_path, node, crate::llm::Resolution::Auto) {
-                Ok((explanation, budget)) => {
-                    tool_success("Explained node".to_string(), Some(json!({ "explanation": explanation, "tokens": budget })))
-                }
+            Ok(mgr) => match crate::llm::pipeline::explain_node(
+                &mgr,
+                file_path,
+                node,
+                crate::llm::Resolution::Auto,
+            ) {
+                Ok((explanation, budget)) => tool_success(
+                    "Explained node".to_string(),
+                    Some(json!({ "explanation": explanation, "tokens": budget })),
+                ),
                 Err(e) => tool_error(format!("Explain failed: {}", e)),
             },
             Err(e) => tool_error(format!("AiManager init failed: {}", e)),
@@ -1359,7 +1660,9 @@ pub mod mcp_server {
     }
     #[cfg(not(feature = "mamba"))]
     fn handle_explain(_file_path: &str, _node: Option<&str>) -> Value {
-        tool_error("explain requires the 'mamba' feature. Recompile with --features mamba".to_string())
+        tool_error(
+            "explain requires the 'mamba' feature. Recompile with --features mamba".to_string(),
+        )
     }
 
     /// `edit_ask`: propose a validated AST edit. Returns the target node,
@@ -1369,7 +1672,12 @@ pub mod mcp_server {
         let root = std::env::current_dir().unwrap_or_default();
         let project_root = crate::core::find_project_root(&root);
         match crate::llm::AiManager::new(&project_root) {
-            Ok(mgr) => match crate::llm::pipeline::propose_edit(&mgr, file_path, request, crate::llm::Resolution::Auto) {
+            Ok(mgr) => match crate::llm::pipeline::propose_edit(
+                &mgr,
+                file_path,
+                request,
+                crate::llm::Resolution::Auto,
+            ) {
                 Ok(proposal) => {
                     // Validate via the Duplex Loop before returning.
                     match crate::GnawTreeWriter::new(file_path) {
@@ -1389,7 +1697,9 @@ pub mod mcp_server {
                                         "tokens": proposal.budget,
                                     })),
                                 ),
-                                Err(e) => tool_error(format!("Proposed edit failed validation: {}", e)),
+                                Err(e) => {
+                                    tool_error(format!("Proposed edit failed validation: {}", e))
+                                }
                             }
                         }
                         Err(e) => tool_error(format!("Failed to open {}: {}", file_path, e)),
@@ -1402,7 +1712,9 @@ pub mod mcp_server {
     }
     #[cfg(not(feature = "mamba"))]
     fn handle_edit_ask(_file_path: &str, _request: &str) -> Value {
-        tool_error("edit_ask requires the 'mamba' feature. Recompile with --features mamba".to_string())
+        tool_error(
+            "edit_ask requires the 'mamba' feature. Recompile with --features mamba".to_string(),
+        )
     }
 
     #[cfg(feature = "mamba")]
@@ -1410,10 +1722,16 @@ pub mod mcp_server {
         let root = std::env::current_dir().unwrap_or_default();
         let project_root = crate::core::find_project_root(&root);
         match crate::llm::AiManager::new(&project_root) {
-            Ok(mgr) => match crate::llm::pipeline::summarize_dir(&mgr, std::path::Path::new(path), max_files, crate::llm::Resolution::Auto) {
-                Ok((result, budget)) => {
-                    tool_success("Summarized directory".to_string(), Some(json!({ "result": result, "tokens": budget })))
-                }
+            Ok(mgr) => match crate::llm::pipeline::summarize_dir(
+                &mgr,
+                std::path::Path::new(path),
+                max_files,
+                crate::llm::Resolution::Auto,
+            ) {
+                Ok((result, budget)) => tool_success(
+                    "Summarized directory".to_string(),
+                    Some(json!({ "result": result, "tokens": budget })),
+                ),
                 Err(e) => tool_error(format!("Summarize failed: {}", e)),
             },
             Err(e) => tool_error(format!("AiManager init failed: {}", e)),
@@ -1421,7 +1739,9 @@ pub mod mcp_server {
     }
     #[cfg(not(feature = "mamba"))]
     fn handle_summarize(_path: &str, _max_files: usize) -> Value {
-        tool_error("summarize requires the 'mamba' feature. Recompile with --features mamba".to_string())
+        tool_error(
+            "summarize requires the 'mamba' feature. Recompile with --features mamba".to_string(),
+        )
     }
 
     #[cfg(feature = "mamba")]
@@ -1429,10 +1749,15 @@ pub mod mcp_server {
         let root = std::env::current_dir().unwrap_or_default();
         let project_root = crate::core::find_project_root(&root);
         match crate::llm::AiManager::new(&project_root) {
-            Ok(mgr) => match crate::llm::pipeline::investigate(&mgr, question, crate::llm::Resolution::Auto) {
-                Ok((result, budget)) => {
-                    tool_success("Investigation complete".to_string(), Some(json!({ "result": result, "tokens": budget })))
-                }
+            Ok(mgr) => match crate::llm::pipeline::investigate(
+                &mgr,
+                question,
+                crate::llm::Resolution::Auto,
+            ) {
+                Ok((result, budget)) => tool_success(
+                    "Investigation complete".to_string(),
+                    Some(json!({ "result": result, "tokens": budget })),
+                ),
                 Err(e) => tool_error(format!("Investigate failed: {}", e)),
             },
             Err(e) => tool_error(format!("AiManager init failed: {}", e)),
@@ -1440,16 +1765,26 @@ pub mod mcp_server {
     }
     #[cfg(not(feature = "mamba"))]
     fn handle_investigate(_question: &str) -> Value {
-        tool_error("investigate requires the 'mamba' feature. Recompile with --features mamba".to_string())
+        tool_error(
+            "investigate requires the 'mamba' feature. Recompile with --features mamba".to_string(),
+        )
     }
 
     /// `add_rule`: validate and add a lint rule (agent-facing way to write rules).
-    fn handle_add_rule(id: &str, language: &str, pattern: &str, severity: &str, message: Option<&str>) -> Value {
+    fn handle_add_rule(
+        id: &str,
+        language: &str,
+        pattern: &str,
+        severity: &str,
+        message: Option<&str>,
+    ) -> Value {
         let rule = crate::core::rules::Rule {
             id: id.to_string(),
             language: language.to_string(),
             severity: crate::core::rules::Severity::parse(severity),
-            message: message.unwrap_or(&format!("Rule {} matched", id)).to_string(),
+            message: message
+                .unwrap_or(&format!("Rule {} matched", id))
+                .to_string(),
             pattern: pattern.to_string(),
         };
         // Validate the pattern compiles for the language.
@@ -1469,16 +1804,22 @@ pub mod mcp_server {
         }
     }
 
-        fn handle_search_nodes(file_path: &str, pattern: &str) -> Value {
+    fn handle_search_nodes(file_path: &str, pattern: &str) -> Value {
         match GnawTreeWriter::new(file_path) {
             Ok(w) => {
                 let mut m = Vec::new();
                 fn find(n: &TreeNode, acc: &mut Vec<Value>, p: &str) {
-                    if acc.len() >= 500 { return; }
-                    if n.content.contains(p) {
-                        acc.push(json!({"path": n.path, "type": n.node_type, "name": n.get_name()}));
+                    if acc.len() >= 500 {
+                        return;
                     }
-                    for c in &n.children { find(c, acc, p); }
+                    if n.content.contains(p) {
+                        acc.push(
+                            json!({"path": n.path, "type": n.node_type, "name": n.get_name()}),
+                        );
+                    }
+                    for c in &n.children {
+                        find(c, acc, p);
+                    }
                 }
                 find(w.analyze(), &mut m, pattern);
                 let mut msg = format!("Found {} matches", m.len());
@@ -1494,23 +1835,36 @@ pub mod mcp_server {
     async fn handle_sense(state: Arc<AppState>, query: &str, file_path: Option<&str>) -> Value {
         #[cfg(feature = "modernbert")]
         {
-            use crate::llm::{GnawSenseBroker, SenseResponse};
-            let broker = match GnawSenseBroker::new(&state.project_root) {
+            use crate::llm::SenseResponse;
+            let broker = match state.sense_broker().await {
                 Ok(b) => b,
                 Err(e) => return tool_error(e.to_string()),
             };
 
             match broker.sense(query, file_path).await {
-                Ok(response) => {
-                    match response {
-                        SenseResponse::Satelite { matches } => {
-                            tool_success("Satelite search results".into(), Some(json!({"matches": matches})))
-                        }
-                        SenseResponse::Zoom { file_path, nodes, impact } => {
-                            tool_success(format!("Zoom search results for {}", file_path), Some(json!({"nodes": nodes, "impact": impact})))
+                Ok(response) => match response {
+                    SenseResponse::Satelite { matches } => {
+                        if matches.is_empty() {
+                            tool_error(format!(
+                                    "Satellite search: no matches for \"{}\". The project semantic index may be missing — build it with `gnawtreewriter ai index`, or pass file_path for single-file zoom search.",
+                                    query
+                                ))
+                        } else {
+                            tool_success(
+                                format!("Satellite search: {} match(es)", matches.len()),
+                                Some(json!({"matches": matches})),
+                            )
                         }
                     }
-                }
+                    SenseResponse::Zoom {
+                        file_path,
+                        nodes,
+                        impact,
+                    } => tool_success(
+                        format!("Zoom search results for {}", file_path),
+                        Some(json!({"nodes": nodes, "impact": impact})),
+                    ),
+                },
                 Err(e) => tool_error(e.to_string()),
             }
         }
@@ -1558,7 +1912,7 @@ pub mod mcp_server {
                                 None,
                                 pulse,
                             )
-                        },
+                        }
                         Err(e) => tool_error(e.to_string()),
                     }
                 }
@@ -1590,8 +1944,11 @@ pub mod mcp_server {
                 Ok(SenseResponse::Zoom { nodes, .. }) if !nodes.is_empty() => {
                     let best_node = &nodes[0];
                     handle_edit_node_internal(state, file_path, &best_node.path, content)
-                },
-                Ok(_) => tool_error(format!("Could not find a semantic match for '{}' in {}", query, file_path)),
+                }
+                Ok(_) => tool_error(format!(
+                    "Could not find a semantic match for '{}' in {}",
+                    query, file_path
+                )),
                 Err(e) => tool_error(e.to_string()),
             }
         }
@@ -1604,7 +1961,9 @@ pub mod mcp_server {
 
     fn handle_read_node(file_path: &str, node_path: &str) -> Value {
         match GnawTreeWriter::new(file_path) {
-            Ok(w) => w.show_node(node_path).map_or_else(|e| tool_error(e.to_string()), |c| tool_success(c, None)),
+            Ok(w) => w
+                .show_node(node_path)
+                .map_or_else(|e| tool_error(e.to_string()), |c| tool_success(c, None)),
             Err(e) => tool_error(format!("IO error: {}", e)), // Corrected: escaped curly brace
         }
     }
@@ -1627,57 +1986,103 @@ pub mod mcp_server {
         match GnawTreeWriter::new(file_path) {
             Ok(writer) => {
                 let old_source = writer.get_source().to_string();
-                let op = EditOperation::Edit { node_path: node_path.to_string(), content: content.to_string() };
+                let op = EditOperation::Edit {
+                    node_path: node_path.to_string(),
+                    content: content.to_string(),
+                };
                 match writer.preview_edit(op) {
                     Ok(new_source) => {
                         let diff = generate_diff_string(&old_source, &new_source);
-                        tool_success(format!("Preview of edit:\n{}", diff), Some(json!({"diff": diff})))
-                    },
+                        tool_success(
+                            format!("Preview of edit:\n{}", diff),
+                            Some(json!({"diff": diff})),
+                        )
+                    }
                     Err(e) => tool_error(e.to_string()),
                 }
-            },
+            }
             Err(e) => tool_error(format!("IO error: {}", e)),
         }
     }
 
-    fn handle_edit_node_internal(state: Arc<AppState>, file_path: &str, node_path: &str, content: &str) -> Value {
+    fn handle_edit_node_internal(
+        state: Arc<AppState>,
+        file_path: &str,
+        node_path: &str,
+        content: &str,
+    ) -> Value {
         match GnawTreeWriter::new(file_path) {
             Ok(mut w) => {
                 let old_source = w.get_source().to_string();
-                let op = EditOperation::Edit { node_path: node_path.to_string(), content: content.to_string() };
-                if let Err(e) = w.edit(op, false) { return tool_error(e.to_string()); }
-                
+                let op = EditOperation::Edit {
+                    node_path: node_path.to_string(),
+                    content: content.to_string(),
+                };
+                if let Err(e) = w.edit(op, false) {
+                    return tool_error(e.to_string());
+                }
+
                 let new_source_loaded = std::fs::read_to_string(file_path).unwrap_or_default();
                 let diff = generate_diff_string(&old_source, &new_source_loaded);
                 let pulse = generate_pulse(state, file_path, node_path);
-                tool_success_with_pulse(format!("Node edited.\nDiff:\n{}", diff), Some(json!({"diff": diff})), pulse)
-            },
+                tool_success_with_pulse(
+                    format!("Node edited.\nDiff:\n{}", diff),
+                    Some(json!({"diff": diff})),
+                    pulse,
+                )
+            }
             Err(e) => tool_error(format!("IO error: {}", e)),
         }
     }
 
-    fn handle_insert_node(state: Arc<AppState>, file_path: &str, parent_path: &str, position: usize, content: &str) -> Value {
+    fn handle_insert_node(
+        state: Arc<AppState>,
+        file_path: &str,
+        parent_path: &str,
+        position: usize,
+        content: &str,
+    ) -> Value {
         match GnawTreeWriter::new(file_path) {
             Ok(mut w) => {
                 let old_source = w.get_source().to_string();
-                let op = EditOperation::Insert { parent_path: parent_path.to_string(), position, content: content.to_string() };
-                if let Err(e) = w.edit(op, false) { return tool_error(e.to_string()); }
-                
+                let op = EditOperation::Insert {
+                    parent_path: parent_path.to_string(),
+                    position,
+                    content: content.to_string(),
+                };
+                if let Err(e) = w.edit(op, false) {
+                    return tool_error(e.to_string());
+                }
+
                 let new_source_loaded = std::fs::read_to_string(file_path).unwrap_or_default();
                 let diff = generate_diff_string(&old_source, &new_source_loaded);
                 let pulse = generate_pulse(state, file_path, parent_path); // Pulse for parent
-                tool_success_with_pulse(format!("Content inserted.\nDiff:\n{}", diff), Some(json!({"diff": diff})), pulse)
-            },
+                tool_success_with_pulse(
+                    format!("Content inserted.\nDiff:\n{}", diff),
+                    Some(json!({"diff": diff})),
+                    pulse,
+                )
+            }
             Err(e) => tool_error(format!("IO error: {}", e)), // Corrected: escaped curly brace
         }
     }
 
-    fn handle_move_node(state: Arc<AppState>, source_file: &str, source_path: &str, target_file: &str, target_path: &str) -> Value {
+    fn handle_move_node(
+        state: Arc<AppState>,
+        source_file: &str,
+        source_path: &str,
+        target_file: &str,
+        target_path: &str,
+    ) -> Value {
         match GnawTreeWriter::new(source_file) {
             Ok(mut src_w) => {
                 let old_source = src_w.get_source().to_string();
-                let delete_op = EditOperation::Delete { node_path: source_path.to_string() };
-                if let Err(e) = src_w.edit(delete_op, false) { return tool_error(e.to_string()); }
+                let delete_op = EditOperation::Delete {
+                    node_path: source_path.to_string(),
+                };
+                if let Err(e) = src_w.edit(delete_op, false) {
+                    return tool_error(e.to_string());
+                }
 
                 let insert_op = EditOperation::Insert {
                     parent_path: target_path.to_string(),
@@ -1687,15 +2092,24 @@ pub mod mcp_server {
                 match GnawTreeWriter::new(target_file) {
                     Ok(mut tgt_w) => {
                         let old_target = tgt_w.get_source().to_string();
-                        if let Err(e) = tgt_w.edit(insert_op, false) { return tool_error(e.to_string()); }
+                        if let Err(e) = tgt_w.edit(insert_op, false) {
+                            return tool_error(e.to_string());
+                        }
                         let new_target = std::fs::read_to_string(target_file).unwrap_or_default();
                         let diff = generate_diff_string(&old_target, &new_target);
                         let pulse = generate_pulse(state, target_file, target_path);
-                        tool_success_with_pulse(format!("Moved from {} [{}] to {} [{}].\nDiff:\n{}", source_file, source_path, target_file, target_path, diff), Some(json!({"diff": diff})), pulse)
-                    },
+                        tool_success_with_pulse(
+                            format!(
+                                "Moved from {} [{}] to {} [{}].\nDiff:\n{}",
+                                source_file, source_path, target_file, target_path, diff
+                            ),
+                            Some(json!({"diff": diff})),
+                            pulse,
+                        )
+                    }
                     Err(e) => tool_error(format!("IO error on target: {}", e)),
                 }
-            },
+            }
             Err(e) => tool_error(format!("IO error on source: {}", e)),
         }
     }
@@ -1704,14 +2118,14 @@ pub mod mcp_server {
         listener: TcpListener,
         token: Option<String>,
         shutdown_signal: F,
-    ) -> Result<()> 
+    ) -> Result<()>
     where
         F: std::future::Future<Output = ()> + Send + 'static,
     {
         let project_root = std::env::current_dir()?;
         let app = Router::new()
             .route("/", post(rpc_handler))
-            .with_state(Arc::new(AppState { token, project_root }));
+            .with_state(Arc::new(AppState::new(token, project_root)));
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal)
             .await?;
@@ -1721,14 +2135,22 @@ pub mod mcp_server {
     pub async fn serve(addr: &str, token: Option<String>) -> Result<()> {
         let listener = TcpListener::bind(addr).await?;
         eprintln!("Starting MCP server on http://{}", listener.local_addr()?); // Fixed: redirected to stderr
-        serve_with_shutdown(listener, token, async { let _ = signal::ctrl_c().await; }).await
+        serve_with_shutdown(listener, token, async {
+            let _ = signal::ctrl_c().await;
+        })
+        .await
     }
 
     pub async fn status(url: &str, token: Option<String>) -> Result<()> {
         let client = reqwest::Client::new();
         let mut req = client.post(url);
-        if let Some(t) = token { req = req.header("Authorization", format!("Bearer {}", t)); } // Corrected: escaped curly brace
-        let _ = req.json(&json!({"jsonrpc":"2.0","method":"initialize","id":1})).send().await?;
+        if let Some(t) = token {
+            req = req.header("Authorization", format!("Bearer {}", t));
+        } // Corrected: escaped curly brace
+        let _ = req
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await?;
         eprintln!("✓ Server ready");
         Ok(())
     }
