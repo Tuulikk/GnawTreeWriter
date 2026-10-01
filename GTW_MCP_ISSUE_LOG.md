@@ -207,6 +207,37 @@ stora träd.
 
 ---
 
+## 2026-10-01 — UTF-8-audit efter omgång 4: 4 fler byte-slice-bomber funna + åtgärdade
+
+**Kontext:** Användaren: "UTF-8-fixar är redan gjorda — finns fler gömda?"
+Systematisk audit (`rg` efter `&x[..N]`, `[x.len()-N..]`, byte-baserad
+chunking) bekräftade misstanken. Dagens panik var alltså inte en enstaka
+slarveri utan en klass.
+
+| # | Fil:rad | Mönster | Risk | Åtgärd |
+|---|---|---|---|---|
+| 1 | `llm/pipeline.rs:460` | `capped[..3000]` på godtycklig fil-content | panik (evidens-läsning i AI-pipeline) | chars().take(3000) |
+| 2 | `llm/project_indexer.rs:118` | `&content[..97]` — exakt kopia av dagens bugg | panik (project index-preview) | delad `truncate_preview()` |
+| 3 | `llm/project_indexer.rs:108` | `&chunk[..len().min(100)]` | panik | truncate_preview |
+| 4 | `llm/project_indexer.rs:146-148` | `chunk_text` BYTE-baserad (`text[start..end]`) | panik på CJK/emoji >8000 tecken | char-baserad (Vec<char>) ± tester |
+| 5 | `llm/project_indexer.rs:96` | chunk-tröskel 15000 tecken vs rope 8192 tokens | modellkrasch (CJK ≈ 1 token/tecken) | tröskel 8000, chunks 4000/500 |
+| 6 | `cli.rs:4061` | `&first_line[..22]` | panik (removed-preview) | chars().take(22) |
+| 7 | `core/secrets.rs:292` | `&secret[len-4..]` | panik (defensiv) | Vec<char>-redact |
+
+**Granskade men OK:** `mcp/mod.rs:1398` (`git status --porcelain` — ASCII-prefix
+per formatet), `cli.rs:3026` + `core/report.rs:46` (hex-txn-ID:n), 
+tree-sitter-offset-slicear (giltiga UTF-8-gränser per parserkontrakt).
+
+**Validering:** clippy -D warnings ren, 155+ lib-tester gröna (inkl. nya
+chunk_text-regressionstester), binär 0.9.7 ominstallerad, sanity-prov OK.
+
+**Disciplin-notering:** byte-slicear på användarkontroll strings ska aldrig
+skrivas — `truncate_preview()` (gnaw_sense) eller `chars().take(n)` är
+mönstret. Kvar i registry: att lägga till en lint-regel (gnawtreewriter
+add_rule) som flaggar `&X[..N]` på strängar i denna kodbas.
+
+---
+
 <!-- Ny post: kopiera mallen nedan
 ## ÅÅÅÅ-MM-DD — kort rubrik
 **Kontext:**
