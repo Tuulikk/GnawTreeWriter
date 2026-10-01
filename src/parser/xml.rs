@@ -1,4 +1,4 @@
-use crate::parser::{TreeNode, ParserEngine, ParseResult};
+use crate::parser::{ParseResult, ParserEngine, TreeNode};
 use xmltree::{Element, XMLNode};
 
 pub struct XmlParser;
@@ -103,7 +103,9 @@ impl ParserEngine for XmlParser {
         if let Some(rel_start) = code[current_pos..].find(&format!("<{}", elem.name)) {
             let root_abs_start = current_pos + rel_start;
             // Find its matching close
-            if let Some(rel_close) = Self::find_matching_close_in_slice(&code[root_abs_start..], 0, &elem.name) {
+            if let Some(rel_close) =
+                Self::find_matching_close_in_slice(&code[root_abs_start..], 0, &elem.name)
+            {
                 let root_abs_end = root_abs_start + rel_close;
                 let root_node = self.element_to_treenode_with_span(
                     &elem,
@@ -173,7 +175,9 @@ impl XmlParser {
             let mut attrs: Vec<TreeNode> = Vec::new();
             for (i, (k, v)) in el.attributes.iter().enumerate() {
                 let attr_path = format!("{}.attributes.{}", path, i);
-                attrs.push(TreeNode { start_col: 0, end_col: 0, 
+                attrs.push(TreeNode {
+                    start_col: 0,
+                    end_col: 0,
                     id: format!("{}.name", attr_path),
                     path: format!("{}.name", attr_path),
                     node_type: "name".to_string(),
@@ -182,7 +186,9 @@ impl XmlParser {
                     end_line,
                     children: vec![],
                 });
-                attrs.push(TreeNode { start_col: 0, end_col: 0, 
+                attrs.push(TreeNode {
+                    start_col: 0,
+                    end_col: 0,
                     id: format!("{}.value", attr_path),
                     path: format!("{}.value", attr_path),
                     node_type: "value".to_string(),
@@ -192,7 +198,9 @@ impl XmlParser {
                     children: vec![],
                 });
             }
-            children.push(TreeNode { start_col: 0, end_col: 0, 
+            children.push(TreeNode {
+                start_col: 0,
+                end_col: 0,
                 id: format!("{}.attributes", path),
                 path: format!("{}.attributes", path),
                 node_type: "attributes".to_string(),
@@ -242,7 +250,9 @@ impl XmlParser {
                                 + 1;
                             let e_line =
                                 source[..gt_abs + 1].chars().filter(|c| *c == '\n').count() + 1;
-                            children.push(TreeNode { start_col: 0, end_col: 0, 
+                            children.push(TreeNode {
+                                start_col: 0,
+                                end_col: 0,
                                 id: child_path.clone(),
                                 path: child_path.clone(),
                                 node_type: "element".to_string(),
@@ -254,7 +264,9 @@ impl XmlParser {
                             search_pos = gt_abs + 1;
                         } else {
                             // Last resort: no '>' found, fallback to name-only node
-                            children.push(TreeNode { start_col: 0, end_col: 0, 
+                            children.push(TreeNode {
+                                start_col: 0,
+                                end_col: 0,
                                 id: child_path.clone(),
                                 path: child_path.clone(),
                                 node_type: "element".to_string(),
@@ -281,7 +293,9 @@ impl XmlParser {
                                 let e_line2 =
                                     source[..gt_abs2 + 1].chars().filter(|c| *c == '\n').count()
                                         + 1;
-                                children.push(TreeNode { start_col: 0, end_col: 0, 
+                                children.push(TreeNode {
+                                    start_col: 0,
+                                    end_col: 0,
                                     id: child_path.clone(),
                                     path: child_path.clone(),
                                     node_type: "element".to_string(),
@@ -292,7 +306,9 @@ impl XmlParser {
                                 });
                                 search_pos = gt_abs2 + 1;
                             } else {
-                                children.push(TreeNode { start_col: 0, end_col: 0, 
+                                children.push(TreeNode {
+                                    start_col: 0,
+                                    end_col: 0,
                                     id: child_path.clone(),
                                     path: child_path.clone(),
                                     node_type: "element".to_string(),
@@ -304,7 +320,9 @@ impl XmlParser {
                             }
                         } else {
                             // No match at all, fallback to name-only node
-                            children.push(TreeNode { start_col: 0, end_col: 0, 
+                            children.push(TreeNode {
+                                start_col: 0,
+                                end_col: 0,
                                 id: child_path.clone(),
                                 path: child_path.clone(),
                                 node_type: "element".to_string(),
@@ -326,7 +344,9 @@ impl XmlParser {
                                 source[..t_abs_start].chars().filter(|c| *c == '\n').count() + 1;
                             let e_line =
                                 source[..t_abs_end].chars().filter(|c| *c == '\n').count() + 1;
-                            children.push(TreeNode { start_col: 0, end_col: 0, 
+                            children.push(TreeNode {
+                                start_col: 0,
+                                end_col: 0,
                                 id: child_path.clone(),
                                 path: child_path.clone(),
                                 node_type: "text".to_string(),
@@ -337,7 +357,9 @@ impl XmlParser {
                             });
                             search_pos = t_abs_end;
                         } else {
-                            children.push(TreeNode { start_col: 0, end_col: 0, 
+                            children.push(TreeNode {
+                                start_col: 0,
+                                end_col: 0,
                                 id: child_path.clone(),
                                 path: child_path.clone(),
                                 node_type: "text".to_string(),
@@ -357,7 +379,9 @@ impl XmlParser {
                         let s_line =
                             source[..c_abs_start].chars().filter(|c| *c == '\n').count() + 1;
                         let e_line = source[..c_abs_end].chars().filter(|c| *c == '\n').count() + 1;
-                        children.push(TreeNode { start_col: 0, end_col: 0, 
+                        children.push(TreeNode {
+                            start_col: 0,
+                            end_col: 0,
                             id: child_path.clone(),
                             path: child_path.clone(),
                             node_type: "cdata".to_string(),
@@ -368,7 +392,9 @@ impl XmlParser {
                         });
                         search_pos = c_abs_end;
                     } else {
-                        children.push(TreeNode { start_col: 0, end_col: 0, 
+                        children.push(TreeNode {
+                            start_col: 0,
+                            end_col: 0,
                             id: child_path.clone(),
                             path: child_path.clone(),
                             node_type: "cdata".to_string(),
@@ -387,7 +413,9 @@ impl XmlParser {
                         let s_line =
                             source[..c_abs_start].chars().filter(|c| *c == '\n').count() + 1;
                         let e_line = source[..c_abs_end].chars().filter(|c| *c == '\n').count() + 1;
-                        children.push(TreeNode { start_col: 0, end_col: 0, 
+                        children.push(TreeNode {
+                            start_col: 0,
+                            end_col: 0,
                             id: child_path.clone(),
                             path: child_path.clone(),
                             node_type: "comment".to_string(),
@@ -398,7 +426,9 @@ impl XmlParser {
                         });
                         search_pos = c_abs_end;
                     } else {
-                        children.push(TreeNode { start_col: 0, end_col: 0, 
+                        children.push(TreeNode {
+                            start_col: 0,
+                            end_col: 0,
                             id: child_path.clone(),
                             path: child_path.clone(),
                             node_type: "comment".to_string(),
@@ -415,14 +445,16 @@ impl XmlParser {
             }
         }
 
-        TreeNode { start_col: 0, end_col: 0, 
+        TreeNode {
+            start_col: 0,
+            end_col: 0,
             id: path.clone(),
             path,
             node_type: "element".to_string(),
             content: opening,
             start_line,
             end_line,
-            children, 
+            children,
         }
     }
 
@@ -448,16 +480,13 @@ impl XmlParser {
                         pos = o + open_pat.len();
                     } else {
                         // found a close at `c`
-                        if let Some(gt) = slice[c..].find('>') {
-                            let end_pos = c + gt + 1;
-                            depth -= 1;
-                            if depth == 0 {
-                                return Some(end_pos);
-                            }
-                            pos = end_pos;
-                        } else {
-                            return None;
+                        let gt = slice[c..].find('>')?;
+                        let end_pos = c + gt + 1;
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(end_pos);
                         }
+                        pos = end_pos;
                     }
                 }
                 (Some(o), None) => {
@@ -465,16 +494,13 @@ impl XmlParser {
                     pos = o + open_pat.len();
                 }
                 (None, Some(c)) => {
-                    if let Some(gt) = slice[c..].find('>') {
-                        let end_pos = c + gt + 1;
-                        depth -= 1;
-                        if depth == 0 {
-                            return Some(end_pos);
-                        }
-                        pos = end_pos;
-                    } else {
-                        return None;
+                    let gt = slice[c..].find('>')?;
+                    let end_pos = c + gt + 1;
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(end_pos);
                     }
+                    pos = end_pos;
                 }
                 (None, None) => break,
             }
