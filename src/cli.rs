@@ -3,11 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::core::{
-    find_project_root, EditOperation, GnawTreeWriter, OperationType, RestorationEngine, TagManager,
-    TransactionLog, UndoRedoManager, gnaw_find, inspect, blast, gnaw_refactor, gnaw_diff, gnaw_graph, visualizer::TreeVisualizer,
+    blast, find_project_root, gnaw_diff, gnaw_find, gnaw_graph, gnaw_refactor, inspect,
+    visualizer::TreeVisualizer, EditOperation, GnawTreeWriter, OperationType, RestorationEngine,
+    TagManager, TransactionLog, UndoRedoManager,
 };
 #[cfg(feature = "modernbert")]
-use crate::llm::{GnawSenseBroker, SenseResponse, SemanticIndexManager};
+use crate::llm::{GnawSenseBroker, SemanticIndexManager, SenseResponse};
 use crate::parser::TreeNode;
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -111,7 +112,10 @@ enum Commands {
         node_path: Option<String>,
         #[arg(long)]
         tag: Option<String>,
-        #[arg(required_unless_present = "source_file", required_unless_present = "ask")]
+        #[arg(
+            required_unless_present = "source_file",
+            required_unless_present = "ask"
+        )]
         content: Option<String>,
         #[arg(long, conflicts_with = "content")]
         source_file: Option<String>,
@@ -253,9 +257,7 @@ enum Commands {
     /// Comprehensive health check of the system
     Status,
     /// Generate a semantic code quality report
-    SemanticReport {
-        file_path: String,
-    },
+    SemanticReport { file_path: String },
     /// Convert a unified diff to a batch
     DiffToBatch {
         diff_file: String,
@@ -352,17 +354,17 @@ enum Commands {
         #[arg(short, long)]
         preview: bool,
     },
-        /// Move a node to a new location (atomically delete + reinsert)
-        Move {
-            source_file: String,
-            source_path: String,
-            #[arg(required_unless_present = "target_path")]
-            target_file: Option<String>,
-            #[arg(required_unless_present = "target_file")]
-            target_path: Option<String>,
-            #[arg(short, long)]
-            preview: bool,
-        },
+    /// Move a node to a new location (atomically delete + reinsert)
+    Move {
+        source_file: String,
+        source_path: String,
+        #[arg(required_unless_present = "target_path")]
+        target_file: Option<String>,
+        #[arg(required_unless_present = "target_file")]
+        target_path: Option<String>,
+        #[arg(short, long)]
+        preview: bool,
+    },
     /// Delete a node
     Delete {
         file_path: String,
@@ -719,7 +721,13 @@ impl Cli {
                 offset,
             } => {
                 let writer = GnawTreeWriter::new(&file_path)?;
-                list_nodes(&file_path, writer.analyze(), filter_type.as_deref(), limit, offset);
+                list_nodes(
+                    &file_path,
+                    writer.analyze(),
+                    filter_type.as_deref(),
+                    limit,
+                    offset,
+                );
             }
             Commands::Show {
                 file_path,
@@ -777,7 +785,7 @@ impl Cli {
 
                 let content = resolve_content(content, source_file, unescape_newlines)?;
                 let mut writer = GnawTreeWriter::new(&file_path)?;
-                
+
                 // Capture old node for visual diff
                 let old_node = writer.analyze().clone().find_path(&target_path).cloned();
 
@@ -790,7 +798,12 @@ impl Cli {
                     print_diff(writer.get_source(), &modified);
                 } else {
                     writer.edit(op, force)?;
-                    Self::show_visual_diff(&writer, &target_path, old_node.as_ref(), narrative.as_deref());
+                    Self::show_visual_diff(
+                        &writer,
+                        &target_path,
+                        old_node.as_ref(),
+                        narrative.as_deref(),
+                    );
                     show_hint();
                 }
             }
@@ -985,7 +998,14 @@ impl Cli {
                 unique,
             } => {
                 let preview = preview || global_dry_run;
-                Self::handle_quick_insert(&file, &after, filter.as_deref(), &content, preview, unique)?;
+                Self::handle_quick_insert(
+                    &file,
+                    &after,
+                    filter.as_deref(),
+                    &content,
+                    preview,
+                    unique,
+                )?;
             }
             Commands::Rename {
                 symbol_name,
@@ -1087,7 +1107,15 @@ impl Cli {
                 rule,
                 discover,
             } => {
-                Self::handle_lint(&paths, &format, recursive, rules.as_deref(), severity.as_deref(), rule.as_deref(), discover)?;
+                Self::handle_lint(
+                    &paths,
+                    &format,
+                    recursive,
+                    rules.as_deref(),
+                    severity.as_deref(),
+                    rule.as_deref(),
+                    discover,
+                )?;
             }
             Commands::DebugHash { content } => {
                 Self::handle_debug_hash(&content)?;
@@ -1148,25 +1176,72 @@ impl Cli {
                 let preview = preview || global_dry_run;
                 Self::handle_diff_to_batch(&diff_file, output.as_deref(), preview)?;
             }
-            Commands::Search { file_path, pattern, filter_type, limit } => {
+            Commands::Search {
+                file_path,
+                pattern,
+                filter_type,
+                limit,
+            } => {
                 Self::handle_search(&file_path, &pattern, filter_type.as_deref(), limit)?;
             }
             Commands::Skeleton { file_path, depth } => {
                 Self::handle_skeleton(&file_path, depth)?;
             }
-            Commands::Compress { file_path, output, stats } => {
+            Commands::Compress {
+                file_path,
+                output,
+                stats,
+            } => {
                 Self::handle_compress(&file_path, output.as_deref(), stats)?;
             }
-            Commands::Pack { path, format, compress, output, include, ignore, instructions, no_redact, compress_threshold } => {
-                Self::handle_pack(&path, &format, compress, output.as_deref(), include.as_deref(), ignore.as_deref(), instructions.as_deref(), !no_redact, compress_threshold)?;
+            Commands::Pack {
+                path,
+                format,
+                compress,
+                output,
+                include,
+                ignore,
+                instructions,
+                no_redact,
+                compress_threshold,
+            } => {
+                Self::handle_pack(
+                    &path,
+                    &format,
+                    compress,
+                    output.as_deref(),
+                    include.as_deref(),
+                    ignore.as_deref(),
+                    instructions.as_deref(),
+                    !no_redact,
+                    compress_threshold,
+                )?;
             }
-            Commands::Curate { task, path, strategy, max_tokens, max_files, output } => {
-                Self::handle_curate(&task, &path, &strategy, max_tokens, max_files, output.as_deref())?;
+            Commands::Curate {
+                task,
+                path,
+                strategy,
+                max_tokens,
+                max_files,
+                output,
+            } => {
+                Self::handle_curate(
+                    &task,
+                    &path,
+                    &strategy,
+                    max_tokens,
+                    max_files,
+                    output.as_deref(),
+                )?;
             }
             Commands::Stats { path, format } => {
                 Self::handle_stats(&path, &format)?;
             }
-            Commands::Explore { target, level, format } => {
+            Commands::Explore {
+                target,
+                level,
+                format,
+            } => {
                 Self::handle_explore(&target, &level, &format)?;
             }
             Commands::Status => {
@@ -1175,27 +1250,67 @@ impl Cli {
             Commands::SemanticReport { file_path } => {
                 Self::handle_semantic_report(&file_path).await?;
             }
-            Commands::Sense { query, file, deep, auto_index } => {
-                Self::handle_sense(&query, file.as_ref().and_then(|p| p.to_str()), deep, auto_index).await?;
+            Commands::Sense {
+                query,
+                file,
+                deep,
+                auto_index,
+            } => {
+                Self::handle_sense(
+                    &query,
+                    file.as_ref().and_then(|p| p.to_str()),
+                    deep,
+                    auto_index,
+                )
+                .await?;
             }
-            Commands::SenseInsert { file, anchor, content, intent, preview } => {
+            Commands::SenseInsert {
+                file,
+                anchor,
+                content,
+                intent,
+                preview,
+            } => {
                 Self::handle_sense_insert(file, anchor, content, intent, preview).await?;
             }
-            Commands::Explain { file, node, resolution } => {
+            Commands::Explain {
+                file,
+                node,
+                resolution,
+            } => {
                 Self::handle_explain(&file, node.as_deref(), &resolution)?;
             }
-            Commands::Summarize { path, max_files, resolution } => {
+            Commands::Summarize {
+                path,
+                max_files,
+                resolution,
+            } => {
                 Self::handle_summarize(&path, max_files, &resolution)?;
             }
-            Commands::Investigate { question, resolution } => {
+            Commands::Investigate {
+                question,
+                resolution,
+            } => {
                 Self::handle_investigate(&question, &resolution)?;
             }
             Commands::Scaffold { file_path, schema } => {
                 Self::handle_scaffold(&file_path, &schema)?;
             }
             Commands::Rules { command } => match command {
-                RuleSubcommands::Add { id, language, pattern, severity, message } => {
-                    Self::handle_rules_add(&id, &language, &pattern, &severity, message.as_deref())?;
+                RuleSubcommands::Add {
+                    id,
+                    language,
+                    pattern,
+                    severity,
+                    message,
+                } => {
+                    Self::handle_rules_add(
+                        &id,
+                        &language,
+                        &pattern,
+                        &severity,
+                        message.as_deref(),
+                    )?;
                 }
                 RuleSubcommands::List => {
                     Self::handle_rules_list()?;
@@ -1218,13 +1333,22 @@ impl Cli {
                     Self::handle_ai_report(limit, output).await?;
                 }
             },
-                
-            Commands::Alf { message, actor, txn, kind, tag, id, list, limit } => {
-            Self::handle_alf(message, actor, txn, kind, tag, id, list, limit)?;
-                }
-            
+
+            Commands::Alf {
+                message,
+                actor,
+                txn,
+                kind,
+                tag,
+                id,
+                list,
+                limit,
+            } => {
+                Self::handle_alf(message, actor, txn, kind, tag, id, list, limit)?;
+            }
+
             Commands::Version => {
-Self::handle_version()?;
+                Self::handle_version()?;
             }
             Commands::Doctor { format } => {
                 Self::handle_doctor(format.as_deref())?;
@@ -1240,7 +1364,15 @@ Self::handle_version()?;
                 narrative,
                 force,
             } => {
-                Self::handle_semantic_edit(&file_path, &query, content, source_file, narrative, force).await?;
+                Self::handle_semantic_edit(
+                    &file_path,
+                    &query,
+                    content,
+                    source_file,
+                    narrative,
+                    force,
+                )
+                .await?;
             }
             Commands::GnawFind {
                 pattern,
@@ -1356,7 +1488,10 @@ Self::handle_version()?;
 
         match format {
             Some("json") => {
-                println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&result).unwrap_or_default()
+                );
             }
             _ => {
                 print!("{}", blast::format_blast_text(&result));
@@ -1647,7 +1782,12 @@ Use --no-preview to write batch file"
         Ok(())
     }
 
-    fn handle_search(file_path: &str, pattern: &str, filter_type: Option<&str>, limit: Option<usize>) -> Result<()> {
+    fn handle_search(
+        file_path: &str,
+        pattern: &str,
+        filter_type: Option<&str>,
+        limit: Option<usize>,
+    ) -> Result<()> {
         let writer = GnawTreeWriter::new(file_path)?;
         let tree = writer.analyze();
         let mut matches = Vec::new();
@@ -1679,7 +1819,12 @@ Use --no-preview to write batch file"
         if matches.is_empty() {
             println!("No matches found for '{}' in {}", pattern, file_path);
         } else {
-            println!("Found {} matches in {} (showing {}):", total_found, file_path, matches.len());
+            println!(
+                "Found {} matches in {} (showing {}):",
+                total_found,
+                file_path,
+                matches.len()
+            );
             for (path, node_type, name) in &matches {
                 println!("  {} [{}] '{}'", path, node_type, name);
             }
@@ -1791,7 +1936,10 @@ Use --no-preview to write batch file"
             eprintln!("  Compressed tokens: {}", result.compressed_tokens);
         }
         if result.secrets_redacted > 0 {
-            eprintln!("  ⚠ Secrets redacted: {} (use --no-redact to disable)", result.secrets_redacted);
+            eprintln!(
+                "  ⚠ Secrets redacted: {} (use --no-redact to disable)",
+                result.secrets_redacted
+            );
         }
 
         match output {
@@ -1821,7 +1969,8 @@ Use --no-preview to write batch file"
         }
 
         let strategy = crate::core::curator::CurationStrategy::parse(strategy);
-        let result = crate::core::curator::curate_context(root, task, strategy, max_tokens, max_files)?;
+        let result =
+            crate::core::curator::curate_context(root, task, strategy, max_tokens, max_files)?;
 
         eprintln!("{}", result.summary);
         eprintln!();
@@ -1831,10 +1980,17 @@ Use --no-preview to write batch file"
         content.push_str("# Curated Context\n\n");
         content.push_str(&format!("**Task:** {}\n", task));
         content.push_str(&format!("**Strategy:** {}\n", result.strategy));
-        content.push_str(&format!("**Files:** {} ({} tokens)\n\n", result.files.len(), result.total_tokens));
+        content.push_str(&format!(
+            "**Files:** {} ({} tokens)\n\n",
+            result.files.len(),
+            result.total_tokens
+        ));
 
         for f in &result.files {
-            content.push_str(&format!("## {} (score: {:.2}, {} tokens)\n", f.path, f.score, f.tokens));
+            content.push_str(&format!(
+                "## {} (score: {:.2}, {} tokens)\n",
+                f.path, f.score, f.tokens
+            ));
             content.push_str(&format!("**Reason:** {}\n\n", f.reason));
 
             // Include file content
@@ -1881,8 +2037,10 @@ Use --no-preview to write batch file"
                 println!();
                 println!("Languages:");
                 for lang in &stats.languages {
-                    println!("  {}: {} files, {} tokens (avg {})",
-                        lang.name, lang.file_count, lang.total_tokens, lang.avg_tokens_per_file);
+                    println!(
+                        "  {}: {} files, {} tokens (avg {})",
+                        lang.name, lang.file_count, lang.total_tokens, lang.avg_tokens_per_file
+                    );
                 }
                 println!();
                 println!("Largest files:");
@@ -1897,8 +2055,14 @@ Use --no-preview to write batch file"
                     let status = if w.fits { "✓ fits" } else { "✗ too large" };
                     let bar_len = (w.utilization * 20.0).min(20.0) as usize;
                     let bar = "#".repeat(bar_len);
-                    println!("  {:24} {:>10} tokens  [{:<20}] {:.0}%  {}",
-                        w.name, w.max_tokens, bar, w.utilization * 100.0, status);
+                    println!(
+                        "  {:24} {:>10} tokens  [{:<20}] {:.0}%  {}",
+                        w.name,
+                        w.max_tokens,
+                        bar,
+                        w.utilization * 100.0,
+                        status
+                    );
                 }
             }
             _ => {
@@ -1921,9 +2085,13 @@ Use --no-preview to write batch file"
             }
             "text" | "summary" => {
                 Self::print_explore_tree(&result.node, 0);
-                println!("\nTokens: {} | Lines: {} | Level: {:?}",
-                    result.node.tokens, result.node.lines, result.level);
-                let levels: Vec<String> = result.available_levels.iter()
+                println!(
+                    "\nTokens: {} | Lines: {} | Level: {:?}",
+                    result.node.tokens, result.node.lines, result.level
+                );
+                let levels: Vec<String> = result
+                    .available_levels
+                    .iter()
                     .map(|l| format!("{:?}", l))
                     .collect();
                 println!("Available zoom: {}", levels.join(", "));
@@ -1951,10 +2119,15 @@ Use --no-preview to write batch file"
         };
 
         if node.node_type == "file" || node.node_type == "project" {
-            println!("{}{} {} ({} tokens, {} lines)",
-                indent, type_icon, node.name, node.tokens, node.lines);
+            println!(
+                "{}{} {} ({} tokens, {} lines)",
+                indent, type_icon, node.name, node.tokens, node.lines
+            );
         } else {
-            println!("{}{} {} ({} tokens)", indent, type_icon, node.name, node.tokens);
+            println!(
+                "{}{} {} ({} tokens)",
+                indent, type_icon, node.name, node.tokens
+            );
         }
 
         // Show children (limited for readability)
@@ -1982,7 +2155,10 @@ Use --no-preview to write batch file"
                     println!("Summary: {}", report.summary);
                     println!("\nFindings:");
                     for finding in report.findings {
-                        println!("- [{}] {}: {}", finding.severity, finding.category, finding.message);
+                        println!(
+                            "- [{}] {}: {}",
+                            finding.severity, finding.category, finding.message
+                        );
                     }
                 }
                 Err(e) => {
@@ -1998,7 +2174,12 @@ Use --no-preview to write batch file"
         Ok(())
     }
 
-    async fn handle_sense(query: &str, file_path: Option<&str>, deep: bool, auto_index: bool) -> Result<()> {
+    async fn handle_sense(
+        query: &str,
+        file_path: Option<&str>,
+        deep: bool,
+        auto_index: bool,
+    ) -> Result<()> {
         #[cfg(feature = "modernbert")]
         {
             let json_mode = std::env::var("GNAW_JSON").is_ok();
@@ -2065,7 +2246,10 @@ Use --no-preview to write batch file"
             match response {
                 SenseResponse::Satelite { matches } => {
                     if matches.is_empty() {
-                        println!("\n🛰️ Satelite View: No relevant results found for \"{}\".", query);
+                        println!(
+                            "\n🛰️ Satelite View: No relevant results found for \"{}\".",
+                            query
+                        );
                         println!("The index may be outdated. Try running 'gnawtreewriter ai index' again.");
                         return Ok(());
                     }
@@ -2079,11 +2263,21 @@ Use --no-preview to write batch file"
                     for (i, m) in matches.iter().enumerate() {
                         println!("  {}. {} (score: {:.2})", i + 1, m.file_path, m.score);
                     }
-                    println!("\nTip: Use `gnawtreewriter sense \"{}\" --file {}` to zoom in.", query, matches[0].file_path);
+                    println!(
+                        "\nTip: Use `gnawtreewriter sense \"{}\" --file {}` to zoom in.",
+                        query, matches[0].file_path
+                    );
                 }
-                SenseResponse::Zoom { file_path, nodes, impact } => {
+                SenseResponse::Zoom {
+                    file_path,
+                    nodes,
+                    impact,
+                } => {
                     if nodes.is_empty() {
-                        println!("\n🔍 Zoom View: No relevant nodes found in {} for \"{}\".", file_path, query);
+                        println!(
+                            "\n🔍 Zoom View: No relevant nodes found in {} for \"{}\".",
+                            file_path, query
+                        );
                         return Ok(());
                     }
 
@@ -2129,13 +2323,21 @@ Use --no-preview to write batch file"
             let current_dir = std::env::current_dir()?;
             let project_root = find_project_root(&current_dir);
             let broker = GnawSenseBroker::new(&project_root)?;
-            let file_path = file.to_str().ok_or_else(|| anyhow::anyhow!("Invalid file path"))?;
+            let file_path = file
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?;
 
             println!("🧠 GnawSense is searching for anchor: \"{}\"...", anchor);
             let proposal = broker.propose_edit(&anchor, file_path, &intent).await?;
-            
-            println!("📍 Found anchor at {} (confidence: {:.2})", proposal.anchor_path, proposal.confidence);
-            println!("🔧 Action: {} at {} position {}", proposal.suggested_op, proposal.parent_path, proposal.position);
+
+            println!(
+                "📍 Found anchor at {} (confidence: {:.2})",
+                proposal.anchor_path, proposal.confidence
+            );
+            println!(
+                "🔧 Action: {} at {} position {}",
+                proposal.suggested_op, proposal.parent_path, proposal.position
+            );
 
             let mut writer = GnawTreeWriter::new(file_path)?;
             let op = if proposal.suggested_op == "edit" {
@@ -2153,11 +2355,25 @@ Use --no-preview to write batch file"
 
             if preview {
                 let modified = writer.preview_edit(op)?;
-                println!("\n--- Preview of Semantic {} ---", if proposal.suggested_op == "edit" { "Replacement" } else { "Insertion" });
+                println!(
+                    "\n--- Preview of Semantic {} ---",
+                    if proposal.suggested_op == "edit" {
+                        "Replacement"
+                    } else {
+                        "Insertion"
+                    }
+                );
                 print_diff(writer.get_source(), &modified);
             } else {
                 writer.edit(op, false)?;
-                println!("✓ Successfully {} code semantically.", if proposal.suggested_op == "edit" { "replaced" } else { "inserted" });
+                println!(
+                    "✓ Successfully {} code semantically.",
+                    if proposal.suggested_op == "edit" {
+                        "replaced"
+                    } else {
+                        "inserted"
+                    }
+                );
             }
         }
         #[cfg(not(feature = "modernbert"))]
@@ -2215,8 +2431,10 @@ Use --no-preview to write batch file"
         println!("── budget ───────────────────────────────");
         println!(
             "  tokens: {} in / {} out (expected) | {} in / {} out (actual) | calls: {}",
-            budget.expected_input, budget.expected_output,
-            budget.actual_input, budget.actual_output,
+            budget.expected_input,
+            budget.expected_output,
+            budget.actual_input,
+            budget.actual_output,
             budget.calls
         );
         println!(
@@ -2238,7 +2456,10 @@ Use --no-preview to write batch file"
         let mgr = crate::llm::AiManager::new(&project_root)?;
         let res = crate::llm::Resolution::Auto;
 
-        println!("🤖 Asking local model to propose an edit for: \"{}\"", request);
+        println!(
+            "🤖 Asking local model to propose an edit for: \"{}\"",
+            request
+        );
         let proposal = crate::llm::pipeline::propose_edit(&mgr, file_path, request, res)?;
         println!("   target node: {}", proposal.node_path);
         println!("   proposed content ({} chars)\n", proposal.content.len());
@@ -2278,7 +2499,9 @@ Use --no-preview to write batch file"
                 );
             }
         };
-        let new_type = new_tree.find_path(&proposal.node_path).map(|n| n.node_type.clone());
+        let new_type = new_tree
+            .find_path(&proposal.node_path)
+            .map(|n| n.node_type.clone());
         if let (Some(old_t), Some(new_t)) = (orig_type, new_type) {
             if old_t != new_t {
                 anyhow::bail!(
@@ -2302,7 +2525,11 @@ Use --no-preview to write batch file"
         }
 
         // Show the diff (preview or actual).
-        let old_node = writer.analyze().clone().find_path(&proposal.node_path).cloned();
+        let old_node = writer
+            .analyze()
+            .clone()
+            .find_path(&proposal.node_path)
+            .cloned();
         if preview || !force {
             println!("--- Proposed diff (run with --force to apply) ---");
             print_diff(writer.get_source(), &modified);
@@ -2318,7 +2545,12 @@ Use --no-preview to write batch file"
         Ok(())
     }
     #[cfg(not(feature = "mamba"))]
-    fn handle_edit_ask(_file_path: &str, _request: &str, _preview: bool, _force: bool) -> Result<()> {
+    fn handle_edit_ask(
+        _file_path: &str,
+        _request: &str,
+        _preview: bool,
+        _force: bool,
+    ) -> Result<()> {
         Self::err_mamba_disabled()
     }
 
@@ -2326,13 +2558,21 @@ Use --no-preview to write batch file"
     /// occurrence; GTW applies the same old→new replacement to every matching
     /// line in the file (rule-guided multi-edit).
     #[cfg(feature = "mamba")]
-    fn handle_edit_ask_all(file_path: &str, request: &str, preview: bool, force: bool) -> Result<()> {
+    fn handle_edit_ask_all(
+        file_path: &str,
+        request: &str,
+        preview: bool,
+        force: bool,
+    ) -> Result<()> {
         let json_mode = std::env::var("GNAW_JSON").is_ok();
         let project_root = find_project_root(&std::env::current_dir()?);
         let mgr = crate::llm::AiManager::new(&project_root)?;
         let res = crate::llm::Resolution::Auto;
 
-        println!("🤖 Asking local model to propose a change across all occurrences: \"{}\"", request);
+        println!(
+            "🤖 Asking local model to propose a change across all occurrences: \"{}\"",
+            request
+        );
         let proposal = crate::llm::pipeline::propose_edit(&mgr, file_path, request, res)?;
         let old_line = proposal.old_line.clone();
         let new_line = proposal.new_line.clone();
@@ -2381,7 +2621,12 @@ Use --no-preview to write batch file"
         Ok(())
     }
     #[cfg(not(feature = "mamba"))]
-    fn handle_edit_ask_all(_file_path: &str, _request: &str, _preview: bool, _force: bool) -> Result<()> {
+    fn handle_edit_ask_all(
+        _file_path: &str,
+        _request: &str,
+        _preview: bool,
+        _force: bool,
+    ) -> Result<()> {
         Self::err_mamba_disabled()
     }
 
@@ -2474,7 +2719,7 @@ Use --no-preview to write batch file"
         let project_root = find_project_root(&current_dir);
         let engine = crate::core::blueprint::BlueprintEngine::new(&project_root);
         let blueprint = engine.generate()?;
-        
+
         if let Some(path) = output_path {
             let content = if path.ends_with(".md") {
                 engine.render_to_markdown(&blueprint)
@@ -2504,17 +2749,23 @@ Use --no-preview to write batch file"
             let current_dir = std::env::current_dir()?;
             let project_root = find_project_root(&current_dir);
             let broker = GnawSenseBroker::new(&project_root)?;
-            
-            println!("🧠 GnawSense is searching for: \"{}\" in {}...", query, file_path);
+
+            println!(
+                "🧠 GnawSense is searching for: \"{}\" in {}...",
+                query, file_path
+            );
             let response = broker.sense(query, Some(file_path)).await?;
 
             if let SenseResponse::Zoom { nodes, .. } = response {
                 if let Some(best_node) = nodes.first() {
-                    println!("📍 Found best match at node path: {} (score: {:.2})", best_node.path, best_node.score);
-                    
+                    println!(
+                        "📍 Found best match at node path: {} (score: {:.2})",
+                        best_node.path, best_node.score
+                    );
+
                     let content = resolve_content(content, source_file, false)?;
                     let mut writer = GnawTreeWriter::new(file_path)?;
-                    
+
                     // Capture old state for visual diff
                     let old_node = writer.analyze().find_path(&best_node.path).cloned();
 
@@ -2522,14 +2773,23 @@ Use --no-preview to write batch file"
                         node_path: best_node.path.clone(),
                         content,
                     };
-                    
+
                     writer.edit(op, force)?;
-                    Self::show_visual_diff(&writer, &best_node.path, old_node.as_ref(), narrative.as_deref());
+                    Self::show_visual_diff(
+                        &writer,
+                        &best_node.path,
+                        old_node.as_ref(),
+                        narrative.as_deref(),
+                    );
                     println!("✓ Successfully edited node: {}", best_node.path);
                     return Ok(());
                 }
             }
-            anyhow::bail!("Could not find a semantic match for '{}' in {}", query, file_path);
+            anyhow::bail!(
+                "Could not find a semantic match for '{}' in {}",
+                query,
+                file_path
+            );
         }
         #[cfg(not(feature = "modernbert"))]
         {
@@ -2539,7 +2799,7 @@ Use --no-preview to write batch file"
     }
 
     /// gnaw-find: Search AST nodes across project files
-#[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     fn handle_gnaw_find(
         pattern: Option<&str>,
         type_filter: Option<&str>,
@@ -2564,13 +2824,19 @@ Use --no-preview to write batch file"
 
         match format {
             "json" => {
-                println!("{}", serde_json::to_string_pretty(&results).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&results).unwrap_or_default()
+                );
             }
             "summary" => {
                 print!("{}", gnaw_find::format_results_summary(&results, total));
             }
             _ => {
-                print!("{}", gnaw_find::format_results_text(&results, total, max_results));
+                print!(
+                    "{}",
+                    gnaw_find::format_results_text(&results, total, max_results)
+                );
             }
         }
 
@@ -2597,17 +2863,14 @@ Use --no-preview to write batch file"
         let target_file = file_path.unwrap_or(".");
         let output_format = format.unwrap_or("text");
 
-        let results = inspect::inspect(
-            target_file,
-            inspect_mode,
-            symbol,
-            recursive,
-            directory,
-        )?;
+        let results = inspect::inspect(target_file, inspect_mode, symbol, recursive, directory)?;
 
         match output_format {
             "json" => {
-                println!("{}", serde_json::to_string_pretty(&results).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&results).unwrap_or_default()
+                );
             }
             _ => {
                 print!("{}", inspect::format_inspect_text(&results));
@@ -2631,7 +2894,10 @@ Use --no-preview to write batch file"
             "inline" => gnaw_refactor::RefactorKind::Inline,
             "move" => gnaw_refactor::RefactorKind::Move,
             "change_signature" => gnaw_refactor::RefactorKind::ChangeSignature,
-            _ => anyhow::bail!("Unknown refactor kind: {}. Use: rename, extract, inline, move, change_signature", kind),
+            _ => anyhow::bail!(
+                "Unknown refactor kind: {}. Use: rename, extract, inline, move, change_signature",
+                kind
+            ),
         };
 
         let result = gnaw_refactor::refactor(
@@ -2664,7 +2930,10 @@ Use --no-preview to write batch file"
             // File-to-file diff
             let result = gnaw_diff::diff(old_file, new_file, format.unwrap_or("text"))?;
             match format.unwrap_or("text") {
-                "json" => println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default()),
+                "json" => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&result).unwrap_or_default()
+                ),
                 _ => print!("{}", gnaw_diff::format_diff_text(&result)),
             }
         }
@@ -2684,7 +2953,10 @@ Use --no-preview to write batch file"
             "mermaid" => print!("{}", gnaw_graph::format_graph_mermaid(&result)),
             "dot" => print!("{}", gnaw_graph::format_graph_dot(&result)),
             "tree" => print!("{}", gnaw_graph::format_graph_tree(&result)),
-            "json" => println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default()),
+            "json" => println!(
+                "{}",
+                serde_json::to_string_pretty(&result).unwrap_or_default()
+            ),
             _ => print!("{}", gnaw_graph::format_graph_text(&result)),
         }
 
@@ -2696,7 +2968,10 @@ Use --no-preview to write batch file"
         use std::fs;
 
         if file_path.exists() {
-            anyhow::bail!("File already exists: {}. Scaffolding only works for new files.", file_path.display());
+            anyhow::bail!(
+                "File already exists: {}. Scaffolding only works for new files.",
+                file_path.display()
+            );
         }
 
         let engine = ScaffoldEngine::new();
@@ -2708,12 +2983,15 @@ Use --no-preview to write batch file"
         }
 
         fs::write(file_path, code)?;
-        println!("✓ Successfully scaffolded new file: {}", file_path.display());
+        println!(
+            "✓ Successfully scaffolded new file: {}",
+            file_path.display()
+        );
         println!("You can now use `sense-insert` to fill in the implementation.");
 
         Ok(())
     }
-#[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     fn handle_alf(
         message: Option<String>,
         actor: String,
@@ -2742,9 +3020,20 @@ Use --no-preview to write batch file"
                     AlfType::Outcome => "✅ OUTCOME",
                     AlfType::Meta => "ℹ️ META",
                 };
-                let txn_str = e.transaction_id.as_ref().map(|t| format!(" [txn:{}]", &t[..8])).unwrap_or_default();
+                let txn_str = e
+                    .transaction_id
+                    .as_ref()
+                    .map(|t| format!(" [txn:{}]", &t[..8]))
+                    .unwrap_or_default();
                 let actor_str = format!(" @{}", e.actor);
-                println!("- [{}] {}{}{}: {}", e.timestamp.format("%H:%M:%S"), kind_str, actor_str, txn_str, e.message);
+                println!(
+                    "- [{}] {}{}{}: {}",
+                    e.timestamp.format("%H:%M:%S"),
+                    kind_str,
+                    actor_str,
+                    txn_str,
+                    e.message
+                );
                 if !e.tags.is_empty() {
                     println!("  tags: {}", e.tags.join(", "));
                 }
@@ -2781,9 +3070,16 @@ Use --no-preview to write batch file"
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
         let mgr = crate::llm::ai_manager::AiManager::new(&project_root)?;
-        
+
         println!("🚀 Setting up AI models in {}...", project_root.display());
-        if let Err(e) = mgr.setup(crate::llm::ai_manager::AiModel::ModernBert, crate::llm::ai_manager::DeviceType::Cpu, force).await {
+        if let Err(e) = mgr
+            .setup(
+                crate::llm::ai_manager::AiModel::ModernBert,
+                crate::llm::ai_manager::DeviceType::Cpu,
+                force,
+            )
+            .await
+        {
             println!("\n⚠️  {}", "Automatic setup failed.".bold().red());
             println!("Error: {}", e);
             println!("\n💡 [The Helpful Guard]: You can download the model manually using these commands:");
@@ -2802,12 +3098,26 @@ Use --no-preview to write batch file"
         let project_root = find_project_root(&current_dir);
         let mgr = crate::llm::ai_manager::AiManager::new(&project_root)?;
         let status = mgr.get_status()?;
-        
+
         println!("\n🧠 GnawTreeWriter AI Status");
         println!("===========================");
-        println!("ModernBERT: {}", if status.modern_bert_installed { "✅ Installed".green() } else { "❌ Not found (run 'ai setup')".red() });
+        println!(
+            "ModernBERT: {}",
+            if status.modern_bert_installed {
+                "✅ Installed".green()
+            } else {
+                "❌ Not found (run 'ai setup')".red()
+            }
+        );
         #[cfg(feature = "mamba")]
-        println!("LFM2.5:     {}", if status.lfm25_installed { "✅ Installed".green() } else { "❌ Not found (run 'ai setup')".red() });
+        println!(
+            "LFM2.5:     {}",
+            if status.lfm25_installed {
+                "✅ Installed".green()
+            } else {
+                "❌ Not found (run 'ai setup')".red()
+            }
+        );
         println!("Cache Dir:  {}", status.cache_dir.display());
         println!("Device:     CPU");
         println!();
@@ -2847,10 +3157,10 @@ Use --no-preview to write batch file"
 
             println!("🚀 Starting project-wide semantic indexing...");
             println!("📂 Target: {}", target_path.display());
-            
+
             let indexer = ProjectIndexer::new(&project_root)?;
             let total = indexer.index_all(&target_path).await?;
-            
+
             println!("✨ Successfully indexed {} files.", total);
             println!("You can now use `gnawtreewriter sense \"<query>\"` without a file context to search the entire project.");
         }
@@ -2866,7 +3176,7 @@ Use --no-preview to write batch file"
         use crate::core::report::ReportEngine;
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
-        
+
         let engine = ReportEngine::new();
         let markdown = engine.generate_markdown_report(&project_root, limit)?;
 
@@ -2880,31 +3190,24 @@ Use --no-preview to write batch file"
         Ok(())
     }
 
-        fn handle_session_start(name: Option<String>) -> Result<()> {
+    fn handle_session_start(name: Option<String>) -> Result<()> {
+        let current_dir = std::env::current_dir()?;
 
-            let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
 
-            let project_root = find_project_root(&current_dir);
+        let mut transaction_log = TransactionLog::load(project_root)?;
 
-            let mut transaction_log = TransactionLog::load(project_root)?;
+        transaction_log.start_new_session(name)?;
 
-            transaction_log.start_new_session(name)?;
+        println!(
+            "✓ New session started: {}",
+            transaction_log.get_current_session_id()
+        );
 
-            println!(
+        Ok(())
+    }
 
-                "✓ New session started: {}",
-
-                transaction_log.get_current_session_id()
-
-            );
-
-            Ok(())
-
-        }
-
-    
-
-        fn handle_restore_project(timestamp: &str, preview: bool) -> Result<()> {
+    fn handle_restore_project(timestamp: &str, preview: bool) -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
         let transaction_log = TransactionLog::load(project_root.clone())?;
@@ -3025,8 +3328,12 @@ Use --no-preview to perform the restoration"
         let alias_file = project_root.join(".gnawtreewriter_aliases.json");
         let actual_id = if alias_file.exists() {
             let data = std::fs::read_to_string(alias_file)?;
-            let aliases: std::collections::HashMap<String, String> = serde_json::from_str(&data).unwrap_or_default();
-            aliases.get(session_id).cloned().unwrap_or_else(|| session_id.to_string())
+            let aliases: std::collections::HashMap<String, String> =
+                serde_json::from_str(&data).unwrap_or_default();
+            aliases
+                .get(session_id)
+                .cloned()
+                .unwrap_or_else(|| session_id.to_string())
         } else {
             session_id.to_string()
         };
@@ -3036,18 +3343,18 @@ Use --no-preview to perform the restoration"
         }
 
         if preview {
-             println!("Would restore session {}...", actual_id);
-             let files = transaction_log.get_session_files(&actual_id)?;
-             if files.is_empty() {
-                 println!("No files affected in this session.");
-             } else {
-                 println!("Files to be restored:");
-                 for f in files {
-                     println!(" - {}", f.display());
-                 }
-             }
-             println!("\nUse --no-preview to perform restoration.");
-             return Ok(());
+            println!("Would restore session {}...", actual_id);
+            let files = transaction_log.get_session_files(&actual_id)?;
+            if files.is_empty() {
+                println!("No files affected in this session.");
+            } else {
+                println!("Files to be restored:");
+                for f in files {
+                    println!(" - {}", f.display());
+                }
+            }
+            println!("\nUse --no-preview to perform restoration.");
+            return Ok(());
         }
 
         let restoration_engine = RestorationEngine::new(&project_root)?;
@@ -3112,22 +3419,47 @@ Use --no-preview to perform the restoration"
         } else {
             println!("GnawTreeWriter — Available Commands");
             println!("===================================\n");
-            let read_cmds: Vec<_> = commands.as_array().unwrap().iter().filter(|c| !c["write"].as_bool().unwrap()).collect();
-            let write_cmds: Vec<_> = commands.as_array().unwrap().iter().filter(|c| c["write"].as_bool().unwrap()).collect();
+            let read_cmds: Vec<_> = commands
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|c| !c["write"].as_bool().unwrap())
+                .collect();
+            let write_cmds: Vec<_> = commands
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|c| c["write"].as_bool().unwrap())
+                .collect();
             println!("📖 Read-only (safe):");
             for c in &read_cmds {
-                println!("  {:20} {} — {}", c["tool"].as_str().unwrap(), c["name"].as_str().unwrap(), c["desc"].as_str().unwrap());
+                println!(
+                    "  {:20} {} — {}",
+                    c["tool"].as_str().unwrap(),
+                    c["name"].as_str().unwrap(),
+                    c["desc"].as_str().unwrap()
+                );
             }
             println!("\n✏️  Write operations (blocked by dry-mode):");
             for c in &write_cmds {
-                println!("  {:20} {} — {}", c["tool"].as_str().unwrap(), c["name"].as_str().unwrap(), c["desc"].as_str().unwrap());
+                println!(
+                    "  {:20} {} — {}",
+                    c["tool"].as_str().unwrap(),
+                    c["name"].as_str().unwrap(),
+                    c["desc"].as_str().unwrap()
+                );
             }
-            println!("\nTotal: {} commands ({} read, {} write)", commands.as_array().unwrap().len(), read_cmds.len(), write_cmds.len());
+            println!(
+                "\nTotal: {} commands ({} read, {} write)",
+                commands.as_array().unwrap().len(),
+                read_cmds.len(),
+                write_cmds.len()
+            );
         }
         Ok(())
     }
 
-        fn handle_examples(topic: Option<&str>) -> Result<()> {
+    fn handle_examples(topic: Option<&str>) -> Result<()> {
         match topic {
             Some("editing") => {
                 println!("🔧 EDITING EXAMPLES");
@@ -3139,7 +3471,9 @@ Use --no-preview to perform the restoration"
                 println!("   gnawtreewriter edit app.py \"0.1\" 'new code' # Edit specific node");
                 println!();
                 println!("2. Surgical Inline Editing (v0.9.1+):");
-                println!("   gnawtreewriter edit main.rs \"1.2.3\" 'new_var' # Change just one variable");
+                println!(
+                    "   gnawtreewriter edit main.rs \"1.2.3\" 'new_var' # Change just one variable"
+                );
                 println!("   # The editor now preserves surrounding code on the same line!");
                 println!();
                 println!("3. Safe editing with preview:");
@@ -3331,8 +3665,12 @@ Use --no-preview to perform the restoration"
                 println!();
                 println!("3. Project Packing for AI Context:");
                 println!("   gnawtreewriter pack . --compress --format markdown");
-                println!("   gnawtreewriter pack src/ --include rs,py --instructions \"Focus on auth\"");
-                println!("   # Packages entire project with token counts and optional compression.");
+                println!(
+                    "   gnawtreewriter pack src/ --include rs,py --instructions \"Focus on auth\""
+                );
+                println!(
+                    "   # Packages entire project with token counts and optional compression."
+                );
                 println!();
                 println!("4. Intelligent Context Curation:");
                 println!("   gnawtreewriter curate \"authentication login\" --max-tokens 5000");
@@ -3385,7 +3723,8 @@ Use --no-preview to perform the restoration"
                 println!();
                 println!("Safe Refactoring Workflow:");
                 println!("  1. gnawtreewriter status                     # Check current state");
-                println!("  2. gnawtreewriter edit file.py \"0.1\" 'new' --preview  # Preview changes"
+                println!(
+                    "  2. gnawtreewriter edit file.py \"0.1\" 'new' --preview  # Preview changes"
                 );
                 println!("  3. gnawtreewriter edit file.py \"0.1\" 'new'  # Apply if good");
                 println!("  4. gnawtreewriter undo                       # Quick undo if needed");
@@ -3440,7 +3779,9 @@ Use --no-preview to perform the restoration"
                 println!(
                     "  gnawtreewriter examples --topic diff         # Convert diffs to batch ops"
                 );
-                println!("  gnawtreewriter examples --topic ai           # AI and analysis features");
+                println!(
+                    "  gnawtreewriter examples --topic ai           # AI and analysis features"
+                );
                 println!("  gnawtreewriter examples --topic workflow     # Complete workflows");
                 println!("  gnawtreewriter examples --topic handbook     # Consolidated handbook");
                 println!();
@@ -3455,7 +3796,7 @@ Use --no-preview to perform the restoration"
         Ok(())
     }
 
-        fn handle_wizard(task: Option<&str>) -> Result<()> {
+    fn handle_wizard(task: Option<&str>) -> Result<()> {
         match task {
             Some("first-time") => {
                 println!("🧙 FIRST-TIME USER WIZARD");
@@ -3634,7 +3975,9 @@ Use --no-preview to perform the restoration"
                 println!("   • Try: gnawtreewriter analyze <file> for overview");
                 println!("   • Look for node types like 'function_item', 'class_definition'");
                 println!();
-                println!("Still stuck? Check: https://github.com/gnawSoftware/GnawTreeWriter/issues");
+                println!(
+                    "Still stuck? Check: https://github.com/gnawSoftware/GnawTreeWriter/issues"
+                );
             }
             _ => {
                 println!("🧙 GNAWTREEWRITER WIZARD");
@@ -3647,8 +3990,12 @@ Use --no-preview to perform the restoration"
                 println!("  gnawtreewriter wizard --task editing           # How to edit code");
                 println!("  gnawtreewriter wizard --task restoration       # Time travel features");
                 println!("  gnawtreewriter wizard --task batch            # Multi-file operations");
-                println!("  gnawtreewriter wizard --task quick            # Fast edits (text replace)");
-                println!("  gnawtreewriter wizard --task ai               # AI and analysis features");
+                println!(
+                    "  gnawtreewriter wizard --task quick            # Fast edits (text replace)"
+                );
+                println!(
+                    "  gnawtreewriter wizard --task ai               # AI and analysis features"
+                );
                 println!("  gnawtreewriter wizard --task troubleshooting   # Fix common problems");
                 println!();
                 println!("Quick help:");
@@ -3670,9 +4017,13 @@ Use --no-preview to perform the restoration"
 
     fn show_visual_pulse(writer: &GnawTreeWriter, focus_path: &str, narrative: Option<&str>) {
         let viz = TreeVisualizer::new(5, true);
-        
+
         eprintln!("\n┌──────────────────────────────────────────┐");
-        eprintln!("│ 🛠️  {} {:<30} │", "Operation:".bold(), "Structural Update");
+        eprintln!(
+            "│ 🛠️  {} {:<30} │",
+            "Operation:".bold(),
+            "Structural Update"
+        );
         eprintln!("│ 📍 {} {:<30} │", "Target:".bold(), focus_path);
         eprintln!("│ ✨ {} {:<30} │", "Status:".bold(), "Syntax Validated ✅");
         eprintln!("└──────────────────────────────────────────┘");
@@ -3684,22 +4035,32 @@ Use --no-preview to perform the restoration"
 
         eprintln!("\n{}", "Structure Context:".bold());
         eprintln!("{}", viz.generate_sparkline(writer.analyze()));
-        eprintln!("{}", viz.render_with_diff(writer.analyze(), focus_path, None));
+        eprintln!(
+            "{}",
+            viz.render_with_diff(writer.analyze(), focus_path, None)
+        );
     }
 
-    fn show_visual_diff(writer: &GnawTreeWriter, focus_path: &str, old_node: Option<&TreeNode>, narrative: Option<&str>) {
+    fn show_visual_diff(
+        writer: &GnawTreeWriter,
+        focus_path: &str,
+        old_node: Option<&TreeNode>,
+        narrative: Option<&str>,
+    ) {
         let viz = TreeVisualizer::new(5, true);
-        
+
         let total_lines = writer.get_source().lines().count();
         let new_node = writer.analyze().find_path(focus_path);
-        
+
         let old_lines_count = old_node.map(|n| n.content.lines().count()).unwrap_or(0);
         let new_lines_count = new_node.map(|n| n.content.lines().count()).unwrap_or(0);
-        
+
         let removed_preview = if let Some(node) = old_node {
             let first_line = node.content.lines().next().unwrap_or("").trim();
-            if first_line.len() > 25 {
-                format!("{}...", &first_line[..22])
+            // Char-boundary safe: byte slicing panics on multibyte UTF-8.
+            if first_line.chars().count() > 25 {
+                let cut: String = first_line.chars().take(22).collect();
+                format!("{}...", cut)
             } else {
                 first_line.to_string()
             }
@@ -3723,8 +4084,17 @@ Use --no-preview to perform the restoration"
         eprintln!("\n┌──────────────────────────────────────────┐");
         eprintln!("│ 🛠️  {} {:<30} │", "Operation:".bold(), "Surgical Edit");
         eprintln!("│ 📍 {} {:<30} │", "Target:".bold(), target_desc);
-        eprintln!("│ 🗑️  {} {:<30} │", "Removed:".bold(), format!("\"{}\"", removed_preview));
-        eprintln!("│ 📝 {} -{} / +{} lines              │", "Changes:".bold(), old_lines_count, new_lines_count);
+        eprintln!(
+            "│ 🗑️  {} {:<30} │",
+            "Removed:".bold(),
+            format!("\"{}\"", removed_preview)
+        );
+        eprintln!(
+            "│ 📝 {} -{} / +{} lines              │",
+            "Changes:".bold(),
+            old_lines_count,
+            new_lines_count
+        );
         if total_lines > 5 {
             eprintln!("│ 📊 {} {:<23} % │", "Efficiency:".bold(), efficiency);
         } else {
@@ -3739,7 +4109,10 @@ Use --no-preview to perform the restoration"
 
         eprintln!("\n{}", "Structure Context:".bold());
         eprintln!("{}", viz.generate_sparkline(writer.analyze()));
-        eprintln!("{}", viz.render_with_diff(writer.analyze(), focus_path, old_node));
+        eprintln!(
+            "{}",
+            viz.render_with_diff(writer.analyze(), focus_path, old_node)
+        );
     }
 
     fn handle_analyze(paths: &[String], format: &str, recursive: bool) -> Result<()> {
@@ -3797,7 +4170,10 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
                 println!("Analyzed {} files", results.len());
                 for (i, result) in results.iter().enumerate() {
                     if let Some(file_path) = all_files.get(i) {
-                        let tokens = result.get("estimated_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                        let tokens = result
+                            .get("estimated_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as usize;
                         total_tokens += tokens;
                         println!("File: {} ({} tokens)", file_path, tokens);
                         if let Some(children) = result.get("children") {
@@ -3811,7 +4187,9 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
                 if total_tokens > 8000 {
                     println!("⚠️  Warning: Exceeds typical 8k context window");
                 } else if total_tokens > 4000 {
-                    println!("ℹ️  Note: Exceeds 4k — consider using compress or skeleton for overview");
+                    println!(
+                        "ℹ️  Note: Exceeds 4k — consider using compress or skeleton for overview"
+                    );
                 }
             }
             _ => {
@@ -3820,62 +4198,103 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
         }
         Ok(())
     }
-        fn handle_quick_insert(
-            file: &str,
-            after: &str,
-            filter: Option<&str>,
-            content: &str,
-            preview: bool,
-            unique: bool,
-        ) -> Result<()> {
-            use regex::Regex;
-            use std::path::Path;
-            let path = Path::new(file);
-            let original = std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file, e))?;
-            let insert_content = if content == "-" { use std::io::Read; let mut buf = String::new(); std::io::stdin().read_to_string(&mut buf)?; buf } else { content.to_string() };
-            let after_re = Regex::new(after).with_context(|| format!("Invalid --after regex: {}", after))?;
-            let lines: Vec<&str> = original.lines().collect();
-            let mut new_lines: Vec<String> = Vec::new();
-            let mut insertions = 0usize;
-            let insert_text = insert_content.trim_end();
-            for (i, line) in lines.iter().enumerate() {
-                new_lines.push(line.to_string());
-                if after_re.is_match(line) {
-                    if let Some(filter_text) = filter { let context_end = (i + 10).min(lines.len()); let context: String = lines[i..context_end].join("\n"); if !context.contains(filter_text) { continue; } }
-                    if unique { let check_end = (i + 5).min(lines.len()); let nearby: String = lines[i..check_end].join("\n"); if nearby.contains(insert_text) { continue; } }
-                    new_lines.push(insert_text.to_string());
-                    insertions += 1;
+    fn handle_quick_insert(
+        file: &str,
+        after: &str,
+        filter: Option<&str>,
+        content: &str,
+        preview: bool,
+        unique: bool,
+    ) -> Result<()> {
+        use regex::Regex;
+        use std::path::Path;
+        let path = Path::new(file);
+        let original = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", file, e))?;
+        let insert_content = if content == "-" {
+            use std::io::Read;
+            let mut buf = String::new();
+            std::io::stdin().read_to_string(&mut buf)?;
+            buf
+        } else {
+            content.to_string()
+        };
+        let after_re =
+            Regex::new(after).with_context(|| format!("Invalid --after regex: {}", after))?;
+        let lines: Vec<&str> = original.lines().collect();
+        let mut new_lines: Vec<String> = Vec::new();
+        let mut insertions = 0usize;
+        let insert_text = insert_content.trim_end();
+        for (i, line) in lines.iter().enumerate() {
+            new_lines.push(line.to_string());
+            if after_re.is_match(line) {
+                if let Some(filter_text) = filter {
+                    let context_end = (i + 10).min(lines.len());
+                    let context: String = lines[i..context_end].join("\n");
+                    if !context.contains(filter_text) {
+                        continue;
+                    }
                 }
+                if unique {
+                    let check_end = (i + 5).min(lines.len());
+                    let nearby: String = lines[i..check_end].join("\n");
+                    if nearby.contains(insert_text) {
+                        continue;
+                    }
+                }
+                new_lines.push(insert_text.to_string());
+                insertions += 1;
             }
-            let modified = new_lines.join("\n");
-            let modified = if original.ends_with('\n') && !modified.ends_with('\n') { modified + "\n" } else { modified };
-            if preview {
-                println!("--- QuickInsert preview for: {}", file);
-                println!("Pattern: /{}/", after);
-                if let Some(f) = filter { println!("Filter: contains '{}'", f); }
-                if unique { println!("Unique: enabled (skip if already present)"); }
-                println!("Insertions: {} match(es)", insertions);
-                println!();
-                print_diff(&original, &modified);
-                println!("\nUse without --preview to apply");
-                return Ok(());
-            }
-            if let Err(e) = crate::parser::get_parser(path).and_then(|p| Ok(p.parse(&modified)?)) {
-                println!("Validation failed: The proposed insert would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e);
-                return Ok(());
-            }
-            let mut writer = GnawTreeWriter::new(file)?;
-            writer.create_backup()?;
-            let current_dir = std::env::current_dir()?;
-            let project_root = find_project_root(&current_dir);
-            let before_hash = crate::core::calculate_content_hash(&original);
-            let after_hash = crate::core::calculate_content_hash(&modified);
-            let mut tlog = TransactionLog::load(&project_root)?;
-            let txid = tlog.log_transaction(OperationType::Insert, PathBuf::from(file), None, Some(before_hash), Some(after_hash), format!("QuickInsert: {} insertion(s) after /{}/", insertions, after), std::collections::HashMap::new())?;
-            std::fs::write(path, &modified).map_err(|e| anyhow::anyhow!("Failed to write {}: {}", file, e))?;
-            println!("✓ QuickInsert applied: {} insertion(s) (txn {})", insertions, txid);
-            Ok(())
         }
+        let modified = new_lines.join("\n");
+        let modified = if original.ends_with('\n') && !modified.ends_with('\n') {
+            modified + "\n"
+        } else {
+            modified
+        };
+        if preview {
+            println!("--- QuickInsert preview for: {}", file);
+            println!("Pattern: /{}/", after);
+            if let Some(f) = filter {
+                println!("Filter: contains '{}'", f);
+            }
+            if unique {
+                println!("Unique: enabled (skip if already present)");
+            }
+            println!("Insertions: {} match(es)", insertions);
+            println!();
+            print_diff(&original, &modified);
+            println!("\nUse without --preview to apply");
+            return Ok(());
+        }
+        if let Err(e) = crate::parser::get_parser(path).and_then(|p| Ok(p.parse(&modified)?)) {
+            println!("Validation failed: The proposed insert would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e);
+            return Ok(());
+        }
+        let mut writer = GnawTreeWriter::new(file)?;
+        writer.create_backup()?;
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        let before_hash = crate::core::calculate_content_hash(&original);
+        let after_hash = crate::core::calculate_content_hash(&modified);
+        let mut tlog = TransactionLog::load(&project_root)?;
+        let txid = tlog.log_transaction(
+            OperationType::Insert,
+            PathBuf::from(file),
+            None,
+            Some(before_hash),
+            Some(after_hash),
+            format!("QuickInsert: {} insertion(s) after /{}/", insertions, after),
+            std::collections::HashMap::new(),
+        )?;
+        std::fs::write(path, &modified)
+            .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", file, e))?;
+        println!(
+            "✓ QuickInsert applied: {} insertion(s) (txn {})",
+            insertions, txid
+        );
+        Ok(())
+    }
 
     fn find_supported_files(dir: &std::path::Path) -> Result<Vec<String>> {
         let mut files = Vec::new();
@@ -3951,7 +4370,9 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
 
         // VALIDATION: Try to parse the modified code in memory before saving
         let validation_path = Path::new(file);
-        if let Err(e) = crate::parser::get_parser(validation_path).and_then(|parser| Ok(parser.parse(&modified)?)) {
+        if let Err(e) = crate::parser::get_parser(validation_path)
+            .and_then(|parser| Ok(parser.parse(&modified)?))
+        {
             println!("Validation failed: The proposed edit would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e);
             return Ok(());
         }
@@ -4088,9 +4509,9 @@ Use without --preview to apply the clone"
         target_path: Option<&str>,
         preview: bool,
     ) -> Result<()> {
-        use crate::parser::get_parser;
         use crate::core::EditOperation;
         use crate::core::GnawTreeWriter;
+        use crate::parser::get_parser;
         use anyhow::Context as _;
 
         let target_file_path = target_file.unwrap_or(source_file);
@@ -4108,7 +4529,10 @@ Use without --preview to apply the clone"
 
         println!("📦 Moving node from {} [{}]", source_file, source_path);
         println!("  Node type: {}", source_node.node_type);
-        println!("  Lines: {}-{}", source_node.start_line, source_node.end_line);
+        println!(
+            "  Lines: {}-{}",
+            source_node.start_line, source_node.end_line
+        );
 
         if target_path.is_none() {
             return Err(anyhow::anyhow!("Target path must be specified."));
@@ -4117,26 +4541,41 @@ Use without --preview to apply the clone"
 
         if preview {
             let preview_writer = GnawTreeWriter::new(source_file)?;
-            let modified = preview_writer.preview_edit(EditOperation::Delete { node_path: source_path.to_string() })?;
+            let modified = preview_writer.preview_edit(EditOperation::Delete {
+                node_path: source_path.to_string(),
+            })?;
             // Simple preview: show delete diff
             print_diff(&source_code, &modified);
-            println!("
-✓ Preview complete (would then insert at {} [{}])", target_file_path, target_node_path);
+            println!(
+                "
+✓ Preview complete (would then insert at {} [{}])",
+                target_file_path, target_node_path
+            );
         } else {
             // Step 1: Delete source node and save
             let mut source_writer = GnawTreeWriter::new(source_file)?;
-            source_writer.edit(EditOperation::Delete { node_path: source_path.to_string() }, false)?;
+            source_writer.edit(
+                EditOperation::Delete {
+                    node_path: source_path.to_string(),
+                },
+                false,
+            )?;
 
             // Step 2: Re-read (if same file) and insert at target
             let mut target_writer = GnawTreeWriter::new(target_file_path)?;
-            target_writer.edit(EditOperation::Insert {
-                parent_path: target_node_path.to_string(),
-                position: 1,
-                content: source_node.content.clone(),
-            }, false)?;
+            target_writer.edit(
+                EditOperation::Insert {
+                    parent_path: target_node_path.to_string(),
+                    position: 1,
+                    content: source_node.content.clone(),
+                },
+                false,
+            )?;
 
-            println!("  Moved from {} [{}] to {} [{}]",
-                source_file, source_path, target_file_path, target_node_path);
+            println!(
+                "  Moved from {} [{}] to {} [{}]",
+                source_file, source_path, target_file_path, target_node_path
+            );
         }
 
         Ok(())
@@ -4170,9 +4609,9 @@ Use without --preview to apply the clone"
         }
         // Load and compile rules: builtin + project rules file + --rules file.
         let mut rules = Vec::new();
-        rules.extend(
-            crate::core::rules::load_rules_yaml(include_str!("../rules/builtin.yaml"))?,
-        );
+        rules.extend(crate::core::rules::load_rules_yaml(include_str!(
+            "../rules/builtin.yaml"
+        ))?);
         // Project rules (gnawtreewriter.rules.yaml) override builtin by id.
         if let Ok(cwd) = std::env::current_dir() {
             let project_rules = cwd.join("gnawtreewriter.rules.yaml");
@@ -4334,7 +4773,9 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
             id: id.to_string(),
             language: language.to_string(),
             severity: crate::core::rules::Severity::parse(severity),
-            message: message.unwrap_or(&format!("Rule {} matched", id)).to_string(),
+            message: message
+                .unwrap_or(&format!("Rule {} matched", id))
+                .to_string(),
             pattern: pattern.to_string(),
         };
 
@@ -4358,14 +4799,20 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
         let project = crate::core::rules::load_project_rules()?;
         println!("── Builtin rules ({}) ──────────────", builtin.len());
         for r in &builtin {
-            println!("  {} [{}] ({:?}) — {}", r.id, r.language, r.severity, r.message);
+            println!(
+                "  {} [{}] ({:?}) — {}",
+                r.id, r.language, r.severity, r.message
+            );
         }
         println!("── Project rules ({}) ──────────────", project.len());
         if project.is_empty() {
             println!("  (none — add with `rules add`)");
         }
         for r in &project {
-            println!("  {} [{}] ({:?}) — {}", r.id, r.language, r.severity, r.message);
+            println!(
+                "  {} [{}] ({:?}) — {}",
+                r.id, r.language, r.severity, r.message
+            );
         }
         Ok(())
     }
@@ -4415,11 +4862,30 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
         let mut saved = 0usize;
         let mut rejected = 0usize;
         for p in &proposed {
-            let id = p.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let language = p.get("language").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let pattern = p.get("pattern").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let message = p.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let severity = p.get("severity").and_then(|v| v.as_str()).unwrap_or("warning");
+            let id = p
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let language = p
+                .get("language")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let pattern = p
+                .get("pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let message = p
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let severity = p
+                .get("severity")
+                .and_then(|v| v.as_str())
+                .unwrap_or("warning");
 
             if id.is_empty() || language.is_empty() || pattern.is_empty() {
                 rejected += 1;
@@ -4445,7 +4911,9 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
                             continue;
                         }
                         if let Ok(writer) = crate::GnawTreeWriter::new(fp) {
-                            if !crate::core::rules::run_rule(&compiled, writer.analyze(), fp).is_empty() {
+                            if !crate::core::rules::run_rule(&compiled, writer.analyze(), fp)
+                                .is_empty()
+                            {
                                 matched = true;
                                 break;
                             }
@@ -4476,10 +4944,7 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
                 }
             }
         }
-        println!(
-            "\nDone: {} rule(s) saved, {} rejected.",
-            saved, rejected
-        );
+        println!("\nDone: {} rule(s) saved, {} rejected.", saved, rejected);
         println!(
             "Active project rules: {}",
             crate::core::rules::project_rules_path().display()
@@ -4496,216 +4961,334 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
     /// handle_lint_discover (cfg-paritet, annars dead code-varning).
     #[cfg(feature = "mamba")]
     fn parse_rule_proposals(s: &str) -> Result<Vec<serde_json::Value>> {
-        let start = s.find('[').ok_or_else(|| anyhow::anyhow!("no rule array in model output"))?;
-        let end = s.rfind(']').ok_or_else(|| anyhow::anyhow!("unterminated rule array"))?;
+        let start = s
+            .find('[')
+            .ok_or_else(|| anyhow::anyhow!("no rule array in model output"))?;
+        let end = s
+            .rfind(']')
+            .ok_or_else(|| anyhow::anyhow!("unterminated rule array"))?;
         let json: serde_json::Value = serde_json::from_str(&s[start..=end])
             .map_err(|e| anyhow::anyhow!("invalid rule JSON: {}", e))?;
         Ok(json.as_array().cloned().unwrap_or_default())
     }
-    
-        fn handle_doctor(format: Option<&str>) -> Result<()> {
-            use crate::core::diagnostics::DoctorReport;
-            use colored::*;
 
-            let current_dir = std::env::current_dir()?;
-            let project_root = find_project_root(&current_dir);
+    fn handle_doctor(format: Option<&str>) -> Result<()> {
+        use crate::core::diagnostics::DoctorReport;
+        use colored::*;
 
-            let mut report = DoctorReport::new();
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
 
-            // --- Parser Health Checks ---
-            println!("\n{}", "🔬 Parser Health Checks".bold());
-            let parser_tests = [
-                ("py", "def hello(): pass"),
-                ("rs", "fn main() {}"),
-                ("js", "function hello() {}"),
-                ("ts", "const x: number = 1;"),
-                ("go", "package main\nfunc main() {}"),
-                ("java", "class Main {}"),
-                ("c", "int main() { return 0; }"),
-                ("cpp", "int main() { return 0; }"),
-                ("html", "<html></html>"),
-                ("css", "body { margin: 0; }"),
-                ("json", "{\"key\": \"value\"}"),
-                ("yaml", "key: value"),
-                ("toml", "[section]\nkey = \"value\""),
-                ("sql", "SELECT 1;"),
-                ("sh", "echo hello"),
-                ("zig", "pub fn main() void {}"),
-                ("php", "<?php echo 'hello';"),
-                ("svelte", "<script>let x = 0;</script>"),
-                ("dart", "void main() {}"),
-                ("cs", "using System;"),
-            ];
+        let mut report = DoctorReport::new();
 
-            for (ext, code) in &parser_tests {
-                report.check_parser(ext, code);
-            }
+        // --- Parser Health Checks ---
+        println!("\n{}", "🔬 Parser Health Checks".bold());
+        let parser_tests = [
+            ("py", "def hello(): pass"),
+            ("rs", "fn main() {}"),
+            ("js", "function hello() {}"),
+            ("ts", "const x: number = 1;"),
+            ("go", "package main\nfunc main() {}"),
+            ("java", "class Main {}"),
+            ("c", "int main() { return 0; }"),
+            ("cpp", "int main() { return 0; }"),
+            ("html", "<html></html>"),
+            ("css", "body { margin: 0; }"),
+            ("json", "{\"key\": \"value\"}"),
+            ("yaml", "key: value"),
+            ("toml", "[section]\nkey = \"value\""),
+            ("sql", "SELECT 1;"),
+            ("sh", "echo hello"),
+            ("zig", "pub fn main() void {}"),
+            ("php", "<?php echo 'hello';"),
+            ("svelte", "<script>let x = 0;</script>"),
+            ("dart", "void main() {}"),
+            ("cs", "using System;"),
+        ];
 
-            // --- Backup Integrity ---
-            println!("\n{}", "💾 Backup Integrity".bold());
-            report.check_backups(&project_root);
-
-            // --- Transaction Log ---
-            println!("\n{}", "📝 Transaction Log".bold());
-            report.check_transaction_log(&project_root);
-
-            // --- Print results ---
-            match format {
-                Some("json") => {
-                    println!("{}", serde_json::to_string_pretty(&report)?);
-                }
-                _ => {
-                    for check in &report.checks {
-                        let icon = match check.status.as_str() {
-                            "pass" => "✅".green(),
-                            "fail" => "❌".red(),
-                            "warn" => "⚠️ ".yellow(),
-                            _ => "  ".normal(),
-                        };
-                        println!("  {} [{}] {} — {}", icon, check.category.bright_black(), check.name.bold(), check.message);
-                    }
-
-                    println!("\n{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".bright_black());
-                    if report.overall_healthy {
-                        println!("  {} All {} checks passed ({} warnings)", "✅".green(), report.passed.to_string().green(), report.warnings);
-                    } else {
-                        println!("  {} {}/{} checks passed, {} failed, {} warnings",
-                            "⚠️ ".yellow(),
-                            report.passed.to_string().green(),
-                            report.total_checks,
-                            report.failed.to_string().red(),
-                            report.warnings.to_string().yellow());
-                    }
-                }
-            }
-            Ok(())
+        for (ext, code) in &parser_tests {
+            report.check_parser(ext, code);
         }
 
-        async fn handle_health_check() -> Result<()> {
-            use colored::*;
-            use std::process::Command;
-    
-            println!("
-    {}", "🛡️  GnawTreeWriter System Health Check".bold().bright_white());
-            println!("{}", "=====================================".bright_black());
-    
-            // 1. Environment & Paths
-            let current_dir = std::env::current_dir()?;
-            let project_root = find_project_root(&current_dir);
-            let is_git = project_root.join(".git").exists();
-    
-            println!("
-    {}", "📍 Environment".bold());
-            println!("  CWD:          {}", current_dir.display().to_string().cyan());
-            println!("  Project Root: {}", project_root.display().to_string().cyan());
-            println!("  Git Status:   {}", if is_git { "✅ Repository Found".green() } else { "⚠️  Not a Git Repo (Precision may suffer)".yellow() });
-    
-            // 3. Transactions & Undo State
-            println!("\n    {}", "🔄 Transactions & Undo State".bold());
-            let undo_manager = crate::core::undo_redo::UndoRedoManager::new(&project_root)?;
-            let state = undo_manager.get_state();
-            let transaction_log = crate::core::transaction_log::TransactionLog::load(project_root.clone())?;
-            let recent = transaction_log.get_last_n_transactions(5)?;
+        // --- Backup Integrity ---
+        println!("\n{}", "💾 Backup Integrity".bold());
+        report.check_backups(&project_root);
 
-            println!("  Undo Available: {}", if state.undo_available > 0 { format!("{} steps", state.undo_available).green() } else { "0".bright_black() });
-            println!("  Redo Available: {}", if state.redo_available > 0 { format!("{} steps", state.redo_available).green() } else { "0".bright_black() });
+        // --- Transaction Log ---
+        println!("\n{}", "📝 Transaction Log".bold());
+        report.check_transaction_log(&project_root);
 
-            if let Some(last_undo) = &state.last_undo {
-                println!("  Last Action:   {}", last_undo.cyan());
+        // --- Print results ---
+        match format {
+            Some("json") => {
+                println!("{}", serde_json::to_string_pretty(&report)?);
             }
-
-            if !recent.is_empty() {
-                println!("  Recent History:");
-                for transaction in recent.iter().rev().take(3) {
-                    let timestamp = transaction.timestamp.format("%H:%M:%S").to_string();
-                    println!("    • {} [{:?}] {}", timestamp.bright_black(), transaction.operation, transaction.description);
+            _ => {
+                for check in &report.checks {
+                    let icon = match check.status.as_str() {
+                        "pass" => "✅".green(),
+                        "fail" => "❌".red(),
+                        "warn" => "⚠️ ".yellow(),
+                        _ => "  ".normal(),
+                    };
+                    println!(
+                        "  {} [{}] {} — {}",
+                        icon,
+                        check.category.bright_black(),
+                        check.name.bold(),
+                        check.message
+                    );
                 }
-            } else {
-                println!("  Recent History: {}", "No transactions recorded yet".bright_black());
-            }
-    
-            // 2. AI Engine (GnawSense & HRM2)
-            #[cfg(feature = "modernbert")]
-            {
-                println!("\n    {}", "🧠 GnawSense AI Ecosystem".bold().bright_magenta());
-                let mgr = crate::llm::ai_manager::AiManager::new(&project_root)?;
-                let status = mgr.get_status()?;
-                
-                println!("  Engine:       {}", "✅ ModernBERT (Semantic Core)".green());
-                println!("  Reasoning:    {}", "✅ HRM2 (Hierarchical Relational Model)".green().bold());
-                println!("  Cache:        {}", status.cache_dir.display().to_string().cyan());
-                
-                let model_dir = status.cache_dir.join("modernbert");
-                let c = model_dir.join("config.json").exists();
-                let t = model_dir.join("tokenizer.json").exists();
-                let w = model_dir.join("model.safetensors").exists();
-    
-                print!("  Model Files:  ");
-                if c && t && w {
-                    println!("{}", "✅ All components found".green());
+
+                println!("\n{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".bright_black());
+                if report.overall_healthy {
+                    println!(
+                        "  {} All {} checks passed ({} warnings)",
+                        "✅".green(),
+                        report.passed.to_string().green(),
+                        report.warnings
+                    );
                 } else {
-                    let mut missing = Vec::new();
-                    if !c { missing.push("config.json"); }
-                    if !t { missing.push("tokenizer.json"); }
-                    if !w { missing.push("model.safetensors"); }
-                    println!("{} {}", "❌ Missing:".red(), missing.join(", ").red());
-                    println!("                {}", "Run 'gnawtreewriter ai setup' to fix.".italic().bright_black());
-                }
-    
-                // Test load attempt (fast check)
-                match mgr.load_model(crate::llm::AiModel::ModernBert, crate::llm::DeviceType::Cpu) {
-                    Ok(_) => println!("  Runtime:      {}", "✅ AI Services ready for GnawSense operations".green()),
-                    Err(e) => println!("  Runtime:      {} {}", "❌ Load failed:".red(), e.to_string().red()),
+                    println!(
+                        "  {} {}/{} checks passed, {} failed, {} warnings",
+                        "⚠️ ".yellow(),
+                        report.passed.to_string().green(),
+                        report.total_checks,
+                        report.failed.to_string().red(),
+                        report.warnings.to_string().yellow()
+                    );
                 }
             }
-            #[cfg(not(feature = "modernbert"))]
-            {
-                println!("\n    {}", "🧠 GnawSense AI Ecosystem".bold());
-                println!("  Status:       {}", "❌ Disabled".red());
-                println!("  Note:         {}", "Recompile with --features modernbert to enable semantic intelligence.".italic().bright_black());
-            }
-    
-            // 3. MCP Link (Gemini CLI Integration)
-            println!("
-    {}", "🔗 MCP Link".bold());
-            let home = std::env::var("HOME").unwrap_or_default();
-            let mcp_config_path = std::path::PathBuf::from(&home).join(".gemini/antigravity/mcp_config.json");
-            
-            if mcp_config_path.exists() {
-                match std::fs::read_to_string(&mcp_config_path) {
-                    Ok(content) => {
-                        if content.contains("gnawtreewriter") {
-                            println!("  Config:       {}", "✅ Registered in Gemini CLI".green());
-                        } else {
-                            println!("  Config:       {}", "⚠️  Found config but gnawtreewriter is missing".yellow());
-                        }
-                    }
-                    Err(_) => println!("  Config:       {}", "❌ Config exists but is unreadable".red()),
-                }
-            } else {
-                println!("  Config:       {}", "❌ Not found (~/.gemini/antigravity/mcp_config.json)".red());
-            }
-    
-            // 4. Backend Daemon (GnawGuard)
-            println!("
-    {}", "🛡️  Backend Daemon".bold());
-            let guard_check = Command::new("pgrep").arg("-f").arg("gnaw-guard").output();
-            match guard_check {
-                Ok(output) if !output.stdout.is_empty() => {
-                    println!("  GnawGuard:    {}", "✅ Running in background".green());
-                }
-                _ => {
-                    println!("  GnawGuard:    {}", "⚪ Not detected (Optional)".bright_black());
-                }
-            }
-    
-            println!("
-    {}", "✨ Summary".bold());
-            println!("  System is ready for agentic surgical operations.");
-            println!();
-    
-            Ok(())
         }
+        Ok(())
+    }
+
+    async fn handle_health_check() -> Result<()> {
+        use colored::*;
+        use std::process::Command;
+
+        println!(
+            "
+    {}",
+            "🛡️  GnawTreeWriter System Health Check"
+                .bold()
+                .bright_white()
+        );
+        println!("{}", "=====================================".bright_black());
+
+        // 1. Environment & Paths
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        let is_git = project_root.join(".git").exists();
+
+        println!(
+            "
+    {}",
+            "📍 Environment".bold()
+        );
+        println!(
+            "  CWD:          {}",
+            current_dir.display().to_string().cyan()
+        );
+        println!(
+            "  Project Root: {}",
+            project_root.display().to_string().cyan()
+        );
+        println!(
+            "  Git Status:   {}",
+            if is_git {
+                "✅ Repository Found".green()
+            } else {
+                "⚠️  Not a Git Repo (Precision may suffer)".yellow()
+            }
+        );
+
+        // 3. Transactions & Undo State
+        println!("\n    {}", "🔄 Transactions & Undo State".bold());
+        let undo_manager = crate::core::undo_redo::UndoRedoManager::new(&project_root)?;
+        let state = undo_manager.get_state();
+        let transaction_log =
+            crate::core::transaction_log::TransactionLog::load(project_root.clone())?;
+        let recent = transaction_log.get_last_n_transactions(5)?;
+
+        println!(
+            "  Undo Available: {}",
+            if state.undo_available > 0 {
+                format!("{} steps", state.undo_available).green()
+            } else {
+                "0".bright_black()
+            }
+        );
+        println!(
+            "  Redo Available: {}",
+            if state.redo_available > 0 {
+                format!("{} steps", state.redo_available).green()
+            } else {
+                "0".bright_black()
+            }
+        );
+
+        if let Some(last_undo) = &state.last_undo {
+            println!("  Last Action:   {}", last_undo.cyan());
+        }
+
+        if !recent.is_empty() {
+            println!("  Recent History:");
+            for transaction in recent.iter().rev().take(3) {
+                let timestamp = transaction.timestamp.format("%H:%M:%S").to_string();
+                println!(
+                    "    • {} [{:?}] {}",
+                    timestamp.bright_black(),
+                    transaction.operation,
+                    transaction.description
+                );
+            }
+        } else {
+            println!(
+                "  Recent History: {}",
+                "No transactions recorded yet".bright_black()
+            );
+        }
+
+        // 2. AI Engine (GnawSense & HRM2)
+        #[cfg(feature = "modernbert")]
+        {
+            println!(
+                "\n    {}",
+                "🧠 GnawSense AI Ecosystem".bold().bright_magenta()
+            );
+            let mgr = crate::llm::ai_manager::AiManager::new(&project_root)?;
+            let status = mgr.get_status()?;
+
+            println!(
+                "  Engine:       {}",
+                "✅ ModernBERT (Semantic Core)".green()
+            );
+            println!(
+                "  Reasoning:    {}",
+                "✅ HRM2 (Hierarchical Relational Model)".green().bold()
+            );
+            println!(
+                "  Cache:        {}",
+                status.cache_dir.display().to_string().cyan()
+            );
+
+            let model_dir = status.cache_dir.join("modernbert");
+            let c = model_dir.join("config.json").exists();
+            let t = model_dir.join("tokenizer.json").exists();
+            let w = model_dir.join("model.safetensors").exists();
+
+            print!("  Model Files:  ");
+            if c && t && w {
+                println!("{}", "✅ All components found".green());
+            } else {
+                let mut missing = Vec::new();
+                if !c {
+                    missing.push("config.json");
+                }
+                if !t {
+                    missing.push("tokenizer.json");
+                }
+                if !w {
+                    missing.push("model.safetensors");
+                }
+                println!("{} {}", "❌ Missing:".red(), missing.join(", ").red());
+                println!(
+                    "                {}",
+                    "Run 'gnawtreewriter ai setup' to fix."
+                        .italic()
+                        .bright_black()
+                );
+            }
+
+            // Test load attempt (fast check)
+            match mgr.load_model(crate::llm::AiModel::ModernBert, crate::llm::DeviceType::Cpu) {
+                Ok(_) => println!(
+                    "  Runtime:      {}",
+                    "✅ AI Services ready for GnawSense operations".green()
+                ),
+                Err(e) => println!(
+                    "  Runtime:      {} {}",
+                    "❌ Load failed:".red(),
+                    e.to_string().red()
+                ),
+            }
+        }
+        #[cfg(not(feature = "modernbert"))]
+        {
+            println!("\n    {}", "🧠 GnawSense AI Ecosystem".bold());
+            println!("  Status:       {}", "❌ Disabled".red());
+            println!(
+                "  Note:         {}",
+                "Recompile with --features modernbert to enable semantic intelligence."
+                    .italic()
+                    .bright_black()
+            );
+        }
+
+        // 3. MCP Link (Gemini CLI Integration)
+        println!(
+            "
+    {}",
+            "🔗 MCP Link".bold()
+        );
+        let home = std::env::var("HOME").unwrap_or_default();
+        let mcp_config_path =
+            std::path::PathBuf::from(&home).join(".gemini/antigravity/mcp_config.json");
+
+        if mcp_config_path.exists() {
+            match std::fs::read_to_string(&mcp_config_path) {
+                Ok(content) => {
+                    if content.contains("gnawtreewriter") {
+                        println!("  Config:       {}", "✅ Registered in Gemini CLI".green());
+                    } else {
+                        println!(
+                            "  Config:       {}",
+                            "⚠️  Found config but gnawtreewriter is missing".yellow()
+                        );
+                    }
+                }
+                Err(_) => println!(
+                    "  Config:       {}",
+                    "❌ Config exists but is unreadable".red()
+                ),
+            }
+        } else {
+            println!(
+                "  Config:       {}",
+                "❌ Not found (~/.gemini/antigravity/mcp_config.json)".red()
+            );
+        }
+
+        // 4. Backend Daemon (GnawGuard)
+        println!(
+            "
+    {}",
+            "🛡️  Backend Daemon".bold()
+        );
+        let guard_check = Command::new("pgrep").arg("-f").arg("gnaw-guard").output();
+        match guard_check {
+            Ok(output) if !output.stdout.is_empty() => {
+                println!("  GnawGuard:    {}", "✅ Running in background".green());
+            }
+            _ => {
+                println!(
+                    "  GnawGuard:    {}",
+                    "⚪ Not detected (Optional)".bright_black()
+                );
+            }
+        }
+
+        println!(
+            "
+    {}",
+            "✨ Summary".bold()
+        );
+        println!("  System is ready for agentic surgical operations.");
+        println!();
+
+        Ok(())
+    }
 }
 
 fn print_diff(old: &str, new: &str) {
@@ -4751,47 +5334,66 @@ fn show_hint() {
     eprintln!("\x1b[2m[GnawTip]: {}\x1b[0m", hints[index]);
 }
 
-    fn list_nodes(file_path: &str, tree: &TreeNode, filter_type: Option<&str>, limit: usize, offset: usize) {
-        let mut all_nodes_meta = Vec::new();
+fn list_nodes(
+    file_path: &str,
+    tree: &TreeNode,
+    filter_type: Option<&str>,
+    limit: usize,
+    offset: usize,
+) {
+    let mut all_nodes_meta = Vec::new();
 
-        fn collect(n: &TreeNode, filter: Option<&str>, acc: &mut Vec<(String, String, String)>) {
-            if filter.is_none() || filter.unwrap() == n.node_type {
-                acc.push((
-                    n.path.clone(),
-                    n.node_type.clone(),
-                    n.get_name().unwrap_or_else(|| "unnamed".to_string()),
-                ));
-            }
-            for child in &n.children {
-                collect(child, filter, acc);
-            }
+    fn collect(n: &TreeNode, filter: Option<&str>, acc: &mut Vec<(String, String, String)>) {
+        if filter.is_none() || filter.unwrap() == n.node_type {
+            acc.push((
+                n.path.clone(),
+                n.node_type.clone(),
+                n.get_name().unwrap_or_else(|| "unnamed".to_string()),
+            ));
         }
-
-        collect(tree, filter_type, &mut all_nodes_meta);
-        let total_count = all_nodes_meta.len();
-        
-        let target_nodes: Vec<_> = all_nodes_meta.into_iter().skip(offset).take(limit).collect();
-
-        if target_nodes.is_empty() {
-            println!("No nodes found matching criteria (Total: {}, Offset: {})", total_count, offset);
-            return;
-        }
-
-        if offset > 0 || total_count > limit {
-            println!("--- Showing {} nodes (offset {}, total {}) ---", target_nodes.len(), offset, total_count);
-        }
-
-        for (path, node_type, name) in &target_nodes {
-            println!("  {} [{}] {}", path, node_type, name);
-        }
-
-        if let Some((path, _, name)) = target_nodes.first() {
-            if !path.is_empty() { // Don't suggest editing the source_file root directly usually
-                println!("\n💡 [GnawTip]: To edit a node (e.g. '{}'), use:", name);
-                println!("   gnawtreewriter edit {} {} -", file_path, path);
-            }
+        for child in &n.children {
+            collect(child, filter, acc);
         }
     }
+
+    collect(tree, filter_type, &mut all_nodes_meta);
+    let total_count = all_nodes_meta.len();
+
+    let target_nodes: Vec<_> = all_nodes_meta
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .collect();
+
+    if target_nodes.is_empty() {
+        println!(
+            "No nodes found matching criteria (Total: {}, Offset: {})",
+            total_count, offset
+        );
+        return;
+    }
+
+    if offset > 0 || total_count > limit {
+        println!(
+            "--- Showing {} nodes (offset {}, total {}) ---",
+            target_nodes.len(),
+            offset,
+            total_count
+        );
+    }
+
+    for (path, node_type, name) in &target_nodes {
+        println!("  {} [{}] {}", path, node_type, name);
+    }
+
+    if let Some((path, _, name)) = target_nodes.first() {
+        if !path.is_empty() {
+            // Don't suggest editing the source_file root directly usually
+            println!("\n💡 [GnawTip]: To edit a node (e.g. '{}'), use:", name);
+            println!("   gnawtreewriter edit {} {} -", file_path, path);
+        }
+    }
+}
 
 fn resolve_content(
     content: Option<String>,

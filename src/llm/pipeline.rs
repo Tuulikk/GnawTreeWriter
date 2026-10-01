@@ -41,17 +41,17 @@ impl TaskParams {
     pub fn from_resolution(r: crate::llm::Resolution) -> Self {
         match r {
             crate::llm::Resolution::Fast => Self {
-                chunk_chars: 600,   // ~150 tokens prefill ≈ 5-8s/call
+                chunk_chars: 600, // ~150 tokens prefill ≈ 5-8s/call
                 summary_tokens: 96,
                 synth_tokens: 256,
             },
             crate::llm::Resolution::Balanced => Self {
-                chunk_chars: 1200,  // ~300 tokens prefill ≈ 10-15s/call
+                chunk_chars: 1200, // ~300 tokens prefill ≈ 10-15s/call
                 summary_tokens: 128,
                 synth_tokens: 512,
             },
             crate::llm::Resolution::Thorough => Self {
-                chunk_chars: 2400,  // ~600 tokens prefill ≈ 25-40s/call
+                chunk_chars: 2400, // ~600 tokens prefill ≈ 25-40s/call
                 summary_tokens: 192,
                 synth_tokens: 768,
             },
@@ -81,11 +81,7 @@ fn parse_json_array(s: &str) -> Option<Vec<String>> {
 
 /// Parse a JSON array of indices.
 fn parse_json_indices(s: &str) -> Option<Vec<usize>> {
-    parse_json_array(s).map(|v| {
-        v.iter()
-            .filter_map(|t| t.parse::<usize>().ok())
-            .collect()
-    })
+    parse_json_array(s).map(|v| v.iter().filter_map(|t| t.parse::<usize>().ok()).collect())
 }
 
 // ── Commands ─────────────────────────────────────────────────
@@ -216,15 +212,19 @@ pub fn summarize_dir(
 
     // Step 3: project summary (only meaningful for the root).
     let project_summary = if dir.parent().is_none() {
-        let proj_prompt = prompts::summarize_project_prompt(&[(dir_name.clone(), dir_summary.clone())]);
+        let proj_prompt =
+            prompts::summarize_project_prompt(&[(dir_name.clone(), dir_summary.clone())]);
         let proj_params = GenerateParams {
             max_tokens: task.synth_tokens,
             temperature: SYNTH_TEMP,
         };
         expected_input += mgr.estimate_tokens(&proj_prompt);
         expected_output += proj_params.max_tokens;
-        let proj_gen =
-            mgr.generate_lfm25(&proj_prompt, proj_params.max_tokens, proj_params.temperature)?;
+        let proj_gen = mgr.generate_lfm25(
+            &proj_prompt,
+            proj_params.max_tokens,
+            proj_params.temperature,
+        )?;
         budget.actual_input += mgr.estimate_tokens(&proj_prompt);
         budget.record(&proj_gen);
         clean_output(&proj_gen.text)
@@ -268,22 +268,24 @@ fn collect_skeleton(node: &crate::parser::TreeNode, out: &mut Vec<String>, depth
     }
     let interesting = matches!(
         node.node_type.as_str(),
-        "function_item" | "function_definition" | "function_declaration"
-            | "struct_item" | "struct_declaration"
-            | "enum_item" | "enum_declaration"
-            | "impl_item" | "trait_item" | "trait_declaration"
-            | "class_declaration" | "class_definition"
-            | "method_definition" | "mod_item"
+        "function_item"
+            | "function_definition"
+            | "function_declaration"
+            | "struct_item"
+            | "struct_declaration"
+            | "enum_item"
+            | "enum_declaration"
+            | "impl_item"
+            | "trait_item"
+            | "trait_declaration"
+            | "class_declaration"
+            | "class_definition"
+            | "method_definition"
+            | "mod_item"
     );
     if interesting {
         let name = node.get_name().unwrap_or_default();
-        let sig = node
-            .content
-            .lines()
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_string();
+        let sig = node.content.lines().next().unwrap_or("").trim().to_string();
         let line = format!("{}: {}", name, sig);
         if !out.contains(&line) {
             out.push(line);
@@ -309,10 +311,26 @@ fn summarize_file_chunked(
     if skeleton.trim().is_empty() {
         // Fall back to a small raw excerpt for unsupported/empty parses.
         let content = std::fs::read_to_string(path).unwrap_or_default();
-        return summarize_text_chunked(mgr, name, &content, task, budget, expected_input, expected_output);
+        return summarize_text_chunked(
+            mgr,
+            name,
+            &content,
+            task,
+            budget,
+            expected_input,
+            expected_output,
+        );
     }
 
-    summarize_text_chunked(mgr, name, &skeleton, task, budget, expected_input, expected_output)
+    summarize_text_chunked(
+        mgr,
+        name,
+        &skeleton,
+        task,
+        budget,
+        expected_input,
+        expected_output,
+    )
 }
 
 /// Chunk `text` into resolution-sized pieces, summarize each, then reduce
@@ -400,8 +418,11 @@ pub fn investigate(
     };
     expected_input += mgr.estimate_tokens(&expand_prompt);
     expected_output += expand_params.max_tokens;
-    let expand_gen =
-        mgr.generate_lfm25(&expand_prompt, expand_params.max_tokens, expand_params.temperature)?;
+    let expand_gen = mgr.generate_lfm25(
+        &expand_prompt,
+        expand_params.max_tokens,
+        expand_params.temperature,
+    )?;
     budget.actual_input += mgr.estimate_tokens(&expand_prompt);
     budget.record(&expand_gen);
     let terms = parse_json_array(&expand_gen.text).unwrap_or_else(|| vec![question.to_string()]);
@@ -419,23 +440,24 @@ pub fn investigate(
     };
     expected_input += mgr.estimate_tokens(&rank_prompt);
     expected_output += rank_params.max_tokens;
-    let rank_gen =
-        mgr.generate_lfm25(&rank_prompt, rank_params.max_tokens, rank_params.temperature)?;
+    let rank_gen = mgr.generate_lfm25(
+        &rank_prompt,
+        rank_params.max_tokens,
+        rank_params.temperature,
+    )?;
     budget.actual_input += mgr.estimate_tokens(&rank_prompt);
     budget.record(&rank_gen);
-    let indices = parse_json_indices(&rank_gen.text).unwrap_or_else(|| {
-        (0..candidates.len().min(3)).collect()
-    });
+    let indices = parse_json_indices(&rank_gen.text)
+        .unwrap_or_else(|| (0..candidates.len().min(3)).collect());
 
     // Step 4: read evidence from the top-ranked files and synthesize.
     let mut evidence: Vec<(String, String)> = Vec::new();
     for idx in indices.iter().take(3) {
         if let Some((path, _)) = candidates.get(*idx) {
             if let Ok(content) = std::fs::read_to_string(path) {
-                let mut capped = content;
-                if capped.len() > 3000 {
-                    capped = capped[..3000].to_string();
-                }
+                // Char-boundary safe cap: byte slicing panics on multibyte
+                // UTF-8 (the same bug class as gnaw_sense preview crash).
+                let capped: String = content.chars().take(3000).collect();
                 evidence.push((path.clone(), capped));
             }
         }
@@ -451,8 +473,11 @@ pub fn investigate(
     };
     expected_input += mgr.estimate_tokens(&synth_prompt);
     expected_output += synth_params.max_tokens;
-    let synth_gen =
-        mgr.generate_lfm25(&synth_prompt, synth_params.max_tokens, synth_params.temperature)?;
+    let synth_gen = mgr.generate_lfm25(
+        &synth_prompt,
+        synth_params.max_tokens,
+        synth_params.temperature,
+    )?;
     budget.actual_input += mgr.estimate_tokens(&synth_prompt);
     budget.record(&synth_gen);
 
@@ -481,10 +506,13 @@ fn search_index(
     let mut scored: Vec<(usize, String, String)> = Vec::new(); // (score, path, summary)
 
     // Walk source files and score by term hits in path + content.
-    let files = crate::core::file_walker::walk_source_files_filtered(project_root, &[
-        "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "c", "cpp", "h", "hpp", "cs", "php",
-        "rb", "swift", "kt",
-    ]);
+    let files = crate::core::file_walker::walk_source_files_filtered(
+        project_root,
+        &[
+            "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "c", "cpp", "h", "hpp", "cs",
+            "php", "rb", "swift", "kt",
+        ],
+    );
     for path in files {
         let rel = path
             .strip_prefix(project_root)
@@ -667,8 +695,16 @@ pub fn propose_edit(
             .unwrap_or("")
             .trim();
         if !binding.is_empty() {
-            new_content = format!("let {} = {};", binding, new_content.trim().trim_end_matches(';'));
-            new_line = format!("let {} = {};", binding, new_line.trim().trim_end_matches(';'));
+            new_content = format!(
+                "let {} = {};",
+                binding,
+                new_content.trim().trim_end_matches(';')
+            );
+            new_line = format!(
+                "let {} = {};",
+                binding,
+                new_line.trim().trim_end_matches(';')
+            );
         }
     }
 

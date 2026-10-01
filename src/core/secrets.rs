@@ -9,9 +9,8 @@ use regex::Regex;
 use serde::Serialize;
 use std::sync::LazyLock;
 
-static SCANNER: LazyLock<Option<secrets_scanner::Scanner>> = LazyLock::new(|| {
-    secrets_scanner::Scanner::from_bundled().ok()
-});
+static SCANNER: LazyLock<Option<secrets_scanner::Scanner>> =
+    LazyLock::new(|| secrets_scanner::Scanner::from_bundled().ok());
 
 /// A detected secret.
 #[derive(Debug, Clone, Serialize)]
@@ -134,11 +133,7 @@ macro_rules! secret_pattern {
 
 static SECRET_PATTERNS: &[SecretPattern] = &[
     // AWS
-    secret_pattern!(
-        "AWS Access Key",
-        r"AKIA[0-9A-Z]{16}",
-        0.95
-    ),
+    secret_pattern!("AWS Access Key", r"AKIA[0-9A-Z]{16}", 0.95),
     // AWS Secret Key
     secret_pattern!(
         "AWS Secret Key",
@@ -289,12 +284,15 @@ fn is_likely_safe(matched: &str) -> bool {
 }
 
 /// Redact a secret string, showing only first and last few characters.
+/// Char-boundary safe: byte slicing panics on multibyte UTF-8.
 fn redact_secret(secret: &str) -> String {
-    let len = secret.len();
-    if len <= 8 {
-        "*".repeat(len)
+    let chars: Vec<char> = secret.chars().collect();
+    if chars.len() <= 8 {
+        "*".repeat(chars.len())
     } else {
-        format!("{}...{}", &secret[..4], &secret[len - 4..])
+        let head: String = chars[..4].iter().collect();
+        let tail: String = chars[chars.len() - 4..].iter().collect();
+        format!("{}...{}", head, tail)
     }
 }
 
@@ -381,7 +379,11 @@ token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
 password = "supersecretpassword123"
 "#;
         let secrets = scan_for_secrets(source);
-        assert!(secrets.len() >= 2, "Should detect multiple secrets, found: {}", secrets.len());
+        assert!(
+            secrets.len() >= 2,
+            "Should detect multiple secrets, found: {}",
+            secrets.len()
+        );
     }
 
     #[test]

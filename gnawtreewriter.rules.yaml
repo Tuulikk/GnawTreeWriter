@@ -1,0 +1,6 @@
+rules:
+- id: no_byte_slice_strings
+  language: rust
+  severity: warning
+  message: Byte-slicing a string with a literal index panics on multibyte UTF-8. Use chars().take(n) or truncate_preview() instead.
+  pattern: '&$X[..$N]'
