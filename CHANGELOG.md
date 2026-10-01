@@ -1,3 +1,22 @@
+## [0.9.8] - 2026-10-01
+
+### Fixed
+- **MCP reliability on large files** (found via GTW_MCP_ISSUE_LOG.md omgång 3-5): `sense`/`get_skeleton` on 1000+ node files completed within client timeouts instead of cascading into timeouts and a dead "Not connected" connection.
+- **Per-request panic isolation** in both stdio and HTTP MCP loops: a panicking handler now returns a JSON-RPC internal error instead of unwinding through the read loop and killing the connection.
+- **Shared GnawSense broker** (`AppState` + `OnceCell`): the ModernBERT model and JIT index cache now persist across MCP calls instead of reloading per call. First zoom-sense ~25-30 s, following calls ~1 s (cache hit).
+- **Char-boundary panics on multibyte UTF-8** (em-dash, CJK, emoji) — byte slicing (`&s[..97]`, `[..3000]`, byte-based `chunk_text`) replaced with char-safe truncation across sense previews, pipeline evidence caps, project indexer chunking, `edit` removed-preview and secrets redaction. Systematic UTF-8 audit; a `no_byte_slice_strings` lint rule was added to `gnawtreewriter.rules.yaml`.
+- **ModernBERT rope crash on huge nodes** (content > 8192 tokens crashed the model with "inconsistent last dim size in rope") — node content truncated before embedding.
+- **Degenerate `Satelite search results` response** — now reports match count and hints at building the project index when empty.
+- **Bounded JIT cache** (32 files with eviction) — unbounded growth reached 511 MB RSS in long-lived MCP sessions.
+- clippy `question_mark` warnings in `parser/xml.rs`.
+
+### Changed
+- Zoom indexing caps for first-call latency: max 24 embedded nodes per file (largest definitions first), max 1200 chars per node. Zoom remains a localization tool; the full project index is built with `ai index`.
+- `project_indexer` chunk thresholds made rope-safe (chunk at 4000 chars from 8000, was 10000 from 15000 — CJK can cost ~1 token/char).
+
+### Docs
+- `GTW_MCP_ISSUE_LOG.md`: omgång 3 (reproduction: timeout → Not connected, degenerate satellite response), omgång 4 (root causes + fixes + validation), omgång 5 (UTF-8 audit: 7 more byte-slice bugs found and fixed).
+
 ## [0.9.7] - 2026-08-25
 
 ### Added
