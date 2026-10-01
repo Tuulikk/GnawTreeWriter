@@ -31,3 +31,6 @@ GnawData/
 
 # OpenCode checkpoints
 .opencode/
+
+# CommandCode (OpenCode-alternativ)
+.commandcode/
