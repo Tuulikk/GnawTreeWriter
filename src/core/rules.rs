@@ -77,8 +77,7 @@ pub struct CompiledRule {
 
 /// Load rules from YAML text.
 pub fn load_rules_yaml(yaml: &str) -> Result<Vec<Rule>> {
-    let file: RulesFile = serde_yaml::from_str(yaml)
-        .context("failed to parse rules YAML")?;
+    let file: RulesFile = serde_yaml::from_str(yaml).context("failed to parse rules YAML")?;
     Ok(file.rules)
 }
 
@@ -180,8 +179,22 @@ pub fn compile_rule(rule: &Rule) -> Result<CompiledRule> {
         && !substituted.trim_end().ends_with('}')
         && matches!(
             rule.language.to_lowercase().as_str(),
-            "rust" | "rs" | "javascript" | "js" | "typescript" | "ts" | "go" | "java"
-                | "c" | "cpp" | "csharp" | "cs" | "php" | "swift" | "kotlin" | "kt"
+            "rust"
+                | "rs"
+                | "javascript"
+                | "js"
+                | "typescript"
+                | "ts"
+                | "go"
+                | "java"
+                | "c"
+                | "cpp"
+                | "csharp"
+                | "cs"
+                | "php"
+                | "swift"
+                | "kotlin"
+                | "kt"
         );
     if needs_semi {
         parse_attempts.push(format!("{substituted};"));
@@ -217,7 +230,11 @@ pub fn compile_rule(rule: &Rule) -> Result<CompiledRule> {
     }
     // If nothing substantial parsed, try the language scaffold (for partial
     // statements like Python `except:`).
-    if best.as_ref().map(|(t, _)| t.children.is_empty()).unwrap_or(true) {
+    if best
+        .as_ref()
+        .map(|(t, _)| t.children.is_empty())
+        .unwrap_or(true)
+    {
         if let Some(wrapped) = scaffold_pattern(&rule.language, &substituted) {
             if let Ok(t) = parser.parse(&wrapped) {
                 best = Some((t, true));
@@ -248,10 +265,7 @@ pub fn compile_rule(rule: &Rule) -> Result<CompiledRule> {
                 .map(|n| vec![n.clone()])
                 .unwrap_or_default()
         } else {
-            let first_repl = subs
-                .first()
-                .map(|(_, r)| r.clone())
-                .unwrap_or_default();
+            let first_repl = subs.first().map(|(_, r)| r.clone()).unwrap_or_default();
             extract_pattern_roots(&pattern_tree, &first_repl)
         }
     } else {
@@ -277,7 +291,10 @@ fn collect_placeholders(
 ) {
     for (placeholder, replacement) in subs {
         if node.content == *replacement {
-            out.insert(node.path.clone(), placeholder.trim_start_matches('$').to_string());
+            out.insert(
+                node.path.clone(),
+                placeholder.trim_start_matches('$').to_string(),
+            );
             break;
         }
     }
@@ -307,10 +324,7 @@ fn scaffold_pattern(language: &str, pattern: &str) -> Option<String> {
 /// is everything above them.
 fn extract_pattern_roots(scaffolded: &TreeNode, first_replacement: &str) -> Vec<TreeNode> {
     // Find the deepest node containing the first placeholder.
-    fn find_deepest<'a>(
-        node: &'a TreeNode,
-        needle: &str,
-    ) -> Option<&'a TreeNode> {
+    fn find_deepest<'a>(node: &'a TreeNode, needle: &str) -> Option<&'a TreeNode> {
         if !node.content.contains(needle) {
             return None;
         }
@@ -370,11 +384,7 @@ pub fn run_rule(rule: &CompiledRule, tree: &TreeNode, file: &str) -> Vec<Finding
 /// Compile a set of rules once and run them against source code text.
 /// Returns findings (empty if no rules match or none apply to this language).
 /// Rules that fail to compile are skipped (reported via `skipped`).
-pub fn check_code(
-    code: &str,
-    language: &str,
-    rules: &[Rule],
-) -> (Vec<Finding>, usize) {
+pub fn check_code(code: &str, language: &str, rules: &[Rule]) -> (Vec<Finding>, usize) {
     let mut compiled: Vec<CompiledRule> = Vec::new();
     let mut skipped = 0usize;
     let mut applicable = 0usize;
@@ -426,8 +436,7 @@ pub fn builtin_rules() -> Vec<Rule> {
     static CACHE: std::sync::OnceLock<Vec<Rule>> = std::sync::OnceLock::new();
     CACHE
         .get_or_init(|| {
-            load_rules_yaml(include_str!("../../rules/builtin.yaml"))
-                .unwrap_or_default()
+            load_rules_yaml(include_str!("../../rules/builtin.yaml")).unwrap_or_default()
         })
         .clone()
 }
@@ -564,10 +573,7 @@ fn match_node(
 }
 
 /// Merge child bindings; fails if the same placeholder binds different content.
-fn merge_bindings(
-    acc: &mut HashMap<String, String>,
-    new: HashMap<String, String>,
-) -> Option<()> {
+fn merge_bindings(acc: &mut HashMap<String, String>, new: HashMap<String, String>) -> Option<()> {
     for (k, v) in new {
         if let Some(existing) = acc.get(&k) {
             if existing != &v {
@@ -601,17 +607,17 @@ fn normalize(mut s: String) -> String {
 }
 
 fn is_whitespace_node(node: &TreeNode) -> bool {
-    node.node_type == "whitespace"
-        || node.node_type == "comment"
-        || node.content.trim().is_empty()
+    node.node_type == "whitespace" || node.node_type == "comment" || node.content.trim().is_empty()
 }
 
 /// Punctuation-only nodes (e.g. `;`) that are not structurally meaningful.
 fn is_punct_node(node: &TreeNode) -> bool {
     matches!(node.node_type.as_str(), ";" | "," | "(" | ")" | "{" | "}")
-        || node.content.trim().chars().all(|c| {
-            matches!(c, ';' | ',' | '(' | ')' | '{' | '}' | '[' | ']')
-        })
+        || node
+            .content
+            .trim()
+            .chars()
+            .all(|c| matches!(c, ';' | ',' | '(' | ')' | '{' | '}' | '[' | ']'))
 }
 
 #[cfg(test)]
@@ -646,10 +652,7 @@ mod tests {
     #[test]
     fn test_unwrap_rust() {
         let rule = compile("$X.unwrap()", "rust");
-        let tree = parse_source(
-            "fn f() { let a = x.unwrap(); let b = y.ok(); }",
-            "rust",
-        );
+        let tree = parse_source("fn f() { let a = x.unwrap(); let b = y.ok(); }", "rust");
         let findings = run_rule(&rule, &tree, "test.rs");
         assert_eq!(findings.len(), 1, "only unwrap should match");
     }
@@ -659,10 +662,7 @@ mod tests {
         // A statement wrapper + inner child can both match the same pattern;
         // run_rule must report each code location only once.
         let rule = compile("$X.unwrap()", "rust");
-        let tree = parse_source(
-            "fn f() { let a = x.unwrap(); let b = x.unwrap(); }",
-            "rust",
-        );
+        let tree = parse_source("fn f() { let a = x.unwrap(); let b = x.unwrap(); }", "rust");
         let findings = run_rule(&rule, &tree, "test.rs");
         assert_eq!(findings.len(), 2, "two separate unwrap calls expected");
 
@@ -684,17 +684,3 @@ mod tests {
         assert_eq!(findings.len(), 1, "only bare except: pass should match");
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-

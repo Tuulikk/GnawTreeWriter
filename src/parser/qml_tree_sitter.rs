@@ -1,4 +1,4 @@
-use crate::parser::{TreeNode, ParserEngineLegacy};
+use crate::parser::{ParserEngineLegacy, TreeNode};
 use anyhow::Result;
 
 pub struct QmlTreeSitterParser;
@@ -80,14 +80,16 @@ impl QmlTreeSitterParser {
             path
         };
 
-        Ok(TreeNode { start_col: 0, end_col: 0,
+        Ok(TreeNode {
+            start_col: 0,
+            end_col: 0,
             id,
             path: final_path,
             node_type,
             content,
             start_line,
             end_line,
-            children, 
+            children,
         })
     }
 }

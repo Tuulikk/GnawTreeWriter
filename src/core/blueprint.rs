@@ -1,8 +1,8 @@
+use crate::llm::RelationalIndexer;
 use anyhow::Result;
+use colored::Colorize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use crate::llm::RelationalIndexer;
-use colored::Colorize;
 
 pub struct BlueprintEngine {
     project_root: PathBuf,
@@ -25,15 +25,22 @@ impl BlueprintEngine {
     pub fn generate(&self) -> Result<ProjectBlueprint> {
         let mut indexer = RelationalIndexer::new(&self.project_root);
         let mut graphs = indexer.load_all_graphs()?;
-        
+
         if graphs.is_empty() {
             let src_path = self.project_root.join("src");
-            let scan_target = if src_path.exists() { src_path } else { self.project_root.clone() };
-            
-            println!("🔍 No architectural graphs found. Performing initial scan of '{}'...", scan_target.display());
+            let scan_target = if src_path.exists() {
+                src_path
+            } else {
+                self.project_root.clone()
+            };
+
+            println!(
+                "🔍 No architectural graphs found. Performing initial scan of '{}'...",
+                scan_target.display()
+            );
             graphs = indexer.index_directory(&scan_target)?;
         }
-        
+
         let mut blueprint = ProjectBlueprint {
             total_files: graphs.len(),
             clusters: HashMap::new(),
@@ -45,15 +52,21 @@ impl BlueprintEngine {
 
         for graph in graphs {
             let path = Path::new(&graph.file_path);
-            let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("unknown");
-            
+            let file_name = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown");
+
             // 1. Clustering by directory
-            let parent = path.parent()
+            let parent = path
+                .parent()
                 .and_then(|p| p.strip_prefix(&self.project_root).ok())
                 .and_then(|p| p.to_str())
                 .unwrap_or("root");
-            
-            blueprint.clusters.entry(parent.to_string())
+
+            blueprint
+                .clusters
+                .entry(parent.to_string())
                 .or_default()
                 .push(file_name.to_string());
 
@@ -61,8 +74,11 @@ impl BlueprintEngine {
             for rel in graph.relations {
                 if let Some(to_file) = rel.to_file {
                     let to_path = Path::new(&to_file);
-                    let to_name = to_path.file_name().and_then(|s| s.to_str()).unwrap_or("unknown");
-                    
+                    let to_name = to_path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("unknown");
+
                     let conn = (file_name.to_string(), to_name.to_string());
                     if !seen_connections.contains(&conn) && conn.0 != conn.1 {
                         blueprint.connections.push(conn.clone());
@@ -72,7 +88,11 @@ impl BlueprintEngine {
             }
 
             // 3. Entry point detection
-            if file_name == "main.rs" || file_name == "main.py" || file_name == "index.ts" || file_name == "lib.rs" {
+            if file_name == "main.rs"
+                || file_name == "main.py"
+                || file_name == "index.ts"
+                || file_name == "lib.rs"
+            {
                 blueprint.entry_points.push(file_name.to_string());
             }
         }
@@ -81,8 +101,15 @@ impl BlueprintEngine {
     }
 
     pub fn render_to_terminal(&self, blueprint: &ProjectBlueprint) {
-        println!("\n{}", "🏗️  Project Blueprint".bold().bright_white().on_blue());
-        println!("{} files indexed across {} clusters\n", blueprint.total_files, blueprint.clusters.len());
+        println!(
+            "\n{}",
+            "🏗️  Project Blueprint".bold().bright_white().on_blue()
+        );
+        println!(
+            "{} files indexed across {} clusters\n",
+            blueprint.total_files,
+            blueprint.clusters.len()
+        );
 
         println!("{}", "📁 Clusters:".bold().yellow());
         for (cluster, files) in &blueprint.clusters {
@@ -94,10 +121,18 @@ impl BlueprintEngine {
 
         println!("\n{}", "🔗 Key Relations:".bold().yellow());
         for (from, to) in blueprint.connections.iter().take(15) {
-            println!("  {} {} {}", from.white(), "──▶".dimmed(), to.bright_white());
+            println!(
+                "  {} {} {}",
+                from.white(),
+                "──▶".dimmed(),
+                to.bright_white()
+            );
         }
         if blueprint.connections.len() > 15 {
-            println!("  ... and {} more connections", blueprint.connections.len() - 15);
+            println!(
+                "  ... and {} more connections",
+                blueprint.connections.len() - 15
+            );
         }
 
         println!("\n{}", "🚀 Entry Points:".bold().yellow());
@@ -110,15 +145,22 @@ impl BlueprintEngine {
     pub fn render_to_markdown(&self, blueprint: &ProjectBlueprint) -> String {
         let mut md = String::new();
         md.push_str("# 🏗️ Project Blueprint\n\n");
-        md.push_str(&format!("*Generated by GnawTreeWriter on {}*\n\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
-        
+        md.push_str(&format!(
+            "*Generated by GnawTreeWriter on {}*\n\n",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+        ));
+
         md.push_str(&format!("**Total Files:** {}\n", blueprint.total_files));
         md.push_str(&format!("**Clusters:** {}\n\n", blueprint.clusters.len()));
 
         md.push_str("## 📁 Architectural Clusters\n\n");
         for (cluster, files) in &blueprint.clusters {
             md.push_str(&format!("### 📦 {}\n", cluster));
-            md.push_str(&format!("- **Files ({}):** {}\n\n", files.len(), files.join(", ")));
+            md.push_str(&format!(
+                "- **Files ({}):** {}\n\n",
+                files.len(),
+                files.join(", ")
+            ));
         }
 
         md.push_str("## 🔗 Key Relations\n\n");
@@ -133,7 +175,7 @@ impl BlueprintEngine {
         for ep in &blueprint.entry_points {
             md.push_str(&format!("- ✅ `{}`\n", ep));
         }
-        
+
         md.push_str("\n---\n*Gnag vidare! Allting är relativt.*");
         md
     }

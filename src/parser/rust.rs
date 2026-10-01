@@ -1,4 +1,4 @@
-use crate::parser::{ParserEngine, TreeNode, ParseResult, SyntaxError};
+use crate::parser::{ParseResult, ParserEngine, SyntaxError, TreeNode};
 
 pub struct RustParser;
 
@@ -13,7 +13,11 @@ impl RustParser {
         Self
     }
 
-    fn find_error<'a>(&self, node: &tree_sitter::Node<'a>, _cursor: &mut tree_sitter::TreeCursor<'a>) -> Option<tree_sitter::Node<'a>> {
+    fn find_error<'a>(
+        &self,
+        node: &tree_sitter::Node<'a>,
+        _cursor: &mut tree_sitter::TreeCursor<'a>,
+    ) -> Option<tree_sitter::Node<'a>> {
         if node.is_error() || node.is_missing() {
             return Some(*node);
         }
@@ -27,7 +31,11 @@ impl RustParser {
         None
     }
 
-    fn build_tree(node: &tree_sitter::Node, source: &str, path: String) -> anyhow::Result<TreeNode> {
+    fn build_tree(
+        node: &tree_sitter::Node,
+        source: &str,
+        path: String,
+    ) -> anyhow::Result<TreeNode> {
         let start_byte = node.start_byte();
         let end_byte = node.end_byte();
         let content = if let Some(s) = source.get(start_byte..end_byte) {
@@ -73,7 +81,11 @@ impl RustParser {
                                         .and_then(|s| s.strip_suffix(&[')', '}', ']'][..]))
                                         .unwrap_or(stripped);
                                     let base_path = format!("{}.{}", path, ci);
-                                    if let Some(virtual_kids) = crate::core::macro_dispatcher::try_expand_macro(macro_name, inner, &base_path) {
+                                    if let Some(virtual_kids) =
+                                        crate::core::macro_dispatcher::try_expand_macro(
+                                            macro_name, inner, &base_path,
+                                        )
+                                    {
                                         children.extend(virtual_kids);
                                     }
                                 }
@@ -110,12 +122,15 @@ impl ParserEngine for RustParser {
             )()
         };
         if let Err(e) = parser.set_language(&language) {
-            return Err(SyntaxError::from(anyhow::anyhow!("Failed to set Rust language: {}", e)));
+            return Err(SyntaxError::from(anyhow::anyhow!(
+                "Failed to set Rust language: {}",
+                e
+            )));
         }
 
-        let tree = parser
-            .parse(code, None)
-            .ok_or_else(|| SyntaxError::from(anyhow::anyhow!("Failed to parse Rust: No tree returned")))?;
+        let tree = parser.parse(code, None).ok_or_else(|| {
+            SyntaxError::from(anyhow::anyhow!("Failed to parse Rust: No tree returned"))
+        })?;
 
         if tree.root_node().has_error() {
             let mut cursor = tree.walk();

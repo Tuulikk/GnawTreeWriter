@@ -55,12 +55,14 @@ pub fn graph(
     collect_functions_and_calls(tree, &mut nodes, &mut edges, &mut functions, max_depth);
 
     // Find orphan nodes (functions not called by anything)
-    let called_functions: HashSet<String> = edges.iter()
+    let called_functions: HashSet<String> = edges
+        .iter()
         .filter(|e| e.relation == "calls")
         .map(|e| e.to.clone())
         .collect();
 
-    let orphans = nodes.iter()
+    let orphans = nodes
+        .iter()
         .filter(|n| n.node_type.contains("function") && !called_functions.contains(&n.id))
         .count();
 
@@ -186,8 +188,9 @@ fn find_function_id(name: &str, nodes: &Vec<GraphNode>) -> Option<String> {
     }
     // Fuzzy match
     for n in nodes {
-        if n.name.to_lowercase().contains(&name.to_lowercase()) || 
-           name.to_lowercase().contains(&n.name.to_lowercase()) {
+        if n.name.to_lowercase().contains(&name.to_lowercase())
+            || name.to_lowercase().contains(&n.name.to_lowercase())
+        {
             return Some(n.id.clone());
         }
     }
@@ -201,14 +204,19 @@ pub fn format_graph_text(result: &GraphResult) -> String {
     output.push_str("\n🔗 CODE RELATION GRAPH\n");
     output.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
     output.push_str(&format!("File: {}\n", result.file));
-    output.push_str(&format!("📊 {} nodes, {} edges, {} orphans\n",
-        result.summary.nodes, result.summary.edges, result.summary.orphans));
+    output.push_str(&format!(
+        "📊 {} nodes, {} edges, {} orphans\n",
+        result.summary.nodes, result.summary.edges, result.summary.orphans
+    ));
 
     if !result.nodes.is_empty() {
         output.push_str("\n📦 NODES (functions, structs, etc.):\n");
         let mut by_type: HashMap<String, Vec<&GraphNode>> = HashMap::new();
         for node in &result.nodes {
-            by_type.entry(node.node_type.clone()).or_default().push(node);
+            by_type
+                .entry(node.node_type.clone())
+                .or_default()
+                .push(node);
         }
         for (node_type, group) in by_type {
             output.push_str(&format!("  [{}] {}\n", group.len(), node_type));
@@ -221,15 +229,22 @@ pub fn format_graph_text(result: &GraphResult) -> String {
     if !result.edges.is_empty() {
         output.push_str("\n🔗 CALL RELATIONS:\n");
         for edge in &result.edges {
-            let from_name = result.nodes.iter()
+            let from_name = result
+                .nodes
+                .iter()
                 .find(|n| n.id == edge.from)
                 .map(|n| n.name.clone())
                 .unwrap_or_else(|| edge.from.clone());
-            let to_name = result.nodes.iter()
+            let to_name = result
+                .nodes
+                .iter()
                 .find(|n| n.id == edge.to)
                 .map(|n| n.name.clone())
                 .unwrap_or_else(|| edge.to.clone());
-            output.push_str(&format!("  {} → {} [{}]\n", from_name, to_name, edge.relation));
+            output.push_str(&format!(
+                "  {} → {} [{}]\n",
+                from_name, to_name, edge.relation
+            ));
         }
     }
 
@@ -246,7 +261,11 @@ pub fn format_graph_mermaid(result: &GraphResult) -> String {
 
     // Add nodes
     for node in &result.nodes {
-        let label = node.name.replace('"', "").replace('<', "&lt;").replace('>', "&gt;");
+        let label = node
+            .name
+            .replace('"', "")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
         let node_id = node.id.replace([':', '.'], "_");
         output.push_str(&format!("    {}(\"{}\")\n", node_id, label));
     }
@@ -315,7 +334,9 @@ pub fn format_graph_tree(result: &GraphResult) -> String {
         for s in structs {
             output.push_str(&format!("  📦 {}\n", s.name));
             // Find methods
-            let methods: Vec<&GraphNode> = result.nodes.iter()
+            let methods: Vec<&GraphNode> = result
+                .nodes
+                .iter()
                 .filter(|n| n.path.starts_with(&s.path) && n.node_type.contains("function"))
                 .collect();
             for m in methods {
@@ -327,7 +348,9 @@ pub fn format_graph_tree(result: &GraphResult) -> String {
     if !funcs.is_empty() {
         output.push_str("\n🔧 Functions:\n");
         for f in funcs {
-            let calls: Vec<&GraphNode> = result.edges.iter()
+            let calls: Vec<&GraphNode> = result
+                .edges
+                .iter()
                 .filter(|e| e.from == f.id)
                 .filter_map(|e| result.nodes.iter().find(|n| n.id == e.to))
                 .collect();

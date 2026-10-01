@@ -1,6 +1,6 @@
-use std::path::Path;
 use candle_core::{DType, Device};
 use candle_nn::VarBuilder;
+use std::path::Path;
 
 fn main() {
     let model_dir = Path::new(".gnawtreewriter_ai/models/modernbert");

@@ -1,3 +1,5 @@
+#[cfg(feature = "modernbert")]
+use crate::core::LabelManager;
 use anyhow::Result;
 #[cfg(feature = "modernbert")]
 use candle_core::{DType, Device, Tensor};
@@ -5,13 +7,10 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::{self, VarBuilder};
 #[cfg(feature = "modernbert")]
 use candle_transformers::models::modernbert::{Config, ModernBert};
-#[cfg(feature = "modernbert")]
-use crate::core::LabelManager;
 use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "modernbert")]
 use tokenizers::Tokenizer;
-
 
 /// Supported AI models for local execution
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -190,15 +189,17 @@ impl TokenBudget {
     /// profile. A cost *estimate*, never a hard limit — the caller decides
     /// whether the expected time is acceptable.
     pub fn estimate_seconds(&mut self, profile: &TimingProfile) {
-        self.expected_seconds =
-            profile.estimate_seconds(self.expected_input, self.expected_output);
+        self.expected_seconds = profile.estimate_seconds(self.expected_input, self.expected_output);
     }
 }
 
 #[cfg(feature = "modernbert")]
 impl ModernBertModel {
     pub fn get_embedding(&self, text: &str) -> Result<Tensor> {
-        let tokens = self.tokenizer.encode(text, true).map_err(anyhow::Error::msg)?;
+        let tokens = self
+            .tokenizer
+            .encode(text, true)
+            .map_err(anyhow::Error::msg)?;
         let input_ids = Tensor::new(tokens.get_ids(), &self.device)?.unsqueeze(0)?;
         let mask = input_ids.ones_like()?;
         let embeddings = self.model.forward(&input_ids, &mask)?;
@@ -225,14 +226,16 @@ pub struct AiManager {
 impl AiManager {
     pub fn new(project_root: &Path) -> Result<Self> {
         let local_cache = project_root.join(".gnawtreewriter_ai").join("models");
-        
+
         // Try local first, then global home dir
         let model_cache_dir = if local_cache.exists() && local_cache.join("modernbert").exists() {
             local_cache
         } else {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            let global_cache = PathBuf::from(home).join(".gnawtreewriter_ai").join("models");
-            
+            let global_cache = PathBuf::from(home)
+                .join(".gnawtreewriter_ai")
+                .join("models");
+
             if !global_cache.exists() {
                 let _ = fs::create_dir_all(&global_cache);
             }
@@ -242,7 +245,7 @@ impl AiManager {
         #[cfg(feature = "mamba")]
         let timing_profile = load_timing_profile(&model_cache_dir);
 
-        Ok(Self { 
+        Ok(Self {
             model_cache_dir,
             project_root: project_root.to_path_buf(),
             #[cfg(feature = "modernbert")]
@@ -294,42 +297,60 @@ impl AiManager {
     }
 
     #[cfg(feature = "modernbert")]
-    pub fn load_model(&self, model_type: AiModel, device_type: DeviceType) -> Result<&ModernBertModel> {
+    pub fn load_model(
+        &self,
+        model_type: AiModel,
+        device_type: DeviceType,
+    ) -> Result<&ModernBertModel> {
         // OnceLock doesn't have get_or_try_init on stable Rust yet.
         // Use get_or_init with interior error handling — if model fails to load,
         // we panic (this is acceptable: missing model = broken installation).
         if let Some(model) = self.cached_model.get() {
             return Ok(model);
         }
-        
+
         // Load the model (not cached yet)
         let model_dir = self.get_model_path(&model_type);
-        
+
         let config_path = model_dir.join("config.json");
         let tokenizer_path = model_dir.join("tokenizer.json");
         let weights_path = model_dir.join("model.safetensors");
 
-        if !config_path.exists() { return Err(anyhow::anyhow!("Missing config: {:?}", config_path)); }
-        if !tokenizer_path.exists() { return Err(anyhow::anyhow!("Missing tokenizer: {:?}", tokenizer_path)); }
-        if !weights_path.exists() { return Err(anyhow::anyhow!("Missing weights: {:?}", weights_path)); }
+        if !config_path.exists() {
+            return Err(anyhow::anyhow!("Missing config: {:?}", config_path));
+        }
+        if !tokenizer_path.exists() {
+            return Err(anyhow::anyhow!("Missing tokenizer: {:?}", tokenizer_path));
+        }
+        if !weights_path.exists() {
+            return Err(anyhow::anyhow!("Missing weights: {:?}", weights_path));
+        }
 
         let config: Config = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
         let tokenizer = Tokenizer::from_file(&tokenizer_path).map_err(anyhow::Error::msg)?;
-        
+
         let device = match device_type {
             DeviceType::Cpu => Device::Cpu,
             DeviceType::Cuda => Device::new_cuda(0)?,
             DeviceType::Metal => Device::new_metal(0)?,
         };
-        
-        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)? };
+
+        let vb =
+            unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)? };
         let model = ModernBert::load(vb, &config)?;
-        let loaded = ModernBertModel { model, tokenizer, device };
-        
+        let loaded = ModernBertModel {
+            model,
+            tokenizer,
+            device,
+        };
+
         // Store in cache (get_or_init for the first call wins; subsequent calls reuse)
         // If another thread loaded meanwhile, that's fine — we just return the cached one
-        self.cached_model.set(loaded).ok().expect("Model cache already set");
-        
+        self.cached_model
+            .set(loaded)
+            .ok()
+            .expect("Model cache already set");
+
         Ok(self.cached_model.get().unwrap())
     }
 
@@ -363,14 +384,12 @@ impl AiManager {
         let content = candle_core::quantized::gguf_file::Content::read(&mut file)
             .map_err(|e| anyhow::anyhow!("failed to read GGUF header: {e}"))?;
         let model = candle_transformers::models::quantized_lfm2::ModelWeights::from_gguf(
-            content,
-            &mut file,
-            &device,
+            content, &mut file, &device,
         )
         .map_err(|e| anyhow::anyhow!("failed to load LFM2.5 weights: {e}"))?;
 
-        let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
-            .map_err(anyhow::Error::msg)?;
+        let tokenizer =
+            tokenizers::Tokenizer::from_file(&tokenizer_path).map_err(anyhow::Error::msg)?;
 
         let loaded = Lfm25Model {
             model: std::sync::Mutex::new(model),
@@ -478,37 +497,45 @@ impl AiManager {
         eprintln!("[DEBUG] Starting semantic report for: {}", file_path);
         let _model = self.load_model(AiModel::ModernBert, DeviceType::Cpu)?;
         eprintln!("[DEBUG] Model loaded successfully");
-        
+
         let mut label_mgr = LabelManager::load(&self.project_root)?;
         eprintln!("[DEBUG] Label manager loaded from: {:?}", self.project_root);
-        
+
         let path = Path::new(file_path);
         if !path.exists() {
             return Err(anyhow::anyhow!("File not found: {}", file_path));
         }
-        
+
         let content = fs::read_to_string(file_path)?;
         eprintln!("[DEBUG] File content read ({} bytes)", content.len());
-        
+
         let parser = crate::parser::get_parser(path)?;
         eprintln!("[DEBUG] Parser obtained");
-        
+
         let tree = parser.parse(&content)?;
         eprintln!("[DEBUG] AST parsed");
 
         let mut nodes = Vec::new();
         fn collect(n: &crate::parser::TreeNode, acc: &mut Vec<crate::parser::TreeNode>) {
             acc.push(n.clone());
-            for c in &n.children { collect(c, acc); }
+            for c in &n.children {
+                collect(c, acc);
+            }
         }
         collect(&tree, &mut nodes);
         eprintln!("[DEBUG] Collected {} nodes", nodes.len());
 
         let mut findings = Vec::new();
         for node in &nodes {
-            if node.content.len() < 30 || node.content.len() > 5000 { continue; }
-            
-            let braces = node.content.chars().filter(|&c| c == '{' || c == '}').count();
+            if node.content.len() < 30 || node.content.len() > 5000 {
+                continue;
+            }
+
+            let braces = node
+                .content
+                .chars()
+                .filter(|&c| c == '{' || c == '}')
+                .count();
             let density = braces as f32 / node.content.len() as f32;
             if density > 0.15 && node.content.len() > 100 {
                 let msg = format!("High brace density ({:.1}%)", density * 100.0);
@@ -534,13 +561,16 @@ impl AiManager {
         {
             let model_id = "answerdotai/ModernBERT-base";
             let model_dir = self.get_model_path(&AiModel::ModernBert);
-            if !model_dir.exists() { fs::create_dir_all(&model_dir)?; }
+            if !model_dir.exists() {
+                fs::create_dir_all(&model_dir)?;
+            }
             for file in ["config.json", "model.safetensors", "tokenizer.json"] {
                 let dest = model_dir.join(file);
                 if !dest.exists() || _force {
                     let url = format!("https://huggingface.co/{}/resolve/main/{}", model_id, file);
                     println!("  Downloading {}...", file);
-                    let resp = ureq::get(&url).call()
+                    let resp = ureq::get(&url)
+                        .call()
                         .map_err(|e| anyhow::anyhow!("HTTP download failed: {}", e))?;
                     let mut reader = resp.into_reader();
                     let mut out = std::fs::File::create(&dest)
@@ -558,20 +588,28 @@ impl AiManager {
             let gguf_file = "LFM2.5-1.2B-Instruct-QAD-Q4_0.gguf";
             let tok_id = "LiquidAI/LFM2.5-1.2B-Instruct";
             let model_dir = self.get_model_path(&AiModel::Lfm25);
-            if !model_dir.exists() { fs::create_dir_all(&model_dir)?; }
+            if !model_dir.exists() {
+                fs::create_dir_all(&model_dir)?;
+            }
 
             let weights_path = model_dir.join("model.gguf");
             let tokenizer_path = model_dir.join("tokenizer.json");
 
             if !weights_path.exists() || _force {
-                let url = format!("https://huggingface.co/{}/resolve/main/{}", model_id, gguf_file);
+                let url = format!(
+                    "https://huggingface.co/{}/resolve/main/{}",
+                    model_id, gguf_file
+                );
                 println!("  Downloading LFM2.5 QAD-Q4_0 GGUF (~700 MB)...");
                 download_file(&url, &weights_path)?;
             } else {
                 println!("  model.gguf already present.");
             }
             if !tokenizer_path.exists() || _force {
-                let url = format!("https://huggingface.co/{}/resolve/main/tokenizer.json", tok_id);
+                let url = format!(
+                    "https://huggingface.co/{}/resolve/main/tokenizer.json",
+                    tok_id
+                );
                 println!("  Downloading tokenizer.json...");
                 download_file(&url, &tokenizer_path)?;
             }
@@ -579,18 +617,23 @@ impl AiManager {
         Ok(())
     }
 
-
     pub fn get_status(&self) -> Result<AiStatus> {
-        let modern_bert_installed = self.get_model_path(&AiModel::ModernBert).join("config.json").exists();
+        let modern_bert_installed = self
+            .get_model_path(&AiModel::ModernBert)
+            .join("config.json")
+            .exists();
         #[cfg(feature = "mamba")]
-        let lfm25_installed = self.get_model_path(&AiModel::Lfm25).join("model.gguf").exists();
+        let lfm25_installed = self
+            .get_model_path(&AiModel::Lfm25)
+            .join("model.gguf")
+            .exists();
         #[cfg(not(feature = "mamba"))]
         let lfm25_installed = false;
-        Ok(AiStatus { 
-            modern_bert_installed, 
+        Ok(AiStatus {
+            modern_bert_installed,
             lfm25_installed,
-            cache_dir: self.model_cache_dir.clone(), 
-            available_devices: vec![DeviceType::Cpu] 
+            cache_dir: self.model_cache_dir.clone(),
+            available_devices: vec![DeviceType::Cpu],
         })
     }
 
@@ -747,7 +790,11 @@ fn measure_profile(
     // Fit: t(n) = overhead + n * slope  =>  slope = (t2 - t1) / (n2 - n1)
     let (n1, t1) = prefill_times[0];
     let (n2, t2) = prefill_times[1];
-    let prefill_s_per_token = if n2 > n1 { (t2 - t1) / (n2 - n1) as f64 } else { 0.065 };
+    let prefill_s_per_token = if n2 > n1 {
+        (t2 - t1) / (n2 - n1) as f64
+    } else {
+        0.065
+    };
     let call_overhead_s = (t1 - n1 as f64 * prefill_s_per_token).max(0.5);
 
     // Measure decode: 8 single-token steps.

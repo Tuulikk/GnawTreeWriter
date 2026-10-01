@@ -11,7 +11,7 @@ fn is_modernbert_installed(project_root: &Path) -> bool {
         .exists()
 }
 
-// NOTE: The previous semantic search, completion, and refactor tests in this file 
+// NOTE: The previous semantic search, completion, and refactor tests in this file
 // were removed as they were written for an older, deprecated version of AiManager.
 // Modern semantic search is now tested in tests/gnaw_sense_integration.rs.
 
@@ -21,7 +21,7 @@ fn test_ai_status_detection() -> Result<()> {
     let manager = AiManager::new(&project_root)?;
     let status = manager.get_status()?;
 
-            let local = project_root.join(".gnawtreewriter_ai/models");
+    let local = project_root.join(".gnawtreewriter_ai/models");
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let global = std::path::PathBuf::from(&home).join(".gnawtreewriter_ai/models");
     assert!(
@@ -29,7 +29,7 @@ fn test_ai_status_detection() -> Result<()> {
         "cache_dir mismatch: {:?}",
         status.cache_dir
     );
-    
+
     #[cfg(feature = "modernbert")]
     {
         if is_modernbert_installed(&project_root) {

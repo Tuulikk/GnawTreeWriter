@@ -13,14 +13,14 @@ async fn main() -> Result<()> {
         Err(e) => {
             // THE HELPFUL GUARD: Intercept parsing errors to provide tips
             eprintln!("{}", e);
-            
+
             let err_str = e.to_string().to_lowercase();
             if err_str.contains("unrecognized subcommand") {
                 eprintln!("\n💡 [GnawTip]: Not sure which command to use? Try 'gnawtreewriter wizard' or 'gnawtreewriter examples'.");
             } else if err_str.contains("required arguments were not provided") {
                 eprintln!("\n💡 [GnawTip]: Every surgical edit needs a target. Use 'gnawtreewriter list <file>' to find node paths.");
             }
-            
+
             std::process::exit(1);
         }
     };
@@ -29,13 +29,21 @@ async fn main() -> Result<()> {
         // Check if JSON mode was requested
         let json_mode = std::env::var("GNAW_JSON").is_ok();
         if json_mode {
-            use gnawtreewriter::core::diagnostics::{DiagnosticReport, DiagnosticError};
-            let diag = DiagnosticReport::err("gnawtreewriter", "", "unknown", 
-                DiagnosticError::from_anyhow(&err, "unknown"));
-            eprintln!("{}", serde_json::to_string_pretty(&diag).unwrap_or_else(|_| format!("{{\"success\": false, \"error\": \"{}\"}}", err)));
+            use gnawtreewriter::core::diagnostics::{DiagnosticError, DiagnosticReport};
+            let diag = DiagnosticReport::err(
+                "gnawtreewriter",
+                "",
+                "unknown",
+                DiagnosticError::from_anyhow(&err, "unknown"),
+            );
+            eprintln!(
+                "{}",
+                serde_json::to_string_pretty(&diag)
+                    .unwrap_or_else(|_| format!("{{\"success\": false, \"error\": \"{}\"}}", err))
+            );
         } else {
             eprintln!("Error: {}", err);
-            
+
             // Logical tips based on execution errors
             let err_msg = err.to_string().to_lowercase();
             if err_msg.contains("guardian block") {
@@ -46,9 +54,9 @@ async fn main() -> Result<()> {
                 eprintln!("\n🧠 [AiTip]: Semantic features require ModernBERT. Run 'gnawtreewriter ai setup' or check your features.");
             }
         }
-        
+
         std::process::exit(1);
     }
-    
+
     Ok(())
 }

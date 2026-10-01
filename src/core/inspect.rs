@@ -1,7 +1,7 @@
 //! gnaw-inspect: Advanced code intelligence for GnawTreeWriter
 
-use crate::GnawTreeWriter;
 use crate::core::file_walker::walk_source_files_filtered;
+use crate::GnawTreeWriter;
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -133,7 +133,9 @@ fn inspect_project(
     directory: Option<&str>,
 ) -> Result<Vec<InspectResult>> {
     let current_dir = std::env::current_dir()?;
-    let search_dir = directory.map(Path::new).unwrap_or_else(|| current_dir.as_path());
+    let search_dir = directory
+        .map(Path::new)
+        .unwrap_or_else(|| current_dir.as_path());
 
     let mut results = Vec::new();
     let _mode_name = match mode {
@@ -159,7 +161,11 @@ fn inspect_project(
     Ok(results)
 }
 
-fn find_callers(tree: &crate::parser::TreeNode, symbol: &str, file: &str) -> (Vec<Finding>, HashMap<String, usize>) {
+fn find_callers(
+    tree: &crate::parser::TreeNode,
+    symbol: &str,
+    file: &str,
+) -> (Vec<Finding>, HashMap<String, usize>) {
     let mut findings = Vec::new();
     let mut summary = HashMap::new();
 
@@ -176,9 +182,9 @@ fn find_callers(tree: &crate::parser::TreeNode, symbol: &str, file: &str) -> (Ve
     // Find callers of the target symbol
     for (caller, locations) in calls.iter() {
         for (file, line, path) in locations {
-            if caller.to_lowercase().contains(&symbol.to_lowercase()) || 
-               functions.contains(caller) && symbol.is_empty() || 
-               symbol.is_empty() && !caller.contains("anonymous")
+            if caller.to_lowercase().contains(&symbol.to_lowercase())
+                || functions.contains(caller) && symbol.is_empty()
+                || symbol.is_empty() && !caller.contains("anonymous")
             {
                 findings.push(Finding {
                     file: file.clone(),
@@ -207,14 +213,25 @@ fn collect_functions_and_calls(
     let _content = tree.content.trim();
 
     // Collect function definitions
-    if node_type == "function_declaration" || node_type == "function_item" || node_type == "method_declaration" {
+    if node_type == "function_declaration"
+        || node_type == "function_item"
+        || node_type == "method_declaration"
+    {
         if let Some(name) = tree.get_name() {
             functions.insert(name.clone());
-            let is_target = !symbol.is_empty() && name.to_lowercase().contains(&symbol.to_lowercase());
+            let is_target =
+                !symbol.is_empty() && name.to_lowercase().contains(&symbol.to_lowercase());
             if is_target || symbol.is_empty() {
-                if let Some(finding) = tree.children.iter().find(|c| c.node_type == "identifier" || c.node_type == "attribute_identifier") {
+                if let Some(finding) = tree
+                    .children
+                    .iter()
+                    .find(|c| c.node_type == "identifier" || c.node_type == "attribute_identifier")
+                {
                     let name = finding.content.trim();
-                    calls.insert(name.to_string(), vec![(file.to_string(), tree.start_line, tree.path.clone())]);
+                    calls.insert(
+                        name.to_string(),
+                        vec![(file.to_string(), tree.start_line, tree.path.clone())],
+                    );
                 }
             }
         }
@@ -223,13 +240,15 @@ fn collect_functions_and_calls(
     // Collect function calls
     if node_type == "call_expression" {
         if let Some(first_child) = tree.children.first() {
-            if first_child.node_type == "identifier" || first_child.node_type == "field_expression" {
+            if first_child.node_type == "identifier" || first_child.node_type == "field_expression"
+            {
                 let call_name = first_child.content.trim();
                 if !call_name.is_empty() {
-                    calls
-                        .entry(call_name.to_string())
-                        .or_default()
-                        .push((file.to_string(), tree.start_line, tree.path.clone()));
+                    calls.entry(call_name.to_string()).or_default().push((
+                        file.to_string(),
+                        tree.start_line,
+                        tree.path.clone(),
+                    ));
                 }
             }
         }
@@ -240,7 +259,10 @@ fn collect_functions_and_calls(
     }
 }
 
-fn calculate_metrics(tree: &crate::parser::TreeNode, file: &str) -> (Vec<Finding>, HashMap<String, usize>) {
+fn calculate_metrics(
+    tree: &crate::parser::TreeNode,
+    file: &str,
+) -> (Vec<Finding>, HashMap<String, usize>) {
     let mut metrics: HashMap<String, usize> = HashMap::new();
     let mut findings = Vec::new();
     let mut functions: Vec<(String, usize, usize)> = Vec::new();
@@ -275,10 +297,16 @@ fn count_nodes(tree: &crate::parser::TreeNode, metrics: &mut HashMap<String, usi
     }
 }
 
-fn collect_function_sizes(tree: &crate::parser::TreeNode, functions: &mut Vec<(String, usize, usize)>) {
+fn collect_function_sizes(
+    tree: &crate::parser::TreeNode,
+    functions: &mut Vec<(String, usize, usize)>,
+) {
     let node_type = tree.node_type.to_lowercase();
 
-    if node_type == "function_declaration" || node_type == "function_item" || node_type == "method_declaration" {
+    if node_type == "function_declaration"
+        || node_type == "function_item"
+        || node_type == "method_declaration"
+    {
         if let Some(name) = tree.get_name() {
             let lines = tree.end_line.saturating_sub(tree.start_line) + 1;
             functions.push((name, tree.start_line, lines));
@@ -290,7 +318,10 @@ fn collect_function_sizes(tree: &crate::parser::TreeNode, functions: &mut Vec<(S
     }
 }
 
-fn find_orphans(tree: &crate::parser::TreeNode, file: &str) -> (Vec<Finding>, HashMap<String, usize>) {
+fn find_orphans(
+    tree: &crate::parser::TreeNode,
+    file: &str,
+) -> (Vec<Finding>, HashMap<String, usize>) {
     let mut findings = Vec::new();
     let mut summary = HashMap::new();
 
@@ -299,7 +330,12 @@ fn find_orphans(tree: &crate::parser::TreeNode, file: &str) -> (Vec<Finding>, Ha
     let mut all_calls: HashSet<String> = HashSet::new();
     let mut private_functions: Vec<(String, usize, String)> = Vec::new();
 
-    collect_symbols(tree, &mut all_functions, &mut all_calls, &mut private_functions);
+    collect_symbols(
+        tree,
+        &mut all_functions,
+        &mut all_calls,
+        &mut private_functions,
+    );
 
     // Find private functions not in call set
     for (name, line, path) in &private_functions {
@@ -331,10 +367,13 @@ fn collect_symbols(
     let node_type = tree.node_type.to_lowercase();
 
     // Function definitions
-    if node_type == "function_declaration" || node_type == "function_item" || node_type == "method_declaration" {
+    if node_type == "function_declaration"
+        || node_type == "function_item"
+        || node_type == "method_declaration"
+    {
         if let Some(name) = tree.get_name() {
             functions.insert(name.clone());
-            
+
             // Check if private (starts with _ or has #[allow(dead_code)])
             let is_private = name.starts_with('_');
             if is_private {
@@ -360,7 +399,10 @@ fn collect_symbols(
     }
 }
 
-fn analyze_relations(tree: &crate::parser::TreeNode, file: &str) -> (Vec<Finding>, HashMap<String, usize>) {
+fn analyze_relations(
+    tree: &crate::parser::TreeNode,
+    file: &str,
+) -> (Vec<Finding>, HashMap<String, usize>) {
     let mut findings = Vec::new();
     let mut summary = HashMap::new();
 
@@ -400,7 +442,10 @@ fn collect_relations(
     let node_type = tree.node_type.to_lowercase();
 
     // Struct definitions
-    if node_type == "struct_item" || node_type == "class_declaration" || node_type == "type_declaration" {
+    if node_type == "struct_item"
+        || node_type == "class_declaration"
+        || node_type == "type_declaration"
+    {
         if let Some(name) = tree.get_name() {
             structs.entry(name).or_default();
         }
@@ -435,13 +480,17 @@ pub fn format_inspect_text(results: &[InspectResult]) -> String {
     for result in results {
         if !result.findings.is_empty() {
             output.push_str(&format!("\n📊 {} [{}]\n", result.file, result.mode));
-            
+
             if let Some(ref sym) = result.symbol {
                 output.push_str(&format!("  Symbol: {}\n", sym));
             }
 
             for finding in &result.findings {
-                let context = finding.context.as_ref().map(|c| format!(" - {}", c)).unwrap_or_default();
+                let context = finding
+                    .context
+                    .as_ref()
+                    .map(|c| format!(" - {}", c))
+                    .unwrap_or_default();
                 output.push_str(&format!(
                     "  {}:{} [{}] {}{}\n",
                     finding.line, finding.path, finding.node_type, finding.name, context
@@ -450,7 +499,9 @@ pub fn format_inspect_text(results: &[InspectResult]) -> String {
 
             if !result.summary.is_empty() {
                 output.push_str("  Summary: ");
-                let summary_str: Vec<String> = result.summary.iter()
+                let summary_str: Vec<String> = result
+                    .summary
+                    .iter()
                     .map(|(k, v)| format!("{}={}", k, v))
                     .collect();
                 output.push_str(&summary_str.join(", "));

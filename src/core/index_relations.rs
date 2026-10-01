@@ -79,13 +79,26 @@ fn get_line(lines: &[&str], line_num: usize) -> String {
     }
 }
 
-fn extract_imports(tree: &TreeNode, file_path: &str, lines: &[&str], relations: &mut Vec<Relation>) {
+fn extract_imports(
+    tree: &TreeNode,
+    file_path: &str,
+    lines: &[&str],
+    relations: &mut Vec<Relation>,
+) {
     for child in &tree.children {
-        if child.node_type == "use_declaration" || child.node_type == "import_statement"
-            || child.node_type == "import_from_statement" {
+        if child.node_type == "use_declaration"
+            || child.node_type == "import_statement"
+            || child.node_type == "import_from_statement"
+        {
             let import_line = get_line(lines, child.start_line);
-            let source_id = format!("gtw:{}:file:{}", file_path, std::path::Path::new(file_path)
-                .file_stem().and_then(|s| s.to_str()).unwrap_or("unknown"));
+            let source_id = format!(
+                "gtw:{}:file:{}",
+                file_path,
+                std::path::Path::new(file_path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+            );
 
             // Try to extract what's being imported
             let target = if let Some(module) = extract_import_target(&import_line) {
@@ -105,11 +118,19 @@ fn extract_imports(tree: &TreeNode, file_path: &str, lines: &[&str], relations: 
 
         // Recurse into children for nested imports
         for grandchild in &child.children {
-            if grandchild.node_type == "use_declaration" || grandchild.node_type == "import_statement"
-                || grandchild.node_type == "import_from_statement" {
+            if grandchild.node_type == "use_declaration"
+                || grandchild.node_type == "import_statement"
+                || grandchild.node_type == "import_from_statement"
+            {
                 let import_line = get_line(lines, grandchild.start_line);
-                let source_id = format!("gtw:{}:file:{}", file_path, std::path::Path::new(file_path)
-                    .file_stem().and_then(|s| s.to_str()).unwrap_or("unknown"));
+                let source_id = format!(
+                    "gtw:{}:file:{}",
+                    file_path,
+                    std::path::Path::new(file_path)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("unknown")
+                );
 
                 let target = if let Some(module) = extract_import_target(&import_line) {
                     module
@@ -146,77 +167,104 @@ fn extract_import_target(import_line: &str) -> Option<String> {
     // "import os" -> "os"
     if let Some(start) = import_line.find("import ") {
         let rest = &import_line[start + 7..];
-        let end = rest.find(|c: char| c.is_whitespace() || c == ';').unwrap_or(rest.len());
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == ';')
+            .unwrap_or(rest.len());
         return Some(rest[..end].trim().to_string());
     }
     None
 }
 
-    fn extract_calls(tree: &TreeNode, file_path: &str, lines: &[&str], relations: &mut Vec<Relation>) {
-        let mut defined_funcs: std::collections::HashSet<String> = std::collections::HashSet::new();
-        collect_defined_functions(tree, &mut defined_funcs);
-        find_calls_in_scope(tree, &defined_funcs, file_path, lines, relations);
-    }
+fn extract_calls(tree: &TreeNode, file_path: &str, lines: &[&str], relations: &mut Vec<Relation>) {
+    let mut defined_funcs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    collect_defined_functions(tree, &mut defined_funcs);
+    find_calls_in_scope(tree, &defined_funcs, file_path, lines, relations);
+}
 
-    fn collect_defined_functions(tree: &TreeNode, funcs: &mut std::collections::HashSet<String>) {
-        if tree.node_type == "function_item" || tree.node_type == "function_definition"
-            || tree.node_type == "function_declaration" {
-            if let Some(name) = tree.get_name() {
-                funcs.insert(name);
-            }
+fn collect_defined_functions(tree: &TreeNode, funcs: &mut std::collections::HashSet<String>) {
+    if tree.node_type == "function_item"
+        || tree.node_type == "function_definition"
+        || tree.node_type == "function_declaration"
+    {
+        if let Some(name) = tree.get_name() {
+            funcs.insert(name);
         }
+    }
+    for child in &tree.children {
+        collect_defined_functions(child, funcs);
+    }
+}
+
+fn find_calls_in_scope(
+    tree: &TreeNode,
+    defined: &std::collections::HashSet<String>,
+    file_path: &str,
+    _lines: &[&str],
+    relations: &mut Vec<Relation>,
+) {
+    if tree.node_type == "call_expression" {
         for child in &tree.children {
-            collect_defined_functions(child, funcs);
-        }
-    }
-
-    fn find_calls_in_scope(tree: &TreeNode, defined: &std::collections::HashSet<String>, file_path: &str, _lines: &[&str], relations: &mut Vec<Relation>) {
-        if tree.node_type == "call_expression" {
-            for child in &tree.children {
-                if child.node_type == "identifier" {
-                    let callee = child.get_name().unwrap_or_default();
-                    if defined.contains(&callee) || callee.contains("::") {
-                        relations.push(Relation {
-                            from: String::new(),
-                            to: callee,
-                            relation_type: "calls".to_string(),
-                            line: tree.start_line,
-                            file: file_path.to_string(),
-                        });
-                    }
-                    break;
+            if child.node_type == "identifier" {
+                let callee = child.get_name().unwrap_or_default();
+                if defined.contains(&callee) || callee.contains("::") {
+                    relations.push(Relation {
+                        from: String::new(),
+                        to: callee,
+                        relation_type: "calls".to_string(),
+                        line: tree.start_line,
+                        file: file_path.to_string(),
+                    });
                 }
+                break;
             }
-        }
-
-        for child in &tree.children {
-            find_calls_in_scope(child, defined, file_path, _lines, relations);
         }
     }
 
-fn extract_type_usage(tree: &TreeNode, file_path: &str, lines: &[&str], relations: &mut Vec<Relation>) {
+    for child in &tree.children {
+        find_calls_in_scope(child, defined, file_path, _lines, relations);
+    }
+}
+
+fn extract_type_usage(
+    tree: &TreeNode,
+    file_path: &str,
+    lines: &[&str],
+    relations: &mut Vec<Relation>,
+) {
     // Only look at top-level function signatures for type references,
     // not inside function bodies (too noisy)
     for child in &tree.children {
-        if child.node_type == "function_item" || child.node_type == "function_definition"
-            || child.node_type == "function_declaration" {
+        if child.node_type == "function_item"
+            || child.node_type == "function_definition"
+            || child.node_type == "function_declaration"
+        {
             // Check parameters and return type for type references
             for param in &child.children {
-                if param.node_type == "parameters" || param.node_type == "type_annotation"
-                    || param.node_type == "return_type" {
+                if param.node_type == "parameters"
+                    || param.node_type == "type_annotation"
+                    || param.node_type == "return_type"
+                {
                     extract_type_refs(param, file_path, lines, relations, child);
                 }
             }
         }
         // Also check struct fields and enum variants
-        if child.node_type == "struct_item" || child.node_type == "enum_item"
-            || child.node_type == "trait_item" {
+        if child.node_type == "struct_item"
+            || child.node_type == "enum_item"
+            || child.node_type == "trait_item"
+        {
             extract_type_refs(child, file_path, lines, relations, child);
         }
     }
 }
 
-fn extract_type_refs(node: &TreeNode, file_path: &str, _lines: &[&str], relations: &mut Vec<Relation>, context: &TreeNode) {
+fn extract_type_refs(
+    node: &TreeNode,
+    file_path: &str,
+    _lines: &[&str],
+    relations: &mut Vec<Relation>,
+    context: &TreeNode,
+) {
     if node.node_type == "type_identifier" || node.node_type == "scoped_type_identifier" {
         let type_name = node.get_name().unwrap_or(node.content.trim().to_string());
         let context_name = context.get_name().unwrap_or_default();
@@ -235,7 +283,12 @@ fn extract_type_refs(node: &TreeNode, file_path: &str, _lines: &[&str], relation
     }
 }
 
-fn extract_impl_relations(tree: &TreeNode, file_path: &str, lines: &[&str], relations: &mut Vec<Relation>) {
+fn extract_impl_relations(
+    tree: &TreeNode,
+    file_path: &str,
+    lines: &[&str],
+    relations: &mut Vec<Relation>,
+) {
     if tree.node_type == "impl_item" {
         let impl_text = get_line(lines, tree.start_line);
         // "impl Display for Foo" or "impl Foo" or "impl<T> Display for Foo<T>"
@@ -343,7 +396,9 @@ impl std::fmt::Display for MyStruct {
 
         let result = index_relations(path.to_str().unwrap()).unwrap();
 
-        let implements = result.relations.iter()
+        let implements = result
+            .relations
+            .iter()
             .filter(|r| r.relation_type == "implements")
             .collect::<Vec<_>>();
         assert!(!implements.is_empty(), "Should find implements relation");
@@ -383,22 +438,38 @@ def main():
 
     #[test]
     fn test_extract_import_target() {
-        assert_eq!(extract_import_target("use std::collections::HashMap;"), Some("std::collections::HashMap".to_string()));
+        assert_eq!(
+            extract_import_target("use std::collections::HashMap;"),
+            Some("std::collections::HashMap".to_string())
+        );
         assert_eq!(extract_import_target("import os"), Some("os".to_string()));
-        assert_eq!(extract_import_target("from pathlib import Path"), Some("pathlib".to_string()));
+        assert_eq!(
+            extract_import_target("from pathlib import Path"),
+            Some("pathlib".to_string())
+        );
     }
 
     #[test]
     fn test_extract_trait_from_impl() {
-        assert_eq!(extract_trait_from_impl("impl Display for Foo"), Some("Display".to_string()));
-        assert_eq!(extract_trait_from_impl("impl<T> Display for Foo<T>"), Some("Display".to_string()));
+        assert_eq!(
+            extract_trait_from_impl("impl Display for Foo"),
+            Some("Display".to_string())
+        );
+        assert_eq!(
+            extract_trait_from_impl("impl<T> Display for Foo<T>"),
+            Some("Display".to_string())
+        );
         assert_eq!(extract_trait_from_impl("impl Foo"), None);
     }
 
     #[test]
     fn test_debug_mcp_relations() {
         let result = index_relations("src/mcp/mod.rs").unwrap();
-        assert!(result.relations.len() < 200, "Too many relations: {}", result.relations.len());
+        assert!(
+            result.relations.len() < 200,
+            "Too many relations: {}",
+            result.relations.len()
+        );
         assert!(result.relations.iter().any(|r| r.relation_type == "calls"));
     }
 }

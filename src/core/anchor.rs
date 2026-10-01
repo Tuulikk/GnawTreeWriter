@@ -67,10 +67,7 @@ impl AnchorDetector {
                 AnchorStyle::SlashStar,
             ),
             // # ... or # ... text ...
-            (
-                Regex::new(r"#\s*\.{3,}[^\n]*").unwrap(),
-                AnchorStyle::Hash,
-            ),
+            (Regex::new(r"#\s*\.{3,}[^\n]*").unwrap(), AnchorStyle::Hash),
             // # existing code, # rest of file, etc.
             (
                 Regex::new(r"#\s*(?:existing|rest of|previous|remaining|other)[^\n]*").unwrap(),
@@ -87,19 +84,19 @@ impl AnchorDetector {
                 AnchorStyle::SlashSlash, // Default style
             ),
         ];
-        
+
         Self { patterns }
     }
-    
+
     /// Detect all anchors in the given code
     pub fn detect(&self, code: &str) -> Vec<Anchor> {
         let mut anchors = Vec::new();
-        
+
         for (pattern, style) in &self.patterns {
             for m in pattern.find_iter(code) {
                 let text = m.as_str().to_string();
                 let hint = self.extract_hint(&text, *style);
-                
+
                 anchors.push(Anchor {
                     text: text.clone(),
                     start: m.start(),
@@ -109,21 +106,18 @@ impl AnchorDetector {
                 });
             }
         }
-        
+
         // Sort by position and deduplicate overlapping
         anchors.sort_by_key(|a| a.start);
         self.deduplicate_overlapping(anchors)
     }
-    
+
     /// Extract a hint from the anchor text
     fn extract_hint(&self, text: &str, style: AnchorStyle) -> Option<String> {
         // Remove comment markers
         let clean = match style {
             AnchorStyle::SlashSlash => text.trim_start_matches('/').trim(),
-            AnchorStyle::SlashStar => text
-                .trim_start_matches("/*")
-                .trim_end_matches("*/")
-                .trim(),
+            AnchorStyle::SlashStar => text.trim_start_matches("/*").trim_end_matches("*/").trim(),
             AnchorStyle::Hash => text.trim_start_matches('#').trim(),
             AnchorStyle::Html => text
                 .trim_start_matches("<!--")
@@ -136,24 +130,21 @@ impl AnchorDetector {
                 .trim_end_matches("'''")
                 .trim(),
         };
-        
+
         // Remove ellipsis
-        let hint = clean
-            .trim_start_matches('.')
-            .trim_end_matches('.')
-            .trim();
-        
+        let hint = clean.trim_start_matches('.').trim_end_matches('.').trim();
+
         if hint.is_empty() {
             None
         } else {
             Some(hint.to_string())
         }
     }
-    
+
     /// Remove overlapping anchors, keeping the more specific one
     fn deduplicate_overlapping(&self, anchors: Vec<Anchor>) -> Vec<Anchor> {
         let mut result: Vec<Anchor> = Vec::new();
-        
+
         for anchor in anchors {
             // Check if this overlaps with the last added anchor
             if let Some(last) = result.last() {
@@ -169,7 +160,7 @@ impl AnchorDetector {
             }
             result.push(anchor);
         }
-        
+
         result
     }
 }

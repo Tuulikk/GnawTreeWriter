@@ -1,9 +1,9 @@
-use serde::{Serialize, Deserialize};
-use std::fs;
-use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum AlfType {
@@ -19,7 +19,7 @@ pub enum AlfType {
 pub struct AlfEntry {
     pub id: String,
     pub timestamp: DateTime<Utc>,
-    pub actor: String,          // The tool that created the entry (e.g., "writer", "mimir")
+    pub actor: String, // The tool that created the entry (e.g., "writer", "mimir")
     pub transaction_id: Option<String>,
     pub entry_type: AlfType,
     pub message: String,
@@ -39,7 +39,7 @@ impl AlfManager {
         if !ai_dir.exists() {
             fs::create_dir_all(&ai_dir)?;
         }
-        
+
         let storage_path = ai_dir.join("alf.json");
         let entries = if storage_path.exists() {
             let data = fs::read_to_string(&storage_path)?;
@@ -48,8 +48,8 @@ impl AlfManager {
             Vec::new()
         };
 
-        Ok(Self { 
-            storage_path, 
+        Ok(Self {
+            storage_path,
             entries,
             current_actor: "writer".to_string(), // Default actor
         })
@@ -59,7 +59,12 @@ impl AlfManager {
         self.current_actor = actor.to_string();
     }
 
-    pub fn log(&mut self, entry_type: AlfType, message: &str, txn_id: Option<String>) -> Result<String> {
+    pub fn log(
+        &mut self,
+        entry_type: AlfType,
+        message: &str,
+        txn_id: Option<String>,
+    ) -> Result<String> {
         let id = format!("alf_{}", Utc::now().timestamp_micros());
         let entry = AlfEntry {
             id: id.clone(),
@@ -100,7 +105,9 @@ impl AlfManager {
     }
 
     pub fn find_by_txn(&self, txn_id: &str) -> Option<&AlfEntry> {
-        self.entries.iter().find(|e| e.transaction_id.as_deref() == Some(txn_id))
+        self.entries
+            .iter()
+            .find(|e| e.transaction_id.as_deref() == Some(txn_id))
     }
 
     pub fn list(&self, limit: usize) -> Vec<AlfEntry> {

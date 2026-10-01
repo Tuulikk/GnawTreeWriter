@@ -778,7 +778,7 @@ pub mod mcp_server {
                             "id": null,
                             "error": { "code": -32001, "message": "Unauthorized" }
                         })),
-                    )
+                    );
                 }
             }
         }

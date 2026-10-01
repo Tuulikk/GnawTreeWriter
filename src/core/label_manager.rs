@@ -1,9 +1,9 @@
+use crate::core::transaction_log::calculate_content_hash;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use crate::core::transaction_log::calculate_content_hash;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LabelInfo {
@@ -60,13 +60,20 @@ impl LabelManager {
 
     pub fn get_labels(&self, file_path: &str, node_content: &str) -> Vec<String> {
         let hash = calculate_content_hash(node_content);
-        self.store.files.get(file_path)
+        self.store
+            .files
+            .get(file_path)
             .and_then(|f| f.get(&hash))
             .map(|l| l.labels.clone())
             .unwrap_or_default()
     }
 
-    pub fn remove_label(&mut self, file_path: &str, node_content: &str, label: &str) -> Result<bool> {
+    pub fn remove_label(
+        &mut self,
+        file_path: &str,
+        node_content: &str,
+        label: &str,
+    ) -> Result<bool> {
         let hash = calculate_content_hash(node_content);
         if let Some(file_entry) = self.store.files.get_mut(file_path) {
             if let Some(label_info) = file_entry.get_mut(&hash) {

@@ -58,8 +58,10 @@ pub struct ContextWindowInfo {
 pub fn analyze_project(root: &Path) -> Result<ProjectStats> {
     let files = walk_source_files_filtered(
         root,
-        &["rs", "py", "js", "ts", "tsx", "jsx", "go", "java",
-          "c", "cpp", "h", "hpp", "cs", "php", "rb", "swift", "kt"],
+        &[
+            "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "c", "cpp", "h", "hpp", "cs",
+            "php", "rb", "swift", "kt",
+        ],
     );
 
     let mut lang_map: HashMap<String, (usize, usize, usize)> = HashMap::new(); // (count, tokens, lines)
@@ -79,7 +81,8 @@ pub fn analyze_project(root: &Path) -> Result<ProjectStats> {
             Err(_) => continue,
         };
 
-        let ext = path.extension()
+        let ext = path
+            .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("other")
             .to_lowercase();
@@ -95,9 +98,25 @@ pub fn analyze_project(root: &Path) -> Result<ProjectStats> {
         entry.2 += lines;
 
         // Check if file is compressible (has function bodies)
-        let compressible = path.extension().and_then(|e| e.to_str()).is_some_and(|ext| {
-            matches!(ext, "rs" | "py" | "js" | "ts" | "tsx" | "jsx" | "go" | "java" | "c" | "cpp" | "kt" | "swift")
-        });
+        let compressible = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| {
+                matches!(
+                    ext,
+                    "rs" | "py"
+                        | "js"
+                        | "ts"
+                        | "tsx"
+                        | "jsx"
+                        | "go"
+                        | "java"
+                        | "c"
+                        | "cpp"
+                        | "kt"
+                        | "swift"
+                )
+            });
 
         all_files.push(FileInfo {
             path: rel_path,
@@ -125,8 +144,24 @@ pub fn analyze_project(root: &Path) -> Result<ProjectStats> {
     languages.sort_by_key(|l| std::cmp::Reverse(l.total_tokens));
 
     // Compression estimate (rough: 70% of compressible tokens can be saved)
-    let compressible_tokens: usize = languages.iter()
-        .filter(|l| matches!(l.name.as_str(), "rs" | "py" | "js" | "ts" | "tsx" | "jsx" | "go" | "java" | "c" | "cpp" | "kt" | "swift"))
+    let compressible_tokens: usize = languages
+        .iter()
+        .filter(|l| {
+            matches!(
+                l.name.as_str(),
+                "rs" | "py"
+                    | "js"
+                    | "ts"
+                    | "tsx"
+                    | "jsx"
+                    | "go"
+                    | "java"
+                    | "c"
+                    | "cpp"
+                    | "kt"
+                    | "swift"
+            )
+        })
         .map(|l| l.total_tokens)
         .sum();
     let compressed_estimate = total_tokens - (compressible_tokens as f64 * 0.65) as usize;
@@ -137,9 +172,16 @@ pub fn analyze_project(root: &Path) -> Result<ProjectStats> {
     };
 
     let recommendation = if reduction_pct > 0.5 {
-        format!("High compression potential ({:.0}% reduction). Use --compress for ~{} tokens.", reduction_pct * 100.0, compressed_estimate)
+        format!(
+            "High compression potential ({:.0}% reduction). Use --compress for ~{} tokens.",
+            reduction_pct * 100.0,
+            compressed_estimate
+        )
     } else if reduction_pct > 0.2 {
-        format!("Moderate compression potential ({:.0}% reduction).", reduction_pct * 100.0)
+        format!(
+            "Moderate compression potential ({:.0}% reduction).",
+            reduction_pct * 100.0
+        )
     } else {
         "Low compression potential — files are mostly declarations.".to_string()
     };
@@ -201,7 +243,8 @@ mod tests {
         fs::write(
             root.join("src/main.rs"),
             "fn main() {\n    let x = 1;\n    println!(\"{}\", x);\n}",
-        ).unwrap();
+        )
+        .unwrap();
         fs::write(
             root.join("src/lib.rs"),
             "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\npub fn sub(a: i32, b: i32) -> i32 {\n    a - b\n}",
@@ -240,8 +283,18 @@ mod tests {
 
         assert!(!stats.largest_files.is_empty());
         // lib.rs has 2 functions, should have more tokens than main.rs
-        let lib_tokens = stats.largest_files.iter().find(|f| f.path.contains("lib.rs")).map(|f| f.tokens).unwrap_or(0);
-        let main_tokens = stats.largest_files.iter().find(|f| f.path.contains("main.rs")).map(|f| f.tokens).unwrap_or(0);
+        let lib_tokens = stats
+            .largest_files
+            .iter()
+            .find(|f| f.path.contains("lib.rs"))
+            .map(|f| f.tokens)
+            .unwrap_or(0);
+        let main_tokens = stats
+            .largest_files
+            .iter()
+            .find(|f| f.path.contains("main.rs"))
+            .map(|f| f.tokens)
+            .unwrap_or(0);
         assert!(lib_tokens >= main_tokens);
     }
 

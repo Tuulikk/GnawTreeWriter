@@ -1,6 +1,6 @@
-use crate::parser::{TreeNode, ParserEngineLegacy};
-use tree_sitter::Parser;
+use crate::parser::{ParserEngineLegacy, TreeNode};
 use anyhow::Result;
+use tree_sitter::Parser;
 
 pub struct DartParser;
 

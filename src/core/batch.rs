@@ -315,7 +315,6 @@ impl Batch {
     }
 }
 
-
 /// Format a unified-ish diff of two strings (line-based).
 fn format_diff(before: &str, after: &str) -> String {
     let diff = TextDiff::configure()

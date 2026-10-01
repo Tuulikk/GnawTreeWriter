@@ -77,10 +77,7 @@ pub fn rank_candidates_prompt(question: &str, candidates: &[(String, String)]) -
 }
 
 /// Prompt for `investigate` step 4: synthesize the final answer.
-pub fn synthesize_answer_prompt(
-    question: &str,
-    evidence: &[(String, String)],
-) -> String {
+pub fn synthesize_answer_prompt(question: &str, evidence: &[(String, String)]) -> String {
     let body = evidence
         .iter()
         .map(|(path, excerpt)| format!("--- {path} ---\n{excerpt}\n"))
@@ -98,12 +95,7 @@ pub fn synthesize_answer_prompt(
 /// finds the containing AST node and validates before applying. Line-based
 /// output avoids fragile JSON escaping of code snippets (a small-model pain).
 /// `issues` is an optional annotation of known rule violations in the file.
-pub fn edit_ask_prompt(
-    file_path: &str,
-    request: &str,
-    file_preview: &str,
-    issues: &str,
-) -> String {
+pub fn edit_ask_prompt(file_path: &str, request: &str, file_preview: &str, issues: &str) -> String {
     let issues_block = if issues.trim().is_empty() {
         String::new()
     } else {

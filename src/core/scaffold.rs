@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 
 #[derive(Debug, Clone)]
 struct ScaffoldNode {
@@ -21,7 +21,8 @@ impl ScaffoldEngine {
     }
 
     pub fn generate(&self, schema: &str) -> Result<String> {
-        let (lang, structure) = schema.split_once(':')
+        let (lang, structure) = schema
+            .split_once(':')
             .ok_or_else(|| anyhow!("Invalid schema format. Expected 'lang:structure'"))?;
 
         let nodes = self.parse_recursive(structure)?;
@@ -33,8 +34,7 @@ impl ScaffoldEngine {
         }
     }
 
-    fn generate_rust(&self, nodes: &[
-ScaffoldNode], depth: usize) -> String {
+    fn generate_rust(&self, nodes: &[ScaffoldNode], depth: usize) -> String {
         let mut output = String::new();
         let indent = "    ".repeat(depth);
 
@@ -47,41 +47,65 @@ ScaffoldNode], depth: usize) -> String {
                 "mod" => {
                     output.push_str(&format!("{}pub mod {} {{\n", indent, node.name));
                     output.push_str(&self.generate_rust(&node.children, depth + 1));
-                    output.push_str(&format!("{}}}
-\n", indent));
+                    output.push_str(&format!(
+                        "{}}}
+\n",
+                        indent
+                    ));
                 }
                 "struct" => {
-                    output.push_str(&format!("{}pub struct {} {{
-", indent, node.name));
+                    output.push_str(&format!(
+                        "{}pub struct {} {{
+",
+                        indent, node.name
+                    ));
                     for child in &node.children {
                         output.push_str(&format!("{}    pub {}: String,\n", indent, child.name));
                     }
                     if node.children.is_empty() {
                         output.push_str(&format!("{}    // TODO: Add fields\n", indent));
                     }
-                    output.push_str(&format!("{}}}
-\n", indent));
+                    output.push_str(&format!(
+                        "{}}}
+\n",
+                        indent
+                    ));
                 }
                 "fn" => {
-                    output.push_str(&format!("{}pub fn {}() {{
-", indent, node.name));
+                    output.push_str(&format!(
+                        "{}pub fn {}() {{
+",
+                        indent, node.name
+                    ));
                     output.push_str(&self.generate_rust(&node.children, depth + 1));
                     if node.children.is_empty() {
                         output.push_str(&format!("{}    unimplemented!()\n", indent));
                     }
-                    output.push_str(&format!("{}}}
-\n", indent));
+                    output.push_str(&format!(
+                        "{}}}
+\n",
+                        indent
+                    ));
                 }
                 "impl" => {
-                    output.push_str(&format!("{}impl {} {{
-", indent, node.name));
+                    output.push_str(&format!(
+                        "{}impl {} {{
+",
+                        indent, node.name
+                    ));
                     output.push_str(&self.generate_rust(&node.children, depth + 1));
-                    output.push_str(&format!("{}}}
-\n", indent));
+                    output.push_str(&format!(
+                        "{}}}
+\n",
+                        indent
+                    ));
                 }
                 _ => {
-                    output.push_str(&format!("{}// {} {}
-", indent, node.kind, node.name));
+                    output.push_str(&format!(
+                        "{}// {} {}
+",
+                        indent, node.kind, node.name
+                    ));
                 }
             }
         }
@@ -89,8 +113,7 @@ ScaffoldNode], depth: usize) -> String {
         output
     }
 
-    fn generate_python(&self, nodes: &[
-ScaffoldNode], depth: usize) -> String {
+    fn generate_python(&self, nodes: &[ScaffoldNode], depth: usize) -> String {
         let mut output = String::new();
         let indent = "    ".repeat(depth);
 
@@ -117,8 +140,11 @@ ScaffoldNode], depth: usize) -> String {
                     }
                 }
                 _ => {
-                    output.push_str(&format!("{}# {} {}
-", indent, node.kind, node.name));
+                    output.push_str(&format!(
+                        "{}# {} {}
+",
+                        indent, node.kind, node.name
+                    ));
                 }
             }
         }
@@ -133,12 +159,14 @@ ScaffoldNode], depth: usize) -> String {
 
         while current_pos < s.len() {
             let remaining = &s[current_pos..].trim_start();
-            if remaining.is_empty() { break; }
+            if remaining.is_empty() {
+                break;
+            }
 
             // Find next node: type:name(args) OR type(args)
             let type_end = remaining.find('(').unwrap_or(remaining.len());
             let type_part = remaining[..type_end].trim();
-            
+
             let (kind, mut name) = match type_part.split_once(':') {
                 Some((k, n)) => (k.to_string(), n.to_string()),
                 None => (type_part.to_string(), "unnamed".to_string()),
@@ -153,9 +181,12 @@ ScaffoldNode], depth: usize) -> String {
                 let mut paren_end = 0;
                 let mut found_paren_end = false;
                 for (i, c) in remaining[type_end..].chars().enumerate() {
-                    if c == '(' { paren_count += 1; }
-                    else if c == ')' { paren_count -= 1; }
-                    
+                    if c == '(' {
+                        paren_count += 1;
+                    } else if c == ')' {
+                        paren_count -= 1;
+                    }
+
                     if paren_count == 0 {
                         paren_end = type_end + i;
                         found_paren_end = true;
@@ -167,7 +198,7 @@ ScaffoldNode], depth: usize) -> String {
                     anyhow::bail!("Unbalanced parentheses in schema at: {}", remaining);
                 }
 
-                let inner = &remaining[type_end + 1 .. paren_end];
+                let inner = &remaining[type_end + 1..paren_end];
                 node_total_len = paren_end + 1;
 
                 // Parse inner: name:X, children:[...]
@@ -183,27 +214,34 @@ ScaffoldNode], depth: usize) -> String {
                     let mut children_end = 0;
                     let mut found_bracket_end = false;
                     for (i, c) in inner[children_content_start..].chars().enumerate() {
-                        if c == '[' { bracket_count += 1; }
-                        else if c == ']' { bracket_count -= 1; }
-                        
+                        if c == '[' {
+                            bracket_count += 1;
+                        } else if c == ']' {
+                            bracket_count -= 1;
+                        }
+
                         if bracket_count == 0 {
                             children_end = children_content_start + i;
                             found_bracket_end = true;
                             break;
                         }
                     }
-                    
+
                     if !found_bracket_end {
                         anyhow::bail!("Unbalanced brackets in children list at: {}", inner);
                     }
 
-                    let children_str = &inner[children_content_start .. children_end];
+                    let children_str = &inner[children_content_start..children_end];
                     children = self.parse_recursive(children_str)?;
                 }
             }
 
-            nodes.push(ScaffoldNode { kind, name, children });
-            
+            nodes.push(ScaffoldNode {
+                kind,
+                name,
+                children,
+            });
+
             // Advance position in the main string
             let advance = s[current_pos..].find(remaining).unwrap() + node_total_len;
             current_pos += advance;

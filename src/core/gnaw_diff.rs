@@ -52,11 +52,7 @@ impl Clone for DiffSummary {
 }
 
 /// Compare two versions of a file at AST level
-pub fn diff(
-    old_file: &str,
-    new_file: &str,
-    _format: &str,
-) -> Result<DiffResult> {
+pub fn diff(old_file: &str, new_file: &str, _format: &str) -> Result<DiffResult> {
     let old_writer = GnawTreeWriter::new(old_file)?;
     let old_tree = old_writer.analyze();
 
@@ -82,7 +78,10 @@ pub fn diff(
 }
 
 /// Compare two AST trees
-fn compare_trees<'a>(old_tree: &'a TreeNode, new_tree: &'a TreeNode) -> (Vec<DiffChange>, Vec<DiffChange>, Vec<DiffModification>) {
+fn compare_trees<'a>(
+    old_tree: &'a TreeNode,
+    new_tree: &'a TreeNode,
+) -> (Vec<DiffChange>, Vec<DiffChange>, Vec<DiffModification>) {
     let mut additions = Vec::new();
     let mut deletions = Vec::new();
     let mut modifications = Vec::new();
@@ -122,7 +121,11 @@ fn compare_trees<'a>(old_tree: &'a TreeNode, new_tree: &'a TreeNode) -> (Vec<Dif
     (additions, deletions, modifications)
 }
 
-fn find_modifications(old_node: &TreeNode, new_node: &TreeNode, modifications: &mut Vec<DiffModification>) {
+fn find_modifications(
+    old_node: &TreeNode,
+    new_node: &TreeNode,
+    modifications: &mut Vec<DiffModification>,
+) {
     if old_node.path == new_node.path {
         // Same path - check for modifications
         if old_node.node_type != new_node.node_type {
@@ -179,7 +182,8 @@ pub fn format_diff_text(result: &DiffResult) -> String {
     output.push_str("\n📊 AST-AWARE DIFF\n");
     output.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
     output.push_str(&format!("Files: {}\n", result.file));
-    output.push_str(&format!("\n📈 Summary: +{} -{} ~{} (total: {})\n",
+    output.push_str(&format!(
+        "\n📈 Summary: +{} -{} ~{} (total: {})\n",
         result.summary.additions,
         result.summary.deletions,
         result.summary.modifications,
@@ -189,24 +193,30 @@ pub fn format_diff_text(result: &DiffResult) -> String {
     if !result.additions.is_empty() {
         output.push_str("\n➕ ADDITIONS:\n");
         for change in &result.additions {
-            output.push_str(&format!("  +{}:{} [{}] {}\n",
-                change.line, change.path, change.node_type, change.name));
+            output.push_str(&format!(
+                "  +{}:{} [{}] {}\n",
+                change.line, change.path, change.node_type, change.name
+            ));
         }
     }
 
     if !result.deletions.is_empty() {
         output.push_str("\n➖ DELETIONS:\n");
         for change in &result.deletions {
-            output.push_str(&format!("  -{}:{} [{}] {}\n",
-                change.line, change.path, change.node_type, change.name));
+            output.push_str(&format!(
+                "  -{}:{} [{}] {}\n",
+                change.line, change.path, change.node_type, change.name
+            ));
         }
     }
 
     if !result.modifications.is_empty() {
         output.push_str("\n✏️  MODIFICATIONS:\n");
         for modif in &result.modifications {
-            output.push_str(&format!("  ~{}:{} [{} → {}] {}\n",
-                modif.line, modif.path, modif.old_node_type, modif.new_node_type, modif.name));
+            output.push_str(&format!(
+                "  ~{}:{} [{} → {}] {}\n",
+                modif.line, modif.path, modif.old_node_type, modif.new_node_type, modif.name
+            ));
         }
     }
 
@@ -215,29 +225,41 @@ pub fn format_diff_text(result: &DiffResult) -> String {
 }
 
 /// Compare two node paths within the same file
-pub fn diff_nodes(
-    file_path: &str,
-    old_path: &str,
-    new_path: &str,
-) -> Result<String> {
+pub fn diff_nodes(file_path: &str, old_path: &str, new_path: &str) -> Result<String> {
     let writer = GnawTreeWriter::new(file_path)?;
     let tree = writer.analyze();
 
-    let old_node = tree.find_path(old_path)
+    let old_node = tree
+        .find_path(old_path)
         .ok_or_else(|| anyhow::anyhow!("Old node not found: {}", old_path))?;
-    let new_node = tree.find_path(new_path)
+    let new_node = tree
+        .find_path(new_path)
         .ok_or_else(|| anyhow::anyhow!("New node not found: {}", new_path))?;
 
     let mut output = String::new();
     output.push_str(&format!("\n🔄 NODE DIFF: {} → {}\n", old_path, new_path));
     output.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-    output.push_str(&format!("Old: {} ({} lines)\n", old_node.node_type, old_node.end_line - old_node.start_line));
-    output.push_str(&format!("New: {} ({} lines)\n", new_node.node_type, new_node.end_line - new_node.start_line));
+    output.push_str(&format!(
+        "Old: {} ({} lines)\n",
+        old_node.node_type,
+        old_node.end_line - old_node.start_line
+    ));
+    output.push_str(&format!(
+        "New: {} ({} lines)\n",
+        new_node.node_type,
+        new_node.end_line - new_node.start_line
+    ));
 
     if old_node.content != new_node.content {
         output.push_str("\n📝 Content changed:\n");
-        output.push_str(&format!("  Old: {}\n", &old_node.content[..old_node.content.len().min(100)]));
-        output.push_str(&format!("  New: {}\n", &new_node.content[..new_node.content.len().min(100)]));
+        output.push_str(&format!(
+            "  Old: {}\n",
+            &old_node.content[..old_node.content.len().min(100)]
+        ));
+        output.push_str(&format!(
+            "  New: {}\n",
+            &new_node.content[..new_node.content.len().min(100)]
+        ));
     }
 
     output.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");

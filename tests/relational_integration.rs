@@ -24,19 +24,30 @@ mod tests {
 
         // 3. Verify relations
         assert_eq!(graphs.len(), 2);
-        
-        let main_graph = graphs.iter().find(|g| g.file_path.contains("main.rs")).unwrap();
-        
+
+        let main_graph = graphs
+            .iter()
+            .find(|g| g.file_path.contains("main.rs"))
+            .unwrap();
+
         // Find the call relation
-        let call = main_graph.relations.iter().find(|r| r.to_name == "calculate_price").unwrap();
-        
-        println!("Found cross-file relation: {} -> {}:{}", 
-            call.from_file, 
-            call.to_file.as_ref().unwrap_or(&"unknown".into()), 
+        let call = main_graph
+            .relations
+            .iter()
+            .find(|r| r.to_name == "calculate_price")
+            .unwrap();
+
+        println!(
+            "Found cross-file relation: {} -> {}:{}",
+            call.from_file,
+            call.to_file.as_ref().unwrap_or(&"unknown".into()),
             call.to_name
         );
 
-        assert!(call.to_file.is_some(), "Should have found the file for calculate_price");
+        assert!(
+            call.to_file.is_some(),
+            "Should have found the file for calculate_price"
+        );
         assert!(call.to_file.as_ref().unwrap().contains("logic.rs"));
 
         Ok(())

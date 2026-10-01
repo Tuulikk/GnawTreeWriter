@@ -282,11 +282,7 @@ impl AstDiff {
         }
     }
 
-    fn compare_children(
-        before: &TreeNode,
-        after: &TreeNode,
-        changes: &mut Vec<StructuralChange>,
-    ) {
+    fn compare_children(before: &TreeNode, after: &TreeNode, changes: &mut Vec<StructuralChange>) {
         let before_names: Vec<_> = before
             .children
             .iter()
@@ -394,7 +390,11 @@ impl DoctorReport {
                     self.pass(
                         "parser",
                         &format!(".{}", extension),
-                        &format!("Parsed OK — root: '{}', {} nodes", tree.node_type, count_nodes(&tree)),
+                        &format!(
+                            "Parsed OK — root: '{}', {} nodes",
+                            tree.node_type,
+                            count_nodes(&tree)
+                        ),
                     );
                 }
                 Err(e) => {
@@ -427,7 +427,11 @@ impl DoctorReport {
         match crate::core::backup::list_backup_files(&backup_dir) {
             Ok(backups) => {
                 if backups.is_empty() {
-                    self.warn("backup", "backup_count", "Backup directory exists but is empty");
+                    self.warn(
+                        "backup",
+                        "backup_count",
+                        "Backup directory exists but is empty",
+                    );
                 } else {
                     self.pass(
                         "backup",
@@ -442,14 +446,20 @@ impl DoctorReport {
                             Ok(_) => {
                                 self.pass(
                                     "backup",
-                                    &format!("backup_{}", b.path.file_name().unwrap_or_default().to_string_lossy()),
+                                    &format!(
+                                        "backup_{}",
+                                        b.path.file_name().unwrap_or_default().to_string_lossy()
+                                    ),
                                     "Backup file is valid",
                                 );
                             }
                             Err(e) => {
                                 self.fail(
                                     "backup",
-                                    &format!("backup_{}", b.path.file_name().unwrap_or_default().to_string_lossy()),
+                                    &format!(
+                                        "backup_{}",
+                                        b.path.file_name().unwrap_or_default().to_string_lossy()
+                                    ),
                                     &format!("Corrupt backup: {}", e),
                                 );
                             }
@@ -458,7 +468,11 @@ impl DoctorReport {
                 }
             }
             Err(e) => {
-                self.fail("backup", "backup_scan", &format!("Failed to scan backups: {}", e));
+                self.fail(
+                    "backup",
+                    "backup_scan",
+                    &format!("Failed to scan backups: {}", e),
+                );
             }
         }
     }
@@ -466,24 +480,22 @@ impl DoctorReport {
     /// Check transaction log integrity
     pub fn check_transaction_log(&mut self, project_root: &std::path::Path) {
         match crate::core::transaction_log::TransactionLog::load(project_root) {
-            Ok(tlog) => {
-                match tlog.get_full_history() {
-                    Ok(history) => {
-                        self.pass(
-                            "transaction_log",
-                            "log_readable",
-                            &format!("Transaction log OK — {} entries", history.len()),
-                        );
-                    }
-                    Err(e) => {
-                        self.fail(
-                            "transaction_log",
-                            "log_history",
-                            &format!("Cannot read history: {}", e),
-                        );
-                    }
+            Ok(tlog) => match tlog.get_full_history() {
+                Ok(history) => {
+                    self.pass(
+                        "transaction_log",
+                        "log_readable",
+                        &format!("Transaction log OK — {} entries", history.len()),
+                    );
                 }
-            }
+                Err(e) => {
+                    self.fail(
+                        "transaction_log",
+                        "log_history",
+                        &format!("Cannot read history: {}", e),
+                    );
+                }
+            },
             Err(e) => {
                 self.fail(
                     "transaction_log",
@@ -522,16 +534,31 @@ fn extract_line_number(msg: &str) -> Option<usize> {
 fn generate_suggestion(error_type: &str, language: &str, _msg: &str) -> Option<String> {
     match error_type {
         "syntax_error" => Some(match language {
-            "rs" => "Check for missing semicolons, unbalanced braces, or incorrect type annotations".to_string(),
-            "py" => "Verify indentation levels and ensure colons after def/if/for/while".to_string(),
+            "rs" => {
+                "Check for missing semicolons, unbalanced braces, or incorrect type annotations"
+                    .to_string()
+            }
+            "py" => {
+                "Verify indentation levels and ensure colons after def/if/for/while".to_string()
+            }
             "js" | "ts" => "Check for missing brackets, braces, or semicolons".to_string(),
             "go" => "Verify that all imports are used and braces are balanced".to_string(),
-            "java" | "kt" => "Ensure all methods have return types and braces are balanced".to_string(),
+            "java" | "kt" => {
+                "Ensure all methods have return types and braces are balanced".to_string()
+            }
             _ => "Check syntax: balanced braces, semicolons, and proper punctuation".to_string(),
         }),
-        "path_resolution" => Some("Run `gnawtreewriter skeleton <file>` to see valid node paths".to_string()),
-        "guardian_block" => Some("Review the edit — it may be removing critical logic. Use --force to override".to_string()),
-        "parse_error" => Some(format!("The {} parser could not process this file. Check for encoding issues or mixed content", language)),
+        "path_resolution" => {
+            Some("Run `gnawtreewriter skeleton <file>` to see valid node paths".to_string())
+        }
+        "guardian_block" => Some(
+            "Review the edit — it may be removing critical logic. Use --force to override"
+                .to_string(),
+        ),
+        "parse_error" => Some(format!(
+            "The {} parser could not process this file. Check for encoding issues or mixed content",
+            language
+        )),
         "io_error" => Some("Verify file permissions and that the path exists".to_string()),
         _ => None,
     }

@@ -58,8 +58,10 @@ impl ProjectState {
         // Compute file hashes for source files
         let files = crate::core::file_walker::walk_source_files_filtered(
             project_root,
-            &["rs", "py", "js", "ts", "tsx", "jsx", "go", "java",
-              "c", "cpp", "h", "hpp", "cs", "php", "rb", "swift", "kt"],
+            &[
+                "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "c", "cpp", "h", "hpp", "cs",
+                "php", "rb", "swift", "kt",
+            ],
         );
 
         state.file_hashes.clear();
@@ -67,7 +69,9 @@ impl ProjectState {
             if let Ok(rel) = path.strip_prefix(project_root) {
                 if let Ok(content) = std::fs::read_to_string(path) {
                     let hash = format!("{:x}", md5::compute(content.as_bytes()));
-                    state.file_hashes.insert(rel.to_string_lossy().to_string(), hash);
+                    state
+                        .file_hashes
+                        .insert(rel.to_string_lossy().to_string(), hash);
                 }
             }
         }
@@ -119,7 +123,9 @@ mod tests {
         let mut state = ProjectState::default();
         state.git_head = "abc123".to_string();
         state.last_analyzed = "2026-08-24T13:00:00Z".to_string();
-        state.file_hashes.insert("src/main.rs".to_string(), "hash123".to_string());
+        state
+            .file_hashes
+            .insert("src/main.rs".to_string(), "hash123".to_string());
         state.save(root).unwrap();
 
         let loaded = ProjectState::load(root);

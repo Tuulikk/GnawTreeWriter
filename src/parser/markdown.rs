@@ -1,4 +1,4 @@
-use crate::parser::{TreeNode, ParserEngineLegacy};
+use crate::parser::{ParserEngineLegacy, TreeNode};
 use anyhow::Result;
 use regex::Regex;
 
@@ -66,14 +66,18 @@ impl MarkdownParser {
                 i += 1; // Skip closing ```
                 line_num += 1;
 
-                children.push(TreeNode { start_col: 0, end_col: 0, 
+                children.push(TreeNode {
+                    start_col: 0,
+                    end_col: 0,
                     id: format!("{}", children.len()),
                     path: format!("{}", children.len()),
                     node_type: "code_block".to_string(),
                     content: code_lines.join("\n"),
                     start_line,
                     end_line: line_num,
-                    children: vec![TreeNode { start_col: 0, end_col: 0, 
+                    children: vec![TreeNode {
+                        start_col: 0,
+                        end_col: 0,
                         id: format!("{}.lang", children.len()),
                         path: format!("{}.lang", children.len()),
                         node_type: "language".to_string(),
@@ -95,14 +99,18 @@ impl MarkdownParser {
                 // hela raden och tappar "### "-prefixet — "span-överlapp" vid
                 // efterföljande list-edits (2026-08-19, roadmap.md).
                 let line_len = line.chars().count();
-                children.push(TreeNode { start_col: 1, end_col: line_len + 1,
+                children.push(TreeNode {
+                    start_col: 1,
+                    end_col: line_len + 1,
                     id: format!("{}", children.len()),
                     path: format!("{}", children.len()),
                     node_type: format!("heading_{}", level),
                     content: text.to_string(),
                     start_line: line_num,
                     end_line: line_num,
-                    children: vec![TreeNode { start_col: 1, end_col: line_len + 1,
+                    children: vec![TreeNode {
+                        start_col: 1,
+                        end_col: line_len + 1,
                         id: format!("{}.level", children.len()),
                         path: format!("{}.level", children.len()),
                         node_type: "level".to_string(),
@@ -136,7 +144,9 @@ impl MarkdownParser {
                     }
                 }
 
-                children.push(TreeNode { start_col: 0, end_col: 0, 
+                children.push(TreeNode {
+                    start_col: 0,
+                    end_col: 0,
                     id: format!("{}", children.len()),
                     path: format!("{}", children.len()),
                     node_type: "block_quote".to_string(),
@@ -150,7 +160,9 @@ impl MarkdownParser {
 
             // Horizontal rules
             if hr_regex.is_match(line) {
-                children.push(TreeNode { start_col: 0, end_col: 0, 
+                children.push(TreeNode {
+                    start_col: 0,
+                    end_col: 0,
                     id: format!("{}", children.len()),
                     path: format!("{}", children.len()),
                     node_type: "horizontal_rule".to_string(),
@@ -192,8 +204,13 @@ impl MarkdownParser {
                     let parsed_inline = self.parse_inline(item);
                     // Kolumn-span = hela radens text (1..len+1) — annars används
                     // fallback-grenen som tappar "- "/"1. "-prefixet vid edit.
-                    let item_line = lines.get(start_line + idx).map(|l| l.chars().count()).unwrap_or(item.chars().count());
-                    let item_children = vec![TreeNode { start_col: 1, end_col: item_line + 1,
+                    let item_line = lines
+                        .get(start_line + idx)
+                        .map(|l| l.chars().count())
+                        .unwrap_or(item.chars().count());
+                    let item_children = vec![TreeNode {
+                        start_col: 1,
+                        end_col: item_line + 1,
                         id: format!("{}.{}.text", children.len(), idx),
                         path: format!("{}.{}.text", children.len(), idx),
                         node_type: "text".to_string(),
@@ -203,7 +220,9 @@ impl MarkdownParser {
                         children: parsed_inline,
                     }];
 
-                    item_nodes.push(TreeNode { start_col: 1, end_col: item_line + 1,
+                    item_nodes.push(TreeNode {
+                        start_col: 1,
+                        end_col: item_line + 1,
                         id: format!("{}.{}", children.len(), idx),
                         path: format!("{}.{}", children.len(), idx),
                         node_type: "list_item".to_string(),
@@ -214,7 +233,12 @@ impl MarkdownParser {
                     });
                 }
 
-                children.push(TreeNode { start_col: 1, end_col: lines.get(start_line).map(|l| l.chars().count() + 1).unwrap_or(1),
+                children.push(TreeNode {
+                    start_col: 1,
+                    end_col: lines
+                        .get(start_line)
+                        .map(|l| l.chars().count() + 1)
+                        .unwrap_or(1),
                     id: format!("{}", children.len()),
                     path: format!("{}", children.len()),
                     node_type: format!("list_{}", list_type),
@@ -251,7 +275,9 @@ impl MarkdownParser {
                 let para_text = para_lines.join("\n");
                 let inline_nodes = self.parse_inline(&para_text);
 
-                children.push(TreeNode { start_col: 0, end_col: 0, 
+                children.push(TreeNode {
+                    start_col: 0,
+                    end_col: 0,
                     id: format!("{}", children.len()),
                     path: format!("{}", children.len()),
                     node_type: "paragraph".to_string(),
@@ -263,14 +289,16 @@ impl MarkdownParser {
             }
         }
 
-        Ok(TreeNode { start_col: 0, end_col: 0, 
+        Ok(TreeNode {
+            start_col: 0,
+            end_col: 0,
             id: "".to_string(),
             path: "".to_string(),
             node_type: "document".to_string(),
             content: String::new(),
             start_line: 1,
             end_line: line_num,
-            children, 
+            children,
         })
     }
 
@@ -293,7 +321,9 @@ impl MarkdownParser {
                 if let Some(m) = caps.get(0) {
                     let before = &remaining[start_pos..m.start()];
                     if !before.is_empty() {
-                        children.push(TreeNode { start_col: 0, end_col: 0, 
+                        children.push(TreeNode {
+                            start_col: 0,
+                            end_col: 0,
                             id: format!("inline_{}", children.len()),
                             path: format!("inline_{}", children.len()),
                             node_type: "text".to_string(),
@@ -307,14 +337,18 @@ impl MarkdownParser {
                     let link_text = caps.get(1).unwrap().as_str();
                     let link_url = caps.get(2).unwrap().as_str();
 
-                    children.push(TreeNode { start_col: 0, end_col: 0, 
+                    children.push(TreeNode {
+                        start_col: 0,
+                        end_col: 0,
                         id: format!("inline_{}", children.len()),
                         path: format!("inline_{}", children.len()),
                         node_type: "link".to_string(),
                         content: link_text.to_string(),
                         start_line: 1,
                         end_line: 1,
-                        children: vec![TreeNode { start_col: 0, end_col: 0, 
+                        children: vec![TreeNode {
+                            start_col: 0,
+                            end_col: 0,
                             id: format!("inline_{}.url", children.len()),
                             path: format!("inline_{}.url", children.len()),
                             node_type: "url".to_string(),
@@ -339,7 +373,9 @@ impl MarkdownParser {
                 if let Some(m) = caps.get(0) {
                     let before = &remaining[start_pos..m.start()];
                     if !before.is_empty() {
-                        children.push(TreeNode { start_col: 0, end_col: 0, 
+                        children.push(TreeNode {
+                            start_col: 0,
+                            end_col: 0,
                             id: format!("inline_{}", children.len()),
                             path: format!("inline_{}", children.len()),
                             node_type: "text".to_string(),
@@ -352,7 +388,9 @@ impl MarkdownParser {
 
                     let bold_text = caps.get(1).unwrap().as_str();
 
-                    children.push(TreeNode { start_col: 0, end_col: 0, 
+                    children.push(TreeNode {
+                        start_col: 0,
+                        end_col: 0,
                         id: format!("inline_{}", children.len()),
                         path: format!("inline_{}", children.len()),
                         node_type: "bold".to_string(),
@@ -376,7 +414,9 @@ impl MarkdownParser {
                 if let Some(m) = caps.get(0) {
                     let before = &remaining[start_pos..m.start()];
                     if !before.is_empty() {
-                        children.push(TreeNode { start_col: 0, end_col: 0, 
+                        children.push(TreeNode {
+                            start_col: 0,
+                            end_col: 0,
                             id: format!("inline_{}", children.len()),
                             path: format!("inline_{}", children.len()),
                             node_type: "text".to_string(),
@@ -389,7 +429,9 @@ impl MarkdownParser {
 
                     let code_text = caps.get(1).unwrap().as_str();
 
-                    children.push(TreeNode { start_col: 0, end_col: 0, 
+                    children.push(TreeNode {
+                        start_col: 0,
+                        end_col: 0,
                         id: format!("inline_{}", children.len()),
                         path: format!("inline_{}", children.len()),
                         node_type: "inline_code".to_string(),
@@ -415,7 +457,9 @@ impl MarkdownParser {
                     if m.start() == 0 || !remaining[m.start() - 1..m.start()].contains('*') {
                         let before = &remaining[start_pos..m.start()];
                         if !before.is_empty() {
-                            children.push(TreeNode { start_col: 0, end_col: 0, 
+                            children.push(TreeNode {
+                                start_col: 0,
+                                end_col: 0,
                                 id: format!("inline_{}", children.len()),
                                 path: format!("inline_{}", children.len()),
                                 node_type: "text".to_string(),
@@ -428,7 +472,9 @@ impl MarkdownParser {
 
                         let italic_text = caps.get(1).unwrap().as_str();
 
-                        children.push(TreeNode { start_col: 0, end_col: 0, 
+                        children.push(TreeNode {
+                            start_col: 0,
+                            end_col: 0,
                             id: format!("inline_{}", children.len()),
                             path: format!("inline_{}", children.len()),
                             node_type: "italic".to_string(),
@@ -450,7 +496,9 @@ impl MarkdownParser {
 
             // No more inline elements found, add remaining text
             if !remaining.is_empty() {
-                children.push(TreeNode { start_col: 0, end_col: 0, 
+                children.push(TreeNode {
+                    start_col: 0,
+                    end_col: 0,
                     id: format!("inline_{}", children.len()),
                     path: format!("inline_{}", children.len()),
                     node_type: "text".to_string(),
@@ -481,15 +529,38 @@ mod tests {
         let md = "### Funktioner\n- Punkt ett\n- Punkt två\n";
         let root = parser.parse_legacy(md).unwrap();
 
-        let heading = root.children.iter().find(|n| n.node_type.starts_with("heading_")).expect("rubrik-nod");
-        assert!(heading.start_col > 0, "rubrik start_col ska vara > 0 (var 0 → fallback-edit): {}", heading.start_col);
-        assert!(heading.end_col > heading.start_col, "rubrik end_col ska täcka raden");
+        let heading = root
+            .children
+            .iter()
+            .find(|n| n.node_type.starts_with("heading_"))
+            .expect("rubrik-nod");
+        assert!(
+            heading.start_col > 0,
+            "rubrik start_col ska vara > 0 (var 0 → fallback-edit): {}",
+            heading.start_col
+        );
+        assert!(
+            heading.end_col > heading.start_col,
+            "rubrik end_col ska täcka raden"
+        );
 
-        let list = root.children.iter().find(|n| n.node_type.starts_with("list_")).expect("list-nod");
-        assert!(list.start_col > 0, "list start_col ska vara > 0: {}", list.start_col);
+        let list = root
+            .children
+            .iter()
+            .find(|n| n.node_type.starts_with("list_"))
+            .expect("list-nod");
+        assert!(
+            list.start_col > 0,
+            "list start_col ska vara > 0: {}",
+            list.start_col
+        );
         assert!(!list.children.is_empty(), "list ska ha items");
         let first_item = &list.children[0];
-        assert!(first_item.start_col > 0, "list_item start_col ska vara > 0: {}", first_item.start_col);
+        assert!(
+            first_item.start_col > 0,
+            "list_item start_col ska vara > 0: {}",
+            first_item.start_col
+        );
         assert!(
             first_item.end_col > first_item.start_col,
             "list_item end_col ska täcka raden (annars tappas '- '-prefixet vid edit)"

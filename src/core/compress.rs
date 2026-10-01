@@ -63,7 +63,11 @@ pub fn compress_source(source: &str, tree: &TreeNode) -> CompressedOutput {
         let keep_last = last_line.starts_with('}') || last_line == "}";
 
         let replace_start = if keep_first { start_idx + 1 } else { start_idx };
-        let replace_end = if keep_last { end_idx.saturating_sub(1) } else { end_idx };
+        let replace_end = if keep_last {
+            end_idx.saturating_sub(1)
+        } else {
+            end_idx
+        };
 
         if replace_start <= replace_end && replace_start < compressed_lines.len() {
             let placeholder = format!("{}⋮----", indent);
@@ -148,7 +152,7 @@ fn should_compress_body(node: &TreeNode) -> bool {
         | "do_statement"                   // JS/TS
         // ── Other bodies ──
         | "block"                          // Rust generic blocks
-        | "declaration_list"               // C/C++ struct/enum bodies
+        | "declaration_list" // C/C++ struct/enum bodies
     )
     // Note: impl_item and trait_item are NOT included — their children are compressed individually
 }
@@ -271,12 +275,21 @@ fn main() {
         let result = compress(source, "rs");
         // Trait definitions have method signatures but no bodies to compress
         // The methods should be preserved as-is
-        assert!(result.code.contains("trait Drawable"),
-            "Should preserve trait. Got:\n{}", result.code);
-        assert!(result.code.contains("fn draw(&self)"),
-            "Should preserve method signature. Got:\n{}", result.code);
-        assert!(result.code.contains("fn bounding_box(&self)"),
-            "Should preserve method signature. Got:\n{}", result.code);
+        assert!(
+            result.code.contains("trait Drawable"),
+            "Should preserve trait. Got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("fn draw(&self)"),
+            "Should preserve method signature. Got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("fn bounding_box(&self)"),
+            "Should preserve method signature. Got:\n{}",
+            result.code
+        );
     }
 
     #[test]

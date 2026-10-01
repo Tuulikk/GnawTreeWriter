@@ -79,7 +79,9 @@ pub fn curate_context(
 ) -> Result<CuratedContext> {
     let files = walk_source_files_filtered(
         root,
-        &["rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "c", "cpp", "h", "hpp"],
+        &[
+            "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "c", "cpp", "h", "hpp",
+        ],
     );
 
     let mut scored_files = match strategy {
@@ -94,7 +96,12 @@ pub fn curate_context(
             let mut score_map: HashMap<String, (f64, String, usize, usize)> = HashMap::new();
 
             for f in &relevance {
-                let entry = score_map.entry(f.path.clone()).or_insert((0.0, String::new(), f.tokens, f.lines));
+                let entry = score_map.entry(f.path.clone()).or_insert((
+                    0.0,
+                    String::new(),
+                    f.tokens,
+                    f.lines,
+                ));
                 entry.0 += f.score * 0.5;
                 if entry.1.is_empty() || f.score > 0.5 {
                     entry.1 = f.reason.clone();
@@ -102,7 +109,12 @@ pub fn curate_context(
             }
 
             for f in &recent {
-                let entry = score_map.entry(f.path.clone()).or_insert((0.0, String::new(), f.tokens, f.lines));
+                let entry = score_map.entry(f.path.clone()).or_insert((
+                    0.0,
+                    String::new(),
+                    f.tokens,
+                    f.lines,
+                ));
                 entry.0 += f.score * 0.3;
                 if f.score > 0.7 {
                     entry.1 = format!("{}; {}", entry.1, f.reason);
@@ -110,7 +122,12 @@ pub fn curate_context(
             }
 
             for f in &deps {
-                let entry = score_map.entry(f.path.clone()).or_insert((0.0, String::new(), f.tokens, f.lines));
+                let entry = score_map.entry(f.path.clone()).or_insert((
+                    0.0,
+                    String::new(),
+                    f.tokens,
+                    f.lines,
+                ));
                 entry.0 += f.score * 0.2;
                 if f.score > 0.7 {
                     entry.1 = format!("{}; {}", entry.1, f.reason);
@@ -120,14 +137,22 @@ pub fn curate_context(
             score_map
                 .into_iter()
                 .map(|(path, (score, reason, tokens, lines))| CuratedFile {
-                    path, score, reason, tokens, lines,
+                    path,
+                    score,
+                    reason,
+                    tokens,
+                    lines,
                 })
                 .collect()
         }
     };
 
     // Sort by score descending
-    scored_files.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    scored_files.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Apply token budget and file limit
     let mut total_tokens = 0usize;
@@ -524,10 +549,22 @@ mod tests {
 
     #[test]
     fn test_strategy_from_str() {
-        assert_eq!(CurationStrategy::parse("relevance"), CurationStrategy::Relevance);
-        assert_eq!(CurationStrategy::parse("recent"), CurationStrategy::RecentChanges);
-        assert_eq!(CurationStrategy::parse("git"), CurationStrategy::RecentChanges);
-        assert_eq!(CurationStrategy::parse("deps"), CurationStrategy::Dependencies);
+        assert_eq!(
+            CurationStrategy::parse("relevance"),
+            CurationStrategy::Relevance
+        );
+        assert_eq!(
+            CurationStrategy::parse("recent"),
+            CurationStrategy::RecentChanges
+        );
+        assert_eq!(
+            CurationStrategy::parse("git"),
+            CurationStrategy::RecentChanges
+        );
+        assert_eq!(
+            CurationStrategy::parse("deps"),
+            CurationStrategy::Dependencies
+        );
         assert_eq!(CurationStrategy::parse("auto"), CurationStrategy::Auto);
         assert_eq!(CurationStrategy::parse("smart"), CurationStrategy::Auto);
     }
@@ -563,43 +600,40 @@ mod tests {
         )
         .unwrap();
 
-        assert!(result.files.is_empty(), "No files should match nonsense keywords");
+        assert!(
+            result.files.is_empty(),
+            "No files should match nonsense keywords"
+        );
         assert_eq!(result.total_tokens, 0);
     }
 
     #[test]
     fn test_curate_reason_field_populated() {
         let (_dir, root) = setup_project();
-        let result = curate_context(
-            &root,
-            "login",
-            CurationStrategy::Relevance,
-            100000,
-            10,
-        )
-        .unwrap();
+        let result =
+            curate_context(&root, "login", CurationStrategy::Relevance, 100000, 10).unwrap();
 
         assert!(!result.files.is_empty());
         for f in &result.files {
-            assert!(!f.reason.is_empty(), "Every curated file should have a reason");
+            assert!(
+                !f.reason.is_empty(),
+                "Every curated file should have a reason"
+            );
         }
     }
 
     #[test]
     fn test_curate_token_counts_accurate() {
         let (_dir, root) = setup_project();
-        let result = curate_context(
-            &root,
-            "login",
-            CurationStrategy::Relevance,
-            100000,
-            10,
-        )
-        .unwrap();
+        let result =
+            curate_context(&root, "login", CurationStrategy::Relevance, 100000, 10).unwrap();
 
         // Sum of per-file tokens should equal total
         let sum: usize = result.files.iter().map(|f| f.tokens).sum();
-        assert_eq!(sum, result.total_tokens, "total_tokens should equal sum of file tokens");
+        assert_eq!(
+            sum, result.total_tokens,
+            "total_tokens should equal sum of file tokens"
+        );
     }
 
     #[test]
@@ -640,14 +674,7 @@ mod tests {
         fs::write(root.join("src/big.rs"), &big_content).unwrap();
 
         // Budget that only fits the small file
-        let result = curate_context(
-            &root,
-            "login",
-            CurationStrategy::Relevance,
-            2000,
-            10,
-        )
-        .unwrap();
+        let result = curate_context(&root, "login", CurationStrategy::Relevance, 2000, 10).unwrap();
 
         assert!(result.total_tokens <= 2000);
         assert!(
@@ -659,32 +686,24 @@ mod tests {
     #[test]
     fn test_curate_auto_produces_summary() {
         let (_dir, root) = setup_project();
-        let result = curate_context(
-            &root,
-            "session",
-            CurationStrategy::Auto,
-            100000,
-            10,
-        )
-        .unwrap();
+        let result = curate_context(&root, "session", CurationStrategy::Auto, 100000, 10).unwrap();
 
         assert!(!result.summary.is_empty());
-        assert!(result.summary.contains("Auto"), "Summary should mention strategy");
+        assert!(
+            result.summary.contains("Auto"),
+            "Summary should mention strategy"
+        );
     }
 
     #[test]
     fn test_curate_short_keywords_ignored() {
         let (_dir, root) = setup_project();
         // "fn" is only 2 chars — should be skipped as too short
-        let result = curate_context(
-            &root,
-            "fn",
-            CurationStrategy::Relevance,
-            100000,
-            10,
-        )
-        .unwrap();
+        let result = curate_context(&root, "fn", CurationStrategy::Relevance, 100000, 10).unwrap();
 
-        assert!(result.files.is_empty(), "Keywords < 3 chars should be ignored");
+        assert!(
+            result.files.is_empty(),
+            "Keywords < 3 chars should be ignored"
+        );
     }
 }

@@ -1,10 +1,10 @@
-use anyhow::Result;
-use serde::{Serialize, Deserialize};
-use std::collections::{HashSet, HashMap};
-use std::path::{Path, PathBuf};
-use std::fs;
-use crate::parser::TreeNode;
 use crate::core::file_walker::walk_source_files;
+use crate::parser::TreeNode;
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum RelationType {
@@ -40,7 +40,7 @@ impl RelationalIndexer {
         if !storage_dir.exists() {
             let _ = fs::create_dir_all(&storage_dir);
         }
-        Self { 
+        Self {
             storage_dir,
             symbol_table: HashMap::new(),
         }
@@ -49,7 +49,7 @@ impl RelationalIndexer {
     /// Scan a directory and build relations between files recursively
     pub fn index_directory(&mut self, dir_path: &Path) -> Result<Vec<FileGraph>> {
         let mut graphs = Vec::new();
-        
+
         // 1. First pass: Collect all definitions in the directory recursively
         for path in walk_source_files(dir_path) {
             if let Ok(content) = fs::read_to_string(&path) {
@@ -57,14 +57,15 @@ impl RelationalIndexer {
                     if let Ok(tree) = parser.parse(&content) {
                         let mut defs = HashMap::new();
                         self.collect_definitions(&tree, &mut defs);
-                        
+
                         let file_str = path.to_string_lossy().to_string();
                         for name in defs.keys() {
-                            self.symbol_table.entry(name.clone())
+                            self.symbol_table
+                                .entry(name.clone())
                                 .or_default()
                                 .push(file_str.clone());
                         }
-                        
+
                         graphs.push((path.to_path_buf(), tree, defs));
                     }
                 }
@@ -77,13 +78,13 @@ impl RelationalIndexer {
             let file_str = path.to_string_lossy().to_string();
             let mut relations = HashSet::new();
             self.extract_relations(&tree, &file_str, &mut relations);
-            
+
             let graph = FileGraph {
                 file_path: file_str,
                 relations,
                 definitions: defs,
             };
-            
+
             self.save_graph(&graph)?;
             final_graphs.push(graph);
         }
@@ -106,7 +107,9 @@ impl RelationalIndexer {
         if node.node_type.contains("call") || node.node_type.contains("usage") {
             if let Some(name) = node.get_name() {
                 // Check if we know where this is defined
-                let to_file = self.symbol_table.get(&name)
+                let to_file = self
+                    .symbol_table
+                    .get(&name)
                     .and_then(|files| files.first()) // Simplified: take first match
                     .cloned();
 
@@ -135,7 +138,9 @@ impl RelationalIndexer {
 
     pub fn load_all_graphs(&self) -> Result<Vec<FileGraph>> {
         let mut graphs = Vec::new();
-        if !self.storage_dir.exists() { return Ok(graphs); }
+        if !self.storage_dir.exists() {
+            return Ok(graphs);
+        }
 
         for entry in fs::read_dir(&self.storage_dir)? {
             let entry = entry?;

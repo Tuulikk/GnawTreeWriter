@@ -1,6 +1,6 @@
 #[cfg(feature = "modernbert")]
 mod tests {
-    use gnawtreewriter::llm::{GnawSenseBroker, AiModel, DeviceType, AiManager};
+    use gnawtreewriter::llm::{AiManager, AiModel, DeviceType, GnawSenseBroker};
     use std::fs;
     use tempfile::tempdir;
 
@@ -8,13 +8,15 @@ mod tests {
     async fn test_gnaw_sense_basic_navigation() -> anyhow::Result<()> {
         let dir = tempdir()?;
         let test_files_dir = dir.path();
-        
+
         // Use the current working directory as project root to find the models
         let project_root = std::env::current_dir()?;
         let ai_manager = AiManager::new(&project_root)?;
-        
+
         // Ensure models are present (should skip download if already there)
-        ai_manager.setup(AiModel::ModernBert, DeviceType::Cpu, false).await?;
+        ai_manager
+            .setup(AiModel::ModernBert, DeviceType::Cpu, false)
+            .await?;
 
         // 2. Create a test file in the temp dir
         let test_file_path = test_files_dir.join("test_logic.py");
@@ -38,11 +40,13 @@ def handle_git_commit(message):
 
         // 4. Perform a "Zoom" search (within the file) using a "weak" description
         let query = "how do I save data to the disk?";
-        let response = broker.sense(query, Some(test_file_path.to_str().unwrap())).await?;
+        let response = broker
+            .sense(query, Some(test_file_path.to_str().unwrap()))
+            .await?;
 
         if let gnawtreewriter::llm::SenseResponse::Zoom { nodes, .. } = response {
             assert!(!nodes.is_empty(), "Should find at least one matching node");
-            
+
             // The top match should be 'save_to_database'
             let top_match = &nodes[0];
             println!("Top match: {} (score: {})", top_match.path, top_match.score);
@@ -53,8 +57,10 @@ def handle_git_commit(message):
 
         // 5. Test another query for git
         let git_query = "version control stuff";
-        let git_response = broker.sense(git_query, Some(test_file_path.to_str().unwrap())).await?;
-        
+        let git_response = broker
+            .sense(git_query, Some(test_file_path.to_str().unwrap()))
+            .await?;
+
         if let gnawtreewriter::llm::SenseResponse::Zoom { nodes, .. } = git_response {
             let top_match = &nodes[0];
             println!("Git match: {} (score: {})", top_match.path, top_match.score);

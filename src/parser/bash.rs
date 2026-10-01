@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::parser::{TreeNode, ParserEngineLegacy};
+use crate::parser::{ParserEngineLegacy, TreeNode};
 use anyhow::Result;
 use tree_sitter::Parser;
 
@@ -46,14 +46,16 @@ impl BashParser {
 
         let id = path.clone();
 
-        Ok(TreeNode { start_col: 0, end_col: 0,
+        Ok(TreeNode {
+            start_col: 0,
+            end_col: 0,
             id,
             path,
             node_type,
             content,
             start_line,
             end_line,
-            children, 
+            children,
         })
     }
 }

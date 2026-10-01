@@ -169,7 +169,10 @@ pub fn diff_to_batch(diff: &ParsedDiff) -> Result<Batch> {
     // Group hunks by file
     let mut file_hunks: HashMap<PathBuf, Vec<&DiffHunk>> = HashMap::new();
     for hunk in &diff.hunks {
-        file_hunks.entry(hunk.file_path.clone()).or_default().push(hunk);
+        file_hunks
+            .entry(hunk.file_path.clone())
+            .or_default()
+            .push(hunk);
     }
 
     let mut batch = Batch::new();
@@ -182,7 +185,8 @@ pub fn diff_to_batch(diff: &ParsedDiff) -> Result<Batch> {
             .map_err(|e| anyhow!("Failed to read {}: {}", file_path.display(), e))?;
         let parser = get_parser(&file_path)
             .map_err(|e| anyhow!("No parser available for {}: {}", file_path.display(), e))?;
-        let tree = parser.parse(&source)
+        let tree = parser
+            .parse(&source)
             .map_err(|e| anyhow!("Failed to parse {}: {}", file_path.display(), e))?;
 
         let mut operations = Vec::new();
@@ -238,7 +242,12 @@ pub fn diff_to_batch(diff: &ParsedDiff) -> Result<Batch> {
                                         DiffLine::Addition(s) => Some(s),
                                         _ => None,
                                     })
-                                    .and_then(|s| s.chars().take_while(|c| *c == ' ' || *c == '\t').collect::<String>().into())
+                                    .and_then(|s| {
+                                        s.chars()
+                                            .take_while(|c| *c == ' ' || *c == '\t')
+                                            .collect::<String>()
+                                            .into()
+                                    })
                                     .unwrap_or_default();
                                 new_parts.push(format!("{}{}", indent, trimmed));
                                 break;
@@ -297,7 +306,13 @@ pub fn diff_to_batch(diff: &ParsedDiff) -> Result<Batch> {
 /// to find the smallest node that has both a meaningful type and children.
 fn resolve_line_to_node(tree: &TreeNode, line: usize, source: &str) -> String {
     let line_count = source.lines().count();
-    let line = if line > line_count { line_count } else if line == 0 { 1 } else { line };
+    let line = if line > line_count {
+        line_count
+    } else if line == 0 {
+        1
+    } else {
+        line
+    };
 
     // First find the deepest node at this line
     let deepest = match tree.find_node_at_line(line) {

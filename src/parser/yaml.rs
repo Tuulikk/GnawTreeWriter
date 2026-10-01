@@ -1,4 +1,4 @@
-use crate::parser::{TreeNode, ParserEngineLegacy};
+use crate::parser::{ParserEngineLegacy, TreeNode};
 use anyhow::Result;
 use serde_yaml::Value;
 
@@ -89,14 +89,16 @@ impl YamlParser {
 
         let id = path.clone();
 
-        Ok(TreeNode { start_col: 0, end_col: 0,
+        Ok(TreeNode {
+            start_col: 0,
+            end_col: 0,
             id,
             path,
             node_type,
             content,
             start_line,
             end_line,
-            children, 
+            children,
         })
     }
 }

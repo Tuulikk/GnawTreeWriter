@@ -71,10 +71,13 @@ pub fn process_llm_request(request: LLMEditRequest) -> Result<LLMResponse> {
             node_path,
             new_content,
         } => {
-            writer.edit(EditOperation::Edit {
-                node_path: node_path.clone(),
-                content: new_content,
-            }, false)?;
+            writer.edit(
+                EditOperation::Edit {
+                    node_path: node_path.clone(),
+                    content: new_content,
+                },
+                false,
+            )?;
             Ok(LLMResponse::success(format!(
                 "Replaced node at {}: {}",
                 node_path, description
@@ -88,11 +91,14 @@ pub fn process_llm_request(request: LLMEditRequest) -> Result<LLMResponse> {
             let tree = writer.analyze();
             let parent_path = find_parent_path(tree, &node_path)
                 .ok_or_else(|| anyhow::anyhow!("Could not find parent for node: {}", node_path))?;
-            writer.edit(EditOperation::Insert {
-                parent_path,
-                position: 0,
-                content,
-            }, false)?;
+            writer.edit(
+                EditOperation::Insert {
+                    parent_path,
+                    position: 0,
+                    content,
+                },
+                false,
+            )?;
             Ok(LLMResponse::success(format!(
                 "Inserted before node {}: {}",
                 node_path, description
@@ -106,11 +112,14 @@ pub fn process_llm_request(request: LLMEditRequest) -> Result<LLMResponse> {
             let tree = writer.analyze();
             let parent_path = find_parent_path(tree, &node_path)
                 .ok_or_else(|| anyhow::anyhow!("Could not find parent for node: {}", node_path))?;
-            writer.edit(EditOperation::Insert {
-                parent_path,
-                position: 1,
-                content,
-            }, false)?;
+            writer.edit(
+                EditOperation::Insert {
+                    parent_path,
+                    position: 1,
+                    content,
+                },
+                false,
+            )?;
             Ok(LLMResponse::success(format!(
                 "Inserted after node {}: {}",
                 node_path, description
@@ -134,11 +143,14 @@ pub fn process_llm_request(request: LLMEditRequest) -> Result<LLMResponse> {
             property_value,
         } => {
             let content = format!("{}: {}", property_name, property_value);
-            writer.edit(EditOperation::Insert {
-                parent_path: component_path.clone(),
-                position: 1,
-                content,
-            }, false)?;
+            writer.edit(
+                EditOperation::Insert {
+                    parent_path: component_path.clone(),
+                    position: 1,
+                    content,
+                },
+                false,
+            )?;
             Ok(LLMResponse::success(format!(
                 "Added property {} to {}: {}",
                 property_name, component_path, description

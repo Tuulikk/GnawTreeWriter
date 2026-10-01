@@ -3,7 +3,6 @@
 /// Covers the bug where `insert position=1` (append) would land inside the
 /// last function instead of at file level when the file lacked a trailing newline.
 /// Also tests normal operation with trailing newlines and block-level inserts.
-
 use std::io::Write;
 
 use gnawtreewriter::core::EditOperation;
@@ -17,9 +16,7 @@ fn make_file(dir: &std::path::Path, name: &str, content: &str) -> std::path::Pat
 
 /// Helper: read file as string, normalizing to unix line endings.
 fn read_file(path: &std::path::Path) -> String {
-    std::fs::read_to_string(path)
-        .unwrap()
-        .replace("\r\n", "\n")
+    std::fs::read_to_string(path).unwrap().replace("\r\n", "\n")
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -72,7 +69,9 @@ fn insert_source_file_pos1_with_trailing_newline() {
         main_idx
     );
     assert!(
-        lines[main_idx + 1..extra_idx].iter().any(|l| l.contains('}')),
+        lines[main_idx + 1..extra_idx]
+            .iter()
+            .any(|l| l.contains('}')),
         "main's closing brace should appear before fn extra"
     );
 }
@@ -154,7 +153,8 @@ fn insert_block_pos0_adds_after_opening_brace() {
 
     // Find the main function's block node
     let tree = writer.analyze();
-    let main_block = tree.children
+    let main_block = tree
+        .children
         .iter()
         .find(|c| c.node_type == "function_item" && c.content.contains("main"))
         .unwrap()
@@ -196,7 +196,8 @@ fn insert_block_pos1_adds_before_closing_brace() {
     let writer = gnawtreewriter::GnawTreeWriter::new(path.to_str().unwrap()).unwrap();
 
     let tree = writer.analyze();
-    let main_block = tree.children
+    let main_block = tree
+        .children
         .iter()
         .find(|c| c.node_type == "function_item" && c.content.contains("main"))
         .unwrap()
@@ -244,7 +245,8 @@ fn insert_block_pos1_without_trailing_newline() {
     let writer = gnawtreewriter::GnawTreeWriter::new(path.to_str().unwrap()).unwrap();
 
     let tree = writer.analyze();
-    let main_block = tree.children
+    let main_block = tree
+        .children
         .iter()
         .find(|c| c.node_type == "function_item" && c.content.contains("main"))
         .unwrap()
@@ -358,8 +360,14 @@ fn insert_typescript_source_file_pos1_no_trailing_newline() {
         .unwrap();
 
     let lines: Vec<&str> = result.lines().collect();
-    let extra_idx = lines.iter().position(|l| l.contains("function extra")).unwrap();
-    let main_idx = lines.iter().position(|l| l.contains("function main")).unwrap();
+    let extra_idx = lines
+        .iter()
+        .position(|l| l.contains("function extra"))
+        .unwrap();
+    let main_idx = lines
+        .iter()
+        .position(|l| l.contains("function main"))
+        .unwrap();
 
     assert!(
         extra_idx > main_idx,

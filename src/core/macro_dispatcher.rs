@@ -29,7 +29,9 @@ pub struct MacroDispatcher {
 
 impl MacroDispatcher {
     pub fn new() -> Self {
-        Self { parsers: HashMap::new() }
+        Self {
+            parsers: HashMap::new(),
+        }
     }
 
     pub fn register(&mut self, parser: Box<dyn MacroParser>) {
@@ -80,9 +82,14 @@ fn json_value_to_tree(value: &serde_json::Value, base_path: &str) -> TreeNode {
                 // Even = key node, Odd = value node
                 let key_path = format!("{}.{}", base_path, i * 2);
                 kids.push(TreeNode {
-                    id: key_path.clone(), path: key_path,
-                    node_type: format!("json_key:{}", key), content: key.clone(),
-                    start_line: 0, end_line: 0, start_col: 0, end_col: 0,
+                    id: key_path.clone(),
+                    path: key_path,
+                    node_type: format!("json_key:{}", key),
+                    content: key.clone(),
+                    start_line: 0,
+                    end_line: 0,
+                    start_col: 0,
+                    end_col: 0,
                     children: vec![],
                 });
                 let val_path = format!("{}.{}", base_path, i * 2 + 1);
@@ -108,7 +115,10 @@ fn json_value_to_tree(value: &serde_json::Value, base_path: &str) -> TreeNode {
         path: base_path.to_string(),
         node_type: node_type.to_string(),
         content,
-        start_line: 0, end_line: 0, start_col: 0, end_col: 0,
+        start_line: 0,
+        end_line: 0,
+        start_col: 0,
+        end_col: 0,
         children,
     }
 }
@@ -139,7 +149,11 @@ pub fn is_token_tree(node: &TreeNode) -> bool {
 }
 
 /// Parse token tree content through the dispatcher if a matching macro exists.
-pub fn try_expand_macro(macro_name: &str, token_content: &str, base_path: &str) -> Option<Vec<TreeNode>> {
+pub fn try_expand_macro(
+    macro_name: &str,
+    token_content: &str,
+    base_path: &str,
+) -> Option<Vec<TreeNode>> {
     let d = dispatcher();
     let parser = d.get(macro_name)?;
     parser.parse_macro_body(token_content, base_path).ok()
@@ -201,21 +215,33 @@ mod tests {
             path: "0".into(),
             node_type: "macro_invocation".into(),
             content: "json!(...)".into(),
-            start_line: 1, end_line: 1, start_col: 0, end_col: 0,
+            start_line: 1,
+            end_line: 1,
+            start_col: 0,
+            end_col: 0,
             children: vec![TreeNode {
                 id: "0.0".into(),
                 path: "0.0".into(),
                 node_type: "identifier".into(),
                 content: "json".into(),
-                start_line: 1, end_line: 1, start_col: 0, end_col: 0,
+                start_line: 1,
+                end_line: 1,
+                start_col: 0,
+                end_col: 0,
                 children: vec![],
             }],
         };
         assert_eq!(extract_macro_name(&macro_node), Some("json"));
 
         let not_macro = TreeNode {
-            id: "0".into(), path: "0".into(), node_type: "function_item".into(),
-            content: "fn foo".into(), start_line: 1, end_line: 1, start_col: 0, end_col: 0,
+            id: "0".into(),
+            path: "0".into(),
+            node_type: "function_item".into(),
+            content: "fn foo".into(),
+            start_line: 1,
+            end_line: 1,
+            start_col: 0,
+            end_col: 0,
             children: vec![],
         };
         assert_eq!(extract_macro_name(&not_macro), None);

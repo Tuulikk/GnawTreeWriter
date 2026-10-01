@@ -1,4 +1,4 @@
-use crate::parser::{ParserEngine, TreeNode, ParseResult, SyntaxError};
+use crate::parser::{ParseResult, ParserEngine, SyntaxError, TreeNode};
 
 pub struct PythonParser;
 
@@ -13,7 +13,11 @@ impl PythonParser {
         Self
     }
 
-    fn find_error<'a>(&self, node: &tree_sitter::Node<'a>, _cursor: &mut tree_sitter::TreeCursor<'a>) -> Option<tree_sitter::Node<'a>> {
+    fn find_error<'a>(
+        &self,
+        node: &tree_sitter::Node<'a>,
+        _cursor: &mut tree_sitter::TreeCursor<'a>,
+    ) -> Option<tree_sitter::Node<'a>> {
         if node.is_error() || node.is_missing() {
             return Some(*node);
         }
@@ -27,7 +31,11 @@ impl PythonParser {
         None
     }
 
-    fn build_tree(node: &tree_sitter::Node, source: &str, path: String) -> anyhow::Result<TreeNode> {
+    fn build_tree(
+        node: &tree_sitter::Node,
+        source: &str,
+        path: String,
+    ) -> anyhow::Result<TreeNode> {
         let start_byte = node.start_byte();
         let end_byte = node.end_byte();
         let content = if let Some(s) = source.get(start_byte..end_byte) {
@@ -54,14 +62,16 @@ impl PythonParser {
 
         let id = path.clone();
 
-        Ok(TreeNode { start_col: 0, end_col: 0,
+        Ok(TreeNode {
+            start_col: 0,
+            end_col: 0,
             id,
             path,
             node_type,
             content,
             start_line,
             end_line,
-            children, 
+            children,
         })
     }
 }
@@ -75,12 +85,15 @@ impl ParserEngine for PythonParser {
             )()
         };
         if let Err(e) = parser.set_language(&language) {
-            return Err(SyntaxError::from(anyhow::anyhow!("Failed to set Python language: {}", e)));
+            return Err(SyntaxError::from(anyhow::anyhow!(
+                "Failed to set Python language: {}",
+                e
+            )));
         }
 
-        let tree = parser
-            .parse(code, None)
-            .ok_or_else(|| SyntaxError::from(anyhow::anyhow!("Failed to parse Python: No tree returned")))?;
+        let tree = parser.parse(code, None).ok_or_else(|| {
+            SyntaxError::from(anyhow::anyhow!("Failed to parse Python: No tree returned"))
+        })?;
 
         if tree.root_node().has_error() {
             let mut cursor = tree.walk();

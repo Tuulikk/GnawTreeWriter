@@ -123,8 +123,10 @@ pub fn explore(root: &Path, target: &str, level: ZoomLevel) -> Result<ExploreRes
 fn explore_overview(root: &Path) -> Result<ExploreNode> {
     let files = walk_source_files_filtered(
         root,
-        &["rs", "py", "js", "ts", "tsx", "jsx", "go", "java",
-          "c", "cpp", "h", "hpp", "cs", "php", "rb", "swift", "kt"],
+        &[
+            "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "c", "cpp", "h", "hpp", "cs",
+            "php", "rb", "swift", "kt",
+        ],
     );
 
     // Build directory tree with aggregated stats
@@ -132,7 +134,8 @@ fn explore_overview(root: &Path) -> Result<ExploreNode> {
 
     for path in &files {
         let rel = path.strip_prefix(root).unwrap_or(path);
-        let components: Vec<&str> = rel.components()
+        let components: Vec<&str> = rel
+            .components()
             .filter_map(|c| c.as_os_str().to_str())
             .collect();
 
@@ -148,7 +151,7 @@ fn explore_overview(root: &Path) -> Result<ExploreNode> {
         // File entry
         let file_name = components.last().unwrap().to_string();
         let dir_path = if components.len() > 1 {
-            components[..components.len()-1].join("/")
+            components[..components.len() - 1].join("/")
         } else {
             ".".to_string()
         };
@@ -165,7 +168,8 @@ fn explore_overview(root: &Path) -> Result<ExploreNode> {
             }],
         };
 
-        dir_map.entry(dir_path)
+        dir_map
+            .entry(dir_path)
             .and_modify(|e| {
                 e.tokens += tokens;
                 e.lines += lines;
@@ -193,16 +197,20 @@ fn explore_overview(root: &Path) -> Result<ExploreNode> {
             node_type: "directory".to_string(),
             tokens: stats.tokens,
             lines: stats.lines,
-            children: stats.files.into_iter().map(|f| ExploreNode {
-                name: f.name,
-                path: f.path,
-                node_type: "file".to_string(),
-                tokens: f.tokens,
-                lines: f.lines,
-                children: vec![],
-                drill_down: String::new(),
-                content: None,
-            }).collect(),
+            children: stats
+                .files
+                .into_iter()
+                .map(|f| ExploreNode {
+                    name: f.name,
+                    path: f.path,
+                    node_type: "file".to_string(),
+                    tokens: f.tokens,
+                    lines: f.lines,
+                    children: vec![],
+                    drill_down: String::new(),
+                    content: None,
+                })
+                .collect(),
             drill_down: format!("explore --path \"{}\" --level 1", name),
             content: None,
         });
@@ -228,8 +236,10 @@ fn explore_overview(root: &Path) -> Result<ExploreNode> {
 fn explore_directory(target: &Path) -> Result<ExploreNode> {
     let files = walk_source_files_filtered(
         target,
-        &["rs", "py", "js", "ts", "tsx", "jsx", "go", "java",
-          "c", "cpp", "h", "hpp", "cs", "php", "rb", "swift", "kt"],
+        &[
+            "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "c", "cpp", "h", "hpp", "cs",
+            "php", "rb", "swift", "kt",
+        ],
     );
 
     let mut children = Vec::new();
@@ -240,7 +250,8 @@ fn explore_directory(target: &Path) -> Result<ExploreNode> {
     let file_nodes: Vec<ExploreNode> = files
         .par_iter()
         .map(|path| {
-            let name = path.file_name()
+            let name = path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown")
                 .to_string();
@@ -275,7 +286,8 @@ fn explore_directory(target: &Path) -> Result<ExploreNode> {
     children.sort_by_key(|c| std::cmp::Reverse(c.tokens));
 
     Ok(ExploreNode {
-        name: target.file_name()
+        name: target
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("directory")
             .to_string(),
@@ -301,7 +313,8 @@ fn explore_file(target: &Path) -> Result<ExploreNode> {
     let mut children = Vec::new();
     extract_signatures(tree, &mut children, 0);
 
-    let name = target.file_name()
+    let name = target
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("file")
         .to_string();
@@ -325,12 +338,18 @@ fn extract_signatures(node: &TreeNode, children: &mut Vec<ExploreNode>, depth: u
 
     if matches!(
         node.node_type.as_str(),
-        "function_item" | "function_definition" | "function_declaration"
-            | "struct_item" | "struct_declaration"
-            | "enum_item" | "enum_declaration"
+        "function_item"
+            | "function_definition"
+            | "function_declaration"
+            | "struct_item"
+            | "struct_declaration"
+            | "enum_item"
+            | "enum_declaration"
             | "impl_item"
-            | "trait_item" | "trait_declaration"
-            | "class_declaration" | "class_definition"
+            | "trait_item"
+            | "trait_declaration"
+            | "class_declaration"
+            | "class_definition"
             | "method_definition"
     ) {
         let name = node.get_name().unwrap_or_default();
@@ -343,7 +362,8 @@ fn extract_signatures(node: &TreeNode, children: &mut Vec<ExploreNode>, depth: u
             s if s.contains("class") => "class",
             s if s.contains("method") => "method",
             _ => "other",
-        }.to_string();
+        }
+        .to_string();
 
         let signature = node.content.lines().next().unwrap_or("").trim().to_string();
         let tokens = estimate_code_tokens(&node.content);
@@ -374,7 +394,8 @@ fn explore_full(target: &Path) -> Result<ExploreNode> {
     let tokens = estimate_code_tokens(source);
     let lines = source.lines().count();
 
-    let name = target.file_name()
+    let name = target
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("file")
         .to_string();
@@ -442,10 +463,16 @@ mod tests {
             "pub fn validate_password(p: &str) -> bool { !p.is_empty() }\npub fn login(u: &str) -> Session { Session::new(u) }").unwrap();
         fs::write(root.join("src/auth/session.rs"),
             "pub struct Session { pub user: String }\nimpl Session { pub fn new(u: &str) -> Self { Session { user: u.to_string() } } }").unwrap();
-        fs::write(root.join("src/db/users.rs"),
-            "pub fn get_user(id: i32) -> User { todo!() }").unwrap();
-        fs::write(root.join("src/main.rs"),
-            "fn main() { login::validate_password(\"test\"); }").unwrap();
+        fs::write(
+            root.join("src/db/users.rs"),
+            "pub fn get_user(id: i32) -> User { todo!() }",
+        )
+        .unwrap();
+        fs::write(
+            root.join("src/main.rs"),
+            "fn main() { login::validate_password(\"test\"); }",
+        )
+        .unwrap();
 
         (dir, root)
     }

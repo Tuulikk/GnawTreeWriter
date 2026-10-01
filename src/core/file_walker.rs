@@ -23,9 +23,10 @@ pub fn walk_source_files(root: &Path) -> Vec<PathBuf> {
         .filter_map(|e| e.ok())
         .filter(|e| {
             e.file_type().map(|ft| ft.is_file()).unwrap_or(false)
-                && !e.path().components().any(|c| {
-                    c.as_os_str().to_str() == Some(".git")
-                })
+                && !e
+                    .path()
+                    .components()
+                    .any(|c| c.as_os_str().to_str() == Some(".git"))
         })
         .map(|e| e.into_path())
         .collect()

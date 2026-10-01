@@ -110,7 +110,8 @@ pub fn index_entities(file_path: &str, include_private: bool) -> Result<EntityIn
             }
             // Type aliases
             "type_item" | "type_alias" | "type_alias_declaration" => {
-                if let Some(entity) = extract_type_alias(child, &lines, file_path, include_private) {
+                if let Some(entity) = extract_type_alias(child, &lines, file_path, include_private)
+                {
                     if entity.visibility == "pub" {
                         exports.push(entity.name.clone());
                     }
@@ -231,7 +232,12 @@ fn extract_doc_comment(node: &TreeNode, lines: &[&str]) -> Option<String> {
     }
 }
 
-fn extract_function(node: &TreeNode, lines: &[&str], file_path: &str, include_private: bool) -> Option<Entity> {
+fn extract_function(
+    node: &TreeNode,
+    lines: &[&str],
+    file_path: &str,
+    include_private: bool,
+) -> Option<Entity> {
     let vis = detect_visibility(node);
     if !include_private && vis == "private" {
         return None;
@@ -257,7 +263,12 @@ fn extract_function(node: &TreeNode, lines: &[&str], file_path: &str, include_pr
     })
 }
 
-fn extract_struct(node: &TreeNode, lines: &[&str], file_path: &str, include_private: bool) -> Option<Entity> {
+fn extract_struct(
+    node: &TreeNode,
+    lines: &[&str],
+    file_path: &str,
+    include_private: bool,
+) -> Option<Entity> {
     let vis = detect_visibility(node);
     if !include_private && vis == "private" {
         return None;
@@ -326,7 +337,12 @@ fn extract_struct(node: &TreeNode, lines: &[&str], file_path: &str, include_priv
     })
 }
 
-fn extract_enum(node: &TreeNode, lines: &[&str], file_path: &str, include_private: bool) -> Option<Entity> {
+fn extract_enum(
+    node: &TreeNode,
+    lines: &[&str],
+    file_path: &str,
+    include_private: bool,
+) -> Option<Entity> {
     let vis = detect_visibility(node);
     if !include_private && vis == "private" {
         return None;
@@ -393,18 +409,24 @@ fn extract_enum(node: &TreeNode, lines: &[&str], file_path: &str, include_privat
     })
 }
 
-fn extract_impl(node: &TreeNode, lines: &[&str], file_path: &str, include_private: bool) -> Option<Entity> {
+fn extract_impl(
+    node: &TreeNode,
+    lines: &[&str],
+    file_path: &str,
+    include_private: bool,
+) -> Option<Entity> {
     let signature = get_first_line(node, lines);
     let line = node.start_line;
     let tokens = crate::core::token_count::estimate_code_tokens(&get_node_source(node, lines));
 
     // Extract type name from first child or signature
-    let type_name = node.get_name()
+    let type_name = node
+        .get_name()
         .or_else(|| {
             // Try to extract from "impl<T> Foo" or "impl Foo"
             let sig = signature.clone();
             if let Some(start) = sig.find("impl") {
-                let after_impl = &sig[start+4..].trim();
+                let after_impl = &sig[start + 4..].trim();
                 if let Some(end) = after_impl.find('{') {
                     Some(after_impl[..end].trim().to_string())
                 } else {
@@ -427,7 +449,9 @@ fn extract_impl(node: &TreeNode, lines: &[&str], file_path: &str, include_privat
         if child.node_type == "declaration_list" {
             for method in &child.children {
                 if method.node_type == "function_item" || method.node_type == "method_definition" {
-                    if let Some(entity) = extract_function(method, lines, file_path, include_private) {
+                    if let Some(entity) =
+                        extract_function(method, lines, file_path, include_private)
+                    {
                         children.push(entity);
                     }
                 }
@@ -449,7 +473,12 @@ fn extract_impl(node: &TreeNode, lines: &[&str], file_path: &str, include_privat
     })
 }
 
-fn extract_trait(node: &TreeNode, lines: &[&str], file_path: &str, include_private: bool) -> Option<Entity> {
+fn extract_trait(
+    node: &TreeNode,
+    lines: &[&str],
+    file_path: &str,
+    include_private: bool,
+) -> Option<Entity> {
     let vis = detect_visibility(node);
     if !include_private && vis == "private" {
         return None;
@@ -472,7 +501,9 @@ fn extract_trait(node: &TreeNode, lines: &[&str], file_path: &str, include_priva
         if child.node_type == "declaration_list" {
             for method in &child.children {
                 if method.node_type == "function_item" || method.node_type == "method_definition" {
-                    if let Some(entity) = extract_function(method, lines, file_path, include_private) {
+                    if let Some(entity) =
+                        extract_function(method, lines, file_path, include_private)
+                    {
                         children.push(entity);
                     }
                 }
@@ -494,7 +525,12 @@ fn extract_trait(node: &TreeNode, lines: &[&str], file_path: &str, include_priva
     })
 }
 
-fn extract_type_alias(node: &TreeNode, lines: &[&str], file_path: &str, include_private: bool) -> Option<Entity> {
+fn extract_type_alias(
+    node: &TreeNode,
+    lines: &[&str],
+    file_path: &str,
+    include_private: bool,
+) -> Option<Entity> {
     let vis = detect_visibility(node);
     if !include_private && vis == "private" {
         return None;
@@ -519,7 +555,12 @@ fn extract_type_alias(node: &TreeNode, lines: &[&str], file_path: &str, include_
     })
 }
 
-fn extract_const(node: &TreeNode, lines: &[&str], file_path: &str, include_private: bool) -> Option<Entity> {
+fn extract_const(
+    node: &TreeNode,
+    lines: &[&str],
+    file_path: &str,
+    include_private: bool,
+) -> Option<Entity> {
     let vis = detect_visibility(node);
     if !include_private && vis == "private" {
         return None;
@@ -543,7 +584,12 @@ fn extract_const(node: &TreeNode, lines: &[&str], file_path: &str, include_priva
     })
 }
 
-fn extract_static(node: &TreeNode, lines: &[&str], file_path: &str, include_private: bool) -> Option<Entity> {
+fn extract_static(
+    node: &TreeNode,
+    lines: &[&str],
+    file_path: &str,
+    include_private: bool,
+) -> Option<Entity> {
     let vis = detect_visibility(node);
     if !include_private && vis == "private" {
         return None;
@@ -567,7 +613,12 @@ fn extract_static(node: &TreeNode, lines: &[&str], file_path: &str, include_priv
     })
 }
 
-fn extract_module(node: &TreeNode, lines: &[&str], file_path: &str, include_private: bool) -> Option<Entity> {
+fn extract_module(
+    node: &TreeNode,
+    lines: &[&str],
+    file_path: &str,
+    include_private: bool,
+) -> Option<Entity> {
     let vis = detect_visibility(node);
     if !include_private && vis == "private" {
         return None;
@@ -626,10 +677,16 @@ fn private_helper() {}"#;
 
         assert_eq!(result.imports.len(), 1);
         assert!(result.imports[0].contains("HashMap"));
-        assert!(result.exports.contains(&"Config".to_string()),
-            "Config should be in exports. Got: {:?}", result.exports);
-        assert!(result.exports.contains(&"init".to_string()),
-            "init should be in exports. Got: {:?}", result.exports);
+        assert!(
+            result.exports.contains(&"Config".to_string()),
+            "Config should be in exports. Got: {:?}",
+            result.exports
+        );
+        assert!(
+            result.exports.contains(&"init".to_string()),
+            "init should be in exports. Got: {:?}",
+            result.exports
+        );
         assert!(!result.exports.contains(&"private_helper".to_string()));
         assert!(result.entity_count >= 4);
     }
@@ -696,7 +753,11 @@ impl Config {
 
         let result = index_entities(path.to_str().unwrap(), true).unwrap();
 
-        let impl_entity = result.entities.iter().find(|e| e.entity_type == "impl").unwrap();
+        let impl_entity = result
+            .entities
+            .iter()
+            .find(|e| e.entity_type == "impl")
+            .unwrap();
         assert!(impl_entity.children.len() >= 1); // at least new()
     }
 

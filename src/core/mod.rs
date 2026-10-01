@@ -9,23 +9,25 @@ pub mod alf;
 pub mod anchor;
 pub mod backup;
 pub mod batch;
+pub mod blast;
+pub mod blueprint;
 pub mod compress;
 pub mod curator;
-pub mod file_walker;
-pub mod gnaw_find;
-pub mod inspect;
-pub mod blast;
-pub mod gnaw_refactor;
-pub mod gnaw_diff;
-pub mod gnaw_graph;
-pub mod blueprint;
-pub mod diff_parser;
-pub mod guardian;
 pub mod diagnostics;
+pub mod diff_parser;
 pub mod explore;
+pub mod file_walker;
+pub mod gnaw_diff;
+pub mod gnaw_find;
+pub mod gnaw_graph;
+pub mod gnaw_refactor;
+pub mod guardian;
 pub mod healer;
 pub mod index_entities;
 pub mod index_relations;
+pub mod inspect;
+pub mod label_manager;
+pub mod macro_dispatcher;
 pub mod pack;
 pub mod parse_cache;
 pub mod report;
@@ -33,22 +35,22 @@ pub mod restoration_engine;
 pub mod rules;
 pub mod scaffold;
 pub mod secrets;
-pub mod stats;
 pub mod state;
+pub mod stats;
 pub mod tag_manager;
-pub mod label_manager;
-pub mod macro_dispatcher;
 pub mod token_count;
 pub mod transaction_log;
 pub mod undo_redo;
 pub mod visualizer;
 
 pub use batch::{Batch, BatchEdit};
-pub use gnaw_refactor::{RefactorKind, RefactorResult, Change, RefactorSummary, refactor, format_refactor_text};
+pub use gnaw_refactor::{
+    format_refactor_text, refactor, Change, RefactorKind, RefactorResult, RefactorSummary,
+};
+pub use label_manager::LabelManager;
 pub use restoration_engine::{RestorationEngine, RestorationResult, RestorationStats};
 pub use scaffold::ScaffoldEngine;
 pub use tag_manager::TagManager;
-pub use label_manager::LabelManager;
 pub use transaction_log::{
     calculate_content_hash, FileRestorationPlan, OperationType, ProjectRestorationPlan,
     Transaction, TransactionLog,
@@ -167,7 +169,8 @@ impl GnawTreeWriter {
 
         let modified_code = match &operation {
             EditOperation::Edit { node_path, content } => {
-                let resolved = self.resolve_path(node_path)
+                let resolved = self
+                    .resolve_path(node_path)
                     .context(format!("Could not resolve node path: {}", node_path))?;
                 self.edit_node_at_path(&resolved.path, content)?
             }
@@ -176,15 +179,17 @@ impl GnawTreeWriter {
                 position,
                 content,
             } => {
-                let resolved = self.resolve_path(parent_path)
+                let resolved = self
+                    .resolve_path(parent_path)
                     .context(format!("Could not resolve parent path: {}", parent_path))?;
                 self.insert_node_at_path(&resolved.path, *position, content)?
-            },
+            }
             EditOperation::Delete { node_path } => {
-                let resolved = self.resolve_path(node_path)
+                let resolved = self
+                    .resolve_path(node_path)
                     .context(format!("Could not resolve node path: {}", node_path))?;
                 self.delete_node_at_path(&resolved.path)?
-            },
+            }
             EditOperation::Clone {
                 source_path,
                 target_path,
@@ -199,18 +204,27 @@ impl GnawTreeWriter {
         };
 
         // GUARDIAN INTEGRITY CHECK: Analyze the impact of the change
-        if let EditOperation::Edit { node_path, content: _ } = &operation {
+        if let EditOperation::Edit {
+            node_path,
+            content: _,
+        } = &operation
+        {
             if !force {
-                let resolved = self.resolve_path(node_path).context("Guardian could not resolve node")?;
+                let resolved = self
+                    .resolve_path(node_path)
+                    .context("Guardian could not resolve node")?;
                 let guardian = crate::core::guardian::GuardianEngine::new();
                 let report = guardian.audit_edit(resolved, &modified_code);
-                
+
                 match report.level {
                     crate::core::guardian::IntegrityLevel::Critical => {
                         return Err(anyhow::anyhow!("🛑 GUARDIAN BLOCK: This edit removes critical logic or structure.\nMessages: {}\nUse --force to override.", report.messages.join(", ")));
                     }
                     crate::core::guardian::IntegrityLevel::Warning => {
-                        eprintln!("⚠️  GUARDIAN WARNING: Significant structural loss detected: {}", report.messages.join(", "));
+                        eprintln!(
+                            "⚠️  GUARDIAN WARNING: Significant structural loss detected: {}",
+                            report.messages.join(", ")
+                        );
                     }
                     crate::core::guardian::IntegrityLevel::Notice => {
                         eprintln!("ℹ️  Guardian Note: Minor structural reduction observed.");
@@ -226,7 +240,7 @@ impl GnawTreeWriter {
         let path = Path::new(&self.file_path);
         let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let parser = get_parser(path)?;
-        
+
         let modified_code = match parser.parse(&modified_code) {
             Ok(_) => modified_code,
             Err(e) => {
@@ -236,10 +250,13 @@ impl GnawTreeWriter {
                     let mut healed_code = modified_code.clone();
                     // Basic healing: append the fix
                     healed_code.push_str(&action.fix);
-                    
+
                     // Validate healed code
                     if parser.parse(&healed_code).is_ok() {
-                        eprintln!("✨ Duplex Loop: Automatically healed syntax error: {}", action.description);
+                        eprintln!(
+                            "✨ Duplex Loop: Automatically healed syntax error: {}",
+                            action.description
+                        );
                         healed_code
                     } else {
                         return Err(anyhow::anyhow!("Validation failed: The proposed edit would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e));
@@ -251,7 +268,7 @@ impl GnawTreeWriter {
                         "py" => "\n\n💡 Tip: In Python, check your indentation levels and ensure colons ':' are present after def/if/for/while.",
                         _ => "\n\n💡 Tip: Ensure you included all necessary punctuation and punctuation is balanced for this file type.",
                     };
-                    
+
                     let mut msg = format!("Validation failed: The proposed edit would result in invalid syntax.\nError: {}", e);
                     if e.line > 0 {
                         msg.push_str(&format!("\nCheck near line {}.", e.line));
@@ -366,7 +383,8 @@ impl GnawTreeWriter {
     pub fn preview_edit(&self, operation: EditOperation) -> Result<String> {
         match operation {
             EditOperation::Edit { node_path, content } => {
-                let resolved = self.resolve_path(&node_path)
+                let resolved = self
+                    .resolve_path(&node_path)
                     .context(format!("Could not resolve node path: {}", node_path))?;
                 self.edit_node_at_path(&resolved.path, &content)
             }
@@ -375,15 +393,17 @@ impl GnawTreeWriter {
                 position,
                 content,
             } => {
-                let resolved = self.resolve_path(&parent_path)
+                let resolved = self
+                    .resolve_path(&parent_path)
                     .context(format!("Could not resolve parent path: {}", parent_path))?;
                 self.insert_node_at_path(&resolved.path, position, &content)
-            },
+            }
             EditOperation::Delete { node_path } => {
-                let resolved = self.resolve_path(&node_path)
+                let resolved = self
+                    .resolve_path(&node_path)
                     .context(format!("Could not resolve node path: {}", node_path))?;
                 self.delete_node_at_path(&resolved.path)
-            },
+            }
             EditOperation::Clone {
                 source_path,
                 target_path,
@@ -430,7 +450,12 @@ impl GnawTreeWriter {
     }
 
     #[allow(clippy::only_used_in_recursion)]
-    fn find_node_by_name<'a>(&self, tree: &'a TreeNode, name: &str, kind: Option<&str>) -> Option<&'a TreeNode> {
+    fn find_node_by_name<'a>(
+        &self,
+        tree: &'a TreeNode,
+        name: &str,
+        kind: Option<&str>,
+    ) -> Option<&'a TreeNode> {
         // Does this node match?
         if let Some(node_name) = tree.get_name() {
             if node_name == name {
@@ -439,13 +464,20 @@ impl GnawTreeWriter {
                     let nt = tree.node_type.to_lowercase();
                     match k {
                         "fn" | "func" | "function" | "method" => {
-                            if nt.contains("function") || nt.contains("method") { return Some(tree); }
-                        },
+                            if nt.contains("function") || nt.contains("method") {
+                                return Some(tree);
+                            }
+                        }
                         "struct" | "class" | "type" => {
-                            if nt.contains("struct") || nt.contains("class") || nt.contains("type") { return Some(tree); }
-                        },
+                            if nt.contains("struct") || nt.contains("class") || nt.contains("type")
+                            {
+                                return Some(tree);
+                            }
+                        }
                         _ => {
-                            if nt.contains(k) { return Some(tree); }
+                            if nt.contains(k) {
+                                return Some(tree);
+                            }
                         }
                     }
                 } else {
@@ -573,7 +605,7 @@ impl GnawTreeWriter {
                 } else {
                     parent.end_line.saturating_sub(1)
                 }
-            },
+            }
             2 => {
                 let mut last_prop_line = parent.start_line;
                 let mut found = false;

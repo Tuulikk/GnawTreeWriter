@@ -1,7 +1,7 @@
 //! gnaw-find: Find AST nodes across project files
 
-use crate::{GnawTreeWriter, TreeNode};
 use crate::core::file_walker::walk_source_files_filtered;
+use crate::{GnawTreeWriter, TreeNode};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -18,13 +18,16 @@ pub fn find_nodes(
     max_results: usize,
 ) -> Result<Vec<FindResult>> {
     let current_dir = std::env::current_dir()?;
-    let search_dir = directory.map(Path::new).unwrap_or_else(|| current_dir.as_path());
+    let search_dir = directory
+        .map(Path::new)
+        .unwrap_or_else(|| current_dir.as_path());
 
     let exts: Vec<&str> = extensions
         .map(|s| s.split(',').map(|s| s.trim()).collect())
         .unwrap_or_else(|| {
             vec![
-                "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "c", "cpp", "h", "hpp", "cs", "php",
+                "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "c", "cpp", "h", "hpp", "cs",
+                "php",
             ]
         });
 
@@ -64,11 +67,21 @@ pub fn find_nodes(
     Ok(results)
 }
 
-fn collect_by_type(tree: &TreeNode, filter: &str, file: &str, max: usize, results: &mut Vec<FindResult>) {
+fn collect_by_type(
+    tree: &TreeNode,
+    filter: &str,
+    file: &str,
+    max: usize,
+    results: &mut Vec<FindResult>,
+) {
     if results.len() >= max {
         return;
     }
-    if tree.node_type.to_lowercase().contains(&filter.to_lowercase()) {
+    if tree
+        .node_type
+        .to_lowercase()
+        .contains(&filter.to_lowercase())
+    {
         let name = tree.get_name().unwrap_or_else(|| "unnamed".to_string());
         results.push(FindResult {
             file: file.to_string(),
@@ -83,7 +96,13 @@ fn collect_by_type(tree: &TreeNode, filter: &str, file: &str, max: usize, result
     }
 }
 
-fn collect_by_text(tree: &TreeNode, search: &str, file: &str, max: usize, results: &mut Vec<FindResult>) {
+fn collect_by_text(
+    tree: &TreeNode,
+    search: &str,
+    file: &str,
+    max: usize,
+    results: &mut Vec<FindResult>,
+) {
     if results.len() >= max {
         return;
     }
@@ -121,7 +140,10 @@ pub fn format_results_text(results: &[FindResult], total: usize, max: usize) -> 
             output.push_str(&format!("\n📄 {}\n", r.file));
             current_file = r.file.clone();
         }
-        output.push_str(&format!("  {}:{} [{}] {}\n", r.line, r.path, r.node_type, r.name));
+        output.push_str(&format!(
+            "  {}:{} [{}] {}\n",
+            r.line, r.path, r.node_type, r.name
+        ));
     }
 
     if total > max {

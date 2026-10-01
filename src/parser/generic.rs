@@ -1,4 +1,4 @@
-use crate::parser::{ParserEngine, TreeNode, ParseResult};
+use crate::parser::{ParseResult, ParserEngine, TreeNode};
 
 /// Node type used for generic (unknown) file parsing.
 pub const GENERIC_NODE_TYPE: &str = "generic";
@@ -23,7 +23,9 @@ impl ParserEngine for GenericParser {
         let lines = code.lines().collect::<Vec<&str>>();
         let line_count = lines.len();
 
-        Ok(TreeNode { start_col: 0, end_col: 0, 
+        Ok(TreeNode {
+            start_col: 0,
+            end_col: 0,
             id: "0".to_string(),
             path: "0".to_string(),
             node_type: GENERIC_NODE_TYPE.to_string(),

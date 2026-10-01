@@ -100,7 +100,8 @@ pub struct PackFileInfo {
 
 /// Check if a file should be compressed based on options and token count.
 fn should_compress(options: &PackOptions, token_count: usize) -> bool {
-    options.compress && (options.compress_threshold == 0 || token_count >= options.compress_threshold)
+    options.compress
+        && (options.compress_threshold == 0 || token_count >= options.compress_threshold)
 }
 
 /// Compress a single file's source; falls back to the original content.
@@ -140,7 +141,10 @@ pub fn pack_project(root: &Path, options: &PackOptions) -> Result<PackResult> {
         .into_iter()
         .filter(|path| {
             let path_str = path.to_string_lossy();
-            !options.ignore_patterns.iter().any(|pat| path_str.contains(pat))
+            !options
+                .ignore_patterns
+                .iter()
+                .any(|pat| path_str.contains(pat))
         })
         .collect();
 
@@ -280,7 +284,9 @@ fn format_markdown(files: &[(String, String, String)], options: &PackOptions) ->
         .map(|(tree_path, _, content)| compress_file(options, tree_path, content))
         .collect();
 
-    for ((tree_path, _display_path, _content), display_content) in files.iter().zip(&display_contents) {
+    for ((tree_path, _display_path, _content), display_content) in
+        files.iter().zip(&display_contents)
+    {
         let ext = Path::new(tree_path)
             .extension()
             .and_then(|e| e.to_str())
@@ -294,7 +300,10 @@ fn format_markdown(files: &[(String, String, String)], options: &PackOptions) ->
         };
 
         let lines = display_content.lines().count();
-        output.push_str(&format!("### {}{} [{} lines]\n\n", tree_path, tokens, lines));
+        output.push_str(&format!(
+            "### {}{} [{} lines]\n\n",
+            tree_path, tokens, lines
+        ));
         output.push_str(&format!("```{}\n{}\n```\n\n", ext, display_content));
     }
 
@@ -311,7 +320,9 @@ fn format_json(files: &[(String, String, String)], options: &PackOptions) -> Res
         .map(|(tree_path, _, content)| compress_file(options, tree_path, content))
         .collect();
 
-    for ((tree_path, _display_path, content), display_content) in files.iter().zip(&display_contents) {
+    for ((tree_path, _display_path, content), display_content) in
+        files.iter().zip(&display_contents)
+    {
         let tokens = estimate_code_tokens(display_content);
         let lines = content.lines().count();
         total_lines += lines;
@@ -336,7 +347,8 @@ fn format_json(files: &[(String, String, String)], options: &PackOptions) -> Res
         .sum();
 
     // Build language breakdown
-    let mut language_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut language_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
     for f in &file_array {
         if let Some(lang) = f.get("language").and_then(|l| l.as_str()) {
             *language_counts.entry(lang.to_string()).or_insert(0) += 1;
@@ -371,7 +383,9 @@ fn format_plain(files: &[(String, String, String)], options: &PackOptions) -> St
         .map(|(tree_path, _, content)| compress_file(options, tree_path, content))
         .collect();
 
-    for ((tree_path, _display_path, _content), display_content) in files.iter().zip(&display_contents) {
+    for ((tree_path, _display_path, _content), display_content) in
+        files.iter().zip(&display_contents)
+    {
         let tokens = if options.tokens {
             format!(" [{} tokens]", estimate_code_tokens(display_content))
         } else {
@@ -392,7 +406,10 @@ fn format_xml(files: &[(String, String, String)], options: &PackOptions) -> Stri
     output.push_str("<repository>\n");
 
     if let Some(ref instructions) = options.instructions {
-        output.push_str(&format!("  <instructions>{}</instructions>\n", xml_escape(instructions)));
+        output.push_str(&format!(
+            "  <instructions>{}</instructions>\n",
+            xml_escape(instructions)
+        ));
     }
 
     output.push_str("  <files>\n");
@@ -403,13 +420,17 @@ fn format_xml(files: &[(String, String, String)], options: &PackOptions) -> Stri
         .map(|(tree_path, _, content)| compress_file(options, tree_path, content))
         .collect();
 
-    for ((tree_path, _display_path, content), display_content) in files.iter().zip(&display_contents) {
+    for ((tree_path, _display_path, content), display_content) in
+        files.iter().zip(&display_contents)
+    {
         let tokens = estimate_code_tokens(display_content);
         let lines = content.lines().count();
 
         output.push_str(&format!(
             "  <file path=\"{}\" tokens=\"{}\" lines=\"{}\">\n",
-            xml_escape(tree_path), tokens, lines
+            xml_escape(tree_path),
+            tokens,
+            lines
         ));
         output.push_str("    <content><![CDATA[");
         output.push_str(display_content);
@@ -461,8 +482,7 @@ mod tests {
             "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}",
         )
         .unwrap();
-        fs::write(root.join("README.md"), "# My Project\n\nA test project.")
-            .unwrap();
+        fs::write(root.join("README.md"), "# My Project\n\nA test project.").unwrap();
 
         // Create a file that should be ignored
         fs::write(root.join(".gitignore"), "target/\n").unwrap();
@@ -491,8 +511,11 @@ mod tests {
         let result = pack_project(&root, &options).unwrap();
 
         // Should NOT contain target/debug.bin
-        assert!(!result.content.contains("debug.bin"),
-            "Should respect .gitignore. Got:\n{}", result.content);
+        assert!(
+            !result.content.contains("debug.bin"),
+            "Should respect .gitignore. Got:\n{}",
+            result.content
+        );
     }
 
     #[test]
@@ -504,8 +527,11 @@ mod tests {
         };
         let result = pack_project(&root, &options).unwrap();
 
-        assert!(result.content.contains("⋮----"),
-            "Should contain compression placeholder. Got:\n{}", result.content);
+        assert!(
+            result.content.contains("⋮----"),
+            "Should contain compression placeholder. Got:\n{}",
+            result.content
+        );
         // Note: compressed_tokens may be higher than total_tokens due to markdown formatting
         // The real test is that compression placeholders exist
     }
@@ -580,8 +606,11 @@ mod tests {
         let result = pack_project(root, &options).unwrap();
 
         // Should find .gitignore (it's a text file) but not notes.txt
-        assert!(result.file_count <= 1,
-            "Should find at most 1 file, found: {}", result.file_count);
+        assert!(
+            result.file_count <= 1,
+            "Should find at most 1 file, found: {}",
+            result.file_count
+        );
     }
 
     #[test]
@@ -621,7 +650,9 @@ mod tests {
         // Verify the XML is parseable and contains the file element
         assert!(result.content.contains("<file path="));
         assert!(result.content.contains("config.rs"));
-        assert!(result.content.contains("<![CDATA[fn init() {}]]></content>"));
+        assert!(result
+            .content
+            .contains("<![CDATA[fn init() {}]]></content>"));
     }
 
     #[test]
@@ -642,9 +673,14 @@ mod tests {
         let options = PackOptions::default();
         let result = pack_project(&root, &options).unwrap();
 
-        assert!(result.secrets_redacted >= 1, "Should detect and redact secret");
-        assert!(!result.content.contains("AKIAIOSFODNN7QWERTYUI"),
-            "Redacted output must not contain the key");
+        assert!(
+            result.secrets_redacted >= 1,
+            "Should detect and redact secret"
+        );
+        assert!(
+            !result.content.contains("AKIAIOSFODNN7QWERTYUI"),
+            "Redacted output must not contain the key"
+        );
         assert!(result.content.contains("<REDACTED>"));
     }
 
@@ -704,8 +740,10 @@ mod tests {
         };
         let result = pack_project(&root, &options).unwrap();
 
-        assert!(!result.content.contains("# My Project"),
-            "Ignore pattern should exclude README");
+        assert!(
+            !result.content.contains("# My Project"),
+            "Ignore pattern should exclude README"
+        );
         assert!(result.content.contains("fn main()"));
     }
 }

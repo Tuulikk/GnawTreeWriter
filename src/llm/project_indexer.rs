@@ -182,6 +182,9 @@ mod tests {
     fn chunk_text_edge_cases() {
         assert!(ProjectIndexer::chunk_text("", 100, 10).is_empty());
         let short = "fn main() {}";
-        assert_eq!(ProjectIndexer::chunk_text(short, 100, 10), vec![short.to_string()]);
+        assert_eq!(
+            ProjectIndexer::chunk_text(short, 100, 10),
+            vec![short.to_string()]
+        );
     }
 }

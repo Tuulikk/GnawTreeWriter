@@ -1,5 +1,5 @@
 use crate::parser::TreeNode;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IntegrityLevel {
@@ -40,8 +40,10 @@ impl GuardianEngine {
 
         if new_len < old_len / 2 && old_len > 100 {
             score -= 0.3;
-            messages.push(format!("Significant volume reduction: {}% of code removed.", 
-                (1.0 - (new_len as f32 / old_len as f32)) * 100.0));
+            messages.push(format!(
+                "Significant volume reduction: {}% of code removed.",
+                (1.0 - (new_len as f32 / old_len as f32)) * 100.0
+            ));
         }
 
         // 2. Structural Check (Qualitative - Simplified for now)
@@ -51,16 +53,20 @@ impl GuardianEngine {
 
         if new_complexity < old_complexity && old_complexity > 2 {
             score -= 0.4;
-            messages.push(format!("Structural complexity drop: {} logical markers lost.", 
-                old_complexity - new_complexity));
+            messages.push(format!(
+                "Structural complexity drop: {} logical markers lost.",
+                old_complexity - new_complexity
+            ));
         }
 
         // 3. Comment Preservation
         if (old_node.content.contains("//") || old_node.content.contains("/*"))
-            && !new_content.contains("//") && !new_content.contains("/*") {
-                score -= 0.2;
-                messages.push("Documentation/Comments appear to have been stripped.".into());
-            }
+            && !new_content.contains("//")
+            && !new_content.contains("/*")
+        {
+            score -= 0.2;
+            messages.push("Documentation/Comments appear to have been stripped.".into());
+        }
 
         let level = if score <= 0.3 {
             IntegrityLevel::Critical
@@ -72,11 +78,17 @@ impl GuardianEngine {
             IntegrityLevel::Safe
         };
 
-        IntegrityReport { level, score, messages }
+        IntegrityReport {
+            level,
+            score,
+            messages,
+        }
     }
 
     fn estimate_complexity(&self, content: &str) -> usize {
-        let keywords = ["if ", "else", "for ", "while", "match ", "switch", "try", "catch", "unwrap", "expect"];
+        let keywords = [
+            "if ", "else", "for ", "while", "match ", "switch", "try", "catch", "unwrap", "expect",
+        ];
         keywords.iter().filter(|&&k| content.contains(k)).count()
     }
 }

@@ -438,7 +438,10 @@ impl TransactionLog {
             aliases.insert(alias.clone(), self.session_id.clone());
             let data = serde_json::to_string_pretty(&aliases)?;
             let _ = std::fs::write(alias_file, data);
-            println!("✓ Session alias created: '{}' -> {}", alias, self.session_id);
+            println!(
+                "✓ Session alias created: '{}' -> {}",
+                alias, self.session_id
+            );
         }
 
         self.log_transaction(

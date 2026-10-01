@@ -6,9 +6,8 @@
 use std::sync::LazyLock;
 use tiktoken_rs::cl100k_base;
 
-static BPE: LazyLock<tiktoken_rs::CoreBPE> = LazyLock::new(|| {
-    cl100k_base().expect("Failed to initialize tiktoken BPE encoder")
-});
+static BPE: LazyLock<tiktoken_rs::CoreBPE> =
+    LazyLock::new(|| cl100k_base().expect("Failed to initialize tiktoken BPE encoder"));
 
 /// Count tokens in a text string using tiktoken (cl100k_base encoding).
 ///

@@ -1,8 +1,8 @@
-use serde::{Serialize, Deserialize};
-use std::fs;
-use std::path::{Path, PathBuf};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeEmbedding {
@@ -74,7 +74,9 @@ impl SemanticIndexManager {
 
     pub fn load_project_index(&self) -> Result<SemanticIndex> {
         let mut index = SemanticIndex::default();
-        if !self.storage_dir.exists() { return Ok(index); }
+        if !self.storage_dir.exists() {
+            return Ok(index);
+        }
 
         for entry in fs::read_dir(&self.storage_dir)? {
             let entry = entry?;
@@ -98,8 +100,15 @@ impl SemanticIndex {
     }
 
     /// Search with explicit minimum score threshold.
-    pub fn search_with_threshold(&self, query_vector: &[f32], limit: usize, min_score: f32) -> Vec<(&NodeEmbedding, f32)> {
-        let mut results: Vec<(&NodeEmbedding, f32)> = self.entries.iter()
+    pub fn search_with_threshold(
+        &self,
+        query_vector: &[f32],
+        limit: usize,
+        min_score: f32,
+    ) -> Vec<(&NodeEmbedding, f32)> {
+        let mut results: Vec<(&NodeEmbedding, f32)> = self
+            .entries
+            .iter()
             .map(|entry| {
                 let score = cosine_similarity(query_vector, &entry.vector);
                 (entry, score)
@@ -121,7 +130,7 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    
+
     if norm_a == 0.0 || norm_b == 0.0 {
         0.0
     } else {

@@ -1,7 +1,7 @@
 //! gnaw-refactor: Automated code refactoring
 
-use crate::{GnawTreeWriter, TreeNode};
 use crate::core::file_walker::walk_source_files_filtered;
+use crate::{GnawTreeWriter, TreeNode};
 use anyhow::Result;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -75,20 +75,20 @@ pub fn refactor(
             rename_symbol(file_path, node_path, target, recursive, preview)
         }
         RefactorKind::Extract => {
-            let new_func_name = new_name.ok_or_else(|| anyhow::anyhow!("new_name required for extract"))?;
+            let new_func_name =
+                new_name.ok_or_else(|| anyhow::anyhow!("new_name required for extract"))?;
             extract_function(file_path, node_path, new_func_name, preview)
         }
         RefactorKind::Move => {
-            let location = target_location.ok_or_else(|| anyhow::anyhow!("target_location required for move"))?;
+            let location = target_location
+                .ok_or_else(|| anyhow::anyhow!("target_location required for move"))?;
             move_code(file_path, node_path, location, preview)
         }
         RefactorKind::ChangeSignature => {
             let sig = new_name.ok_or_else(|| anyhow::anyhow!("new signature required"))?;
             change_signature(file_path, node_path, sig, preview)
         }
-        RefactorKind::Inline => {
-            inline_function(file_path, node_path, preview)
-        }
+        RefactorKind::Inline => inline_function(file_path, node_path, preview),
     }
 }
 
@@ -102,7 +102,8 @@ fn rename_symbol(
     let writer = GnawTreeWriter::new(file_path)?;
     let tree = writer.analyze();
 
-    let target = tree.find_path(node_path)
+    let target = tree
+        .find_path(node_path)
         .ok_or_else(|| anyhow::anyhow!("Node not found at path: {}", node_path))?;
 
     let old_name = target.get_name().unwrap_or_else(|| "unnamed".to_string());
@@ -124,7 +125,11 @@ fn rename_symbol(
     }
 
     let total_changes = changes.len();
-    let files_changed = changes.iter().map(|c| c.file.clone()).collect::<HashSet<_>>().len();
+    let files_changed = changes
+        .iter()
+        .map(|c| c.file.clone())
+        .collect::<HashSet<_>>()
+        .len();
 
     Ok(RefactorResult {
         kind: "rename".to_string(),
@@ -187,11 +192,14 @@ fn extract_function(
     let writer = GnawTreeWriter::new(file_path)?;
     let tree = writer.analyze();
 
-    let target = tree.find_path(node_path)
+    let target = tree
+        .find_path(node_path)
         .ok_or_else(|| anyhow::anyhow!("Node not found at path: {}", node_path))?;
 
     // Get the block to extract
-    let block = target.children.iter()
+    let block = target
+        .children
+        .iter()
         .find(|c| c.node_type == "block")
         .or_else(|| target.children.first());
 
@@ -229,7 +237,8 @@ fn move_code(
     let writer = GnawTreeWriter::new(file_path)?;
     let tree = writer.analyze();
 
-    let target = tree.find_path(node_path)
+    let target = tree
+        .find_path(node_path)
         .ok_or_else(|| anyhow::anyhow!("Node not found at path: {}", node_path))?;
 
     let changes = vec![Change {
@@ -264,7 +273,8 @@ fn change_signature(
     let writer = GnawTreeWriter::new(file_path)?;
     let tree = writer.analyze();
 
-    let target = tree.find_path(node_path)
+    let target = tree
+        .find_path(node_path)
         .ok_or_else(|| anyhow::anyhow!("Node not found at path: {}", node_path))?;
 
     let old_sig = target.get_name().unwrap_or_else(|| "function".to_string());
@@ -290,15 +300,12 @@ fn change_signature(
     })
 }
 
-fn inline_function(
-    file_path: &str,
-    node_path: &str,
-    _preview: bool,
-) -> Result<RefactorResult> {
+fn inline_function(file_path: &str, node_path: &str, _preview: bool) -> Result<RefactorResult> {
     let writer = GnawTreeWriter::new(file_path)?;
     let tree = writer.analyze();
 
-    let target = tree.find_path(node_path)
+    let target = tree
+        .find_path(node_path)
         .ok_or_else(|| anyhow::anyhow!("Node not found at path: {}", node_path))?;
 
     let func_name = target.get_name().unwrap_or_else(|| "function".to_string());
@@ -330,9 +337,15 @@ pub fn format_refactor_text(result: &RefactorResult) -> String {
 
     output.push_str(&format!("\n🔧 REFACTOR: {}\n", result.kind.to_uppercase()));
     output.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-    output.push_str(&format!("📍 {} @ {}\n", result.target_file, result.target_path));
+    output.push_str(&format!(
+        "📍 {} @ {}\n",
+        result.target_file, result.target_path
+    ));
     output.push_str(&format!("\n✅ Success: {}\n", result.success));
-    output.push_str(&format!("📊 {} files, {} changes\n", result.summary.files_changed, result.summary.total_changes));
+    output.push_str(&format!(
+        "📊 {} files, {} changes\n",
+        result.summary.files_changed, result.summary.total_changes
+    ));
 
     if let Some(ref name) = result.summary.new_function_name {
         output.push_str(&format!("✨ New name: {}\n", name));
@@ -344,8 +357,10 @@ pub fn format_refactor_text(result: &RefactorResult) -> String {
     if !result.changes.is_empty() {
         output.push_str("\n📝 CHANGES:\n");
         for change in &result.changes {
-            output.push_str(&format!("   {}:{} [{}] {} → {}\n",
-                change.line, change.file, change.change_type, change.old_name, change.new_name));
+            output.push_str(&format!(
+                "   {}:{} [{}] {} → {}\n",
+                change.line, change.file, change.change_type, change.old_name, change.new_name
+            ));
         }
     }
 
