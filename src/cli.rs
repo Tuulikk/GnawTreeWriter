@@ -642,6 +642,11 @@ enum AiSubcommands {
     Index {
         /// Directory to index (defaults to project root)
         path: Option<PathBuf>,
+        /// Use the GPU for this run (requires a build with --features cuda;
+        /// still needs >=20% VRAM free). Overrides gnawtreewriter.yaml.
+        /// Default: off — indexing runs on CPU.
+        #[arg(long)]
+        gpu: bool,
     },
     /// Generate an engineering report of recent structural changes
     Report {
@@ -1352,8 +1357,8 @@ impl Cli {
                 AiSubcommands::Calibrate => {
                     Self::handle_ai_calibrate()?;
                 }
-                AiSubcommands::Index { path } => {
-                    Self::handle_ai_index(path).await?;
+                AiSubcommands::Index { path, gpu } => {
+                    Self::handle_ai_index(path, gpu).await?;
                 }
                 AiSubcommands::Report { limit, output } => {
                     Self::handle_ai_report(limit, output).await?;
@@ -2226,7 +2231,7 @@ Use --no-preview to write batch file"
                     if auto_index {
                         // Auto-index mode: skip interactive prompt (for AI agents / CI)
                         println!("🧠 GnawSense requires a project index. Auto-indexing (--auto-index)...");
-                        Self::handle_ai_index(None).await?;
+                        Self::handle_ai_index(None, false).await?;
                         println!();
                         println!("Now searching for: \"{}\"...", query);
                     } else {
@@ -2245,7 +2250,7 @@ Use --no-preview to write batch file"
 
                         if answer == "y" || answer == "yes" {
                             println!();
-                            Self::handle_ai_index(None).await?;
+                            Self::handle_ai_index(None, false).await?;
                             println!();
                             println!("Now searching for: \"{}\"...", query);
                         } else {
@@ -3173,9 +3178,46 @@ Use --no-preview to write batch file"
         Self::err_mamba_disabled()
     }
 
-    async fn handle_ai_index(path: Option<PathBuf>) -> Result<()> {
+    /// Resolve the indexing device mode: `--gpu` flag > `indexing.device`
+    /// in gnawtreewriter.yaml > conservative default (no setting = CPU).
+    /// Pure YAML parser separated for testing.
+    #[cfg(feature = "modernbert")]
+    fn device_mode_from_config_text(text: &str) -> Option<String> {
+        #[derive(serde::Deserialize)]
+        struct Cfg {
+            indexing: Option<IndexingCfg>,
+        }
+        #[derive(serde::Deserialize)]
+        struct IndexingCfg {
+            device: Option<String>,
+        }
+        serde_yaml::from_str::<Cfg>(text).ok()?.indexing?.device
+    }
+
+    /// Read the optional project config (gnawtreewriter.yaml) for indexing.device.
+    #[cfg(feature = "modernbert")]
+    fn resolve_index_device_from_config() -> Option<String> {
+        let root = find_project_root(&std::env::current_dir().ok()?);
+        let text = std::fs::read_to_string(root.join("gnawtreewriter.yaml")).ok()?;
+        Self::device_mode_from_config_text(&text)
+    }
+
+    async fn handle_ai_index(path: Option<PathBuf>, gpu: bool) -> Result<()> {
         #[cfg(feature = "modernbert")]
         {
+            // Device mode for this run: --gpu (transient) > gnawtreewriter.yaml
+            // (persistent) > default (unset = CPU, conservative). The mode is
+            // handed to ai_manager::indexing_device via GTW_INDEX_DEVICE.
+            let mode = if gpu {
+                Some("auto".to_string())
+            } else {
+                Self::resolve_index_device_from_config()
+            };
+            match mode {
+                Some(ref m) => std::env::set_var("GTW_INDEX_DEVICE", m),
+                None => std::env::remove_var("GTW_INDEX_DEVICE"),
+            }
+
             use crate::llm::ProjectIndexer;
             let current_dir = std::env::current_dir()?;
             let project_root = find_project_root(&current_dir);
@@ -5462,6 +5504,44 @@ Supported formats:
 mod tests {
     use super::*;
     use crate::core::transaction_log::OperationType;
+
+    /// gnawtreewriter.yaml indexing.device parsing — the flag-in-file
+    /// mechanism AGENTS.md points agents/devs at (ROADMAP: conservative
+    /// default, opt-in GPU).
+    #[cfg(feature = "modernbert")]
+    #[test]
+    fn config_device_mode_parses() {
+        assert_eq!(
+            Cli::device_mode_from_config_text("indexing:\n  device: auto\n"),
+            Some("auto".to_string())
+        );
+        assert_eq!(
+            Cli::device_mode_from_config_text("indexing:\n  device: cpu\n"),
+            Some("cpu".to_string())
+        );
+        assert_eq!(
+            Cli::device_mode_from_config_text("indexing:\n  device: cuda\n"),
+            Some("cuda".to_string())
+        );
+    }
+
+    #[cfg(feature = "modernbert")]
+    #[test]
+    fn config_device_mode_absent_or_invalid_is_none() {
+        // No file / no setting = conservative default (CPU path).
+        assert_eq!(Cli::device_mode_from_config_text(""), None);
+        assert_eq!(Cli::device_mode_from_config_text("other: 1\n"), None);
+        assert_eq!(
+            Cli::device_mode_from_config_text("indexing:\n  nothing: true\n"),
+            None
+        );
+        // Broken YAML must never panic or enable anything.
+        assert_eq!(
+            Cli::device_mode_from_config_text("indexing: [unclosed\n  :"),
+            None
+        );
+    }
+
     use anyhow::Result;
     use chrono::Utc;
     use std::collections::HashMap;

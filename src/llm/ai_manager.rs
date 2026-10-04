@@ -38,6 +38,110 @@ impl From<&str> for DeviceType {
     }
 }
 
+/// VRAM safety gate for INDEXING (the 20%-free rule): never grab GPU memory
+/// while the OS or other important users (e.g. a co-resident llama-server)
+/// would be squeezed. Query/sense paths deliberately stay CPU — only
+/// `ai index` may pick the GPU.
+///
+/// Pure decision function so the policy is unit-testable without a GPU.
+/// The mode comes from `gnawtreewriter.yaml` (`indexing.device`), the
+/// `--gpu` flag, or `GTW_INDEX_DEVICE` — resolved by the CLI. Policy:
+/// - absent/unset: CPU — conservative default, GTW never touches the GPU
+///   unless told to (the original design was a CPU-only tool)
+/// - `cpu`: CPU (explicit)
+/// - `auto`: GPU iff built with `cuda` AND >= 20% of VRAM is reported
+///   free (None = probe failed = no GPU) — never squeeze the OS or
+///   co-resident GPU users
+/// - `cuda`: force GPU (expert escape hatch; fails LOUDLY at model load
+///   on a CPU-only build, never silently degrades)
+/// - anything else: fail safe to CPU
+pub fn decide_index_device(
+    cuda_compiled: bool,
+    mode: Option<&str>,
+    vram_free_pct: Option<f32>,
+) -> DeviceType {
+    let mode = match mode {
+        None => return DeviceType::Cpu,
+        Some(m) => m.to_ascii_lowercase(),
+    };
+    match mode.as_str() {
+        "cpu" => DeviceType::Cpu,
+        "cuda" => DeviceType::Cuda,
+        "auto" => {
+            if !cuda_compiled {
+                return DeviceType::Cpu;
+            }
+            match vram_free_pct {
+                Some(pct) if pct >= 20.0 => DeviceType::Cuda,
+                _ => DeviceType::Cpu,
+            }
+        }
+        _ => DeviceType::Cpu,
+    }
+}
+
+/// Probe GPU0 (the ordinal `Device::new_cuda(0)` uses) via nvidia-smi.
+/// None = cannot probe (missing binary, driver error, non-NVIDIA box) —
+/// callers must treat that as "no GPU available".
+fn vram_free_percent() -> Option<f32> {
+    let out = std::process::Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=memory.free,memory.total",
+            "--format=csv,noheader,nounits",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(out.stdout).ok()?;
+    let line = text.lines().next()?;
+    let mut parts = line.split(',');
+    let free: f32 = parts.next()?.trim().parse().ok()?;
+    let total: f32 = parts.next()?.trim().parse().ok()?;
+    if total <= 0.0 {
+        return None;
+    }
+    Some(free / total * 100.0)
+}
+
+/// Device policy entry point for `ai index`. Always logs WHY — a silent
+/// fallback is a future support ticket. The mode is resolved by the CLI
+/// (gnawtreewriter.yaml `indexing.device` + `--gpu` flag) and passed
+/// through `GTW_INDEX_DEVICE`.
+pub fn indexing_device() -> DeviceType {
+    let mode = std::env::var("GTW_INDEX_DEVICE").ok();
+    let pct = vram_free_percent();
+    let dev = decide_index_device(cfg!(feature = "cuda"), mode.as_deref(), pct);
+    match (mode.as_deref(), &dev) {
+        (None, _) => eprintln!(
+            "ai index: CPU (default — set indexing.device: auto in gnawtreewriter.yaml, or pass --gpu)"
+        ),
+        (Some(m), _) if m.eq_ignore_ascii_case("cpu") => {
+            eprintln!("ai index: CPU (indexing.device: cpu)")
+        }
+        (Some(m), _) if m.eq_ignore_ascii_case("cuda") => {
+            eprintln!("ai index: GPU forced (indexing.device: cuda)")
+        }
+        (Some(m), _) if !m.eq_ignore_ascii_case("auto") => eprintln!(
+            "ai index: CPU (unknown indexing device {:?} in gnawtreewriter.yaml — use auto|cpu|cuda)",
+            m
+        ),
+        (_, DeviceType::Cuda) => eprintln!(
+            "ai index: GPU (CUDA), VRAM {:.0}% free (>=20% gate passed)",
+            pct.unwrap_or(0.0)
+        ),
+        _ if !cfg!(feature = "cuda") => eprintln!(
+            "ai index: CPU (built without cuda feature — rebuild via scripts/build-gpu.sh)"
+        ),
+        _ => match pct {
+            Some(p) => eprintln!("ai index: CPU (VRAM gate: {:.0}% free < 20%)", p),
+            None => eprintln!("ai index: CPU (could not probe VRAM via nvidia-smi)"),
+        },
+    }
+    dev
+}
+
 #[cfg(feature = "modernbert")]
 pub struct ModernBertModel {
     pub model: ModernBert,
@@ -933,5 +1037,94 @@ mod source_tests {
     #[test]
     fn sources_empty_findings() {
         assert!(report(vec![]).sources().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod device_gate_tests {
+    use super::*;
+
+    #[test]
+    fn default_is_always_cpu_even_with_free_vram() {
+        // Conservative by design: GTW never touches the GPU unless told to.
+        assert_eq!(decide_index_device(true, None, Some(90.0)), DeviceType::Cpu);
+        assert_eq!(decide_index_device(true, None, Some(50.0)), DeviceType::Cpu);
+        assert_eq!(
+            decide_index_device(false, None, Some(90.0)),
+            DeviceType::Cpu
+        );
+    }
+
+    #[test]
+    fn auto_passes_at_exactly_20_percent() {
+        assert_eq!(
+            decide_index_device(true, Some("auto"), Some(20.0)),
+            DeviceType::Cuda
+        );
+        assert_eq!(
+            decide_index_device(true, Some("auto"), Some(85.0)),
+            DeviceType::Cuda
+        );
+    }
+
+    #[test]
+    fn auto_blocks_below_20_percent() {
+        assert_eq!(
+            decide_index_device(true, Some("auto"), Some(19.9)),
+            DeviceType::Cpu
+        );
+        assert_eq!(
+            decide_index_device(true, Some("auto"), Some(0.0)),
+            DeviceType::Cpu
+        );
+    }
+
+    #[test]
+    fn auto_blocks_when_probe_fails() {
+        assert_eq!(
+            decide_index_device(true, Some("auto"), None),
+            DeviceType::Cpu
+        );
+    }
+
+    #[test]
+    fn auto_without_cuda_build_is_cpu() {
+        assert_eq!(
+            decide_index_device(false, Some("auto"), Some(90.0)),
+            DeviceType::Cpu
+        );
+        // Expert force still honored — fails loudly at model load instead.
+        assert_eq!(
+            decide_index_device(false, Some("cuda"), None),
+            DeviceType::Cuda
+        );
+    }
+
+    #[test]
+    fn explicit_cpu_wins_even_with_free_vram() {
+        assert_eq!(
+            decide_index_device(true, Some("cpu"), Some(90.0)),
+            DeviceType::Cpu
+        );
+    }
+
+    #[test]
+    fn forced_cuda_bypasses_the_gate() {
+        assert_eq!(
+            decide_index_device(true, Some("cuda"), Some(0.0)),
+            DeviceType::Cuda
+        );
+    }
+
+    #[test]
+    fn unknown_mode_fails_safe_to_cpu() {
+        assert_eq!(
+            decide_index_device(true, Some("gpu"), Some(90.0)),
+            DeviceType::Cpu
+        );
+        assert_eq!(
+            decide_index_device(true, Some("AUTO2"), Some(90.0)),
+            DeviceType::Cpu
+        );
     }
 }

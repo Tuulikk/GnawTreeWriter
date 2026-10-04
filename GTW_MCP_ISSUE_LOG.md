@@ -504,6 +504,32 @@ fortfarande den GAMLA binären tills deras sessioner startas om.
 
 ---
 
+## 2026-10-04 — GPU-indekering (fynd 14: quick-replace falskt "applied")
+
+**Kontext:**
+
+| # | Anrop | Parametrar | Resultat |
+|---|-------|-----------|----------|
+| 14 | `quick-replace src/llm/ai_manager.rs` (testmodul-omskrivning) | oldString = före-`cargo fmt`-text, filen var fmt-omskriven | ✓ "applied" (txn …85977) men **bytes oförändrade** — gamla tester kvar, nya saknades; upptäcktes först av fallande tester |
+
+**Omväg:** verifiering med grep efter varje GTW-skrivning (redan policy efter
+resurrection-fynden) + ersättning med exakt fmt-matchande text → nya tester på
+plats (3 träffar, 0 gamla), 177+24 tester gröna.
+
+**Bedömning:** [x] bugg — `quick-replace` får inte rapportera "applied" när
+söktexten inte matchar; bytes ska ändras, annars fel med tydlig text
+("söktexten hittades inte — läs om filen efter `cargo fmt` och försök igen").
+Guidande-principen: felet ska peka på nästa steg, inte bluffa framgång.
+Samtliga tidigare ersättningar den här dagen verifierades med grep — denna
+ena slank igenom för att verifieringen hoppades över en gång.
+
+**Sammanhang:** GPU-arbetet (opt-in-gate `indexing.device` i
+`gnawtreewriter.yaml`, `--gpu`-flagga, `scripts/build-gpu.sh`,
+AGENTS.md-avsnitt) är komplett och live-verifierat i tre lägen (fil=auto →
+GPU vid 28 % VRAM fri; ingen fil → konservativ CPU-default; `--gpu` → GPU).
+
+---
+
 <!-- Ny post: kopiera mallen nedan
 ## ÅÅÅÅ-MM-DD — kort rubrik
 **Kontext:**

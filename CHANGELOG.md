@@ -1,3 +1,40 @@
+## [0.11.0] - 2026-10-04
+
+### Added
+- **GPU-accelerated indexing — opt-in, conservative by default**: GnawTreeWriter
+  never touches the GPU unless told to (the tool was designed CPU-only and stays
+  that way for users). Two ways to opt in:
+  - persistent: `indexing.device: auto` in the new optional `gnawtreewriter.yaml`
+    (values `auto`|`cpu`|`cuda`; absent file or setting = CPU)
+  - one-off: `gnawtreewriter ai index --gpu`
+- **20%-VRAM safety gate** (`decide_index_device` in ai_manager): `auto` uses the
+  GPU only when the binary was built with `--features cuda` **and** ≥20% of VRAM
+  is free — never squeezes the OS or co-resident GPU users (verified live against
+  a co-resident llama-server). Unknown/invalid config values fail safe to CPU.
+  Every decision is logged with its reason (guided principle: never silently
+  degrade). Query paths (sense/zoom/MCP) always stay CPU by design.
+- **`scripts/build-gpu.sh`** — distribution-friendly GPU build: compiles
+  `--features cuda` inside an `nvidia/cuda` container (host needs only podman +
+  NVIDIA driver — **no CUDA toolkit**, which Fedora does not ship), auto-detects
+  compute capability from the host's `nvidia-smi`, ships exactly the CUDA
+  runtime libs the host lacks (driver libs correctly left to the host), and
+  installs a wrapper + binary. One command, idempotent, cached volumes for
+  rebuilds (~2 min warm).
+- **Docs**: AGENTS.md "GPU indexing (opt-in; devs recommended)" section — the
+  recommendation for developer machines is to change the one flag in the file;
+  README "GPU-accelerated indexing (optional, off by default)" section with the
+  same three-line setup.
+
+### Fixed
+- **Finding #14 (GTW tool bug, logged in GTW_MCP_ISSUE_LOG.md)**: `quick-replace`
+  reported "✓ applied" while changing zero bytes (oldString didn't match
+  post-`cargo fmt` text) — caught by failing tests. A replace must change bytes
+  or fail loudly with guidance ("search text not found — re-read the file after
+  cargo fmt and retry"), never fake success.
+
+### Docs
+- `GTW_MCP_ISSUE_LOG.md`: GPU-entry + finding #14.
+
 ## [0.10.0] - 2026-10-04
 
 ### Added

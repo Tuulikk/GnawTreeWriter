@@ -31,6 +31,27 @@ edit the codebase, the way it is meant to be used.
 - **In a terminal / CLI agent**: the `gnawtreewriter` binary
   (`gnawtreewriter edit <file> <path> -`, `gnawtreewriter batch <spec.json>`, ...).
 
+### GPU indexing (opt-in; devs recommended)
+
+GPU use is **off by default** — GnawTreeWriter was designed CPU-only and
+stays conservative for users. The recommendation for developer machines is
+to change the flag in the file: set
+
+```yaml
+# gnawtreewriter.yaml (project root)
+indexing:
+  device: auto
+```
+
+That single flag is the whole configuration. `auto` enables the GPU for
+`ai index` only when the binary was built with `--features cuda` **and**
+≥20% of VRAM is free (never squeeze the OS or other GPU users); everything
+else always stays on CPU. One-off alternative: `gnawtreewriter ai index --gpu`.
+
+Building the cuda binary (no host CUDA toolkit needed — podman + NVIDIA
+driver is enough): `scripts/build-gpu.sh`. Without that build the flag
+harmlessly resolves to CPU with an explanatory log line.
+
 ### Why this matters
 GnawTreeWriter validates syntax **before** writing and targets the smallest
 possible node. Text-replace can silently corrupt syntax on multi-line edits and

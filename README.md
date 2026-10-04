@@ -99,6 +99,31 @@ cargo install --path .
 cargo install --path . --features modernbert,mcp
 ```
 
+### GPU-accelerated indexing (optional, off by default)
+
+GnawTreeWriter is a CPU-first tool: **by default it never touches your GPU.**
+If you have an NVIDIA GPU and want `ai index` (the preprocessing that builds
+the semantic search index) to run on it:
+
+```bash
+# One-time build in a container — host needs only podman + NVIDIA driver
+# (no CUDA toolkit required; works on Fedora and friends)
+scripts/build-gpu.sh
+```
+
+Then opt in, either per run or persistently:
+
+```bash
+gnawtreewriter ai index --gpu        # one-off
+# or set in gnawtreewriter.yaml (see the comments in that file):
+#   indexing:
+#     device: auto
+```
+
+`device: auto` uses the GPU only when the build has CUDA support **and at
+least 20% of VRAM is free** — it will not squeeze your desktop or other GPU
+workloads. Everything else (sense, explain, MCP) always stays on CPU.
+
 ---
 
 ## 🛡️ The Structural Guardian

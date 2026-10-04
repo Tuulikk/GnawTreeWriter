@@ -1,0 +1,15 @@
+# Project config for GnawTreeWriter (optional — absent file = defaults).
+#
+# indexing.device controls whether `ai index` may use the GPU:
+#   cpu   — never use the GPU (conservative default; this was designed a
+#           CPU-only tool and stays that way unless you opt in)
+#   auto  — GPU when built with --features cuda AND >=20% of VRAM is free
+#           (the gate never squeezes the OS or other GPU users); falls
+#           back to CPU otherwise
+#   cuda  — force GPU (fails loudly if the build lacks cuda support)
+#
+# This repository runs GPU indexing (developer setup). See AGENTS.md
+# ("GPU indexing") and scripts/build-gpu.sh for how to build the cuda
+# binary. A one-off run can also use: gnawtreewriter ai index --gpu
+indexing:
+  device: auto
