@@ -244,9 +244,12 @@ async fn integration_mcp_tools_call_missing_args() -> Result<(), Box<dyn std::er
 async fn integration_mcp_tools_call_batch() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
+
+    // oneshot channel to signal server shutdown
     let (tx, rx) = oneshot::channel::<()>();
     let token = Some("secret".to_string());
 
+    // Spawn the server; it will run until we send on `tx`
     let server_handle = tokio::spawn(async move {
         let shutdown_fut = async move {
             let _ = rx.await;
@@ -258,11 +261,15 @@ async fn integration_mcp_tools_call_batch() -> Result<(), Box<dyn std::error::Er
 
     let url = format!("http://{}/", addr);
     let client = Client::new();
-
-    let body_init = json!({"jsonrpc":"2.0","method":"initialize","id":1});
+    // Wait for server to become available (connection retries)
     let mut ready = false;
     for _ in 0..40 {
-        match client.post(&url).json(&body_init).send().await {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
             Ok(_) => {
                 ready = true;
                 break;
@@ -279,27 +286,97 @@ async fn integration_mcp_tools_call_batch() -> Result<(), Box<dyn std::error::Er
     }
     assert!(ready, "server did not become ready in time");
 
-    let body = json!({
-        "jsonrpc":"2.0",
-        "method":"tools/call",
-        "id":4,
-        "params": {"name":"batch","arguments":{}}
-    });
+    // Missing required `file` argument must be an INVALID_PARAMS error,
+    // same contract as every other tool (never a silent fake success).
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&json!({
+            "jsonrpc":"2.0",
+            "method":"tools/call",
+            "id":4,
+            "params": {"name":"batch","arguments":{}}
+        }))
+        .send()
+        .await?;
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+    let v: serde_json::Value = resp.json().await?;
+    assert!(
+        v.get("result").is_none(),
+        "missing file must not produce a result"
+    );
+    assert_eq!(v["error"]["code"], -32602, "expected INVALID_PARAMS");
+
+    // Real path: preview a batch spec against a fixture file. Nothing is
+    // written and the response describes the pending operations.
+    let dir = tempfile::tempdir()?;
+    let target = dir.path().join("app.py");
+    std::fs::write(&target, "def get_theme():\n    return 'old'\n")?;
+    let spec_path = dir.path().join("batch.json");
+    // Real batch file format (BatchFile/BatchOp in src/core/batch.rs):
+    // edit = {file, path, content}. An earlier draft used a nonexistent
+    // `replace` field and could only ever fail to parse — masked for a
+    // while by the undo-test chaos (finding #12).
+    let new_source = "def get_theme():\n    return 'new'\n";
+    std::fs::write(
+        &spec_path,
+        json!({
+            "description": "swap theme",
+            "operations": [
+                {
+                    "type": "edit",
+                    "file": target.to_string_lossy(),
+                    "path": "0",
+                    "content": new_source
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+    let before = std::fs::read_to_string(&target)?;
 
     let resp = client
         .post(&url)
         .header("Authorization", "Bearer secret")
-        .json(&body)
+        .json(&json!({
+            "jsonrpc":"2.0",
+            "method":"tools/call",
+            "id":5,
+            "params": {
+                "name":"batch",
+                "arguments": {
+                    "file": spec_path.to_string_lossy(),
+                    "preview": true
+                }
+            }
+        }))
         .send()
         .await?;
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let v: serde_json::Value = resp.json().await?;
-    assert!(v.get("result").is_some());
-    let result = v.get("result").unwrap();
-    assert!(result.get("content").is_some());
+    let result = v.get("result").expect("JSON-RPC result for preview");
+    assert!(
+        result.get("error").is_none(),
+        "preview must succeed: {:?}",
+        result.get("error")
+    );
+    let text = result["content"][0]
+        .as_str()
+        .unwrap_or(result["content"][0]["text"].as_str().unwrap_or(""));
+    assert!(
+        text.contains("preview") || text.to_lowercase().contains("nothing written"),
+        "preview response must say nothing was written, got: {}",
+        text
+    );
 
+    // Preview guarantee: the target file is byte-identical.
+    let after = std::fs::read_to_string(&target)?;
+    assert_eq!(before, after, "preview must never write to disk");
+
+    // Shutdown server
     let _ = tx.send(());
     server_handle.await?;
+
     Ok(())
 }
 
@@ -443,6 +520,12 @@ async fn integration_mcp_tools_call_file_not_found() -> Result<(), Box<dyn std::
 
 #[tokio::test]
 async fn integration_mcp_tools_call_undo() -> Result<(), Box<dyn std::error::Error>> {
+    // ISOLATION (GTW_MCP_ISSUE_LOG.md finding #12): undo operates on the
+    // transaction log of `project_root`. An earlier version of this test
+    // spawned the server with the repo as root, so every `cargo test` run
+    // reverted the latest real GTW edit in the repository. The server is now
+    // bound to a throwaway temp project instead.
+    let temp_project = tempfile::tempdir()?;
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
     let (tx, rx) = oneshot::channel::<()>();
@@ -452,9 +535,14 @@ async fn integration_mcp_tools_call_undo() -> Result<(), Box<dyn std::error::Err
         let shutdown_fut = async move {
             let _ = rx.await;
         };
-        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
-            .await
-            .unwrap();
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown_root(
+            listener,
+            token,
+            temp_project.path().to_path_buf(),
+            shutdown_fut,
+        )
+        .await
+        .unwrap();
     });
 
     let url = format!("http://{}/", addr);
@@ -497,7 +585,21 @@ async fn integration_mcp_tools_call_undo() -> Result<(), Box<dyn std::error::Err
     let v: serde_json::Value = resp.json().await?;
     assert!(v.get("result").is_some());
     let result = v.get("result").unwrap();
-    assert!(result.get("content").is_some());
+    let content = result.get("content").and_then(|c| c.as_array()).cloned();
+    assert!(content.is_some(), "undo response must carry content");
+    // Deterministic outcome on an empty temp project: nothing is undoable.
+    // (Asserting the message also proves the server really used the temp root.)
+    let text = content
+        .unwrap()
+        .iter()
+        .filter_map(|c| c.get("text").and_then(|t| t.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.contains("Nothing to undo") || text.contains("Undo unavailable"),
+        "expected empty-log undo message on temp project, got: {}",
+        text
+    );
 
     let _ = tx.send(());
     server_handle.await?;
@@ -653,4 +755,246 @@ async fn integration_mcp_tools_call_analyze() -> Result<(), Box<dyn std::error::
     server_handle.await?;
 
     Ok(())
+}
+
+/// Adoption contract (ROADMAP 9.3): every tool in tools/list must be
+/// self-teaching and schema-honest, so agent drift can never silently
+/// regress the catalog again:
+///   1. unique, non-empty name
+///   2. description >= 100 chars (VAD/NÄR/RETURERAR/EXEMPEL template)
+///   3. inputSchema.type == "object"
+///   4. at least one property — EXCEPT honest zero-arg tools
+///      (empty properties AND empty required, e.g. save_state)
+///   5. every `required` entry must exist in `properties`
+///   6. the ROADMAP priority tools exist with real schemas
+#[tokio::test]
+async fn integration_mcp_tools_adoption_contract() -> Result<(), Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+
+    let (tx, rx) = oneshot::channel::<()>();
+    let token = Some("secret".to_string());
+
+    let server_handle = tokio::spawn(async move {
+        let shutdown_fut = async move {
+            let _ = rx.await;
+        };
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
+            .await
+            .unwrap();
+    });
+
+    let url = format!("http://{}/", addr);
+    let client = Client::new();
+
+    let mut ready = false;
+    for _ in 0..40 {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                ready = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_connect() {
+                    sleep(Duration::from_millis(50)).await;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(ready, "server did not become ready in time");
+
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&json!({"jsonrpc":"2.0","method":"tools/list","id":3}))
+        .send()
+        .await?;
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let v: serde_json::Value = resp.json().await?;
+    let tools = v
+        .get("result")
+        .and_then(|r| r.get("tools"))
+        .and_then(|t| t.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    assert!(
+        tools.len() >= 30,
+        "expected at least 30 tools, got {}",
+        tools.len()
+    );
+
+    let mut names: Vec<&str> = Vec::new();
+    for tool in &tools {
+        let name = tool
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or_default();
+        assert!(!name.is_empty(), "tool with empty name found");
+        assert!(!names.contains(&name), "duplicate tool name: {}", name);
+        names.push(name);
+
+        let desc = tool
+            .get("description")
+            .and_then(|d| d.as_str())
+            .unwrap_or_default();
+        assert!(
+            desc.chars().count() >= 100,
+            "tool '{}': description too short ({} chars) — must teach VAD/NÄR/RETURNERAR/EXEMPEL",
+            name,
+            desc.chars().count()
+        );
+
+        let schema = tool
+            .get("inputSchema")
+            .unwrap_or_else(|| panic!("tool '{}': missing inputSchema", name));
+        assert_eq!(
+            schema.get("type").and_then(|t| t.as_str()),
+            Some("object"),
+            "tool '{}': inputSchema.type must be 'object'",
+            name
+        );
+
+        let props = schema.get("properties").and_then(|p| p.as_object());
+        let required: Vec<&str> = schema
+            .get("required")
+            .and_then(|r| r.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+            .unwrap_or_default();
+
+        match props {
+            Some(p) => {
+                for req in &required {
+                    assert!(
+                        p.contains_key(*req),
+                        "tool '{}': required '{}' not in properties (schema lies)",
+                        name,
+                        req
+                    );
+                }
+            }
+            None => {
+                assert!(
+                    required.is_empty(),
+                    "tool '{}': no properties but required = {:?} (schema lies)",
+                    name,
+                    required
+                );
+            }
+        }
+
+        let props_empty = schema
+            .get("properties")
+            .and_then(|p| p.as_object())
+            .map(|p| p.is_empty())
+            .unwrap_or(true);
+        if props_empty {
+            assert!(
+                required.is_empty(),
+                "tool '{}': empty properties but non-empty required — a zero-arg tool must be honestly empty",
+                name
+            );
+        }
+    }
+
+    // ROADMAP 9.3 priority tools must exist with at least one schema property.
+    for priority in [
+        "batch",
+        "edit_node",
+        "insert_node",
+        "search_nodes",
+        "sense",
+        "semantic_edit",
+    ] {
+        let tool = tools
+            .iter()
+            .find(|t| t.get("name").and_then(|n| n.as_str()) == Some(priority))
+            .unwrap_or_else(|| panic!("priority tool '{}' missing from tools/list", priority));
+        let props = tool
+            .get("inputSchema")
+            .and_then(|s| s.get("properties"))
+            .and_then(|p| p.as_object())
+            .map(|p| p.len())
+            .unwrap_or(0);
+        assert!(
+            props >= 1,
+            "priority tool '{}': expected >= 1 schema property, got {}",
+            priority,
+            props
+        );
+    }
+
+    // Shutdown server
+    let _ = tx.send(());
+    server_handle.await?;
+
+    Ok(())
+}
+
+/// ROADMAP 9.4 contract: get_semantic_report's payload carries a top-level
+/// `sources` list whose entries point at the reported fixture file — the
+/// provenance chain an agent uses to verify claims via read_node. Pure
+/// payload assembly, so no model is needed: this test calls the exact
+/// function the MCP handler calls.
+#[test]
+fn integration_sources_semantic_report_payload() {
+    let report = gnawtreewriter::llm::SemanticReport {
+        file_path: "src/core/batch.rs".into(),
+        summary: "summary".into(),
+        findings: vec![
+            gnawtreewriter::llm::QualityFinding {
+                path: "1.2".into(),
+                severity: "warning".into(),
+                category: "complexity".into(),
+                message: "m".into(),
+            },
+            gnawtreewriter::llm::QualityFinding {
+                path: "1.2".into(),
+                severity: "info".into(),
+                category: "style".into(),
+                message: "m2".into(),
+            },
+        ],
+    };
+    let payload = gnawtreewriter::mcp::mcp_server::semantic_report_payload(&report);
+    let sources = payload["sources"]
+        .as_array()
+        .expect("payload must carry sources array");
+    assert_eq!(sources.len(), 1, "sources deduped by node_path");
+    assert_eq!(sources[0]["file"], "src/core/batch.rs");
+    assert_eq!(sources[0]["node_path"], "1.2");
+    assert!(payload.get("report").is_some(), "report still present");
+}
+
+/// ROADMAP 9.4 contract: investigate's payload carries a top-level `sources`
+/// list built from the evidence the answer was synthesized from.
+/// (mamba-gated because InvestigateResult lives in the mamba pipeline.)
+#[cfg(feature = "mamba")]
+#[test]
+fn integration_sources_investigate_payload() {
+    let result = gnawtreewriter::llm::pipeline::InvestigateResult {
+        terms: vec!["undo".into()],
+        candidates: vec!["src/core/undo_redo.rs".into()],
+        answer: "the answer".into(),
+        sources: gnawtreewriter::llm::sources_from_evidence(&[(
+            "src/core/undo_redo.rs".into(),
+            "content".into(),
+        )]),
+    };
+    let budget = gnawtreewriter::llm::TokenBudget::default();
+    let payload = gnawtreewriter::mcp::mcp_server::investigate_payload(&result, &budget);
+    let sources = payload["sources"]
+        .as_array()
+        .expect("payload must carry sources array");
+    assert_eq!(sources[0]["file"], "src/core/undo_redo.rs");
+    assert!(payload.get("result").is_some(), "result still present");
 }

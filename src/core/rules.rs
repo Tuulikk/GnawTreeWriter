@@ -39,6 +39,11 @@ pub struct Rule {
     pub severity: Severity,
     pub message: String,
     pub pattern: String,
+    /// Optional rewrite template (ast-grep parity): `$X` metavariables bind
+    /// from the pattern match and expand into replacement code. A rule with
+    /// a fix is APPLYABLE via `lint --fix` (never applied without the flag).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fix: Option<String>,
 }
 
 fn default_severity() -> Severity {
@@ -450,6 +455,345 @@ pub fn check_code_with_builtin(code: &str, language: &str) -> (Vec<Finding>, usi
     (findings, skipped, has_error)
 }
 
+/// Options controlling a lint run over files or directories.
+pub struct LintOptions<'a> {
+    /// Expand directories into their supported files. Without it, a
+    /// directory path is an error (same safety rule as the CLI).
+    pub recursive: bool,
+    /// Extra rules YAML file, loaded after builtin + project rules.
+    pub rules_file: Option<&'a str>,
+    /// Minimum severity to keep (e.g. "warning" hides "info" findings).
+    pub severity_filter: Option<&'a str>,
+    /// Only run the rule with this exact id.
+    pub rule_filter: Option<&'a str>,
+    /// Ad-hoc pattern search: compile this `$X` pattern in-memory and
+    /// report matches (never write) — the ast-grep `run -p` equivalent.
+    /// When set, stored rules are not used.
+    pub ad_hoc_pattern: Option<&'a str>,
+    /// Language for the ad-hoc pattern (required together with it).
+    pub ad_hoc_language: Option<&'a str>,
+    /// Stop after this many findings; the result is flagged truncated.
+    pub max_findings: usize,
+}
+
+impl Default for LintOptions<'_> {
+    fn default() -> Self {
+        LintOptions {
+            recursive: false,
+            rules_file: None,
+            severity_filter: None,
+            rule_filter: None,
+            ad_hoc_pattern: None,
+            ad_hoc_language: None,
+            max_findings: 1000,
+        }
+    }
+}
+
+/// Result of a lint run over a set of files.
+pub struct LintResult {
+    pub findings: Vec<Finding>,
+    pub files_checked: usize,
+    pub skipped_rules: usize,
+    /// Per-rule compile warnings ("skipping rule 'x': ...").
+    pub rule_warnings: Vec<String>,
+    /// Per-file read/parse errors ("file: message").
+    pub file_errors: Vec<String>,
+    /// True when `max_findings` was reached and the run stopped early.
+    pub truncated: bool,
+    /// The effective rule set used for this run (builtin + project +
+    /// rules_file, after filters). Carries the fix templates needed by
+    /// `lint --fix` without re-reading the rules files.
+    pub rules: Vec<Rule>,
+}
+
+/// Recursively collect lintable files under `dir` (same extension list the
+/// CLI uses, so CLI and MCP lint the same files).
+pub fn find_lintable_files(dir: &std::path::Path) -> Result<Vec<String>> {
+    const SUPPORTED: &[&str] = &[
+        "py", "rs", "ts", "tsx", "js", "jsx", "php", "html", "htm", "qml", "go", "toml", "json",
+        "yaml", "yml", "css", "md", "markdown", "txt", "xml", "svg", "xsl", "xsd", "rss", "atom",
+    ];
+    let mut files = Vec::new();
+    if dir.is_dir() {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                files.extend(find_lintable_files(&path)?);
+            } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if SUPPORTED.contains(&ext) {
+                    if let Some(s) = path.to_str() {
+                        files.push(s.to_string());
+                    }
+                }
+            }
+        }
+    }
+    Ok(files)
+}
+
+/// Expand a `fix:` template with the bindings from a match. `$NAME`
+/// metavariables are replaced by the captured source content; a
+/// metavariable with no binding is an error — the fix cannot be built and
+/// must never be guessed.
+pub fn expand_fix(fix: &str, captures: &HashMap<String, String>) -> Result<String> {
+    let mut out = String::with_capacity(fix.len());
+    let mut rest = fix;
+    while let Some(pos) = rest.find('$') {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos + 1..];
+        let name_len = after
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .count();
+        let name: String = after.chars().take(name_len).collect();
+        if name.is_empty() {
+            anyhow::bail!("fix template contains a bare '$' with no metavariable name");
+        }
+        let bound = captures.get(&name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "fix template references ${} which the pattern does not capture",
+                name
+            )
+        })?;
+        out.push_str(bound);
+        rest = &after[name_len..];
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+/// Validate that a fix template parses as the rule's language once its
+/// `$NAME` metavariables are replaced by placeholder identifiers (the same
+/// substitution strategy `compile_rule` uses for patterns). Rejected fixes
+/// never reach the rules file.
+pub fn validate_fix(language: &str, fix: &str) -> Result<()> {
+    let parser = crate::parser::get_parser_for_language(language)
+        .with_context(|| format!("unknown language '{}'", language))?;
+    let mut rest = fix;
+    let mut substituted = String::with_capacity(fix.len());
+    let mut seen: HashMap<String, String> = HashMap::new();
+    while let Some(pos) = rest.find('$') {
+        substituted.push_str(&rest[..pos]);
+        let after = &rest[pos + 1..];
+        let name_len = after
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .count();
+        let name: String = after.chars().take(name_len).collect();
+        if name.is_empty() {
+            anyhow::bail!("fix template contains a bare '$' with no metavariable name");
+        }
+        let entry = seen.len();
+        let repl = seen
+            .entry(name)
+            .or_insert_with(|| format!("_gtw_fix_{entry}"));
+        substituted.push_str(repl);
+        rest = &after[name_len..];
+    }
+    substituted.push_str(rest);
+    // Expression-shaped fixes (e.g. `if $X { $Y } else { $Z }`, or anything
+    // ending in `?`) do not parse as top-level items — retry inside a
+    // function scaffold, mirroring how compile_rule scaffolds statement-like
+    // patterns. Both attempts must fail to reject the fix.
+    if parser.parse(&substituted).is_err() {
+        let scaffolded = format!("fn _gtw_fix_probe() {{ {} }}", substituted);
+        parser
+            .parse(&scaffolded)
+            .with_context(|| "fix template does not parse as valid code")?;
+    }
+    Ok(())
+}
+
+/// Build the apply-plan for `lint --fix`: one atomic batch of Edit
+/// operations, one per finding whose rule carries a fix. Editing replaces a
+/// node's content in place, so sibling node paths stay valid and the whole
+/// set applies atomically (batch semantics: validated in memory first,
+/// rollback on any failure). Returns the batch plus the number of findings
+/// skipped because their rule has no fix (report-only rules are never
+/// touched). The batch is returned unapplied — the caller decides preview
+/// vs apply, and apply only happens behind an explicit `--fix`.
+pub fn fix_batch(findings: &[Finding], rules: &[Rule]) -> Result<(crate::core::Batch, usize)> {
+    let fixes: HashMap<&str, &str> = rules
+        .iter()
+        .filter_map(|r| r.fix.as_deref().map(|f| (r.id.as_str(), f)))
+        .collect();
+    let mut ops: Vec<crate::core::BatchOp> = Vec::new();
+    let mut skipped = 0usize;
+    // Never emit two writes for the same node, even across duplicated
+    // findings (dedup is line+column based; node paths can still repeat).
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    for f in findings {
+        let template = match fixes.get(f.rule_id.as_str()) {
+            Some(t) => *t,
+            None => {
+                skipped += 1;
+                continue;
+            }
+        };
+        let content = expand_fix(template, &f.captures)?;
+        if seen.insert((f.file.clone(), f.node_path.clone())) {
+            ops.push(crate::core::BatchOp::Edit {
+                file: f.file.clone(),
+                path: f.node_path.clone(),
+                content,
+            });
+        }
+    }
+    let batch = crate::core::Batch {
+        description: Some("lint --fix auto-edits".to_string()),
+        operations: ops,
+    };
+    Ok((batch, skipped))
+}
+
+/// Shared lint core used by both the CLI `lint` command and the MCP `lint`
+/// tool — single implementation so the two never diverge. Report-only:
+/// this function never writes to disk.
+pub fn run_lint(paths: &[String], opts: &LintOptions) -> Result<LintResult> {
+    // Build the rule set. An ad-hoc pattern replaces stored rules entirely:
+    // callers ask "where does this pattern occur", not "what rules fire".
+    let ad_hoc_rule = match (opts.ad_hoc_pattern, opts.ad_hoc_language) {
+        (Some(pattern), Some(language)) => Some(Rule {
+            id: "ad_hoc".to_string(),
+            language: language.to_string(),
+            severity: Severity::Warning,
+            message: format!("Pattern match: {}", pattern.trim()),
+            pattern: pattern.to_string(),
+            fix: None,
+        }),
+        (Some(_), None) | (None, Some(_)) => {
+            anyhow::bail!("ad-hoc pattern search requires both `pattern` and `language`");
+        }
+        _ => None,
+    };
+
+    let mut rules: Vec<Rule> = Vec::new();
+    if let Some(rule) = &ad_hoc_rule {
+        rules.push(rule.clone());
+    } else {
+        rules.extend(load_rules_yaml(include_str!("../../rules/builtin.yaml"))?);
+        if let Ok(cwd) = std::env::current_dir() {
+            let project_rules = cwd.join("gnawtreewriter.rules.yaml");
+            if project_rules.exists() {
+                if let Ok(yaml) = std::fs::read_to_string(&project_rules) {
+                    rules.extend(load_rules_yaml(&yaml)?);
+                }
+            }
+        }
+        if let Some(rf) = opts.rules_file {
+            let yaml = std::fs::read_to_string(rf)
+                .map_err(|e| anyhow::anyhow!("failed to read rules file {}: {}", rf, e))?;
+            rules.extend(load_rules_yaml(&yaml)?);
+        }
+    }
+
+    // Compile rules once; report (never silence) invalid ones.
+    let mut compiled = Vec::new();
+    let mut skipped = 0usize;
+    let mut rule_warnings = Vec::new();
+    for rule in &rules {
+        if let Some(sf) = opts.severity_filter {
+            let min = severity_rank(Severity::parse(sf));
+            if severity_rank(rule.severity) < min {
+                continue;
+            }
+        }
+        if let Some(rf) = opts.rule_filter {
+            if rule.id != rf {
+                continue;
+            }
+        }
+        match compile_rule(rule) {
+            Ok(c) => compiled.push(c),
+            Err(e) => {
+                rule_warnings.push(format!("skipping rule '{}': {}", rule.id, e));
+                skipped += 1;
+            }
+        }
+    }
+
+    // Resolve the file list (directories require `recursive`).
+    let mut all_files: Vec<String> = Vec::new();
+    for path in paths {
+        let path_buf = std::path::PathBuf::from(path);
+        if path_buf.is_dir() {
+            if !opts.recursive {
+                anyhow::bail!(
+                    "Directory '{}' requires recursive=true for safety. \
+                     Pass recursive: true, or list files explicitly.",
+                    path
+                );
+            }
+            all_files.extend(find_lintable_files(&path_buf)?);
+        } else {
+            all_files.push(path.clone());
+        }
+    }
+
+    let mut result = LintResult {
+        findings: Vec::new(),
+        files_checked: 0,
+        skipped_rules: skipped,
+        rule_warnings,
+        file_errors: Vec::new(),
+        truncated: false,
+        rules: rules.clone(),
+    };
+
+    for file_path in &all_files {
+        result.files_checked += 1;
+        let code = match std::fs::read_to_string(file_path) {
+            Ok(c) => c,
+            Err(e) => {
+                result.file_errors.push(format!("{}: {}", file_path, e));
+                continue;
+            }
+        };
+        let lang = std::path::Path::new(file_path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let tree = match crate::parser::get_parser_for_language(&lang) {
+            Ok(p) => match p.parse(&code) {
+                Ok(t) => t,
+                Err(e) => {
+                    result.file_errors.push(format!("{}: {}", file_path, e));
+                    continue;
+                }
+            },
+            Err(e) => {
+                result.file_errors.push(format!("{}: {}", file_path, e));
+                continue;
+            }
+        };
+        for rule in &compiled {
+            if !language_matches(&rule.rule.language, &lang) {
+                continue;
+            }
+            for f in run_rule(rule, &tree, file_path) {
+                if result.findings.len() >= opts.max_findings {
+                    result.truncated = true;
+                    return Ok(result);
+                }
+                result.findings.push(f);
+            }
+        }
+    }
+    Ok(result)
+}
+
+/// Numeric rank for severity filtering (error > warning > info).
+pub fn severity_rank(s: Severity) -> u8 {
+    match s {
+        Severity::Error => 3,
+        Severity::Warning => 2,
+        Severity::Info => 1,
+    }
+}
+
 /// Format findings as compact prompt annotations, one per line:
 /// `⚠️ line N [rule_id] message`. Empty string when there are no findings.
 pub fn format_findings_for_prompt(findings: &[Finding]) -> String {
@@ -631,6 +975,7 @@ mod tests {
             severity: Severity::Warning,
             message: "test rule".into(),
             pattern: pattern.into(),
+            fix: None,
         };
         compile_rule(&rule).expect("rule should compile")
     }
@@ -671,6 +1016,138 @@ mod tests {
         assert_eq!(lines, vec![1, 1]);
         let cols: Vec<usize> = findings.iter().map(|f| f.column).collect();
         assert_ne!(cols[0], cols[1], "different columns are separate findings");
+    }
+    #[test]
+    fn test_run_lint_finds_unwrap_in_fixture() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("sample.rs");
+        std::fs::write(
+            &file,
+            "fn f() {\n    let a = x.unwrap();\n    let b = y.ok();\n}\n",
+        )
+        .unwrap();
+
+        let opts = LintOptions {
+            ad_hoc_pattern: Some("$X.unwrap()"),
+            ad_hoc_language: Some("rust"),
+            ..Default::default()
+        };
+        let result = run_lint(&[file.to_string_lossy().to_string()], &opts).unwrap();
+        assert_eq!(result.files_checked, 1);
+        assert_eq!(result.findings.len(), 1, "only the unwrap should match");
+        let f = &result.findings[0];
+        assert_eq!(f.rule_id, "ad_hoc");
+        assert_eq!(f.line, 2, "unwrap is on line 2");
+        assert!(f.file.ends_with("sample.rs"));
+        assert!(result.file_errors.is_empty());
+        assert!(!result.truncated);
+    }
+
+    #[test]
+    fn test_run_lint_directory_requires_recursive() {
+        let dir = tempfile::tempdir().unwrap();
+        let opts = LintOptions::default();
+        let result = run_lint(&[dir.path().to_string_lossy().to_string()], &opts);
+        assert!(
+            result.is_err(),
+            "directory without recursive must be an error"
+        );
+    }
+
+    #[test]
+    fn test_run_lint_recursive_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("nested");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn f() { x.unwrap(); }").unwrap();
+        std::fs::write(sub.join("b.rs"), "fn g() { y.unwrap(); }").unwrap();
+        std::fs::write(sub.join("c.txt"), "not linted").unwrap();
+
+        let opts = LintOptions {
+            recursive: true,
+            ad_hoc_pattern: Some("$X.unwrap()"),
+            ad_hoc_language: Some("rust"),
+            ..Default::default()
+        };
+        let result = run_lint(&[dir.path().to_string_lossy().to_string()], &opts).unwrap();
+        assert_eq!(result.files_checked, 3, "txt is also in the supported set");
+        assert_eq!(result.findings.len(), 2, "one unwrap per file");
+        let files: Vec<&str> = result.findings.iter().map(|f| f.file.as_str()).collect();
+        assert!(
+            files.iter().any(|f| f.ends_with("b.rs")),
+            "nested file must be visited"
+        );
+    }
+
+    #[test]
+    fn test_run_lint_truncation() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("many.rs");
+        std::fs::write(
+            &file,
+            "fn f() {\n    a.unwrap();\n    b.unwrap();\n    c.unwrap();\n}\n",
+        )
+        .unwrap();
+
+        let opts = LintOptions {
+            ad_hoc_pattern: Some("$X.unwrap()"),
+            ad_hoc_language: Some("rust"),
+            max_findings: 2,
+            ..Default::default()
+        };
+        let result = run_lint(&[file.to_string_lossy().to_string()], &opts).unwrap();
+        assert_eq!(result.findings.len(), 2);
+        assert!(result.truncated, "reaching max_findings must set truncated");
+    }
+
+    #[test]
+    fn test_run_lint_severity_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("s.rs");
+        std::fs::write(&file, "fn f() { x.unwrap(); }").unwrap();
+
+        // Ad-hoc findings are Warning; filtering to "error" must drop them.
+        let opts = LintOptions {
+            ad_hoc_pattern: Some("$X.unwrap()"),
+            ad_hoc_language: Some("rust"),
+            severity_filter: Some("error"),
+            ..Default::default()
+        };
+        let result = run_lint(&[file.to_string_lossy().to_string()], &opts).unwrap();
+        assert!(
+            result.findings.is_empty(),
+            "warning findings must be filtered out"
+        );
+
+        let opts = LintOptions {
+            ad_hoc_pattern: Some("$X.unwrap()"),
+            ad_hoc_language: Some("rust"),
+            severity_filter: Some("warning"),
+            ..Default::default()
+        };
+        let result = run_lint(&[file.to_string_lossy().to_string()], &opts).unwrap();
+        assert_eq!(
+            result.findings.len(),
+            1,
+            "warning must pass a warning filter"
+        );
+    }
+
+    #[test]
+    fn test_run_lint_reports_unreadable_file() {
+        let opts = LintOptions {
+            ad_hoc_pattern: Some("$X.unwrap()"),
+            ad_hoc_language: Some("rust"),
+            ..Default::default()
+        };
+        let result = run_lint(&["/nonexistent/definitely_missing.rs".to_string()], &opts).unwrap();
+        assert_eq!(result.files_checked, 1, "attempted files are counted");
+
+        assert_eq!(result.findings.len(), 0);
+        assert!(
+            !result.file_errors.is_empty(),
+            "missing file must be surfaced as a file error, never silenced"
+        );
     }
 
     #[test]

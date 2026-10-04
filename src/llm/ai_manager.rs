@@ -716,6 +716,86 @@ pub struct QualityFinding {
     pub message: String,
 }
 
+/// A provenance pointer attached to LLM-generated answers (ROADMAP 9.4).
+/// `node_path` is present when the source is node-level, letting an agent
+/// go straight from an answer to `read_node` verification.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Source {
+    pub file: String,
+    pub node_path: Option<String>,
+}
+
+/// Build the `sources` list from the evidence an answer was synthesized
+/// from (file path + capped content pairs). Pure so it can be unit-tested
+/// without a model; the MCP handler calls this exact function. Lives here
+/// (not in the mamba-gated pipeline) so the default feature gate tests it.
+pub fn sources_from_evidence(evidence: &[(String, String)]) -> Vec<Source> {
+    let mut seen = std::collections::HashSet::new();
+    evidence
+        .iter()
+        .map(|(path, _)| Source {
+            file: path.clone(),
+            node_path: None,
+        })
+        .filter(|s| seen.insert(s.file.clone()))
+        .collect()
+}
+
+#[cfg(test)]
+mod evidence_tests {
+    use super::*;
+
+    #[test]
+    fn sources_map_evidence_files() {
+        let evidence = vec![
+            ("src/a.rs".to_string(), "fn a() {}".to_string()),
+            ("src/b.py".to_string(), "def b(): pass".to_string()),
+        ];
+        let sources = sources_from_evidence(&evidence);
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].file, "src/a.rs");
+        assert_eq!(sources[0].node_path, None);
+    }
+
+    #[test]
+    fn sources_dedup_by_file() {
+        let evidence = vec![
+            ("src/a.rs".to_string(), "one".to_string()),
+            ("src/a.rs".to_string(), "two".to_string()),
+            ("src/c.rs".to_string(), "three".to_string()),
+        ];
+        let sources = sources_from_evidence(&evidence);
+        let files: Vec<_> = sources.iter().map(|s| s.file.as_str()).collect();
+        assert_eq!(files, vec!["src/a.rs", "src/c.rs"]);
+    }
+
+    #[test]
+    fn sources_empty_evidence() {
+        assert!(sources_from_evidence(&[]).is_empty());
+    }
+}
+
+impl SemanticReport {
+    /// Provenance pointers (ROADMAP 9.4): every finding is a node-level
+    /// source in the reported file. Deduped; findings order preserved.
+    pub fn sources(&self) -> Vec<Source> {
+        let mut seen = std::collections::HashSet::new();
+        self.findings
+            .iter()
+            .filter_map(|f| {
+                if seen.insert(f.path.clone()) {
+                    Some(Source {
+                        file: self.file_path.clone(),
+                        node_path: Some(f.path.clone()),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AiStatus {
     pub modern_bert_installed: bool,
@@ -812,4 +892,46 @@ fn measure_profile(
         call_overhead_s,
         measured_at: 0,
     })
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+
+    fn report(findings: Vec<QualityFinding>) -> SemanticReport {
+        SemanticReport {
+            file_path: "src/core/batch.rs".into(),
+            summary: "s".into(),
+            findings,
+        }
+    }
+
+    fn finding(path: &str) -> QualityFinding {
+        QualityFinding {
+            path: path.into(),
+            severity: "warning".into(),
+            category: "complexity".into(),
+            message: "m".into(),
+        }
+    }
+
+    #[test]
+    fn sources_map_findings_to_nodes() {
+        let r = report(vec![finding("1.2"), finding("5.0")]);
+        let sources = r.sources();
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].file, "src/core/batch.rs");
+        assert_eq!(sources[0].node_path.as_deref(), Some("1.2"));
+    }
+
+    #[test]
+    fn sources_dedup_node_paths() {
+        let r = report(vec![finding("1.2"), finding("1.2")]);
+        assert_eq!(r.sources().len(), 1);
+    }
+
+    #[test]
+    fn sources_empty_findings() {
+        assert!(report(vec![]).sources().is_empty());
+    }
 }

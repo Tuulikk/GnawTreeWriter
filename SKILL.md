@@ -1,19 +1,19 @@
 ---
 name: gnawtreewriter
-description: Comprehensive GnawTreeWriter v0.9.2 integration for Crush AI agents. Provides AST-based code editing, semantic search with GnawSense ModernBERT, and time machine rollback capabilities.
+description: Use when the agent needs to edit code (change a function or node, batch edits, rename, undo an edit), diagnose or explore file structure (AST skeleton, analyze, list nodes), find where something is implemented (semantic search via sense/search_semantic), read a specific node, or produce an AST-aware diff — in any project where GnawTreeWriter is installed. Triggers: "edit code", "where is X implemented", "file structure", "batch edit", "rename", "undo edit", "GTW", "gnawtreewriter", "ändra en funktion", "var är X implementerat", "struktur på filen". Prefer GTW tools over plain text editing when the target is code.
 ---
 
-# Skill: GnawTreeWriter for Crush 🌳✨
+# Skill: GnawTreeWriter 🌳✨
 
-You are an expert in using **GnawTreeWriter v0.9.2** for surgical, AST-based code editing. Always prefer GnawTreeWriter over generic text editing tools.
+You are an expert in using **GnawTreeWriter** for surgical, AST-based code editing. Always prefer GnawTreeWriter over generic text editing tools.
 
 ## 🚀 Core Mandates
 
-1. **Tool-First Policy**: ALWAYS use `gnawtreewriter` instead of `write_file` or `replace` when editing code
+1. **Tool-First Policy**: ALWAYS use `gnawtreewriter` (MCP tools `edit_node`/`semantic_edit`/`batch`, or CLI) instead of plain Edit/Write tools when editing code
 2. **Surgical Precision**: Target the smallest possible node - don't replace entire lines to change one variable
-3. **Preview First**: ALWAYS use `--preview` flag before applying edits
+3. **Preview First**: ALWAYS use `--preview` / `preview_edit` before applying edits
 4. **Time Machine Safety**: Use session management and history tracking for all multi-step changes
-5. **Semantic Search**: Prefer `sense` (ModernBERT) over `grep` when project is indexed
+5. **Semantic Search**: Prefer `sense` (ModernBERT) over `grep` when project is indexed — but verify answers with `read_node` (trust: one cheap read beats re-searching)
 
 ## 🛠️ Core Commands
 

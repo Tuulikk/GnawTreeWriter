@@ -127,368 +127,7 @@ pub mod mcp_server {
                 }
             })),
 
-            "tools/list" => Ok(json!({
-                "tools": [
-                    {
-                        "name": "analyze",
-                        "title": "Analyze file structure",
-                        "description": "Analyze a file and return its full AST structure.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string" }
-                            },
-                            "required": ["file_path"]
-                        }
-                    },
-                    {
-                        "name": "list_nodes",
-                        "title": "List nodes in file",
-                        "description": "Get a flat list of important nodes.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string" }
-                            },
-                            "required": ["file_path"]
-                        }
-                    },
-                    {
-                        "name": "get_skeleton",
-                        "title": "Get skeletal view",
-                        "description": "Get a high-level hierarchical overview of definitions.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string" },
-                                "max_depth": { "type": "integer" }
-                            },
-                            "required": ["file_path"]
-                        }
-                    },
-                    {
-                        "name": "compress",
-                        "title": "Compress source code",
-                        "description": "Replace function/method bodies with placeholders to reduce token count while preserving signatures and structure.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string" }
-                            },
-                            "required": ["file_path"]
-                        }
-                    },
-                    {
-                        "name": "pack",
-                        "title": "Pack project for AI",
-                        "description": "Pack entire project into AI-optimized format with token counts and optional compression.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "path": { "type": "string", "description": "Root directory to pack (default: current directory)" },
-                                "format": { "type": "string", "enum": ["markdown", "json", "plain", "xml"], "description": "Output format (default: markdown)" },
-                                "compress": { "type": "boolean", "description": "Compress function bodies (default: false)" },
-                                "include": { "type": "string", "description": "Comma-separated file extensions to include" },
-                                "ignore": { "type": "string", "description": "Comma-separated patterns to ignore" },
-                                "instructions": { "type": "string", "description": "Custom instructions to include in output" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "curate",
-                        "title": "Curate context for AI agent",
-                        "description": "Intelligently select the most relevant files for a task, instead of dumping the entire project.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "task": { "type": "string", "description": "Task description (what the agent is working on)" },
-                                "path": { "type": "string", "description": "Root directory (default: current directory)" },
-                                "strategy": { "type": "string", "enum": ["relevance", "recent", "deps", "auto"], "description": "Curation strategy (default: auto)" },
-                                "max_tokens": { "type": "integer", "description": "Maximum total tokens (default: 8000)" },
-                                "max_files": { "type": "integer", "description": "Maximum number of files (default: 20)" }
-                            },
-                            "required": ["task"]
-                        }
-                    },
-                    {
-                        "name": "search_semantic",
-                        "title": "Semantic code search",
-                        "description": "Search code by meaning across the entire project. Good for finding 'how is X implemented?' without knowing file names.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "query": { "type": "string", "description": "Semantic search query (e.g. 'how is authentication handled?')" },
-                                "file_path": { "type": "string", "description": "Optional: limit search to this file (zoom mode)" },
-                                "max_results": { "type": "integer", "description": "Maximum results (default: 10)" }
-                            },
-                            "required": ["query"]
-                        }
-                    },
-                    {
-                        "name": "diff_since",
-                        "title": "Detect changes since last index",
-                        "description": "Compare current project state against a previous git commit, date, or saved state. Returns added/modified/deleted files.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "since_commit": { "type": "string", "description": "Git commit hash to compare against" },
-                                "since_date": { "type": "string", "description": "ISO date to compare from (e.g. '2026-08-20')" },
-                                "include_uncommitted": { "type": "boolean", "description": "Include uncommitted changes (default: true)" },
-                                "use_saved_state": { "type": "boolean", "description": "Use saved state file if available (default: true)" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "index_entities",
-                        "title": "Extract entities from source file(s)",
-                        "description": "Extract functions, structs, enums, impls, and other entities from one or more files for knowledge graph indexing.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string", "description": "Path to a single file to analyze" },
-                                "file_paths": { "type": "array", "items": {"type": "string"}, "description": "Multiple files to analyze (batch mode)" },
-                                "include_private": { "type": "boolean", "description": "Include private entities (default: false)" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "index_relations",
-                        "title": "Extract relations from source file(s)",
-                        "description": "Extract call relationships, imports, type usage, and impl relationships from one or more files for knowledge graph edges.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string", "description": "Path to a single file to analyze" },
-                                "file_paths": { "type": "array", "items": {"type": "string"}, "description": "Multiple files to analyze (batch mode)" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "save_state",
-                        "title": "Save project state for incremental tracking",
-                        "description": "Save current git HEAD and file hashes to .gnawtreewriter_state.json. Use after indexing to enable efficient diff_since.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {}
-                        }
-                    },
-                    {
-                        "name": "explore",
-                        "title": "Explore project with zoom levels",
-                        "description": "Map-like navigation: overview (dirs+tokens), directory (files+summaries), file (signatures), full (source).",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "target": { "type": "string", "description": "Path to explore (file or directory, default: project root)" },
-                                "level": { "type": "string", "enum": ["0", "1", "2", "3", "overview", "directory", "file", "full"], "description": "Zoom level (default: auto)" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "explain",
-                        "title": "Explain a code node",
-                        "description": "Explain a code node in plain language using the local LFM2.5 model.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string", "description": "Path to the file" },
-                                "node": { "type": "string", "description": "AST node path (optional; default: whole file)" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "edit_ask",
-                        "title": "Propose an AST edit with the local LLM",
-                        "description": "Let the local LFM2.5 model propose a minimal edit for a request; the proposal is validated against the AST (Duplex Loop) and returned as a preview. Apply via edit_node.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string", "description": "Path to the file to edit" },
-                                "request": { "type": "string", "description": "What to change, in plain language" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "summarize",
-                        "title": "Summarize a directory",
-                        "description": "Hierarchical directory summary using the local LFM2.5 model.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "path": { "type": "string", "description": "Directory to summarize" },
-                                "max_files": { "type": "integer", "description": "Max files to summarize (default: 50)" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "investigate",
-                        "title": "Investigate a question",
-                        "description": "Answer a question about the codebase using the local LFM2.5 model.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "question": { "type": "string", "description": "The question to investigate" }
-                            }
-                        }
-                    },
-                    {
-                        "name": "add_rule",
-                        "title": "Add a lint rule",
-                        "description": "Validate and add a semgrep-like lint rule to gnawtreewriter.rules.yaml. The pattern must be valid code for the language, with $X placeholders.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "id": { "type": "string", "description": "Unique rule id (e.g. proj_no_todo)" },
-                                "language": { "type": "string", "description": "Language: rust, python, javascript, ..." },
-                                "pattern": { "type": "string", "description": "Code pattern with $X placeholders, e.g. \"$X.unwrap()\"" },
-                                "severity": { "type": "string", "enum": ["error", "warning", "info"], "description": "Severity (default: warning)" },
-                                "message": { "type": "string", "description": "Human-readable message" }
-                            },
-                            "required": ["id", "language", "pattern"]
-                        }
-                    },
-                    {
-                        "name": "get_semantic_report",
-                        "title": "Generate semantic quality report",
-                        "description": "Analyze code quality using AI.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string" }
-                            },
-                            "required": ["file_path"]
-                        }
-                    },
-                    {
-                        "name": "search_nodes",
-                        "title": "Search nodes by text",
-                        "description": "Find nodes containing specific text pattern.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string" },
-                                "pattern": { "type": "string" }
-                            },
-                            "required": ["file_path", "pattern"]
-                        }
-                    },
-                    {
-                        "name": "read_node",
-                        "title": "Read node content",
-                        "description": "Get source code of a specific node.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string" },
-                                "node_path": { "type": "string" }
-                            },
-                            "required": ["file_path", "node_path"]
-                        }
-                    },
-                    {
-                        "name": "edit_node",
-                        "title": "Edit node content",
-                        "description": "Replace node content safely.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string" },
-                                "node_path": { "type": "string" },
-                                "content": { "type": "string" }
-                            },
-                            "required": ["file_path", "node_path", "content"]
-                        }
-                    },
-                    {
-                        "name": "move_node",
-                        "title": "Move node to new location",
-                        "description": "Delete a node from one location and insert it at another. Atomically moves code across files.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "source_file": { "type": "string" },
-                                "source_path": { "type": "string" },
-                                "target_file": { "type": "string" },
-                                "target_path": { "type": "string" }
-                            },
-                            "required": ["source_file", "source_path", "target_path"]
-                        }
-                    },
-                    {
-                        "name": "insert_node",
-                        "title": "Insert new content",
-                        "description": "Insert code into a parent node.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string" },
-                                "parent_path": { "type": "string" },
-                                "position": { "type": "integer" },
-                                "content": { "type": "string" }
-                            },
-                            "required": ["file_path", "parent_path", "position", "content"]
-                        }
-                    },
-                    {
-                        "name": "preview_edit",
-                        "title": "Preview edit",
-                        "description": "Show a diff of what an edit would change without applying it.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string" },
-                                "node_path": { "type": "string" },
-                                "content": { "type": "string" }
-                            },
-                            "required": ["file_path", "node_path", "content"]
-                        }
-                    },
-                    {
-                        "name": "sense",
-                        "title": "Semantic Search (GnawSense)",
-                        "description": "Search for code semantically using AI. Good for finding where something is implemented when you only have a vague description.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "query": { "type": "string", "description": "Semantic query (e.g., 'how is backup handled?')" },
-                                "file_path": { "type": "string", "description": "Optional: Limit search to this file (Zoom mode)" }
-                            },
-                            "required": ["query"]
-                        }
-                    },
-                    {
-                        "name": "semantic_insert",
-                        "title": "Semantic Insert (GnawSense)",
-                        "description": "Insert code near a semantic anchor point. Use this when you know WHAT the surrounding code does, but don't know the exact path.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string" },
-                                "anchor_query": { "type": "string", "description": "Description of the code where you want to insert near (e.g., 'the backup initialization')" },
-                                "content": { "type": "string", "description": "The new code to insert" },
-                                "intent": { "type": "string", "description": "Where to insert: 'after' (default), 'before', or 'inside'" }
-                            },
-                            "required": ["file_path", "anchor_query", "content"]
-                        }
-                    },
-                    {
-                        "name": "semantic_edit",
-                        "title": "Semantic Edit (GnawSense)",
-                        "description": "Find a node semantically (e.g. 'the main loop') and replace its content. Perfect for surgical edits when you don't want to hunt for node paths.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": { "type": "string" },
-                                "query": { "type": "string", "description": "Semantic description of what to edit (e.g. 'the backup initialization')" },
-                                "content": { "type": "string", "description": "The new code content" }
-                            },
-                            "required": ["file_path", "query", "content"]
-                        }
-                    },
-                    { "name": "batch", "description": "Apply batch", "inputSchema": {"type":"object"} },
-                    { "name": "undo", "description": "Undo", "inputSchema": {"type":"object"} }
-                ]
-            })),
+            "tools/list" => Ok(json!({ "tools": tool_definitions() })),
 
             "tools/call" => {
                 let params = req.params.unwrap_or_else(|| json!({}));
@@ -668,7 +307,47 @@ pub mod mcp_server {
                             .and_then(Value::as_str)
                             .unwrap_or("warning");
                         let message = arguments.get("message").and_then(Value::as_str);
-                        Ok(handle_add_rule(id, language, pattern, severity, message))
+                        let fix = arguments.get("fix").and_then(Value::as_str);
+                        Ok(handle_add_rule(
+                            id, language, pattern, severity, message, fix,
+                        ))
+                    }
+                    "lint" => {
+                        let paths: Vec<String> = arguments
+                            .get("paths")
+                            .and_then(Value::as_array)
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(Value::as_str)
+                                    .map(|s| s.to_string())
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        if paths.is_empty() {
+                            return Ok(tool_error(
+                                "lint requires `paths`: [files or directories]. For an ad-hoc pattern search also pass `pattern` + `language`, e.g. {\"paths\": [\"src\"], \"pattern\": \"$X.unwrap()\", \"language\": \"rust\"}".to_string(),
+                            ));
+                        }
+                        Ok(handle_lint_mcp(
+                            &paths,
+                            arguments
+                                .get("recursive")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(true),
+                            arguments.get("rules_file").and_then(Value::as_str),
+                            arguments.get("severity").and_then(Value::as_str),
+                            arguments.get("rule_id").and_then(Value::as_str),
+                            arguments.get("pattern").and_then(Value::as_str),
+                            arguments.get("language").and_then(Value::as_str),
+                            arguments
+                                .get("fix")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false),
+                            arguments
+                                .get("preview")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false),
+                        ))
                     }
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
@@ -738,10 +417,17 @@ pub mod mcp_server {
                         Ok(handle_semantic_edit(state, fp, query, content).await)
                     }
                     "batch" => {
-                        Ok(json!({ "content": [{ "type": "text", "text": "Batch executed" }] }))
+                        let file = validate_arg("file")?;
+                        let preview = arguments
+                            .get("preview")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        Ok(handle_batch_mcp(file, preview))
                     }
                     "undo" => {
-                        Ok(json!({ "content": [{ "type": "text", "text": "Undo executed" }] }))
+                        let steps =
+                            arguments.get("steps").and_then(Value::as_u64).unwrap_or(1) as usize;
+                        Ok(handle_undo_mcp(state.clone(), steps))
                     }
                     _ => {
                         let err = build_jsonrpc_error(
@@ -760,6 +446,424 @@ pub mod mcp_server {
                 Err(serde_json::to_value(err).unwrap())
             }
         }
+    }
+    /// The MCP tool registry — real, testable Rust instead of an opaque
+    /// macro blob. Every entry must carry a full inputSchema and a
+    /// description that says WHAT the tool does, WHEN to reach for it
+    /// (vs. Read/Grep/Edit) and WHAT it returns; the registry contract
+    /// test enforces this.
+    fn tool_definitions() -> Vec<Value> {
+        vec![
+            json!({
+                "name": "analyze",
+                "title": "Analyze file structure",
+                "description": "Parse a file and return its full AST (abstract syntax tree) as typed nodes. WHAT: the structural map every GTW edit addresses. WHEN: first, before any edit — node paths found here are how edit_node/read_node target code, and unlike line numbers they survive edits elsewhere in the file. RETURNS: nested nodes with a dot-path, type and name each. Example: {\"file_path\": \"src/main.rs\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Path to the source file to parse" }
+                    },
+                    "required": ["file_path"]
+                }
+            }),
+            json!({
+                "name": "list_nodes",
+                "title": "List nodes in file",
+                "description": "Flat, paginated list of the nodes in one file with dot-path, type and name — the index for finding the path an edit targets. WHEN: locating a specific function/struct after analyze, or enumerating every definition of a kind. RETURNS: one line per node: dot-path [type] name. Example: {\"file_path\": \"src/cli.rs\", \"filter\": \"function_item\"} lists every function.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Path to the file to list" },
+                        "filter": { "type": "string", "description": "Only show nodes whose type contains this substring (e.g. function_item)" },
+                        "max_depth": { "type": "integer", "description": "Limit tree depth (fewer = shallower listing)" }
+                    },
+                    "required": ["file_path"]
+                }
+            }),
+            json!({
+                "name": "get_skeleton",
+                "title": "Get skeletal view",
+                "description": "Hierarchical outline of a file's definitions (functions, structs, impls) up to max_depth — a far smaller alternative to reading the whole file. WHEN: you need the shape of a large file without its bodies. RETURNS: an indented tree of signatures. Example: {\"file_path\": \"src/core/rules.rs\", \"max_depth\": 2}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" },
+                        "max_depth": { "type": "integer" }
+                    },
+                    "required": ["file_path"]
+                }
+            }),
+            json!({
+                "name": "compress",
+                "title": "Compress source code",
+                "description": "Replace function/method bodies with placeholders to cut tokens (~70%) while preserving signatures and structure — a lossy but syntactically valid summary. WHEN: a file is too large to include but its API surface matters. RETURNS: compressed source text. Never writes to disk. Example: {\"file_path\": \"src/big.rs\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" }
+                    },
+                    "required": ["file_path"]
+                }
+            }),
+            json!({
+                "name": "pack",
+                "title": "Pack project for AI",
+                "description": "Pack an entire project into one AI-optimized document with per-file token counts and optional body compression. WHEN: bootstrapping context for a new repo or handing a project to another agent in one artifact. RETURNS: the packed document in the chosen format. Example: {\"path\": \".\", \"format\": \"markdown\", \"compress\": true}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Root directory to pack (default: current directory)" },
+                        "format": { "type": "string", "enum": ["markdown", "json", "plain", "xml"], "description": "Output format (default: markdown)" },
+                        "compress": { "type": "boolean", "description": "Compress function bodies (default: false)" },
+                        "include": { "type": "string", "description": "Comma-separated file extensions to include" },
+                        "ignore": { "type": "string", "description": "Comma-separated patterns to ignore" },
+                        "instructions": { "type": "string", "description": "Custom instructions to include in output" }
+                    }
+                }
+            }),
+            json!({
+                "name": "curate",
+                "title": "Curate context for AI agent",
+                "description": "Intelligently select the most relevant files for a task instead of dumping the entire project. WHEN: you have a specific task and a token budget — returns the files worth reading first. RETURNS: ranked file list with token counts. Example: {\"task\": \"authentication flow\", \"max_tokens\": 5000}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "task": { "type": "string", "description": "Task description (what the agent is working on)" },
+                        "path": { "type": "string", "description": "Root directory (default: current directory)" },
+                        "strategy": { "type": "string", "enum": ["relevance", "recent", "deps", "auto"], "description": "Curation strategy (default: auto)" },
+                        "max_tokens": { "type": "integer", "description": "Maximum total tokens (default: 8000)" },
+                        "max_files": { "type": "integer", "description": "Maximum number of files (default: 20)" }
+                    },
+                    "required": ["task"]
+                }
+            }),
+            json!({
+                "name": "search_semantic",
+                "title": "Semantic code search",
+                "description": "Search code by meaning across the entire project — find 'how is X implemented?' without knowing file names. WHEN: the question is semantic, not a literal identifier (use search_nodes for exact text). RETURNS: ranked code locations. Example: {\"query\": \"how is authentication handled?\", \"max_results\": 10}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Semantic search query (e.g. 'how is authentication handled?')" },
+                        "file_path": { "type": "string", "description": "Optional: limit search to this file (zoom mode)" },
+                        "max_results": { "type": "integer", "description": "Maximum results (default: 10)" }
+                    },
+                    "required": ["query"]
+                }
+            }),
+            json!({
+                "name": "diff_since",
+                "title": "Detect changes since last index",
+                "description": "Compare current project state against a previous git commit, date, or saved state (save_state). WHEN: 'what changed since...?' after indexing or between sessions. RETURNS: added/modified/deleted files. Example: {\"since_date\": \"2026-08-20\", \"include_uncommitted\": true}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "since_commit": { "type": "string", "description": "Git commit hash to compare against" },
+                        "since_date": { "type": "string", "description": "ISO date to compare from (e.g. '2026-08-20')" },
+                        "include_uncommitted": { "type": "boolean", "description": "Include uncommitted changes (default: true)" },
+                        "use_saved_state": { "type": "boolean", "description": "Use saved state file if available (default: true)" }
+                    }
+                }
+            }),
+            json!({
+                "name": "index_entities",
+                "title": "Extract entities from source file(s)",
+                "description": "Extract functions, structs, enums, impls and other entities from one or more files for knowledge-graph indexing. WHEN: building a project map or after large changes. Provide file_path OR file_paths (at least one). RETURNS: entity records with kind, name and location. Example: {\"file_paths\": [\"src/core/*.rs\"]}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Path to a single file to analyze" },
+                        "file_paths": { "type": "array", "items": {"type": "string"}, "description": "Multiple files to analyze (batch mode)" },
+                        "include_private": { "type": "boolean", "description": "Include private entities (default: false)" }
+                    },
+                    "anyOf": [ { "required": ["file_path"] }, { "required": ["file_paths"] } ]
+                }
+            }),
+            json!({
+                "name": "index_relations",
+                "title": "Extract relations from source file(s)",
+                "description": "Extract call relationships, imports, type usage and impl relations from one or more files for knowledge-graph edges. WHEN: together with index_entities to map how code connects. Provide file_path OR file_paths (at least one). RETURNS: relation records (caller → callee, import, impl). Example: {\"file_paths\": [\"src/cli.rs\", \"src/core/mod.rs\"]}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Path to a single file to analyze" },
+                        "file_paths": { "type": "array", "items": {"type": "string"}, "description": "Multiple files to analyze (batch mode)" }
+                    },
+                    "anyOf": [ { "required": ["file_path"] }, { "required": ["file_paths"] } ]
+                }
+            }),
+            json!({
+                "name": "save_state",
+                "title": "Save project state for incremental tracking",
+                "description": "Save current git HEAD and file hashes to .gnawtreewriter_state.json — the baseline that diff_since compares against. WHEN: right after indexing, or at a milestone you may want to diff from later. Takes no arguments. RETURNS: confirmation of the saved state. Example: {}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }),
+            json!({
+                "name": "explore",
+                "title": "Explore project with zoom levels",
+                "description": "Map-like navigation with zoom levels: overview (dirs+tokens), directory (files+summaries), file (signatures), full (source). WHEN: first contact with a repo or choosing what to read next. RETURNS: the map for the requested level. Example: {\"target\": \"src\", \"level\": \"directory\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "target": { "type": "string", "description": "Path to explore (file or directory, default: project root)" },
+                        "level": { "type": "string", "enum": ["0", "1", "2", "3", "overview", "directory", "file", "full"], "description": "Zoom level (default: auto)" }
+                    }
+                }
+            }),
+            json!({
+                "name": "explain",
+                "title": "Explain a code node",
+                "description": "Explain a code node — or a whole file — in plain language using the local LFM2.5 model. WHEN: onboarding to unfamiliar code or sanity-checking what a function does before editing it. RETURNS: a plain-language explanation. Example: {\"file_path\": \"src/core/batch.rs\", \"node\": \"1.2\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Path to the file" },
+                        "node": { "type": "string", "description": "AST node path (optional; default: whole file)" }
+                    },
+                    "required": ["file_path"]
+                }
+            }),
+            json!({
+                "name": "edit_ask",
+                "title": "Propose an AST edit with the local LLM",
+                "description": "Let the local LFM2.5 model propose a minimal edit for a plain-language request; the proposal is validated against the AST (Duplex Loop) and returned as a preview — nothing is written. WHEN: you know WHAT should change but not the exact node content. RETURNS: a proposed edit to review; apply it yourself via edit_node. Example: {\"file_path\": \"a.rs\", \"request\": \"make parse_file return anyhow::Result\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Path to the file to edit" },
+                        "request": { "type": "string", "description": "What to change, in plain language" }
+                    },
+                    "required": ["file_path", "request"]
+                }
+            }),
+            json!({
+                "name": "summarize",
+                "title": "Summarize a directory",
+                "description": "Hierarchical summary of a directory — what each file/module does — generated by the local LFM2.5 model. WHEN: getting oriented in an unfamiliar subtree before reading files. RETURNS: per-file one-liners grouped by directory. Example: {\"path\": \"src/core\", \"max_files\": 50}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Directory to summarize" },
+                        "max_files": { "type": "integer", "description": "Max files to summarize (default: 50)" }
+                    }
+                }
+            }),
+            json!({
+                "name": "investigate",
+                "title": "Investigate a question",
+                "description": "Answer a question about the codebase using the local LFM2.5 model — a mix of semantic search and reasoning over indexed sources. WHEN: a 'how does X work?' question you cannot answer with a single grep. RETURNS: an answer plus sources: [{file}] — the exact files it was synthesized from, verifiable via read_node. Example: {\"question\": \"where is the transaction log rotated?\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "question": { "type": "string", "description": "The question to investigate" }
+                    },
+                    "required": ["question"]
+                }
+            }),
+            json!({
+                "name": "add_rule",
+                "title": "Add a lint rule",
+                "description": "Validate and add a semgrep-like lint rule to gnawtreewriter.rules.yaml. The pattern must be valid code for the language, with $X placeholders. Pass `fix` to attach a rewrite template (also validated) — the rule then becomes applyable via the lint tool with fix: true.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "Unique rule id (e.g. proj_no_todo)" },
+                        "language": { "type": "string", "description": "Language: rust, python, javascript, ..." },
+                        "pattern": { "type": "string", "description": "Code pattern with $X placeholders, e.g. \"$X.unwrap()\"" },
+                        "severity": { "type": "string", "enum": ["error", "warning", "info"], "description": "Severity (default: warning)" },
+                        "message": { "type": "string", "description": "Human-readable message" },
+                        "fix": { "type": "string", "description": "Optional rewrite template with $X metavariables bound from the pattern match, e.g. \"$X.expect(\\\"msg\\\")\" — validated before saving" }
+                    },
+                    "required": ["id", "language", "pattern"]
+                }
+            }),
+            json!({
+                "name": "lint",
+                "title": "Lint files or search patterns (AST-aware)",
+                "description": "AST pattern linting and search in ONE call: run stored lint rules over files/directories, or pass `pattern`+`language` for an ad-hoc `$X` metavariable search (the ast-grep `run -p` equivalent). Use this INSTEAD of Grep when searching for code shapes: Grep sees text (breaks on formatting), this sees syntax, and returns structured findings [{file, rule_id, severity, message, line, column, node_path, captures}] with the node_path for surgical follow-up edits. Report-only — never writes.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "paths": { "type": "array", "items": {"type": "string"}, "description": "Files or directories to lint" },
+                        "recursive": { "type": "boolean", "description": "Expand directories into their supported files (default true; directories without it are rejected)" },
+                        "rules_file": { "type": "string", "description": "Extra rules YAML loaded after builtin + project rules" },
+                        "severity": { "type": "string", "enum": ["error", "warning", "info"], "description": "Minimum severity to report" },
+                        "rule_id": { "type": "string", "description": "Only run the rule with this id" },
+                        "pattern": { "type": "string", "description": "Ad-hoc $X pattern to search for, e.g. \"$X.unwrap()\" (replaces stored rules)" },
+                        "language": { "type": "string", "description": "Language for the ad-hoc pattern (required with pattern)" },
+                        "fix": { "type": "boolean", "description": "Apply fixes from rules that carry a fix template (DEFAULT FALSE — report-only). Findings become atomic edits; use preview: true first." },
+                        "preview": { "type": "boolean", "description": "With fix: true, show the planned fixes without writing anything" }
+                    },
+                    "required": ["paths"]
+                }
+            }),
+            json!({
+                "name": "get_semantic_report",
+                "title": "Generate semantic quality report",
+                "description": "AI code-quality analysis of one file — smells, complexity hotspots and structural observations from the local model. WHEN: reviewing a file you just edited, or before planning a refactor. RETURNS: a markdown quality report plus sources: [{file, node_path}] — one provenance pointer per finding, verifiable via read_node. Example: {\"file_path\": \"src/core/batch.rs\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Path to the file to analyze" }
+                    },
+                    "required": ["file_path"]
+                }
+            }),
+            json!({
+                "name": "search_nodes",
+                "title": "Search nodes by text",
+                "description": "Find AST nodes whose content or name contains a text pattern, in one file. WHEN: you know an identifier or snippet and need the node path that edit_node/read_node require — unlike Grep it returns dot-paths, not line numbers. RETURNS: matching paths with type and name. Example: {\"file_path\": \"src/cli.rs\", \"pattern\": \"handle_lint\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Path to the file to search" },
+                        "pattern": { "type": "string", "description": "Text/substring to search for inside node content" }
+                    },
+                    "required": ["file_path", "pattern"]
+                }
+            }),
+            json!({
+                "name": "read_node",
+                "title": "Read node content",
+                "description": "Read the exact source text of ONE AST node by dot-path — the surgical alternative to dumping a whole file. WHEN: verifying content before or after an edit, or inspecting one function in a large file. RETURNS: the node's source code. Example: {\"file_path\": \"src/cli.rs\", \"node_path\": \"35.2.105\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Path to the file" },
+                        "node_path": { "type": "string", "description": "Dot-path of the node (from analyze/list_nodes/search_nodes)" }
+                    },
+                    "required": ["file_path", "node_path"]
+                }
+            }),
+            json!({
+                "name": "edit_node",
+                "title": "Edit node content",
+                "description": "Replace the content of ONE AST node (by dot-path) with new code — syntax-validated BEFORE writing, so a broken replacement is rejected instead of corrupting the file. WHEN: changing a function/struct/impl you already located; safer than text search-replace because the target cannot silently mismatch. RETURNS: a diff summary and a transaction id (revert via undo). Example: {\"file_path\": \"a.rs\", \"node_path\": \"1.2\", \"content\": \"fn fixed() { }\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Path to the file" },
+                        "node_path": { "type": "string", "description": "Dot-path of the node to replace" },
+                        "content": { "type": "string", "description": "New complete content for the node (validated as code before write)" }
+                    },
+                    "required": ["file_path", "node_path", "content"]
+                }
+            }),
+            json!({
+                "name": "move_node",
+                "title": "Move node to new location",
+                "description": "Atomically move an AST node to another location — delete + reinsert in one transaction, optionally across files, so no half-moved state can exist. WHEN: relocating functions, methods or blocks between parents/files. RETURNS: a move report and transaction id (revert via undo). Example: {\"source_file\": \"a.rs\", \"source_path\": \"1.2\", \"target_file\": \"b.rs\", \"target_path\": \"0\"}; target_file defaults to source_file.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "source_file": { "type": "string", "description": "File containing the node" },
+                        "source_path": { "type": "string", "description": "Dot-path of the node to move" },
+                        "target_file": { "type": "string", "description": "Destination file (default: same as source_file)" },
+                        "target_path": { "type": "string", "description": "Destination parent dot-path" }
+                    },
+                    "required": ["source_file", "source_path", "target_path"]
+                }
+            }),
+            json!({
+                "name": "insert_node",
+                "title": "Insert new content",
+                "description": "Insert new code as a child of a parent node at a given position — syntax-validated before writing, so it lands at a structurally valid spot. WHEN: adding a function, method, import, field or statement. RETURNS: an insertion report and transaction id (revert via undo). Example: {\"file_path\": \"a.rs\", \"parent_path\": \"35.2\", \"position\": 2, \"content\": \"fn helper() {}\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Path to the file" },
+                        "parent_path": { "type": "string", "description": "Dot-path of the parent to insert into" },
+                        "position": { "type": "integer", "description": "Child index to insert at (default 1)" },
+                        "content": { "type": "string", "description": "Code to insert (validated as code before write)" }
+                    },
+                    "required": ["file_path", "parent_path", "content"]
+                }
+            }),
+            json!({
+                "name": "preview_edit",
+                "title": "Preview edit",
+                "description": "Dry-run an edit: show exactly what would change and write nothing. WHEN: before any risky edit_node, or when you want to double-check node targeting. RETURNS: a unified diff of the proposed change. Example: {\"file_path\": \"a.rs\", \"node_path\": \"1.2\", \"content\": \"...\"} — repeat the same call via edit_node when the diff is right.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Path to the file" },
+                        "node_path": { "type": "string", "description": "Dot-path of the node the edit targets" },
+                        "content": { "type": "string", "description": "Proposed new content for the node" }
+                    },
+                    "required": ["file_path", "node_path", "content"]
+                }
+            }),
+            json!({
+                "name": "sense",
+                "title": "Semantic Search (GnawSense)",
+                "description": "Search for code semantically using AI. Good for finding where something is implemented when you only have a vague description.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Semantic query (e.g., 'how is backup handled?')" },
+                        "file_path": { "type": "string", "description": "Optional: Limit search to this file (Zoom mode)" }
+                    },
+                    "required": ["query"]
+                }
+            }),
+            json!({
+                "name": "semantic_insert",
+                "title": "Semantic Insert (GnawSense)",
+                "description": "Insert code near a semantic anchor point. Use this when you know WHAT the surrounding code does, but don't know the exact path.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" },
+                        "anchor_query": { "type": "string", "description": "Description of the code where you want to insert near (e.g., 'the backup initialization')" },
+                        "content": { "type": "string", "description": "The new code to insert" },
+                        "intent": { "type": "string", "description": "Where to insert: 'after' (default), 'before', or 'inside'" }
+                    },
+                    "required": ["file_path", "anchor_query", "content"]
+                }
+            }),
+            json!({
+                "name": "semantic_edit",
+                "title": "Semantic Edit (GnawSense)",
+                "description": "Find a node semantically (e.g. 'the main loop') and replace its content. Perfect for surgical edits when you don't want to hunt for node paths.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" },
+                        "query": { "type": "string", "description": "Semantic description of what to edit (e.g. 'the backup initialization')" },
+                        "content": { "type": "string", "description": "The new code content" }
+                    },
+                    "required": ["file_path", "query", "content"]
+                }
+            }),
+            json!({
+                "name": "batch",
+                "title": "Apply batch operations atomically",
+                "description": "Apply a batch of AST edit operations from a batch JSON file atomically: every operation validates in-memory before any write, and any failure rolls back the whole batch. Use this for coordinated multi-file changes INSTEAD of several edit_node calls — one transaction, one preview, one undo, one transaction-log entry. Batch JSON format: {\"description\": str, \"operations\": [{\"type\": \"edit\"|\"insert\"|\"delete\", \"file\": str, ...}]} — see BATCH_USAGE.md. With preview=true returns the unified diff and writes nothing.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file": { "type": "string", "description": "Path to the batch JSON spec" },
+                        "preview": { "type": "boolean", "description": "Show the diff without writing (default false)" }
+                    },
+                    "required": ["file"]
+                }
+            }),
+            json!({
+                "name": "undo",
+                "title": "Undo recent edit operations",
+                "description": "Undo the last N logged GTW edit operations (default 1) through the transaction log — the quick 'oops' button after a bad edit. Each reverted operation is reported with its transaction id; failed reverts are reported loudly with the restore fallback (`gnawtreewriter restore-project --preview`). Prefer this over hand-reverting files.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "steps": { "type": "integer", "description": "Number of operations to undo (default 1)" }
+                    }
+                }
+            }),
+        ]
     }
 
     async fn rpc_handler(
@@ -1229,6 +1333,24 @@ pub mod mcp_server {
         }
     }
 
+    /// Structured content for `get_semantic_report`: the report plus a
+    /// top-level `sources` provenance list (ROADMAP 9.4). Extracted as a
+    /// pure function so the sources contract is testable without loading
+    /// a model — the integration test calls this exact function.
+    pub fn semantic_report_payload(report: &crate::llm::SemanticReport) -> Value {
+        json!({"report": report, "sources": report.sources()})
+    }
+
+    /// Structured content for `investigate`: result + tokens + top-level
+    /// `sources` (ROADMAP 9.4). Pure — unit-testable without a model.
+    #[cfg(feature = "mamba")]
+    pub fn investigate_payload(
+        result: &crate::llm::pipeline::InvestigateResult,
+        budget: &crate::llm::TokenBudget,
+    ) -> Value {
+        json!({ "result": result, "tokens": budget, "sources": result.sources })
+    }
+
     async fn handle_get_semantic_report(state: Arc<AppState>, file_path: &str) -> Value {
         #[cfg(feature = "modernbert")]
         {
@@ -1239,7 +1361,7 @@ pub mod mcp_server {
             match mgr.generate_semantic_report(file_path).await {
                 Ok(report) => tool_success(
                     "Semantic report generated".into(),
-                    Some(json!({"report": report})),
+                    Some(semantic_report_payload(&report)),
                 ),
                 Err(e) => tool_error(e.to_string()),
             }
@@ -1280,6 +1402,7 @@ pub mod mcp_server {
                                 "file": m.file_path,
                                 "node_path": m.node_path,
                                 "score": m.score,
+                                "preview": m.content_preview,
                             })
                         })
                         .collect();
@@ -1756,7 +1879,7 @@ pub mod mcp_server {
             ) {
                 Ok((result, budget)) => tool_success(
                     "Investigation complete".to_string(),
-                    Some(json!({ "result": result, "tokens": budget })),
+                    Some(investigate_payload(&result, &budget)),
                 ),
                 Err(e) => tool_error(format!("Investigate failed: {}", e)),
             },
@@ -1769,6 +1892,224 @@ pub mod mcp_server {
             "investigate requires the 'mamba' feature. Recompile with --features mamba".to_string(),
         )
     }
+    /// `lint`: AST pattern linting / ad-hoc `$X` pattern search. Report-only —
+    /// never writes. Shared core with the CLI (`rules::run_lint`) so the two
+    /// never diverge.
+    #[allow(clippy::too_many_arguments)]
+    fn handle_lint_mcp(
+        paths: &[String],
+        recursive: bool,
+        rules_file: Option<&str>,
+        severity_filter: Option<&str>,
+        rule_filter: Option<&str>,
+        pattern: Option<&str>,
+        language: Option<&str>,
+        fix: bool,
+        preview: bool,
+    ) -> Value {
+        let opts = crate::core::rules::LintOptions {
+            recursive,
+            rules_file,
+            severity_filter,
+            rule_filter,
+            ad_hoc_pattern: pattern,
+            ad_hoc_language: language,
+            ..Default::default()
+        };
+        match crate::core::rules::run_lint(paths, &opts) {
+                Ok(result) => {
+                    let mut lines: Vec<String> = result
+                        .findings
+                        .iter()
+                        .map(|f| {
+                            format!(
+                                "{}:{}:{} {:?} [{}] {}",
+                                f.file, f.line, f.column, f.severity, f.rule_id, f.message
+                            )
+                        })
+                        .collect();
+                    for e in &result.file_errors {
+                        lines.push(format!("error: {}", e));
+                    }
+                    for w in &result.rule_warnings {
+                        lines.push(format!("warning: {}", w));
+                    }
+                    // `fix` is never implicit: without the flag nothing is
+                    // written — the run stays report-only.
+                    let fix_note = if fix && !result.findings.is_empty() {
+                        match crate::core::rules::fix_batch(&result.findings, &result.rules) {
+                            Ok((batch, _no_fix)) if !batch.operations.is_empty() => {
+                                if preview {
+                                    match batch.preview_text() {
+                                        Ok(t) => Some(format!(
+                                            "Fix preview ({} operation(s), nothing written):
+{}",
+                                            batch.operations.len(),
+                                            t
+                                        )),
+                                        Err(e) => Some(format!("Fix preview failed: {}", e)),
+                                    }
+                                } else {
+                                    match batch.apply() {
+                                        Ok(()) => Some(format!(
+                                            "✅ Applied {} fix(es) atomically.",
+                                            batch.operations.len()
+                                        )),
+                                        Err(e) => Some(format!(
+                                            "❌ Fix apply FAILED (batch is atomic — no partial writes): {}",
+                                            e
+                                        )),
+                                    }
+                                }
+                            }
+                            Ok((_, no_fix)) => Some(format!(
+                                "No fixable findings: {} finding(s) matched but none carry a fix template — add one with `add_rule` + fix.",
+                                no_fix
+                            )),
+                            Err(e) => Some(format!("Fix expansion failed: {}", e)),
+                        }
+                    } else {
+                        None
+                    };
+                    let summary = format!(
+                        "Lint: {} finding(s) in {} file(s){}",
+                        result.findings.len(),
+                        result.files_checked,
+                        if result.truncated {
+                            format!(" (truncated at {} — narrow the search)", result.findings.len())
+                        } else {
+                            String::new()
+                        }
+                    );
+                    if let Some(note) = &fix_note {
+                        lines.push(note.clone());
+                    }
+                    let data = json!({
+                        "findings": result.findings,
+                        "files_checked": result.files_checked,
+                        "skipped_rules": result.skipped_rules,
+                        "truncated": result.truncated,
+                        "fix_applied": fix && !preview && fix_note.as_ref().map(|n| n.starts_with("✅")).unwrap_or(false),
+                    });
+                    if result.findings.is_empty() && result.file_errors.is_empty() {
+                        tool_success(
+                            format!(
+                                "{}. Nothing matched{}.",
+                                summary,
+                                if pattern.is_some() {
+                                    " — check the pattern's language, or use `sense` for semantic (not structural) search".to_string()
+                                } else {
+                                    ". Rules come from rules/builtin.yaml + gnawtreewriter.rules.yaml — add one with `add_rule`".to_string()
+                                }
+                            ),
+                            Some(data),
+                        )
+                    } else {
+                        tool_success(format!("{}\n{}", summary, lines.join("\n")), Some(data))
+                    }
+                }
+                Err(e) => tool_error(format!(
+                    "Lint failed: {}. Directories need recursive=true; ad-hoc search needs both `pattern` and `language`.",
+                    e
+                )),
+            }
+    }
+
+    /// `batch`: apply a batch spec file atomically (preview or apply). Real
+    /// implementation via `Batch` — a stub here once reported "Batch executed"
+    /// while writing nothing; never fake success.
+    fn handle_batch_mcp(file: &str, preview: bool) -> Value {
+        let batch = match crate::core::Batch::from_file(file) {
+                Ok(b) => b,
+                Err(e) => {
+                    return tool_error(format!(
+                        "Failed to load batch file '{}': {}. The batch spec is JSON with an `operations` array — see BATCH_USAGE.md for the full format, or convert a unified diff with `gnawtreewriter diff-to-batch`.",
+                        file, e
+                    ))
+                }
+            };
+        if preview {
+            match batch.preview_text() {
+                Ok(text) => tool_success(
+                    format!(
+                        "Batch preview ({} operations) — nothing written:\n{}",
+                        batch.operations.len(),
+                        text
+                    ),
+                    None,
+                ),
+                Err(e) => tool_error(format!("Preview failed (nothing written): {}", e)),
+            }
+        } else {
+            match batch.apply() {
+                    Ok(()) => tool_success(
+                        format!(
+                            "Batch applied atomically: {} operation(s). One transaction logged — undo with the `undo` tool if the result is wrong.",
+                            batch.operations.len()
+                        ),
+                        None,
+                    ),
+                    Err(e) => tool_error(format!(
+                        "Batch failed and was rolled back: {}. Fix the operations in {} and re-run, or run with preview=true first.",
+                        e, file
+                    )),
+                }
+        }
+    }
+
+    /// `undo`: revert the last N logged operations via the real
+    /// UndoRedoManager (same engine as the CLI). A stub here once reported
+    /// "Undo executed" while changing nothing — undo must never lie.
+    fn handle_undo_mcp(state: Arc<AppState>, steps: usize) -> Value {
+        let mut mgr = match crate::core::UndoRedoManager::new(&state.project_root) {
+            Ok(m) => m,
+            Err(e) => {
+                return tool_error(format!(
+                    "Undo unavailable: {}. Inspect the log with `gnawtreewriter history`.",
+                    e
+                ))
+            }
+        };
+        match mgr.undo(steps) {
+                Ok(results) if results.is_empty() => tool_error(
+                    "Nothing to undo: no undoable operations in the transaction log. `gnawtreewriter history` lists what is logged.".to_string(),
+                ),
+                Ok(results) => {
+                    let mut lines = Vec::new();
+                    let mut failed = 0usize;
+                    for r in &results {
+                        if r.success {
+                            lines.push(format!("✓ {} ({})", r.message, r.transaction_id));
+                        } else {
+                            failed += 1;
+                            lines.push(format!(
+                                "✗ {} ({}) — run `gnawtreewriter restore-project --preview` to find a restore point",
+                                r.message, r.transaction_id
+                            ));
+                        }
+                    }
+                    let summary = if failed > 0 {
+                        format!(
+                            "Undo: {} of {} operation(s) reverted ({} failed)",
+                            results.len() - failed,
+                            results.len(),
+                            failed
+                        )
+                    } else {
+                        format!("Undone {} operation(s)", results.len())
+                    };
+                    if failed == results.len() {
+                        tool_error(format!("{}\n{}", summary, lines.join("\n")))
+                    } else {
+                        tool_success(format!("{}\n{}", summary, lines.join("\n")), None)
+                    }
+                }
+                Err(e) => tool_error(format!(
+                    "Undo failed: {}. Try `gnawtreewriter restore-project --preview` to inspect restore points — never hand-edit around a broken file.",
+                    e
+                )),
+            }
+    }
 
     /// `add_rule`: validate and add a lint rule (agent-facing way to write rules).
     fn handle_add_rule(
@@ -1777,6 +2118,7 @@ pub mod mcp_server {
         pattern: &str,
         severity: &str,
         message: Option<&str>,
+        fix: Option<&str>,
     ) -> Value {
         let rule = crate::core::rules::Rule {
             id: id.to_string(),
@@ -1786,14 +2128,33 @@ pub mod mcp_server {
                 .unwrap_or(&format!("Rule {} matched", id))
                 .to_string(),
             pattern: pattern.to_string(),
+            fix: fix.map(|f| f.to_string()),
         };
         // Validate the pattern compiles for the language.
         if let Err(e) = crate::core::rules::compile_rule(&rule) {
             return tool_error(format!("Rule rejected: {}", e));
         }
+        // A fix template must parse as valid code — never store a rewrite
+        // that would produce broken syntax.
+        if let Some(fix_template) = fix {
+            if let Err(e) = crate::core::rules::validate_fix(language, fix_template) {
+                return tool_error(format!(
+                    "Fix rejected: {}. A $NAME in the fix must be captured by the pattern.",
+                    e
+                ));
+            }
+        }
         match crate::core::rules::append_project_rule(&rule) {
             Ok(()) => tool_success(
-                format!("Rule '{}' added", id),
+                format!(
+                    "Rule {} added{}",
+                    id,
+                    if fix.is_some() {
+                        " (with fix — apply via lint tool with fix: true)"
+                    } else {
+                        ""
+                    }
+                ),
                 Some(json!({
                     "id": id,
                     "path": crate::core::rules::project_rules_path().to_string_lossy(),
@@ -2123,6 +2484,21 @@ pub mod mcp_server {
         F: std::future::Future<Output = ()> + Send + 'static,
     {
         let project_root = std::env::current_dir()?;
+        serve_with_shutdown_root(listener, token, project_root, shutdown_signal).await
+    }
+
+    /// Test-isolated server variant: binds the server to an explicit project
+    /// root so tests never operate on the real repo transaction log. See
+    /// GTW_MCP_ISSUE_LOG.md finding #12 (undo test once reverted real edits).
+    pub async fn serve_with_shutdown_root<F>(
+        listener: TcpListener,
+        token: Option<String>,
+        project_root: std::path::PathBuf,
+        shutdown_signal: F,
+    ) -> Result<()>
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
         let app = Router::new()
             .route("/", post(rpc_handler))
             .with_state(Arc::new(AppState::new(token, project_root)));

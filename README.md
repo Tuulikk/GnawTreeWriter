@@ -20,7 +20,7 @@ gnawtreewriter edit src/main.rs --ask "fix the self-assignment bug" --force
 gnawtreewriter edit src/main.rs --ask "replace every unwrap with expect" --all
 ```
 
-**MCP tools added**: `explain`, `summarize`, `investigate`, `add_rule` — all available to AI agents.
+**MCP tools added**: `explain`, `summarize`, `investigate`, `add_rule`, `lint` — all available to AI agents.
 
 **Roadmap**: Phase 8 (Local LLM) + Rules Engine steps 1–5 all marked complete. Spec at `docs/RULES_ENGINE_SPEC.md`.
 
@@ -296,12 +296,18 @@ rules:
     severity: error
     message: "unwrap() panics on Err/None"
     pattern: "$X.unwrap()"
+    # optional: auto-apply template ($X bound from the pattern match)
+    fix: "$X.expect(\"checked\")"
 ```
 
 ```bash
 # Lint with builtin rules (46 across rust/python/js/ts/go/java/c) + your project rules
 gnawtreewriter lint src/core --recursive
 gnawtreewriter lint src/core --severity error --format json
+
+# Apply fixes (report-only by default — --fix is required to write)
+gnawtreewriter lint src/core --recursive --fix --preview   # diff only
+gnawtreewriter lint src/core --recursive --fix             # atomic batch apply
 
 # Add a rule yourself (validated before saving)
 gnawtreewriter rules add no_unwrap rust '$X.unwrap()' --severity error --message "unwrap panics"
@@ -312,7 +318,9 @@ gnawtreewriter lint src/core --discover
 ```
 
 The rules engine does three things *without* a model (deterministic, free):
-- **`lint`**: finds rule violations across files
+- **`lint`**: finds rule violations across files; `--fix` applies `fix:`
+  templates as an atomic batch (`--fix --preview` shows the diff first —
+  never writes without the explicit flag)
 - **Edit guardian**: after any edit, error-severity findings block it,
   warnings are printed — *"does it parse?" → "is it good code?"*
 - **Prompt annotations**: `edit --ask` sees known violations before proposing,
@@ -324,7 +332,7 @@ And one thing *with* the local model:
 
 All of these are also available as MCP tools (`explore`, `pack`, `curate`, `compress`,
 `diff_to_batch`, `index_entities`, `index_relations`, `explain`, `summarize`,
-`investigate`, `add_rule`) for agents working through Claude Desktop, Zed, or VSCode.
+`investigate`, `add_rule`, `lint`) for agents working through Claude Desktop, Zed, or VSCode.
 
 ## 🤖 AI Agent Integration (VS Code / Copilot)
 

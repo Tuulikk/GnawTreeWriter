@@ -1,3 +1,27 @@
+## [0.10.0] - 2026-10-04
+
+### Added
+- **MCP `lint` tool** (ROADMAP 9.1): AST pattern linting through MCP with full schema — paths, `recursive`, severity/rule filters, and ad-hoc `$X` pattern search (`pattern` + `language`). Shared core `rules::run_lint` with the CLI so the two never diverge; report-only, never writes. CLI gained parity flags `--pattern`/`--language`.
+- **`fix:` rule support** (ROADMAP 9.2): rules may carry a rewrite template (`fix: "$X.expect(\"msg\")"` in YAML, `--fix` on `rules add`, `fix` arg on MCP `add_rule`). Templates expand with `$X` bindings from the match, are validated before saving (`validate_fix`: identifier substitution, scaffold fallback `fn probe() { … }` for expression forms like `?`-chains — unknown languages fall through to the generic parser, matching `compile_rule`), and apply through `lint --fix` (CLI) / `lint {fix: true}` (MCP) as an **atomic batch** — Edit-op per finding, node content replaced in place so paths don't shift, dedup per file+path. `--fix --preview` shows the diff and writes nothing. Writes only ever happen behind the explicit flag; `LintResult.rules` carries the effective rule set. `py_bare_except` ships with a builtin fix.
+- **MCP adoption contract** (ROADMAP 9.3): all 30 tools now carry self-teaching descriptions (VAD + NÄR vs Read/Grep/Edit + RETURNERAR + EXEMPEL, ≥100 chars) and complete `inputSchema`s. Schema lies fixed against the actual dispatch: `list_nodes` exposes `filter`/`max_depth`, `explain`/`edit_ask`/`investigate` gained `required`, `index_entities`/`index_relations` gained `anyOf` (file_path | file_paths), `save_state` is honestly zero-arg. New `integration_mcp_tools_adoption_contract` test mechanically pins the catalog: unique names, description length, `required ⊆ properties`, honest zero-arg, ≥30 tools, priority tools (`batch`, `edit_node`, `insert_node`, `search_nodes`, `sense`, `semantic_edit`) with real schemas — documentation drift can no longer regress silently.
+- **Source citations (`sources`) in LLM answers** (ROADMAP 9.4): `get_semantic_report` returns `sources: [{file, node_path}]` (one provenance pointer per finding, deduped); `investigate` returns `sources: [{file}]` for the evidence the answer was actually synthesized from. Pure payload builders (`semantic_report_payload`, `investigate_payload`) make the contract testable without a model — `integration_sources_semantic_report_payload` + `integration_sources_investigate_payload` (mamba) plus 6 unit tests.
+- **`FileMatch.content_preview`**: satellite `sense`/`search_semantic` matches now include a `preview` straight from the index — score + content in one response saves an extra `read_node` round-trip.
+
+### Fixed
+- **"Resurrection" mystery root-caused** (GTW_MCP_ISSUE_LOG.md finding 12): the repeated silent reversion of recent edits (8 victims across `rules.rs`/`cli.rs`) was never a cache bug — `integration_mcp_tools_call_undo` called the MCP `undo` tool against the **real repo transaction log** on every `cargo test` (the server takes `project_root` from CWD), replaying the latest GTW transactions onto source files. New `serve_with_shutdown_root(listener, token, project_root, shutdown)` lets tests bind an explicit project root; the undo test now runs against a throwaway temp project and asserts the deterministic "Nothing to undo". Regression-proofed: two consecutive full-suite runs with unchanged file checksums.
+- **Batch test used a nonexistent spec format** (finding 13): `integration_mcp_tools_call_batch` wrote `replace` instead of the real `BatchFile`/`BatchOp` format (`{file, path, content}`) and could never pass against a real parser — masked by the undo-test chaos. Fixed with root-node replacement.
+- **`--features mamba` did not compile**: a mamba-gated `Rule` initializer in `cli.rs` predated the 9.2 `fix` field. Now parses `fix` from the rule source (parity with `rules add`).
+- MCP handler signature/docs now match dispatch for `explain` (requires `file_path`), `edit_ask` (requires `file_path` + `request`), `investigate` (requires `question`).
+
+### Changed
+- `undo` MCP tool documents the transaction-log contract and points at `gnawtreewriter history` / `restore-project` for failed reverts; `batch` tool description covers atomicity + preview semantics.
+
+### Docs
+- `GTW_INSTRUCTIONS.md` regenerated: all 30 tools in a category table + the diagnostic chain (`analyze`/`get_skeleton` → `sense`/`search_nodes` → `read_node` → `edit_node`/`semantic_edit` → verify → `undo`) — the previous version had drifted to 17 tools.
+- `GTW_MCP_ISSUE_LOG.md`: 9.1-continuation entry (findings 1–8), 9.2 entry (findings 9–11), 9.3 entry (findings 12–13, root-cause reclassification), 9.4 live-verification entry.
+- `ROADMAP.md`: Phase 9 items 9.1–9.4 marked complete with implementation notes.
+- `README.md`: Rules Engine documents `fix:` templates and `lint --fix [--preview]`; MCP tool lists include `lint`.
+
 ## [0.9.8] - 2026-10-01
 
 ### Fixed

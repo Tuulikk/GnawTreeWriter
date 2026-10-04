@@ -3,7 +3,7 @@
 //! Fixed-step pipelines: control flow lives in Rust, each LLM call is a small
 //! bounded step with typed input/output. No chat, no agentic loop.
 
-use crate::llm::ai_manager::AiManager;
+use crate::llm::ai_manager::{sources_from_evidence, AiManager, Source};
 use crate::llm::prompts;
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -491,6 +491,7 @@ pub fn investigate(
             terms,
             candidates: candidates.iter().map(|(p, _)| p.clone()).collect(),
             answer: clean_output(&synth_gen.text),
+            sources: sources_from_evidence(&evidence),
         },
         budget,
     ))
@@ -574,6 +575,9 @@ pub struct InvestigateResult {
     pub terms: Vec<String>,
     pub candidates: Vec<String>,
     pub answer: String,
+    /// Files the answer was actually synthesized from — the provenance
+    /// contract (ROADMAP 9.4): every LLM answer is auditable via read_node.
+    pub sources: Vec<Source>,
 }
 
 /// Proposed edit from the model: which node to replace and with what content.

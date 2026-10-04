@@ -238,10 +238,287 @@ add_rule) som flaggar `&X[..N]` på strängar i denna kodbas.
 
 ---
 
+## 2026-10-04 — driftprov av sense (e.1): stabilitet OK, men MCP-ytan
+dropper träffarna
+
+**Kontext:** Motor2-agenten körde det planerade driftprovet av 10-01-fixen
+(3afa725) innan punkt 6 kunde betraktas som stängd. Fråga med känt svar:
+"logs endpoint handler" → `crates/motor2-server/src/system.rs:45`.
+
+| # | Anrop | Parametrar | Resultat |
+|---|-------|------------|----------|
+| 1 | `sense` (MCP) | satellite, "where is the logs endpoint handler…" | Guidande svar ✓: "no matches … build it with `gnawtreewriter ai index`, or pass file_path" — men MCP har INGET `ai index`-verktyg (agenten måste bash:a) |
+| 2 | `sense` (MCP) | zoom, file=system.rs, två olika queries | **Bara rubrikraden** "Zoom search results for <file>" — inga noder, inga poäng, inget innehåll |
+| 3 | `sense` (CLI, `GNAW_JSON=1`) | identisk query + fil | Fullt JSON: 5 noder `{path, preview, score}` (14, 121.2.11, 121.2.9, 106, 79) — den strukturerade datan FINNS |
+
+**Omväg:** CLI med GNAW_JSON=1 (för att överhuvudtaget se träffarna).
+
+**Bedömning:**
+- [ ] användarfel [ ] bugg [ ] saknad funktion
+- [x] **svår att nå/rätta användning** — MCP-handlern skickar JSON:n som
+      strukturerad bilaga (`tool_success(text, Some(json))`), men agentens
+      MCP-yta visar bara `text`-delen. Verktyget är under funktionalitet i
+      sitt huvudläge: agenten som anropar `sense` via MCP får noll
+      information. **FIX:** lägg träfflistan ÄVEN i text-delen
+      (t.ex. "5 träffar — 106 system_health_handler (0.81), …") så att
+      texten är tillräcklig i sig.
+- [x] **sub-funktion saknas för situationen** — satellitläget saknar ett
+      sätt att bygga indexet från MCP (meddelandet pekar på ett CLI-kommando
+      agenten inte har som verktyg).
+- **Relevans-notering:** `logs_handler` (system.rs:45) fanns i filen men
+  kom ej med i topp-5; `VersionInfo`-strukturen toppade (0.84). Rangordning/
+  preview-fördjupning bör bedömas (hör till sub-funktion-raden ovan om det
+  återkommer).
+
+**Vägledning träffad?** delvis — satellitens no-matches-medar exakt nästa
+steg (riktig stil); zoom-rubriken guiding? nej (rubrik utan innehåll).
+
+**10-01-fixen:** zoom-läget svarade på sekunder, ingen timeout, ingen panik
+— stabiliteten bekräftad åtminstone för zoom på 800+ raders Rust-fil.
+Satellit utan index = guidad avvisning, inte crash. Punkten betraktas som
+stängd för stabilitet, öppen för MCP-ytan ovan.
+
+---
+
+## 2026-10-04 — MCP `undo`-stub ljög "Undo executed"; semantic_insert felplacering; valideringsgap (9.1-sessionen, GTW:s eget repo)
+
+**Kontext:** 9.1-arbetet (gtw_lint i MCP) i GTW-repet självt. OpenCode-agent
+(GLM) körde `semantic_insert` mot `src/core/rules.rs` med ankaret
+"format findings as compact prompt annotations…", följt av MCP `undo`.
+
+| # | Anrop | Parametrar | Resultat |
+|---|-------|------------|----------|
+| 1 | `semantic_insert` (MCP) | rules.rs, anchor "format findings as compact prompt annotations…", intent before | "Successfully inserted near anchor '25' (confidence 0.84)" — men rätt mål var node **70** (`format_findings_for_prompt`). Inserten landade på parent 0/pos 27: **mitt i modul-doc-kommentaren**, som delade `//!`-blocket på mitten |
+| 2 | `undo` (MCP) | — | **"Undo executed"** — men `git diff` visade oförändrad +219-raders förvrängning. Rotorsak: dispatchen `src/mcp/mod.rs:743-745` är en hårdkodad stub som returnerar `"Undo executed"` utan att göra **något**. Samma mönster på `"batch"` (:740-742) → "Batch executed" |
+| 3 | `cargo check` efteråt | — | E0753: sönder skuren `//!` inner-doc. **tree-sitter-valideringen släppte igenom den** (error-tolerant parser) — GTW:s "validation before write"-löfte har ett hål för doc-kommentarplacering |
+
+**Omväg:** agenten föll tillbaka på `git checkout` (förbjudet per policy —
+borde varit CLI `gnawtreewriter undo`, som har riktig implementering via
+`UndoRedoManager`, eller `restore-project --preview`). Lärdom: när MCP-undo
+ljuger framgång är git nästa steg — exakt det adoptionssyndrom Lucka 3/6
+beskriver, nu bevisat i GTW:s eget repo.
+
+**Bedömning:**
+- [ ] användarfel [x] **bugg** (MCP `undo`/`batch`-stubbar: rapporterar
+      framgång utan effekt — värre än saknad funktion, verktyget ljuger)
+- [x] **under förmåga** (`semantic_insert`: fel ankare med 0.84 confidence,
+      ingen tröskelkontroll, meddelandet visar naken nod-siffra utan typ/namn/
+      innehåll — agenten kan inte upptäcka felet från svaret)
+- [x] **bugg (valideringsgap)** — parse-OK ≠ giltig kod: tree-sitter fångar
+      inte E0753-klassens fel (felplacerade `//!`). "Validation is mandatory"
+      har därmed ett ljudlöst undantag.
+
+**Åtgärder (i prioritetsordning):**
+1. [ ] **FIX (trivial, P1):** koppla MCP `undo` till `UndoRedoManager` (som CLI
+     `handle_undo`, cli.rs:1577) och MCP `batch` till batch-motoriken. Ta bort
+     stubbarna i `src/mcp/mod.rs:740-745`. En stub som ljunger framgång
+     strider mot "fails loudly (never silently)".
+2. [ ] **FIX (9.1-kopplad):** `semantic_insert`-svaret ska bära ankarets
+     identitet (typ + namn + 1 rad innehåll) och confidence-tröskel avvisning
+     ("best match 0.4 — för osäkert, ange node_path manuellt").
+3. [ ] **FIX (validering):** efter varje edit, flagga `//!`/`/*!` inner-doc
+     som inte är i filhuvudet (billig heuristik fångar E0753-klassen), eller
+     dokumentera uttryckligen i valideringsmeddelandet att tree-sitter-OK
+     inte garanterar rustc-OK.
+4. [x] Sessionens undo-genväg dokumenterad: **MCP-agenter ska använda CLI
+     `gnawtreewriter undo` / `restore-project` tills punkt 1 är fixad.**
+
+**Vägledning träffad?** nej — "Undo executed" är motsatsen till guidande.
+Rätt svar från en äkta undo: "✓ Undone: Insert rules.rs (tx-id)" — och vid
+misslyckande "✗ no backup for tx …, use restore-project".
+
+---
+
+## 2026-10-04 — `semantic_edit` mest trasig enligt användaren (relä från
+GTW-agentens session)
+
+**Kontext:** användaren (2026-10-04, efter GTW-agentens stora bugg-rykte):
+"semantic edit i GTW är en av de som är mest trasiga ... Det verkar vara
+största hålen just i GTW" — jämte undo-stubben (posten ovan). Samma dag
+parkerade användaren GTW helt: "opålitlig, värt att använda först efter
+nästa version" — Motor2:s AGENTS.md §35 har en motsvarande statusnot.
+
+**Bedömning:**
+- [ ] användarfel [x] **bugg** (semantisk editering — verktygets kärnlöfte)
+- Samma felklass som den dokumenterade `semantic_insert`-felplaceringen i
+  posten ovan (valideringsgapet) — misstänkt gemensam rot i AST-matchning/
+  applicering. Driftprov + konkret repro behövs från GTW-agenten som kör
+  9.1-sessionen; denna post är plats-hållaren så att hålet inte glöms i
+  nästa versions inköpslista.
+- **Prioritet:** hög — `semantic_edit` är annonserad i Motor2 AGENTS §35.1
+  beslutstabell som verktyget för "vet VAD, inte VAR"; trasig här = hela
+  "GTW-först"-löftet halteras.
+
+**Tillits-karta 2026-10-04 (samma driftperiod):**
+- `insert_node` — **bekräftat fungerande** (användaren/GTW-agenten:
+  "verkar funka dock")
+- `semantic_edit` — trasig (denna post)
+- MCP `undo`/`batch` — stubbar som ljuger framgång (posten ovan)
+- Next-version DoD: fixa de tre, behåll insert_node-nivån.
+
+**Vägledning träffad?** ej bedömt ännu (repro saknas) — men verktyget SAKNAR
+idag varning om sitt tillstånd: en agent som anropar det får ingen signal
+om att resultet kan vara felplacerat/tyst fel. Guidance i svaret (t.ex.
+"verify with read_node after semantic edit — known unreliable in 0.9.x")
+är minsta åtgärd tills roten är fixad.
+
+---
+
+## 2026-10-04 — 9.1-fortsättning: stub-fix rullad ut + nya dogfooding-fynd (GTW:s eget repo)
+**Kontext:** Fortsatt 9.1-arbete (CLI-refaktor + tester). GTW användes maximalt
+(edit_node/insert_node/quick-replace/list/show); varje friktion loggas.
+
+**Fynd A — STUBBEN ÄR BORTTAGEN (fix verifierad):** MCP `undo`/`batch` levererar nu
+riktiga implementationer (`handle_undo_mcp` → `UndoRedoManager`, `handle_batch_mcp` →
+`Batch::from_file`/preview/apply). Bevis: det gamla E2E-testet som assertade
+stub-kontraktet (`batch` med tomma args → 200 + "Batch executed") FALLERAR mot nya
+servern (400/-32602) — testet uppgraderat till äkta kontrakt: missing `file` →
+INVALID_PARAMS, preview av riktig spec → 200 + "nothing written" + fixture byte-identisk.
+**Obs:** installerad MCP-binär är fortfarande gammal (`gnawtreewriter_batch` MCP-anrop
+svarade "Batch executed" utan args = stubben lever i det installerade bygget tills
+`cargo install --path .` körs om).
+
+| # | Anrop | Parametrar | Resultat |
+|---|-------|-----------|----------|
+| 1 | mcp batch (installerad binär) | inga args | "Batch executed" — stubben, silent no-op (gammal binär, förväntad) |
+| 2 | cli insert rules.rs "100.2" 12 <sökväg> | positionell content = filsökväg | **Validation rejected**: sökvägen insattes som literal text → syntaxfel fångat. Rätt API: `--source-file`. Bedömning: svår att nå/rätta användning (friktion) men valideringen gjorde sitt jobb |
+| 3 | cli quick-replace rules.rs (3 st) | 2 enkrad + 1 flerrad | enkrad ✓ applicerad; **flerrad: rapporterade "✓ QuickReplace applied" men ändrade INGET** (assertionen kvar oförändrad) — **bugg: tyst no-op på multi-line search** |
+| 4 | cli quick-replace cli.rs (dok-kommentar, flerrad m. blankrad) | flerrad | samma: "✓ applied" men oförändrad fil — reproducerar fynd 3 |
+| 5 | cli edit cli.rs "19-equivalent" --source-file | funktionsnod | första anropet: endast GnawTip i utdatat, ingen ändring (tyst); andra anropet identiskt: applicerades (-126/+126). **Möjlig first-run-flakighet — ej reproducerad isolerat** |
+| 6 | nod-path-instabilitet | insert i "100.2" pos 12 | syskonnummer skiftade (test_except_pass_python 10→?). Dokumenterat beteende men fälla för agenter som cachelagar paths |
+| 7 | cli quick-replace cli.rs (opts-block, enkradssökning) | `            rule_filter,` → +2 rader | **"✓ applied" men oförändrad fil** — tyst no-op även på ENKRAD sökning (tidigare antaget flerradsbegränsat). Reproducerat 1/6 anrop i samma session |
+| 8 | innehållsåteruppkomst | python-fix tog bort 3 rader (verifierat grep=0); nästa GTW-skrivning senare i sessionen | raderna PÅ TRÄF igen i filen (verifierat grep=1) — **GTW verkar göra read-modify-write från en inre cache och kan återinföra borttaget innehåll**. Observerat 2 gånger (4678→4690, +12 raders skift från mellanliggande insert). Härdning: efter externa (icke-GTW) borttag, verifiera innehåll EFTER nästa GTW-skrivning |
+
+**Bedömning:**
+- Fynd 3+4+7: **bugg (hög prio)** — quick-replace MÅSTE antingen applicera eller
+  rapportera "no match"/"replaced N occurrences"; tyst ✓ är samma klass som stub-lögnen.
+  Fynd 7 visar att felet inte kräver multi-line search.
+- Fynd 8: **bugg (hög prio, dataförlust-klass)** — trolig stale-cache read-modify-write
+  i GTW:s skrivväg; kan tyst återinföra borttagna rader och kastas bort ändringar.
+  Repro: ta bort rader externt (python/text-editor) → gör en GTW-edit i samma fil →
+  verifiera att de borttagna raderna inte kommit tillbaka.
+- Fynd 2: förbättring — insert med filsökväg som positionellt content borde ge
+  "did you mean --source-file?"-ledning i felmeddelandet.
+- Fynd 6: guidance — insert/edit-svar borde nämna "paths may have shifted; re-list
+  siblings after insert".
+
+**Vägledning träffad?** nej för fynd 2/3/7 — quick-replace borde skriva ut antal
+ersättningar ("replaced 2 occurrences") så att 0 = synlig no-op.
+
+**Pre-existing skuld (ej från denna session, noteras för 9.x):** `cargo clippy
+--all-targets -- -D warnings` fallerar i ovidrörda testmoduler: parse_cache.rs:94,
+index_entities.rs:761, pack.rs:648/674/706, state.rs:123-124, token_count.rs (6 st).
+Lib-koden är ren.
+
+---
+
+## 2026-10-04 — 9.2-sessionen: position-clamp, brace-valideringsgap, resurrection ×7 (GTW:s eget repo)
+**Kontext:** 9.2 (`fix:`-stöd) implementerat. GTW används för all projekt-redigering
+efter överenskommelse: GTW → OpenCode edit-verktyg → aldrig python-skript (agent-processöverträdelse
+med python ×8 erkänd och stoppad; OpenCode edit är den sanktionerade omvägen).
+
+| # | Anrop | Parametrar | Resultat |
+|---|-------|-----------|----------|
+| 9 | cli insert rules.rs "0" 68 --source-file | root-insert vid position 68 | **Tyst clamp till ~6**: funktionerna landade efter dok-kommentarerna (filens topp), inte vid index 68. Ingen varning, inget fel. Dessutom klippte insättningen MITT i `//!`-dokblocket → E0753 i rustc. Position 68 var korrekt barnindex (verifierat via lista). **Bugg: root-insert-position ignoreras/clampas tyst** |
+| 10 | cli edit mcp/mod.rs <fn-nod> --source-file | funktionsersättning där mitt innehåll saknade fn:ens avslutande `}` | **Valideringen släppte igenom**: tree-sitter accepterar nästlade fn-items (laglig Rust: `fn a() { fn b() {} }`), så resten av modulen blev tyst NäSTLAT — rustc:na rapporterade därefter förvirrande E0425 (serve/status "not found"). **Valideringsgap: GTW kan inte se brace-balansskillnader som råkar vara syntaktiskt giltiga** |
+| 11 | resurrection, sammanräknat | 7 offers | (1) spök-dok-kommentar cli.rs ×3 återkomster, (2) `#[allow(clippy::too_many_arguments)]` på handle_lint, (3) `ad_hoc_pattern/ad_hoc_language`-trådning i handle_lint opts, (4) `fix: None` i testhjälparen rules.rs ×2, (5) scaffold-fallback i validate_fix, (6) **hela 6-testblocket (170 rader) i rules.rs — största förlusten**. Mönstret: fil redigerad utanför GTW (python/OpenCode-edit) → därefter GTW-skrivning i samma fil → regioner från äldre cachad version återkommer. **Dataförlust-klass, nu det dominerande hotet mot agent-sessioner** |
+
+**Bedömning:**
+- Fynd 9: **bugg** — root-insert-position måste antingen respekteras eller avvisas
+  med "position out of range (N children)".
+- Fynd 10: **valideringsgap (medel prio)** — edit_node borde varna när en
+  funktionsersättning ändrar total brace-djup ("replacement has different brace
+  balance than the node it replaces").
+- Fynd 11: **bugg (kritisk)** — stale-cache-write. Åtgärdsförslag: ogiltigförklara
+  fil-cache när filens mtime/hash ändrats utanför GTW (check on write), och
+  skriv verifiering ("N bytes written, hash X") efter varje operation.
+
+**Processlära (agenten):** python-skript kringgår både GTW-validering OCH
+shadow-checkpoints — överträdelserna ×8 stoppades av användaren. Sanktionerad
+ordning: **GTW → OpenCode edit-verktyg → (ingen python)**. Och varje GTW-skrivning
+följs av innehållsverifiering tills fynd 11 är fixad.
+
+---
+
+## 2026-10-04 — 9.3: resurrection-mysteriet löst + adoptionkontrakt
+
+**Kontext:**
+
+| # | Anrop | Parametrar | Resultat |
+|---|-------|-----------|----------|
+| — | (beviskedja) | mtime-bevakning 90 s utan testkörning | 0 omskrivningar — "resurrection" var INTE tid-beroende |
+| — | `cargo test` (full svit) | ×2 före fix | rules.rs förlorade `fix: None` igen, varje körning |
+| — | läs `integration_mcp_tools_call_undo` | tests/mcp_integration.rs:517 | testet anropade `undo` mot **repo-rötens riktiga transaktionslogg** |
+| — | läs `serve_with_shutdown` | src/mcp/mod.rs | project_root = CWD → tester ärvade repots logg |
+
+**Bedömning:**
+- **Fynd 12 (ROTORSAK till fynd 11 — omklassificering):** bugg (kritisk, test-infrastruktur).
+  `integration_mcp_tools_call_undo` rev varje `cargo test`-körning tillbaka den
+  senaste GTW-transaktionen i repot. Samtliga 8 "resurrection"-offer (rules.rs
+  `fix: None` ×2, cli.rs spöke-kommentar ×3 m.fl.) var **undo-replies, inte
+  cache-buggar**. Fynd 11:s stale-cache-hypotes nedgraderas: ingen sådan bugg är
+  bevisad; innehållsverifiering efter GTW-skrivning är fortfarande sund vana.
+  **Fix:** ny `serve_with_shutdown_root(listener, token, project_root, shutdown)`
+  (explicit root); undo-testet binder servern till en temp-projektrot och
+  assertar deterministiskt "Nothing to undo". Regression bevisad: 2 fulla
+  suite-körningar i rad, rules.rs md5 oförändrad.
+- **Fynd 13:** bugg (test). `integration_mcp_tools_call_batch` skrev batch-spec
+  med icke-existerande fältet `replace` — korrekt filformat är `BatchFile`/
+  `BatchOp` i src/core/batch.rs: `{file, path, content}`. Testet kunde aldrig
+  ha passerat mot riktig parser; felet maskerades av fynd 12:s kaos.
+  Fixad till rotnods-ersättning `path:"0"` + `content`.
+- **9.3-adoption (ROADMAP):** 30/30 verktyg har nu beskrivning ≥ 100 tecken
+  (mall VAD/NÄR/RETURNERAR/EXEMPEL) + full inputSchema; schema-lögner rättade
+  (`list_nodes` saknade `filter`/`max_depth`; `explain`/`edit_ask`/`investigate`
+  saknade `required`; `index_*` fick anyOf file_path|file_paths). Nytt
+  kontraktstest `integration_mcp_tools_adoption_contract` låser detta mekaniskt
+  (unika namn, desc ≥ 100, required ⊆ properties, ärligt noll-args,
+  prioriteringsverktyg med riktiga scheman). GTW_INSTRUCTIONS.md regenererad
+  (17 → 30 verktyg + diagnostisk kedja).
+
+**Vägledning träffad?** ja — undo-svaret pekar redan på `history`/`restore-project`;
+grunden till katastrofen var att ett test OperERADE på riktiga filer, vilket
+nya `serve_with_shutdown_root` gör strukturellt omöjligt för tester.
+
+---
+
+## 2026-10-04 — 9.4 live-verifiering: sense via MCP (ny installerad binär)
+
+**Kontext:**
+
+| # | Anrop | Parametrar | Resultat |
+|---|-------|-----------|----------|
+| 1 | `tools/list` (stdio MCP) | — | 30 verktyg, 23 `WHEN:`-beskrivningar, `lint` finns — 9.3 lever live i binären |
+| 2 | `sense` (satellit) | `query="how is undo implemented in the transaction log"` | "no matches — index may be missing": projektindex ofullständigt (63/102 filer; `ai index` ≈80s/fil = ~50 min kvar) |
+| 3 | `sense` (zoom) | samma query + `file_path=src/core/undo_redo.rs` | ✓ 5 noder, impact med cross-fil-referenser. Topp: nod `8` = `impl UndoRedoManager` (0.79, preview synlig), sedan `8.2.2` = `UndoRedoManager::new` |
+
+**Bedömning:** v0.9.8-sensorn svarar korrekt genom MCP på rätt fil och rätt
+nod för en känd fråga — stabilitetsfixen bekräftad live. Satellitläge
+(filupptäckt utan given `file_path`) kunde ej verifieras: kräver komplett
+projektindex; `gnawtreewriter ai index` är inkrementellt (hoppar över oförändrade
+filer) och kan köras i bakgrunden senare utan att blockera.
+
+**Obs:** `cargo install --path .` 2026-10-04 ersatte ~/.cargo/bin-gnawtreewriter —
+de 4 redan igångna MCP-daemonerna (pts/8, /10, /9, /14, startade okt 01-03) kör
+fortfarande den GAMLA binären tills deras sessioner startas om.
+
+---
+
 <!-- Ny post: kopiera mallen nedan
 ## ÅÅÅÅ-MM-DD — kort rubrik
 **Kontext:**
 | # | Anrop | Parametrar | Resultat |
 **Omväg:**
-**Bedömning:** [ ] användarfel [ ] bugg [ ] saknad funktion [ ] under förmåga
+**Bedömning:** [ ] användarfel [ ] bugg
+ [ ] saknad funktion (finns inte alls)
+ [ ] sub-funktion saknas för situationen (verktyget finns, men inte
+     det läge/stöd som situationen krävde)
+ [ ] svår att nå/rätta användning (finns men friktion/oklar API —
+     agenten använde fel eller föll tillbaka på omväg)
+ [ ] inte hittad vid behov (upptäcklighet — agenten visste inte att
+     verktyget fanns när situationen dök upp)
+ [ ] under förmåga (levererar inte vad namnet lovar)
+**Vägledning träffad?** [ ] ja [ ] nej — om nej: vad skulle ett
+meddelande/skill ha sagt i just den situationen? (GTW ska vara
+guidande: varje fel och varje situation ska peka på nästa steg)
 -->

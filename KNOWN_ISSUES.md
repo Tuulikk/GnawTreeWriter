@@ -1,8 +1,12 @@
 # Known Issues and Limitations
 
-**Current as of GnawTreeWriter v0.2.1**
+**Current as of GnawTreeWriter v0.9.8** *(gått igenom och verifierad mot koden 2026-10-04)*
 
 This document tracks known issues, limitations, and workarounds based on real-world usage and AI agent testing feedback.
+
+> **Aktuella utvecklingsluckor** (vad som ska byggas/fixas härnäst) finns i
+> [ROADMAP.md](ROADMAP.md) **Phase 9: Agent Adoption & MCP Parity** (inplockad ur
+> `GAP-REPORT-2026-10-04.md`). Detta dokument täcker kända begränsningar i befintlig funktionalitet.
 
 ---
 
@@ -69,13 +73,13 @@ This document tracks known issues, limitations, and workarounds based on real-wo
 ## 📊 **Performance Issues**
 
 ### **Issue**: Large project analysis is slow
-**Status**: Expected for comprehensive AST parsing  
-**Symptom**: Projects with 1000+ files take significant time to analyze  
-**Workaround**: Use specific file patterns or directories instead of full project  
-**Mitigation**: Progress indicators planned for future versions  
+**Status**: ✅ Mitigated in v0.9.7 — file processing is parallelized (rayon): pack ~50% faster, explore ~59% faster, indexing 40–52% faster  
+**Symptom**: Very large projects (1000+ files) still take time on first full analysis  
+**Workaround**: Use `explore` / `analyze --format summary` for cheap overviews, or target specific files  
+**Future**: Progress indicators for long-running scans
 
 ### **Issue**: Memory usage on very large files
-**Status**: TreeSitter limitation  
+**Status**: TreeSitter limitation (still current)  
 **Symptom**: Files over 10MB may consume significant memory  
 **Workaround**: Consider splitting very large files  
 
@@ -90,9 +94,9 @@ This document tracks known issues, limitations, and workarounds based on real-wo
 **Future**: Document standard exit codes  
 
 ### **Issue**: No MCP integration yet
-**Status**: Planned for Phase 2  
-**Impact**: AI agents must use CLI instead of native tool calls  
-**Workaround**: Use shell commands with JSON parsing  
+**Status**: ✅ RESOLVED — MCP integration shipped in Phase 2 (stdio & HTTP transports, ~30 tools)  
+**Note**: Kvar som utvecklingslucka är MCP-*parity* — vissa CLI-funktioner (t.ex. `lint`) saknar
+MCP-post och vissa schemas är tomma. Se ROADMAP.md Phase 9.1/9.3.  
 
 ---
 
@@ -172,4 +176,4 @@ gnawtreewriter analyze file.py
 
 ---
 
-*This document is maintained based on real user feedback, particularly from AI agent testing. Last updated: 2025-12-27*
+*This document is maintained based on real user feedback, particularly from AI agent testing. Last reviewed against code: 2026-10-04 (v0.9.8)*

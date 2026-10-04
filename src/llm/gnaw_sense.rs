@@ -85,6 +85,9 @@ pub struct FileMatch {
     pub file_path: String,
     pub node_path: Option<String>,
     pub score: f32,
+    /// Chunk preview straight from the index (ROADMAP 9.4 nice-to-have):
+    /// score + preview in one response saves an extra read_node round-trip.
+    pub content_preview: String,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -193,6 +196,7 @@ impl GnawSenseBroker {
                         file_path: entry.file_path.clone(),
                         node_path: Some(entry.node_path.clone()),
                         score,
+                        content_preview: entry.content_preview.clone(),
                     })
                     .collect(),
             })

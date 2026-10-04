@@ -10,7 +10,7 @@ The roadmap is divided into two sections:
 
 ---
 
-## Current Status: v0.9.7 (Released 2026-08-25)
+## Current Status: v0.9.8 (Released 2026-10-01)
 
 ### ✅ Completed Since v0.8.5
 
@@ -88,6 +88,109 @@ src/core/
 
 ---
 
+## Phase 9: Agent Adoption & MCP Parity 🔄 IN PROGRESS — 🔥 CURRENT PRIORITY (9.1 ✅ + 9.2 ✅ 2026-10-04)
+**Target: v0.10 | Source: GAP-REPORT-2026-10-04.md (uppdaterad in i roadmap 2026-10-04)**
+
+*Diagnos: Motor2-agenter använder GTW nästan aldrig (diagnos/sökning/edit) trots "GTW först"-policyn,
+medan gnawdriver används dagligen. sex konkreta luckor, prioriterade i ordning nedan.
+Detaljerad bevisning: `GAP-REPORT-2026-10-04.md`.*
+
+### 9.1 — `gtw_lint` saknas i MCP-registret (högst prio) ✅ COMPLETE 2026-10-04
+- [x] Lägg `lint`-tool-post i `src/mcp/mod.rs`-registret + handler
+  (`paths: string[]`, `recursive: bool`, `rules_file`, `severity`, `rule_id`,
+  **+ ad-hoc `pattern`/`language`** så agenter kan göra ast-grep `-p`-sökning utan förhandsregel)
+- [x] Delad funktionskärna: `run_lint(paths, &LintOptions) -> LintResult` i `src/core/rules.rs`
+  som CLI (`handle_lint`) och MCP (`handle_lint_mcp`) båda anropar (crate, inte subprocess — MCP och CLI divergerar inte)
+- [x] Strukturerat svar: `findings: [{file, rule_id, severity, message, line, column, node_path, captures}]`
+  + `files_checked`/`truncated`/`file_errors` på tools/call-resultatet
+- [x] Tester: 6 enhetstester för `run_lint` (fixture, ad-hoc, recursive-krav, truncation, severity-filter,
+  oläsbar fil redovisas) + 2 MCP E2E (schema-kontrakt i tools/list; tools/call ad-hoc-sök på fixture, report-only-bevis)
+- [x] CLI-paritet: `lint --pattern "$X.unwrap()" --language rust` (ad-hoc-sökning även från CLI,
+  samma `run_lint`-kärna) — rökverifierad 2026-10-04 (text + json-format + builtin-regler)
+- Sidovinster samma session: **MCP `undo`/`batch`-stubbar ersatta med riktiga implementationer**
+  (`handle_undo_mcp` via `UndoRedoManager`, `handle_batch_mcp` via `Batch::from_file`/preview/apply)
+  + `tool_definitions()` extraherad ur `json!`-blobben så registret blivit nod-adresserbart.
+  Batch-E2E-testet uppgraderat från stub-kontrakt till äkta preview-kontrakt (missing `file` → 400/-32602).
+
+### 9.2 — `fix:`-stöd i regler (ast-grep-paritet) ✅ COMPLETE 2026-10-04
+- [x] `Rule.fix: Option<String>` i `src/core/rules.rs` (+ YAML-nyckel `fix:`; serde-skip när None)
+- [x] `rule add --fix "…"` — validerar att pattern kompilerar OCH fixen parse:ar som giltig kod
+  (`validate_fix`: `$NAME`→placeholder-identifierare, scaffold-fallback `fn probe() { … }`
+  för uttrycks-former som `?`-kedjor; ogiltig fix avvisas, aldrig sparad)
+- [x] `lint --fix` i `handle_lint`: default report-only; `--fix` bygger `fix_batch(findings, rules)`
+  → atomisk Batch (Edit-op per träff, nod-innehåll byts på plats så paths inte skiftar); `--fix --preview`
+  = diff utan skrivning. ALDRIG skriv utan explicit flagga. Samma för MCP: `lint`-tool fick `fix`/`preview`-args
+  (`fix_applied` i strukturerat svar), `add_rule` fick `fix`-arg
+- [x] Tester: 6 nya (expansion med multipla `$X`-träffar; obunden metavar = fel; validate accept/reject;
+  fix_batch-op + skip-räkning; dedup per nod; **E2E: run_lint → fix_batch → apply → verifierat innehåll**)
+  + rökprov: `--fix --preview` md5-oförändrad, `--fix` skriver, `undo --steps 2` återställer
+- Kärnfunktioner: `expand_fix`, `validate_fix`, `fix_batch` (src/core/rules.rs);
+  `LintResult.rules` bär effektiv regeluppsättning så anropare slipper läsa om regelfiler
+
+### 9.3 — MCP-schemas + beskrivningar som lär ut (adoption-luckan) ✅ KLAR 2026-10-04
+- [x] Fullt `inputSchema` (properties + required + exempel) på **alla 30** verktyg — inte bara
+  prioriteringssexen. Schema-lögner rättade mot dispatchen: `list_nodes` fick `filter`/`max_depth`,
+  `explain`/`edit_ask`/`investigate` fick `required`, `index_entities`/`index_relations` fick
+  `anyOf` (file_path | file_paths), `save_state` är ärligt noll-args (`properties:{}, required:[]`)
+- [x] Beskrivningsmall per tool: **VAD** + **NÄR** (jämförelse mot Read/Grep/Edit) + **RETURNERAR** + **EXEMPEL**
+- [x] Kontrakts-test `integration_mcp_tools_adoption_contract`: unika namn, beskrivning ≥ 100 tecken,
+  `inputSchema.type == object`, `required ⊆ properties` (schema ljuger inte), ärligt noll-args,
+  ≥ 30 verktyg, prioriteringsverktygen (`batch`, `edit_node`, `insert_node`, `search_nodes`, `sense`,
+  `semantic_edit`) med ≥ 1 property. Avvikelse från planen medveten: noll-args-verktyg tillåts tomma
+  properties (att hitta på en fejk-property vore värre)
+- [x] `GTW_INSTRUCTIONS.md` regenererad: 17 → 30 verktyg (förra försöket hade driftat) +
+  diagnostisk kedja `analyze`/`get_skeleton` → `sense`/`search_nodes` → `read_node` →
+  `edit_node`/`semantic_edit` → `gnaw-diff`/`undo`
+- [x] **Bisetapp — resurrection-mysteriet löst** (GTW_MCP_ISSUE_LOG.md fynd 12/13): "resurrection" ×8
+  var inga cache-buggar — `integration_mcp_tools_call_undo` revertade repo-rötens RIKTIGA
+  transaktionslogg vid varje `cargo test`. Ny `serve_with_shutdown_root` tvingar tester till
+  isolerad projektrot; regression bevisad med 2 gröna fullkörningar, rules.rs-md5 oförändrad.
+  Batch-testets spec hade fel fält (`replace` → `path`+`content`) sedan skapandet
+
+### 9.4 — Källcitat i LLM-svar (`investigate`/`get_semantic_report`) — steg 1-3 klara 2026-10-04
+- [x] `sources: [{file, node_path}]` på båda LLM-svaren: `get_semantic_report` mappar findings →
+  `{file, node_path}` (dedup); `investigate` mappar **evidence** (filerna svaret faktiskt
+  syntesiserades från, ärligare än alla kandidater) → `{file}`. Ren builder
+  `sources_from_evidence` + `Source` bor i `ai_manager.rs` (ogated) — pipeline är mamba-gated och
+  testerna skulle aldrig körts i default-gate annars. Handlers fäster `sources` på toppnivå via
+  rena payload-funktioner (`semantic_report_payload`, `investigate_payload` under mamba-gate)
+  så kontraktet testas utan modell
+- [x] Kontrakts-test: `integration_sources_semantic_report_payload` (fixture
+  `src/core/batch.rs`/nod `1.2`, dedup-verifiering) i default-gate +
+  `integration_sources_investigate_payload` i mamba-gate — båda anropar exakt de funktioner
+  handlerna anropar. 6 ytterligare enhetstester (builder + report.sources)
+- [x] `FileMatch.content_preview`: satellite-svar bär nu `preview` från `NodeEmbedding`
+  (sparar extra `read_node`-rundtur); kompileringsforcerad enda konstruktionsplats
+- [x] Bisurfad: `--features mamba` gick inte alls att kompilera (cli.rs:4889 saknade `fix`-fält
+  i Rule-init — 9.2-beroende bakom gate); fixad med fix-paritet (`fix` parsas ur YAML/JSON)
+- [x] Live-verifiering av v0.9.8:s stabilitetsfix (2026-10-04, loggad i `GTW_MCP_ISSUE_LOG.md`):
+  `cargo install --path .` + live `sense` via stdio-MCP med känd fråga → rätt fil
+  (`src/core/undo_redo.rs`) och rätt nod (topp `8` = `impl UndoRedoManager`, 0.79).
+  `tools/list` bekräftar dessutom 9.3 live (30 verktyg, 23 WHEN-beskrivningar).
+  Satellitläge (filupptäckt utan given file_path) kvarstår pga ofullständigt projektindex
+  (63/102, inkrementellt `ai index` kan köras senare i bakgrunden); 4 äldre MCP-daemoner
+  kör fortfarande före-install-binären tills deras sessioner startas om
+
+### 9.5 — Stäng öppna poster ur GTW_MCP_ISSUE_LOG.md
+- [x] MCP `undo`/`batch`-stubbar (hardkodat "Undo executed"/"Batch executed") — ersatta med riktiga
+  implementationer + E2E-tester 2026-10-04 (se 9.1-sidovinster)
+- [ ] `get_skeleton` tomt svar på stora filer: returnera fel eller begränsat skelett + `truncated: true` — tomt svar får aldrig vara tyst
+- [ ] Stäng 2026-09-30:s halvfärdiga triage-checklistor (roten åtgärdades i v0.9.8)
+- [ ] Lägg till lint-regel som flaggar `&X[..N]` byte-slices på strängar (kvar ur UTF-8-audit + rökprov på rule-flödet)
+- [ ] Utvärdera `status`/`doctor` som MCP-post (CLI har redan båda) — agenter ska kunna diagnosera "är GTW vid liv" i ett anrop
+
+### 9.6 — GTW ska vara mer guidande och redovisande
+- [x] Skill registrerad i opencode (`SKILL.md` symlinkad till `~/.config/opencode/skills/gnawtreewriter/`) — 2026-10-04
+- [ ] SKILL.md-innehåll: situations-tabell (vilket verktyg vid vilken situation), fallback-regeln (timeout → omväg + logg), fullständigt exempelanrop per verktyg
+- [ ] Alla `tool_error`-vägar i `mcp/mod.rs` får nästa-steg-guidance (mönstret finns i `sense`-satelliten: "no matches … build it with `ai index`") — inga råa felsträngar
+- [ ] AGENTS.md: "för agenter som ANVÄNDER GTW"-sektion (diagnoskedjan + noteringstaxonomin + eskalationsregeln)
+
+**Definition of done (per item):** `cargo build` + `cargo clippy -- -D warnings` rent; tester gröna inkl. nya
+(beteendetest — verifiera att datan flödar MCP-in → resultat ut); `GTW_INSTRUCTIONS.md` + `GTW_MCP_ISSUE_LOG.md` uppdaterade.
+Motor2-sidans §35-utrullning sköts separat — hör inte hit.
+
+---
+
 ## Phase 1: Reliability & Safety ✅ COMPLETE
 **Status: DONE**
 
@@ -146,21 +249,21 @@ src/llm/
 - [x] **Extract name — all languages**: Add patterns for `def `, `class `, `func `, `pub fn`, `async fn`, `impl`, `trait`, methods, etc. Currently only handles `fn ` and `struct `.
 - [x] **Better error when model not loaded**: `not(feature = "modernbert")` should return JSON-formatted error for agents.
 
-### Tier 2: Agent-Friendly (1–2 Days)
+### Tier 2: Agent-Friendly (1–2 Days) ✅ COMPLETE
 
-- [ ] **Auto-index without prompt**: `--auto-index` flag that indexes without interactive y/N. Current prompt blocks agents.
-- [ ] **Sense-insert with all intents**: Support `before`, `inside`, `replace` — not just `after`. Currently returns "Unsupported intent" for everything else.
-- [ ] **Fix propose_edit position logic**: `get_next_index()` uses `idx + 3 + 1` hack. Replace with proper AST sibling lookup via GnawTreeWriter.
+- [x] **Auto-index without prompt**: `--auto-index` flag that indexes without interactive y/N. Current prompt blocks agents. *(Verified in code 2026-10-04: `src/cli.rs` `auto_index: bool`)*
+- [x] **Sense-insert with all intents**: Support `before`, `inside`, `replace` — not just `after`. *(Verified in code 2026-10-04: `src/llm/gnaw_sense.rs` stödjer after/before/inside/replace)*
+- [x] **Fix propose_edit position logic**: `get_next_index()` used `idx + 3 + 1` hack. *(Verified in code 2026-10-04: nu `idx + 3` med dokumenterad positionskodning "insert after child at index idx")*
 
-### Tier 3: Performance (2–3 Days) — 🔥 CURRENT PRIORITY
+### Tier 3: Performance (2–3 Days) ✅ COMPLETE
 
-- [ ] **Model caching**: Load ModernBERT once into `Arc<Mutex<Option<ModernBertModel>>>`. Reuse across calls. Eliminates 2–3 sec per invocation. 10–20x speedup.
-- [ ] **JIT index cache**: Cache Zoom-mode embeddings per file+content-hash. Avoid re-embedding unchanged files.
-- [ ] **Incremental project indexing**: Only re-index changed files at `ai index`. Currently re-embeds everything (smart hash check exists but is per-file, not global).
+- [x] **Model caching**: Load models once and reuse across calls. *(Verified in code 2026-10-04: `OnceLock`-cache för ModernBERT + LFM2.5 i `src/llm/ai_manager.rs`, plus shared sense broker med per-request panic isolation sedan v0.9.8)*
+- [x] **JIT index cache**: Cache embeddings per file+content-hash. *(Verified in code 2026-10-04: `calculate_content_hash` i `semantic_index.rs` + `project_indexer.rs`)*
+- [ ] **Incremental project indexing**: Only re-index changed files at `ai index`. Per-file hash-check finns, men global inkrementell indexering saknas fortfarande.
 
 ### Tier 4: Intelligence (1–2 Weeks)
 
-- [ ] **Query expansion**: Expand vague queries ("fixa git-grejen") into multiple embedding searches for better recall.
+- [x] **Query expansion**: Expand vague queries into multiple embedding searches for better recall. *(Verified in code 2026-10-04: `investigate` gör query expansion → index search → ranking i `src/llm/pipeline.rs`)*
 - [ ] **Hierarchical context in embeddings**: Include parent node type/name when generating embeddings. A `login` function in `tests/` differs from one in `auth/`.
 - [ ] **Fix RelationalIndex integration**: `index_directory()` is only called inside `sense()` JIT, never during `ai index`. Call graph is never properly built at index time.
 - [ ] **Feedback loop**: Log failed searches (no results, low confidence) and adjust scoring. Spec calls this "AUTO-koppling".

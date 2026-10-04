@@ -90,6 +90,9 @@ rules:
     pattern: |
       except:
           pass
+    fix: |
+      except Exception:
+          pass
 
   # eval() of dynamic input is a code-injection risk
   - id: py_eval

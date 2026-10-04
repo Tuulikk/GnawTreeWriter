@@ -426,6 +426,18 @@ enum Commands {
         /// Only run a specific rule by id
         #[arg(long)]
         rule: Option<String>,
+        /// Ad-hoc ast-grep-style pattern search ($X placeholders); reports matches without needing a stored rule
+        #[arg(long)]
+        pattern: Option<String>,
+        /// Language for the ad-hoc pattern (required with --pattern)
+        #[arg(long)]
+        language: Option<String>,
+        /// Apply fixes from rules that carry a fix template (default: report-only)
+        #[arg(long)]
+        fix: bool,
+        /// With --fix: show the diff of planned fixes without writing
+        #[arg(long)]
+        preview: bool,
         /// Use the local LFM2.5 model to discover project-specific rules
         #[arg(long)]
         discover: bool,
@@ -656,6 +668,10 @@ enum RuleSubcommands {
         #[arg(long, default_value = "warning")]
         severity: String,
         /// Human-readable message for findings
+        #[arg(long)]
+        /// Optional rewrite template ($X binds from the pattern match); validated on save
+        #[arg(long)]
+        fix: Option<String>,
         #[arg(long)]
         message: Option<String>,
     },
@@ -1105,6 +1121,10 @@ impl Cli {
                 rules,
                 severity,
                 rule,
+                pattern,
+                language,
+                fix,
+                preview,
                 discover,
             } => {
                 Self::handle_lint(
@@ -1114,6 +1134,10 @@ impl Cli {
                     rules.as_deref(),
                     severity.as_deref(),
                     rule.as_deref(),
+                    pattern.as_deref(),
+                    language.as_deref(),
+                    fix,
+                    preview,
                     discover,
                 )?;
             }
@@ -1303,6 +1327,7 @@ impl Cli {
                     pattern,
                     severity,
                     message,
+                    fix,
                 } => {
                     Self::handle_rules_add(
                         &id,
@@ -1310,6 +1335,7 @@ impl Cli {
                         &pattern,
                         &severity,
                         message.as_deref(),
+                        fix.as_deref(),
                     )?;
                 }
                 RuleSubcommands::List => {
@@ -4593,6 +4619,7 @@ Use without --preview to apply the clone"
         None
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn handle_lint(
         paths: &[String],
         format: &str,
@@ -4600,6 +4627,10 @@ Use without --preview to apply the clone"
         rules_file: Option<&str>,
         severity_filter: Option<&str>,
         rule_filter: Option<&str>,
+        pattern: Option<&str>,
+        language: Option<&str>,
+        fix: bool,
+        preview: bool,
         discover: bool,
     ) -> Result<()> {
         // `lint --discover`: use the local model to propose project-specific
@@ -4607,128 +4638,88 @@ Use without --preview to apply the clone"
         if discover {
             return Self::handle_lint_discover(paths);
         }
-        // Load and compile rules: builtin + project rules file + --rules file.
-        let mut rules = Vec::new();
-        rules.extend(crate::core::rules::load_rules_yaml(include_str!(
-            "../rules/builtin.yaml"
-        ))?);
-        // Project rules (gnawtreewriter.rules.yaml) override builtin by id.
-        if let Ok(cwd) = std::env::current_dir() {
-            let project_rules = cwd.join("gnawtreewriter.rules.yaml");
-            if project_rules.exists() {
-                if let Ok(yaml) = std::fs::read_to_string(&project_rules) {
-                    rules.extend(crate::core::rules::load_rules_yaml(&yaml)?);
-                }
-            }
-        }
-        if let Some(rf) = rules_file {
-            let yaml = std::fs::read_to_string(rf)
-                .map_err(|e| anyhow::anyhow!("failed to read rules file {}: {}", rf, e))?;
-            rules.extend(crate::core::rules::load_rules_yaml(&yaml)?);
-        }
+        // Shared core with the MCP `lint` tool — CLI and MCP must not diverge.
+        let opts = crate::core::rules::LintOptions {
+            recursive,
+            rules_file,
+            severity_filter,
+            rule_filter,
+            ad_hoc_pattern: pattern,
+            ad_hoc_language: language,
+            ..Default::default()
+        };
+        let result = crate::core::rules::run_lint(paths, &opts)?;
 
-        // Compile all rules (fail loudly on invalid ones).
-        let mut compiled = Vec::new();
-        let mut skipped = 0usize;
-        for rule in &rules {
-            if let Some(sf) = severity_filter {
-                let min = crate::core::rules::Severity::parse(sf);
-                if Self::severity_rank(rule.severity) < Self::severity_rank(min) {
-                    continue;
-                }
-            }
-            if let Some(rf) = rule_filter {
-                if rule.id != rf {
-                    continue;
-                }
-            }
-            match crate::core::rules::compile_rule(rule) {
-                Ok(c) => compiled.push(c),
-                Err(e) => {
-                    eprintln!("⚠️  skipping rule '{}': {}", rule.id, e);
-                    skipped += 1;
-                }
-            }
-        }
-
-        let mut all_files = Vec::new();
-
-        for path in paths {
-            let path_buf = std::path::PathBuf::from(path);
-            if path_buf.is_dir() {
-                if recursive {
-                    all_files.extend(Self::find_supported_files(&path_buf)?);
-                } else {
-                    return Err(anyhow::anyhow!(
-                        "Directory '{}' requires --recursive flag for safety.
-
-To lint this directory: gnawtreewriter lint {} --recursive
-To lint specific files: gnawtreewriter lint {}/*.ext",
-                        path,
-                        path,
-                        path
-                    ));
-                }
+        // `--fix` is never implicit: without the flag this whole block is
+        // skipped and the run stays report-only.
+        if fix {
+            let (batch, no_fix) = crate::core::rules::fix_batch(&result.findings, &result.rules)?;
+            if batch.operations.is_empty() {
+                println!(
+                    "ℹ️  {} finding(s), none carry a fix template — nothing to apply.",
+                    result.findings.len()
+                );
+            } else if preview {
+                let text = batch.preview_text()?;
+                println!(
+                    "── Fix preview ({} operation(s), nothing written) ──",
+                    batch.operations.len()
+                );
+                println!("{}", text);
             } else {
-                all_files.push(path.clone());
+                batch.apply()?;
+                println!(
+                    "✅ Applied {} fix(es) atomically (undo with `gnawtreewriter undo --steps {}`).",
+                    batch.operations.len(),
+                    batch.operations.len()
+                );
+            }
+            if no_fix > 0 {
+                eprintln!(
+                    "ℹ️  {} finding(s) skipped: their rule has no fix template.",
+                    no_fix
+                );
             }
         }
 
-        if all_files.is_empty() {
-            println!("No supported files found to lint.");
-            return Ok(());
+        for w in &result.rule_warnings {
+            eprintln!("⚠️  {}", w);
+        }
+        if result.skipped_rules > 0 {
+            eprintln!(
+                "⚠️  {} rule(s) skipped due to errors.",
+                result.skipped_rules
+            );
         }
 
-        let mut issues = Vec::new();
-        let mut total_files = 0;
-
-        for file_path in &all_files {
-            total_files += 1;
-            match GnawTreeWriter::new(file_path) {
-                Ok(writer) => {
-                    let tree = writer.analyze();
-                    // Determine the file's language for rule matching.
-                    let lang = std::path::Path::new(file_path)
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .unwrap_or("")
-                        .to_lowercase();
-                    for rule in &compiled {
-                        // Only run rules whose language matches the file.
-                        if !crate::core::rules::language_matches(&rule.rule.language, &lang) {
-                            continue;
-                        }
-                        for f in crate::core::rules::run_rule(rule, tree, file_path) {
-                            issues.push(format!(
-                                "{}:{}:{} {} {}",
-                                f.file,
-                                f.line,
-                                f.column,
-                                match f.severity {
-                                    crate::core::rules::Severity::Error => "error",
-                                    crate::core::rules::Severity::Warning => "warning",
-                                    crate::core::rules::Severity::Info => "info",
-                                },
-                                f.message
-                            ));
-                        }
-                    }
-                }
-                Err(e) => {
-                    issues.push(format!("{}:1:1 error {}", file_path, e));
-                }
-            }
-        }
-
-        if skipped > 0 {
-            eprintln!("⚠️  {} rule(s) skipped due to errors.", skipped);
-        }
+        // CLI rendering: findings as `file:line:col severity message` lines.
+        let issues: Vec<String> = result
+            .findings
+            .iter()
+            .map(|f| {
+                format!(
+                    "{}:{}:{} {} {}",
+                    f.file,
+                    f.line,
+                    f.column,
+                    match f.severity {
+                        crate::core::rules::Severity::Error => "error",
+                        crate::core::rules::Severity::Warning => "warning",
+                        crate::core::rules::Severity::Info => "info",
+                    },
+                    f.message
+                )
+            })
+            .chain(result.file_errors.iter().map(|e| format!("error {}", e)))
+            .collect();
+        let total_files = result.files_checked;
 
         match format {
             "json" => {
                 let result = serde_json::json!({
                     "files_checked": total_files,
                     "issues_found": issues.len(),
+                    "truncated": result.truncated,
                     "issues": issues
                 });
                 println!("{}", serde_json::to_string_pretty(&result)?);
@@ -4738,9 +4729,10 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
                     println!("✅ No issues found in {} files", total_files);
                 } else {
                     println!(
-                        "⚠️  Found {} issues in {} files:",
+                        "⚠️  Found {} issues in {} files{}:",
                         issues.len(),
-                        total_files
+                        total_files,
+                        if result.truncated { " (truncated)" } else { "" }
                     );
                     for issue in issues {
                         println!("{}", issue);
@@ -4751,15 +4743,6 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
         Ok(())
     }
 
-    /// Numeric rank for severity filtering (error > warning > info).
-    fn severity_rank(s: crate::core::rules::Severity) -> u8 {
-        match s {
-            crate::core::rules::Severity::Error => 3,
-            crate::core::rules::Severity::Warning => 2,
-            crate::core::rules::Severity::Info => 1,
-        }
-    }
-
     /// `rules add`: validate a rule (pattern must compile) and append it to
     /// gnawtreewriter.rules.yaml. The agent-facing way to write rules.
     fn handle_rules_add(
@@ -4768,6 +4751,7 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
         pattern: &str,
         severity: &str,
         message: Option<&str>,
+        fix: Option<&str>,
     ) -> Result<()> {
         let rule = crate::core::rules::Rule {
             id: id.to_string(),
@@ -4777,18 +4761,29 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
                 .unwrap_or(&format!("Rule {} matched", id))
                 .to_string(),
             pattern: pattern.to_string(),
+            fix: fix.map(|f| f.to_string()),
         };
 
-        // Validate: the pattern must compile for the target language.
+        // Validate: the pattern must compile for the target language...
         crate::core::rules::compile_rule(&rule)
             .map_err(|e| anyhow::anyhow!("rule rejected: {}", e))?;
 
+        // ...and if the rule carries a fix, the fix template must parse as
+        // valid code too — a broken rewrite never reaches the rules file.
+        if let Some(fix_template) = fix {
+            crate::core::rules::validate_fix(language, fix_template)
+                .map_err(|e| anyhow::anyhow!("fix rejected: {}. Tip: $NAME binds from the pattern match; check that every $NAME in the fix exists in the pattern", e))?;
+        }
+
         crate::core::rules::append_project_rule(&rule)?;
         println!(
-            "✅ Rule '{}' added to {}",
+            "✅ Rule {} added to {}",
             id,
             crate::core::rules::project_rules_path().display()
         );
+        if fix.is_some() {
+            println!("   Fix template active: apply with `lint --fix` (preview first with `lint --fix --preview`).");
+        }
         println!("   It is now active for `lint` and the edit guardian.");
         Ok(())
     }
@@ -4886,6 +4881,7 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
                 .get("severity")
                 .and_then(|v| v.as_str())
                 .unwrap_or("warning");
+            let fix = p.get("fix").and_then(|v| v.as_str()).map(|s| s.to_string());
 
             if id.is_empty() || language.is_empty() || pattern.is_empty() {
                 rejected += 1;
@@ -4897,6 +4893,7 @@ To lint specific files: gnawtreewriter lint {}/*.ext",
                 severity: crate::core::rules::Severity::parse(severity),
                 message,
                 pattern,
+                fix,
             };
             // Validate: compiles AND matches at least one linted file.
             match crate::core::rules::compile_rule(&rule) {

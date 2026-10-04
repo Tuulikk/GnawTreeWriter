@@ -43,7 +43,7 @@ pub mod transaction_log;
 pub mod undo_redo;
 pub mod visualizer;
 
-pub use batch::{Batch, BatchEdit};
+pub use batch::{Batch, BatchEdit, BatchOp};
 pub use gnaw_refactor::{
     format_refactor_text, refactor, Change, RefactorKind, RefactorResult, RefactorSummary,
 };
