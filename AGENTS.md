@@ -52,6 +52,30 @@ Building the cuda binary (no host CUDA toolkit needed — podman + NVIDIA
 driver is enough): `scripts/build-gpu.sh`. Without that build the flag
 harmlessly resolves to CPU with an explanatory log line.
 
+### För agenter som ANVÄNDAR GTW (icke-repotsspecifikt)
+
+**Diagnostisk kedja** (använd i den här ordningen — gissna aldrig radnummer):
+
+1. `analyze`/`get_skeleton` → filens struktur och nod-sökvägar
+2. `sense`/`search_nodes` → hitta exakt nod ("var är X?" → sense; exakt text → search_nodes)
+3. `read_node` → verifiera innehållet du tänker ändra
+4. `preview_edit` → diffen, skriver ingenting
+5. `edit_node`/`semantic_edit`/`insert_node` → skriv (syntax valideras FÖRE skrivning)
+6. Verifiera (`cargo check`/test) → vid fel: `undo` (transaktionslogg), aldrig `git checkout`
+
+**Noteringstaxonomi** (något strular → logga i `GTW_MCP_ISSUE_LOG.md`, inte bara
+åsidosätt): ange verktyg + exakta parametrar + vad som svarade + vad du använde
+i stället. Avbocka sedan en av: *användarfel / bugg / saknad funktion /
+sub-funktion saknas / svår att nå / inte hittad vid behov / under förmåga*.
+Varje stängd post i den loggen motsvarar en riktig fix (se hela listan — stubbar,
+tysta tomma svar och felaktiga "applied"-rapporter kom alla därifrån).
+
+**Eskalationsregel:** ett timeout/fel → EN omväg (grep/Read/CLI), gå vidare med
+uppgiften, logga sedan — aldrig upprepa samma anrop blint, aldrig tysta
+feladrättelser (t.ex. `git checkout` av GTW-edits). Misstänker du en
+"framgång" utan byte? Verifiera bytes (`git diff` / läs om noden) och logga —
+GTW:s fel ska vara högljudda, inte tysta (fynd #14).
+
 ### Why this matters
 GnawTreeWriter validates syntax **before** writing and targets the smallest
 possible node. Text-replace can silently corrupt syntax on multi-line edits and

@@ -1131,7 +1131,7 @@ pub mod mcp_server {
                 }
                 json!({"content": [{ "type": "text", "text": format!("Analyzed {} ({} tokens)", file_path, tokens)}], "data": tree_json})
             }
-            Err(e) => tool_error(format!("IO error: {}", e)),
+            Err(e) => tool_error(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e)),
         }
     }
 
@@ -1200,7 +1200,7 @@ pub mod mcp_server {
                 }
                 tool_success(msg, Some(json!({"nodes": nodes})))
             }
-            Err(e) => tool_error(format!("IO error: {}", e)),
+            Err(e) => tool_error(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e)),
         }
     }
 
@@ -1313,7 +1313,7 @@ or list_nodes for a flat index of this file.",
                     "ratio": result.ratio
                 })),
             ),
-            Err(e) => tool_error(format!("Compression failed: {}", e)),
+            Err(e) => tool_error(format!("Compression failed: {} — the file may not be parseable; run analyze on it to see why", e)),
         }
     }
 
@@ -1327,7 +1327,7 @@ or list_nodes for a flat index of this file.",
     ) -> Value {
         let root = std::path::Path::new(path);
         if !root.exists() {
-            return tool_error(format!("Path does not exist: {}", path));
+            return tool_error(format!("Path does not exist: {} — paths resolve from the project root; verify the location with the explore tool first", path));
         }
 
         let include_exts: Vec<String> = include
@@ -1364,7 +1364,10 @@ or list_nodes for a flat index of this file.",
                     "files": result.files
                 })),
             ),
-            Err(e) => tool_error(format!("Pack failed: {}", e)),
+            Err(e) => tool_error(format!(
+                "Pack failed: {} — check the path and the include/ignore patterns",
+                e
+            )),
         }
     }
 
@@ -1377,7 +1380,7 @@ or list_nodes for a flat index of this file.",
     ) -> Value {
         let root = std::path::Path::new(path);
         if !root.exists() {
-            return tool_error(format!("Path does not exist: {}", path));
+            return tool_error(format!("Path does not exist: {} — paths resolve from the project root; verify the location with the explore tool first", path));
         }
 
         let strategy = crate::core::curator::CurationStrategy::parse(strategy);
@@ -1396,7 +1399,10 @@ or list_nodes for a flat index of this file.",
                     "summary": result.summary
                 })),
             ),
-            Err(e) => tool_error(format!("Curation failed: {}", e)),
+            Err(e) => tool_error(format!(
+                "Curation failed: {} — check the path; the task description drives file selection",
+                e
+            )),
         }
     }
 
@@ -1423,21 +1429,21 @@ or list_nodes for a flat index of this file.",
         {
             let mgr = match crate::llm::ai_manager::AiManager::new(&state.project_root) {
                 Ok(m) => m,
-                Err(e) => return tool_error(e.to_string()),
+                Err(e) => return tool_error(format!("AiManager init failed: {} — run `gnawtreewriter ai setup` to download models (ai status shows what is installed), then retry", e)),
             };
             match mgr.generate_semantic_report(file_path).await {
                 Ok(report) => tool_success(
                     "Semantic report generated".into(),
                     Some(semantic_report_payload(&report)),
                 ),
-                Err(e) => tool_error(e.to_string()),
+                Err(e) => tool_error(format!("Semantic report failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to read_node + your own review and log it in GTW_MCP_ISSUE_LOG.md", e)),
             }
         }
         #[cfg(not(feature = "modernbert"))]
         {
             let _ = state;
             let _ = file_path;
-            tool_error("ModernBERT feature not enabled.".into())
+            tool_error("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into())
         }
     }
 
@@ -1451,12 +1457,12 @@ or list_nodes for a flat index of this file.",
         {
             let _mgr = match crate::llm::ai_manager::AiManager::new(&state.project_root) {
                 Ok(m) => m,
-                Err(e) => return tool_error(e.to_string()),
+                Err(e) => return tool_error(format!("AiManager init failed: {} — run `gnawtreewriter ai setup` to download models (ai status shows what is installed), then retry", e)),
             };
 
             let broker = match crate::llm::GnawSenseBroker::new(&state.project_root) {
                 Ok(b) => b,
-                Err(e) => return tool_error(e.to_string()),
+                Err(e) => return tool_error(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e)),
             };
 
             match broker.sense(query, file_path).await {
@@ -1501,7 +1507,7 @@ or list_nodes for a flat index of this file.",
                         ),
                     )
                 }
-                Err(e) => tool_error(format!("Semantic search failed: {}", e)),
+                Err(e) => tool_error(format!("Semantic search failed: {} — check the local model with `gnawtreewriter ai status`; on repeat, fall back to search_nodes/grep and log the failure in GTW_MCP_ISSUE_LOG.md", e)),
             }
         }
         #[cfg(not(feature = "modernbert"))]
@@ -1802,7 +1808,7 @@ or list_nodes for a flat index of this file.",
                     "last_analyzed": state.last_analyzed,
                 })),
             ),
-            Err(e) => tool_error(format!("Failed to save state: {}", e)),
+            Err(e) => tool_error(format!("Failed to save state: {} — check write permission on .gnawtreewriter_state.json in the project root", e)),
         }
     }
 
@@ -1824,7 +1830,10 @@ or list_nodes for a flat index of this file.",
                         .map(|l| format!("{:?}", l)).collect::<Vec<_>>(),
                 })),
             ),
-            Err(e) => tool_error(format!("Explore failed: {}", e)),
+            Err(e) => tool_error(format!(
+                "Explore failed: {} — check the target path (defaults to the project root)",
+                e
+            )),
         }
     }
 
@@ -1843,9 +1852,9 @@ or list_nodes for a flat index of this file.",
                     "Explained node".to_string(),
                     Some(json!({ "explanation": explanation, "tokens": budget })),
                 ),
-                Err(e) => tool_error(format!("Explain failed: {}", e)),
+                Err(e) => tool_error(format!("Explain failed: {} — local model problem? `gnawtreewriter ai status`; fallback: read_node + read the code yourself", e)),
             },
-            Err(e) => tool_error(format!("AiManager init failed: {}", e)),
+            Err(e) => tool_error(format!("AiManager init failed: {} — download the local models first with `gnawtreewriter ai setup`, then retry (ai status shows what is installed)", e)),
         }
     }
     #[cfg(not(feature = "mamba"))]
@@ -1892,12 +1901,12 @@ or list_nodes for a flat index of this file.",
                                 }
                             }
                         }
-                        Err(e) => tool_error(format!("Failed to open {}: {}", file_path, e)),
+                        Err(e) => tool_error(format!("Failed to open {}: {} — verify file_path exists (explore/search_nodes find it)", file_path, e)),
                     }
                 }
-                Err(e) => tool_error(format!("Edit proposal failed: {}", e)),
+                Err(e) => tool_error(format!("Edit proposal failed: {} — retry with a more concrete request, or go straight to edit_node once you know the node path", e)),
             },
-            Err(e) => tool_error(format!("AiManager init failed: {}", e)),
+            Err(e) => tool_error(format!("AiManager init failed: {} — download the local models first with `gnawtreewriter ai setup`, then retry (ai status shows what is installed)", e)),
         }
     }
     #[cfg(not(feature = "mamba"))]
@@ -1922,9 +1931,9 @@ or list_nodes for a flat index of this file.",
                     "Summarized directory".to_string(),
                     Some(json!({ "result": result, "tokens": budget })),
                 ),
-                Err(e) => tool_error(format!("Summarize failed: {}", e)),
+                Err(e) => tool_error(format!("Summarize failed: {} — local model problem? `gnawtreewriter ai status`; fallback: get_skeleton for structure", e)),
             },
-            Err(e) => tool_error(format!("AiManager init failed: {}", e)),
+            Err(e) => tool_error(format!("AiManager init failed: {} — download the local models first with `gnawtreewriter ai setup`, then retry (ai status shows what is installed)", e)),
         }
     }
     #[cfg(not(feature = "mamba"))]
@@ -1948,9 +1957,9 @@ or list_nodes for a flat index of this file.",
                     "Investigation complete".to_string(),
                     Some(investigate_payload(&result, &budget)),
                 ),
-                Err(e) => tool_error(format!("Investigate failed: {}", e)),
+                Err(e) => tool_error(format!("Investigate failed: {} — local model problem? `gnawtreewriter ai status`; fallback: search_nodes + read_node", e)),
             },
-            Err(e) => tool_error(format!("AiManager init failed: {}", e)),
+            Err(e) => tool_error(format!("AiManager init failed: {} — download the local models first with `gnawtreewriter ai setup`, then retry (ai status shows what is installed)", e)),
         }
     }
     #[cfg(not(feature = "mamba"))]
@@ -2199,7 +2208,7 @@ or list_nodes for a flat index of this file.",
         };
         // Validate the pattern compiles for the language.
         if let Err(e) = crate::core::rules::compile_rule(&rule) {
-            return tool_error(format!("Rule rejected: {}", e));
+            return tool_error(format!("Rule rejected: {} — the pattern must parse as valid {} code with $X placeholders; fix the pattern and retry (rules add validates before writing)", e, language));
         }
         // A fix template must parse as valid code — never store a rewrite
         // that would produce broken syntax.
@@ -2228,7 +2237,7 @@ or list_nodes for a flat index of this file.",
                     "active": true,
                 })),
             ),
-            Err(e) => tool_error(format!("Failed to add rule: {}", e)),
+            Err(e) => tool_error(format!("Failed to add rule: {} — nothing was written; fix the reported issue and retry (rules add validates first)", e)),
         }
     }
 
@@ -2256,7 +2265,7 @@ or list_nodes for a flat index of this file.",
                 }
                 tool_success(msg, Some(json!({"matches": m})))
             }
-            Err(e) => tool_error(format!("IO error: {}", e)),
+            Err(e) => tool_error(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e)),
         }
     }
 
@@ -2266,7 +2275,7 @@ or list_nodes for a flat index of this file.",
             use crate::llm::SenseResponse;
             let broker = match state.sense_broker().await {
                 Ok(b) => b,
-                Err(e) => return tool_error(e.to_string()),
+                Err(e) => return tool_error(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e)),
             };
 
             match broker.sense(query, file_path).await {
@@ -2333,13 +2342,13 @@ or list_nodes for a flat index of this file.",
                         }
                     }
                 },
-                Err(e) => tool_error(e.to_string()),
+                Err(e) => tool_error(format!("sense failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md", e)),
             }
         }
         #[cfg(not(feature = "modernbert"))]
         {
             let _ = (state, query, file_path);
-            tool_error("ModernBERT feature not enabled.".into())
+            tool_error("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into())
         }
     }
 
@@ -2355,14 +2364,14 @@ or list_nodes for a flat index of this file.",
             use crate::llm::GnawSenseBroker;
             let broker = match GnawSenseBroker::new(&state.project_root) {
                 Ok(b) => b,
-                Err(e) => return tool_error(e.to_string()),
+                Err(e) => return tool_error(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e)),
             };
 
             match broker.propose_edit(anchor_query, file_path, intent).await {
                 Ok(proposal) => {
                     let mut writer = match GnawTreeWriter::new(file_path) {
                         Ok(w) => w,
-                        Err(e) => return tool_error(e.to_string()),
+                        Err(e) => return tool_error(format!("Could not open {} for the proposed insert: {} — verify file_path exists (explore/search_nodes)", file_path, e)),
                     };
                     let op = EditOperation::Insert {
                         parent_path: proposal.parent_path,
@@ -2381,16 +2390,16 @@ or list_nodes for a flat index of this file.",
                                 pulse,
                             )
                         }
-                        Err(e) => tool_error(e.to_string()),
+                        Err(e) => tool_error(format!("sense failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md", e)),
                     }
                 }
-                Err(e) => tool_error(e.to_string()),
+                Err(e) => tool_error(format!("sense failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md", e)),
             }
         }
         #[cfg(not(feature = "modernbert"))]
         {
             let _ = (state, file_path, anchor_query, content, intent);
-            tool_error("ModernBERT feature not enabled.".into())
+            tool_error("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into())
         }
     }
 
@@ -2405,7 +2414,7 @@ or list_nodes for a flat index of this file.",
             use crate::llm::{GnawSenseBroker, SenseResponse};
             let broker = match GnawSenseBroker::new(&state.project_root) {
                 Ok(b) => b,
-                Err(e) => return tool_error(e.to_string()),
+                Err(e) => return tool_error(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e)),
             };
 
             match broker.sense(query, Some(file_path)).await {
@@ -2414,16 +2423,16 @@ or list_nodes for a flat index of this file.",
                     handle_edit_node_internal(state, file_path, &best_node.path, content)
                 }
                 Ok(_) => tool_error(format!(
-                    "Could not find a semantic match for '{}' in {}",
+                    "Could not find a semantic match for '{}' in {} — try a different anchor phrase, or insert_node with a parent_path from list_nodes",
                     query, file_path
                 )),
-                Err(e) => tool_error(e.to_string()),
+                Err(e) => tool_error(format!("sense failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md", e)),
             }
         }
         #[cfg(not(feature = "modernbert"))]
         {
             let _ = (state, file_path, query, content);
-            tool_error("ModernBERT feature not enabled.".into())
+            tool_error("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into())
         }
     }
 
@@ -2431,8 +2440,8 @@ or list_nodes for a flat index of this file.",
         match GnawTreeWriter::new(file_path) {
             Ok(w) => w
                 .show_node(node_path)
-                .map_or_else(|e| tool_error(e.to_string()), |c| tool_success(c, None)),
-            Err(e) => tool_error(format!("IO error: {}", e)), // Corrected: escaped curly brace
+                .map_or_else(|e| tool_error(format!("Node read failed: {} — node_path may be stale; run analyze or list_nodes for current paths and retry", e)), |c| tool_success(c, None)),
+            Err(e) => tool_error(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e)), // Corrected: escaped curly brace
         }
     }
 
@@ -2466,10 +2475,10 @@ or list_nodes for a flat index of this file.",
                             Some(json!({"diff": diff})),
                         )
                     }
-                    Err(e) => tool_error(e.to_string()),
+                    Err(e) => tool_error(format!("sense failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md", e)),
                 }
             }
-            Err(e) => tool_error(format!("IO error: {}", e)),
+            Err(e) => tool_error(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e)),
         }
     }
 
@@ -2487,7 +2496,7 @@ or list_nodes for a flat index of this file.",
                     content: content.to_string(),
                 };
                 if let Err(e) = w.edit(op, false) {
-                    return tool_error(e.to_string());
+                    return tool_error(format!("Edit rejected: {} — the validation details are in the message; list_nodes for current paths, preview_edit first, then retry", e));
                 }
 
                 let new_source_loaded = std::fs::read_to_string(file_path).unwrap_or_default();
@@ -2499,7 +2508,7 @@ or list_nodes for a flat index of this file.",
                     pulse,
                 )
             }
-            Err(e) => tool_error(format!("IO error: {}", e)),
+            Err(e) => tool_error(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e)),
         }
     }
 
@@ -2519,7 +2528,7 @@ or list_nodes for a flat index of this file.",
                     content: content.to_string(),
                 };
                 if let Err(e) = w.edit(op, false) {
-                    return tool_error(e.to_string());
+                    return tool_error(format!("Edit rejected: {} — the validation details are in the message; list_nodes for current paths, preview_edit first, then retry", e));
                 }
 
                 let new_source_loaded = std::fs::read_to_string(file_path).unwrap_or_default();
@@ -2531,7 +2540,7 @@ or list_nodes for a flat index of this file.",
                     pulse,
                 )
             }
-            Err(e) => tool_error(format!("IO error: {}", e)), // Corrected: escaped curly brace
+            Err(e) => tool_error(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e)), // Corrected: escaped curly brace
         }
     }
 
@@ -2549,7 +2558,7 @@ or list_nodes for a flat index of this file.",
                     node_path: source_path.to_string(),
                 };
                 if let Err(e) = src_w.edit(delete_op, false) {
-                    return tool_error(e.to_string());
+                    return tool_error(format!("Source edit rejected: {} — source_path must be an existing node (search_nodes finds it); retry with a fresh path", e));
                 }
 
                 let insert_op = EditOperation::Insert {
@@ -2561,7 +2570,7 @@ or list_nodes for a flat index of this file.",
                     Ok(mut tgt_w) => {
                         let old_target = tgt_w.get_source().to_string();
                         if let Err(e) = tgt_w.edit(insert_op, false) {
-                            return tool_error(e.to_string());
+                            return tool_error(format!("Target edit rejected: {} — target_path must exist as a parent (list_nodes shows valid paths); retry with a fresh path", e));
                         }
                         let new_target = std::fs::read_to_string(target_file).unwrap_or_default();
                         let diff = generate_diff_string(&old_target, &new_target);
@@ -2575,10 +2584,10 @@ or list_nodes for a flat index of this file.",
                             pulse,
                         )
                     }
-                    Err(e) => tool_error(format!("IO error on target: {}", e)),
+                    Err(e) => tool_error(format!("IO error on target: {} — target_path must exist as a parent node (list_nodes shows valid paths)", e)),
                 }
             }
-            Err(e) => tool_error(format!("IO error on source: {}", e)),
+            Err(e) => tool_error(format!("IO error on source: {} — source_path must name an existing node (search_nodes finds it)", e)),
         }
     }
 

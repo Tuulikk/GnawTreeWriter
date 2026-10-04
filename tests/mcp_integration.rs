@@ -1184,3 +1184,55 @@ async fn integration_mcp_doctor_reports_health() -> Result<(), Box<dyn std::erro
 
     Ok(())
 }
+
+/// ROADMAP 9.6: every tool_error must carry next-step guidance — no raw
+/// passthrough strings. This pins the invariant mechanically (same idea
+/// as the adoption contract): banned patterns must not exist in the MCP
+/// server source at all.
+#[test]
+fn integration_error_strings_carry_guidance() {
+    let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/mcp/mod.rs");
+    let raw = std::fs::read_to_string(&src_dir).expect("read mcp/mod.rs");
+    // Strip comment lines — doc comments legitimately REFERENCE the old lies
+    // ("a stub here once reported ...") as warnings; only live code counts.
+    let src: String = raw
+        .lines()
+        .filter(|l| {
+            let t = l.trim_start();
+            !t.starts_with("//")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let banned = [
+        // raw passthrough of the underlying error — no context, no next step
+        ("tool_error(e.to_string())", "raw e.to_string() passthrough"),
+        // bare feature gate — must say how to enable it
+        (
+            "tool_error(\"ModernBERT feature not enabled.\".into())",
+            "bare feature-gate error",
+        ),
+        // generic IO error without pointers
+        (
+            "tool_error(format!(\"IO error: {}\", e))",
+            "unguided IO error",
+        ),
+        // silent-ok on failure paths that used to fake success
+        ("\"Undo executed\"", "undo stub lie"),
+        ("\"Batch executed\"", "batch stub lie"),
+    ];
+    for (pattern, what) in banned {
+        assert!(
+            !src.contains(pattern),
+            "unguided error string found ({}): {} — errors must point at the next step (9.6)",
+            what,
+            pattern
+        );
+    }
+
+    // Spot-check that guidance actually exists (the invariant has teeth).
+    assert!(
+        src.contains("ai setup") && src.contains("GTW_MCP_ISSUE_LOG.md"),
+        "guidance must point at model setup and the issue log"
+    );
+}

@@ -1,312 +1,137 @@
 ---
 name: gnawtreewriter
-description: Use when the agent needs to edit code (change a function or node, batch edits, rename, undo an edit), diagnose or explore file structure (AST skeleton, analyze, list nodes), find where something is implemented (semantic search via sense/search_semantic), read a specific node, or produce an AST-aware diff — in any project where GnawTreeWriter is installed. Triggers: "edit code", "where is X implemented", "file structure", "batch edit", "rename", "undo edit", "GTW", "gnawtreewriter", "ändra en funktion", "var är X implementerat", "struktur på filen". Prefer GTW tools over plain text editing when the target is code.
+description: Use when the agent needs to edit code (change a function or node, batch edits, rename, undo an edit), diagnose or explore file structure (AST skeleton, analyze, list nodes), find where something is implemented (semantic search via sense/search_semantic), read a specific node, lint/fix code, check system health (doctor), or produce an AST-aware diff — in any project where GnawTreeWriter is installed. Triggers: "edit code", "where is X implemented", "file structure", "batch edit", "rename", "undo edit", "GTW", "gnawtreewriter", "ändra en funktion", "var är X implementerat", "struktur på filen", "lint", "doctor". Prefer GTW tools over plain text editing when the target is code.
 ---
 
 # Skill: GnawTreeWriter 🌳✨
 
-You are an expert in using **GnawTreeWriter** for surgical, AST-based code editing. Always prefer GnawTreeWriter over generic text editing tools.
+You are an expert in using **GnawTreeWriter** for surgical, AST-based code editing. Always prefer GnawTreeWriter over generic text editing tools when the target is code.
 
 ## 🚀 Core Mandates
 
-1. **Tool-First Policy**: ALWAYS use `gnawtreewriter` (MCP tools `edit_node`/`semantic_edit`/`batch`, or CLI) instead of plain Edit/Write tools when editing code
-2. **Surgical Precision**: Target the smallest possible node - don't replace entire lines to change one variable
-3. **Preview First**: ALWAYS use `--preview` / `preview_edit` before applying edits
-4. **Time Machine Safety**: Use session management and history tracking for all multi-step changes
-5. **Semantic Search**: Prefer `sense` (ModernBERT) over `grep` when project is indexed — but verify answers with `read_node` (trust: one cheap read beats re-searching)
+1. **Tool-First Policy**: ALWAYS use GTW (`edit_node`/`semantic_edit`/`batch` MCP tools, or CLI) instead of plain Edit/Write tools when editing code
+2. **Surgical Precision**: Target the smallest possible node — don't replace entire lines to change one variable
+3. **Preview First**: ALWAYS use `preview_edit` / `--preview` before applying
+4. **Time Machine Safety**: `undo` exists per transaction; use `session-start` for multi-step work
+5. **Verify, don't assume**: GTW failures are LOUD (no-match replace, unknown rule id, empty skeleton all error with guidance) — read the error, it tells you the next step
+6. **Semantic search**: prefer `sense` over `grep` when the project is indexed — then confirm with `read_node` (one cheap read beats re-searching)
 
-## 🛠️ Core Commands
+## 🧭 Situations → Tools (start here)
 
-### File Analysis
+| Situation | Tool (MCP → CLI) | Example call |
+|---|---|---|
+| "Where is X implemented?" (don't know file) | `sense` → `gnawtreewriter sense "query"` | `sense {"query": "how is undo implemented"}` |
+| "What's in this file?" (shape, not bodies) | `get_skeleton` → `skeleton <file>` | `get_skeleton {"file_path": "src/cli.rs", "max_depth": 2}` |
+| "Give me node paths" | `analyze` / `list_nodes` → `analyze`/`list <file>` | `list_nodes {"file_path": "src/cli.rs", "filter": "function_item"}` |
+| Read exactly one block | `read_node` → (CLI: `edit --preview` prints diffs) | `read_node {"file_path": "a.rs", "node_path": "35.2.105"}` |
+| Change a function/struct you located | `preview_edit` → `edit_node` → `edit <file> <path> '<code>'` | `edit_node {"file_path": "a.rs", "node_path": "1.2", "content": "fn x() {}"}` |
+| "Change X" without knowing the node | `semantic_edit` / `semantic_insert` | `semantic_edit {"file_path": "a.rs", "query": "the backup init", "content": "..."}` |
+| Add code at a structural spot | `insert_node` → `insert <file> <parent> <pos> '<code>'` | `insert_node {"file_path": "a.rs", "parent_path": "35.2", "position": 1, "content": "..."}` |
+| Move/rename across locations | `move_node` → `move <src_file> <src_path> [tgt] <tgt_path>` | `move_node {"source_file": "a.rs", "source_path": "1.2", "target_path": "0"}` |
+| Multi-file coordinated change | `batch` (ONE transaction) → `batch <file.json>` | spec below — `{file, path, content}` format! |
+| Oops / bad edit | `undo` → `gnawtreewriter undo --steps N` | `undo {"steps": 1}` |
+| Lint / find anti-patterns | `lint` → `gnawtreewriter lint <path> --recursive` | `lint {"paths": ["src"], "recursive": true, "severity_filter": "warning"}` |
+| Auto-apply rule fixes | `lint {fix: true}` (+ `preview: true` first!) | `lint {"paths": ["src"], "fix": true, "preview": true}` |
+| Write a rule | `add_rule` (pattern + optional `fix`) | `add_rule {"id": "proj_no_todo", "language": "rust", "pattern": "todo!()", "severity": "warning", "message": "..."}` |
+| Is GTW alive/sane here? | `doctor` → `gnawtreewriter doctor` | `doctor {}` → `{healthy, passed, failed, checks[]}` |
+| Plain-language explanation | `explain` / `investigate` (mamba build) | `explain {"file_path": "src/core/batch.rs", "node": "1.2"}` |
+| Find text inside one file | `search_nodes` → `search <file> "<pattern>"` | `search_nodes {"file_path": "cli.rs", "pattern": "handle_lint"}` |
+| Snappy text replace (not AST) | (CLI) `quick-replace` — FAILS LOUD on no-match | `gnawtreewriter quick-replace f.rs 'old' 'new' --preview` |
+
+**Diagnostic chain**: `analyze`/`get_skeleton` → `sense`/`search_nodes` → `read_node` → `preview_edit` → `edit_node`/`semantic_edit` → verify (`cargo check`/tests) → `undo` if wrong.
+
+## 🆘 Fallback Rule (timeout or tool error)
+
+1. **Don't retry blindly.** One timeout → fall back, note it, continue your task.
+2. **Detour**: use `grep`/Read for the immediate need — GTW was supposed to save you a guess, not block you.
+3. **LOG IT** in `GTW_MCP_ISSUE_LOG.md` (this project): what you called, exact params, what came back, what you used instead. The log is how GTW gets fixed — every past outage (timeout, bare header, lying undo) was found this way.
+4. **Never cheat the policy**: no `git checkout`/`git restore` to undo GTW edits — use `undo`/`restore-project --preview`.
+5. After a suspicious "success", verify bytes actually changed (`git diff`, re-read the node). Loud failure is normal; silent no-op is a bug worth logging.
+
+## 📋 Standard Workflow (edit existing code)
+
 ```bash
-# Show AST structure
-gnawtreewriter analyze <file>
+# 1. structure + paths
+gnawtreewriter analyze <file>            # or MCP analyze / list_nodes
+gnawtreewriter search <file> "<pattern>" # exact node path
 
-# List all nodes with paths
-gnawtreewriter list <file>
+# 2. preview (ALWAYS)
+gnawtreewriter edit <file> "<path>" '<new_code>' --preview   # or MCP preview_edit
 
-# High-level skeleton view
-gnawtreewriter skeleton <file>
+# 3. apply
+gnawtreewriter edit <file> "<path>" '<new_code>'             # or MCP edit_node
+
+# 4. verify
+cargo check    # or the project's own build/test
 ```
 
-### Search & Discovery
-```bash
-# Search nodes by content
-gnawtreewriter search <file> "<pattern>"
+Add code: find parent via `list` → `insert <file> "<parent>" <pos> '<code>'`.
+Multi-file: `session-start` → edits → `history` → `restore-session <id>` if wrong.
 
-# Semantic search (requires ai index)
-gnawtreewriter sense "<query>"
+## 📦 Batch spec (correct format!)
 
-# Semantic search within file
-gnawtreewriter sense "<query>" <file>
-```
+`{type: "edit"}` uses **`file` + `path` + `content`** (node replacement), NOT `search`/`replace`:
 
-### Editing
-```bash
-# Edit specific node (ALWAYS preview first!)
-gnawtreewriter edit <file> <path> '<new_code>' --preview
-gnawtreewolf edit <file> <path> '<new_code>'
-
-# Insert new node
-# 0=top, 1=bottom, 2=after properties
-gnawtreewriter insert <file> <parent> 0 '<new_code>'
-
-# Delete node
-gnawtreewriter delete <file> <path> --preview
-```
-
-### Time Machine
-```bash
-# Quick undo
-gnawtreewriter undo
-gnawtreewriter undo --steps 3
-
-# View history
-gnawtreewriter history
-
-# Restore to point in time
-gnawtreewriter restore-project "2025-12-27T15:30:00Z" --preview
-
-# Session management
-gnawtreewriter session-start
-gnawtreewriter session-stop
-gnawtreewriter restore-session <id>
-```
-
-## 📋 Standard Workflow
-
-### For Editing Existing Code
-
-1. **Analyze structure**
-   ```bash
-   gnawtreewolf analyze <file>
-   gnawtreewriter list <file>
-   ```
-
-2. **Find exact node path**
-   ```bash
-   gnawtreewriter search <file> "<pattern>"
-   ```
-
-3. **Preview edit**
-   ```bash
-   gnawtreewriter edit <file> "<path>" '<new_code>' --preview
-   ```
-
-4. **Apply if correct**
-   ```bash
-   gnawtreewriter edit <file> "<path>" '<new_code>'
-   ```
-
-5. **Verify**
-   ```bash
-   cargo check  # or equivalent
-   ```
-
-### For Adding New Code
-
-1. **Find parent node**
-   ```bash
-   gnawtreewriter list <file>
-   ```
-
-2. **Insert at position**
-   ```bash
-   gnawtreewriter insert <file> "<parent>" 1 '<new_code>'
-   ```
-
-3. **Verify**
-   ```bash
-   gnawtreewriter history
-   cargo check
-   ```
-
-### For Multi-File Refactoring
-
-1. **Start session**
-   ```bash
-   gnawtreewriter session-start
-   ```
-
-2. **Make changes**
-   ```bash
-   gnawtreewriter edit <file1> "<path>" '<code>'
-   gnawtreewriter edit <file2> "<path>" '<code>'
-   ```
-
-3. **Review all changes**
-   ```bash
-   gnawtreewriter history
-   ```
-
-4. **Undo entire session if needed**
-   ```bash
-   gnawtreewriter restore-session <session-id>
-   ```
-
-## 🧠 GnawSense (ModernBERT) Features
-
-### First-Time Setup (per project)
-```bash
-# Index project for semantic search
-gnawtreewriter ai index
-```
-
-### Semantic Search
-```bash
-# Project-wide semantic understanding
-gnawtreewriter sense "how is crash detection implemented?"
-gnawtreewriter sense "database error handling"
-
-# Within-file semantic zoom
-gnawtreewriter sense "main function" src/main.rs
-```
-
-### Semantic Insertion
-```bash
-# Insert code near semantic landmark
-gnawtreewriter sense-insert <file> "<anchor>" '<code>'
-```
-
-## ⚡ Quick Operations
-
-### Text-based Search & Replace
-```bash
-gnawtreewriter quick-replace <file> '<old>' '<new>' --preview
-gnawtreewriter quick-replace <file> '<old>' '<new>'
-```
-
-### Batch Operations
-Create JSON file:
 ```json
 {
   "description": "Multi-file refactor",
   "operations": [
-    {"file": "src/file1.rs", "search": "old", "replace": "new"},
-    {"file": "src/file2.rs", "search": "old", "replace": "new"}
+    {"type": "edit", "file": "src/file1.rs", "path": "1.2", "content": "fn new() {}"},
+    {"type": "insert", "file": "src/file2.rs", "parent_path": "1.0", "position": 1, "content": "use x;"}
   ]
 }
 ```
 
-Run batch:
 ```bash
-gnawtreewriter batch <file.json> --preview
-gnawtreewriter batch <file.json>
+gnawtreewriter batch spec.json --preview   # diff only, writes nothing
+gnawtreewriter batch spec.json             # atomic — all or none, one txn id
 ```
 
-## 🎯 Best Practices
+MCP: `batch {"file": "spec.json", "preview": true}`.
 
-### 1. ALWAYS Preview First
-```bash
-# ❌ Bad
-gnawtreewriter edit src/main.rs "1.2" 'code'
-
-# ✅ Good
-gnawtreewriter edit src/main.rs "1.2" 'code' --preview
-gnawtreewriter edit src/main.rs "1.2" 'code'
-```
-
-### 2. Understand Before Editing
-```bash
-# Step 1: Get overview
-gnawtreewriter skeleton <file>
-
-# Step 2: Get exact paths
-gnawtreewriter list <file>
-
-# Step 3: Edit specific node
-gnawtreewriter edit <file> "<path>" '<code>'
-```
-
-### 3. Use Time Machine for Safety
-```bash
-# Before big changes
-gnawtreewriter session-start
-
-# Make changes...
-
-# Review
-gnawtreewriter history
-
-# Undo if needed
-gnawtreewriter restore-session <id>
-```
-
-### 4. Search Smarter
-```bash
-# Instead of grep
-gnawtreewriter search src/ "database"
-
-# For semantic understanding (when indexed)
-gnawtreewriter sense "database error handling"
-```
-
-## 🛡️ Error Handling
-
-### "Node not found at path"
-- File may have changed - run `analyze` again
-- Use `list` to verify path exists
-
-### "Validation failed"
-- Your new code has syntax errors
-- GTW provides language-specific tips (v0.9.1+)
-- Check missing semicolons, brackets, indentation
-
-### "Backup not found"
-- Some operations need existing backups
-- Check: `ls .gnawtreewriter_backups/`
-- Use timestamp-based restoration as fallback
-
-## 📚 Help & Examples
+## 🧠 GnawSense setup (first time per project)
 
 ```bash
-# Show examples by topic
-gnawtreewriter examples --topic editing
-gnawtreewriter examples --topic precision
-gnawtreewriter examples --topic restoration
-gnawtreewriter examples --topic ai
-gnawtreewriter examples --topic workflow
-
-# Interactive wizard
-gnawtreewriter wizard
-
-# Check system status
-gnawtreewriter status
+gnawtreewriter ai index                 # CPU default; --gpu / gnawtreewriter.yaml indexing.device=auto for GPU
+gnawtreewriter sense "how is X done?"   # satellite (needs index)
+gnawtreewriter sense "X" src/file.rs     # zoom (no index needed)
 ```
 
-## 🔧 Command Reference
+Empty satellite result = index missing → the error message says so; build it with `ai index` (background it: `nohup gnawtreewriter ai index &`).
 
-| Command | Description |
-|---------|-------------|
-| `analyze <file>` | Show AST structure |
-| `list <file>` | List all nodes with paths |
-| `skeleton <file>` | High-level overview |
-| `search <file> <pattern>` | Find nodes by content |
-| `edit <file> <path> <code>` | Replace node content |
-| `insert <file> <parent> <pos> <code>` | Insert new node |
-| `delete <file> <path>` | Remove node |
-| `undo` | Undo last change |
-| `history` | Show all changes |
-| `sense <query>` | Semantic search |
-| `sense-insert <file> <anchor> <code>` | Semantic insertion |
-| `session-start` | Start session grouping |
-| `restore-session <id>` | Undo entire session |
-| `status` | Show system state |
+## 🛡️ Error handling (what GTW tells you)
 
-## 💡 Pro Tips
+| Error | What it means / do |
+|---|---|
+| `search text not found … nothing was written` | quick-replace no-match — re-read the file (it changed, e.g. fmt) and retry. Zero bytes touched. |
+| `Node not found at path` | file changed — `analyze`/`list` again for fresh paths |
+| `Validation failed` | your code has syntax errors; the message carries language-specific tips — fix, don't force |
+| `unknown rule id …` | typo or rule not loaded — `rules list` / `gnawtreewriter rules list` |
+| `get_skeleton … must never be read as a valid empty answer` | raise `max_depth`, or use `analyze`/`list_nodes` |
+| `Zoom search: no nodes matched` | broaden the query, or `list_nodes` for raw structure |
+| `doctor: N FAILED` | read `checks[]` — transaction/backup trouble → `restore-project --preview` |
+| timeout / Not connected | **Fallback Rule above** — detour + log to `GTW_MCP_ISSUE_LOG.md` |
 
-- "Every surgical edit needs a target"
-- "Preview twice, apply once"
-- "Use sessions for multi-step changes"
-- "Let GnawSense find code semantically"
-- "Time machine is your safety net"
+## 🔧 MCP tool reference (core)
 
-## ✅ Current Status
+Full schemas via `tools/list` — every description carries VAD/NÄR/RETURNERAR/EXEMPEL. Core set:
 
-- **Version**: v0.9.2 installed
-- **Features**: ModernBERT ✅, MCP ✅
-- **AI Engine**: ModernBERT (Semantic Core)
-- **Time Machine**: Active
-- **GnawGuard**: Running
+```
+analyze {"file_path"}            list_nodes {"file_path", "filter"?, "max_depth"?}
+get_skeleton {"file_path", "max_depth"?}       read_node {"file_path", "node_path"}
+search_nodes {"file_path", "pattern"}          sense {"query", "file_path"?}
+preview_edit {"file_path","node_path","content"}    edit_node {"file_path","node_path","content"}
+insert_node {"file_path","parent_path","position","content"}
+semantic_edit {"file_path","query","content"}   semantic_insert {"file_path","anchor_query","content"}
+move_node {"source_file","source_path","target_path"?}
+batch {"file","preview"?}        undo {"steps"?}
+lint {"paths","recursive"?,"severity_filter"?,"pattern"?,"fix"?,"preview"?}
+add_rule {"id","language","pattern","message"?, "fix"?}     doctor {}
+explain {"file_path","node"}     get_semantic_report {"file_path"}
+```
 
-**Ready for production use!** 🚀
+CLI equivalents: `gnawtreewriter <analyze|list|skeleton|search|sense|edit|insert|delete|move|batch|undo|history|lint|rules|doctor|status|quick-replace|session-start> --help`.
+
+## ✅ Status
+
+Check health with **`gnawtreewriter doctor`** (or MCP `doctor {}`) — never trust a hardcoded version claim. Current release: see `CHANGELOG.md`.

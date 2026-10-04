@@ -193,11 +193,22 @@ Detaljerad bevisning: `GAP-REPORT-2026-10-04.md`.*
   per filnamn + validerar 3 nyaste) istället för att fullt-parsa 2 GB/128
   backups → doctor 80 s → 0,5 s; parser-smokes parallella (12 ms)
 
-### 9.6 — GTW ska vara mer guidande och redovisande
+### 9.6 — GTW ska vara mer guidande och redovisande ✅ KLAR 2026-10-04
 - [x] Skill registrerad i opencode (`SKILL.md` symlinkad till `~/.config/opencode/skills/gnawtreewriter/`) — 2026-10-04
-- [ ] SKILL.md-innehåll: situations-tabell (vilket verktyg vid vilken situation), fallback-regeln (timeout → omväg + logg), fullständigt exempelanrop per verktyg
-- [ ] Alla `tool_error`-vägar i `mcp/mod.rs` får nästa-steg-guidance (mönstret finns i `sense`-satelliten: "no matches … build it with `ai index`") — inga råa felsträngar
-- [ ] AGENTS.md: "för agenter som ANVÄNDER GTW"-sektion (diagnoskedjan + noteringstaxonomin + eskalationsregeln)
+- [x] SKILL.md omskriven: situations-tabell (16 rader, situation → MCP-verktyg →
+  exempelanrop), fallback-regeln (timeout → EN omväg → logg i issue-loggen →
+  verifiera bytes, aldrig git-checkout), korrekt batch-format (`{file, path,
+  content}` — den gamla använde det felaktiga `search/replace`-formatet),
+  `gnawtreewolf`-typer borta, status-delen pekar på `doctor` istället för ett
+  inhackat versionsnummer
+- [x] Alla `tool_error`-vägar guidar: 0 råa `e.to_string()`-passthrough, alla
+  IO/feature-gate/modell-fel pekar på nästa steg (`ai setup`/`ai status`,
+  `search_nodes`/`explore`, issue-loggen). Driftsäkrat av
+  `integration_error_strings_carry_guidance` (bannade mönster får inte återkomma)
+- [x] AGENTS.md: "För agenter som ANVÄNDAR GTW"-sektion — diagnostisk kedja i
+  sex steg, noteringstaxonomin (7 kategorier, varje stängd post = en riktig fix),
+  eskalationsregeln (EN omväg, verifiera bytes misstänkt "framgång", aldrig
+  tysta feladrättelser)
 
 **Definition of done (per item):** `cargo build` + `cargo clippy -- -D warnings` rent; tester gröna inkl. nya
 (beteendetest — verifiera att datan flödar MCP-in → resultat ut); `GTW_INSTRUCTIONS.md` + `GTW_MCP_ISSUE_LOG.md` uppdaterade.

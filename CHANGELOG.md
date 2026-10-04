@@ -1,3 +1,34 @@
+## [0.13.0] - 2026-10-04
+
+### Added
+- **SKILL.md rewritten for agents** (ROADMAP 9.6): situations-table (16 rows —
+  situation → MCP tool → complete example call), the fallback rule (one timeout
+  → one detour → log to `GTW_MCP_ISSUE_LOG.md` → verify bytes on suspicious
+  success, never `git checkout` around GTW), per-tool example calls for the
+  core MCP set, and `doctor`-based status instead of a hardcoded version claim.
+- **AGENTS.md "För agenter som ANVÄNDER GTW" section**: six-step diagnostic
+  chain, the issue-log note taxonomy (7 categories — every closed entry
+  corresponds to a real fix), and the escalation rule.
+- **Error-guidance contract test** `integration_error_strings_carry_guidance`:
+  bans raw `e.to_string()` passthrough, bare feature-gate strings, unguided
+  IO errors, and the historic stub lies from live (non-comment) code — the
+  "no raw error strings" rule can no longer silently regress.
+
+### Changed
+- **Every `tool_error` in the MCP server now carries next-step guidance**
+  (~30 sites): IO errors point at `search_nodes`/`analyze`, feature gates at
+  the rebuild command, model failures at `ai setup`/`ai status` with a
+  search_nodes/grep fallback, edit rejections at `list_nodes`+`preview_edit`,
+  rule failures at `rules list`. Zero raw passthroughs remain.
+
+### Fixed
+- SKILL.md contained the forbidden batch format (`search`/`replace` instead of
+  `{file, path, content}` — finding #13's spec lie), `gnawtreewolf` typos (×2),
+  and a stale hardcoded version claim.
+
+### Docs
+- ROADMAP 9.6 complete. Roadmap Phase 9 fully done (9.1–9.6).
+
 ## [0.12.0] - 2026-10-04
 
 ### Added
