@@ -17,6 +17,16 @@ rules:
     message: "unwrap() panics on Err/None — consider handling the error case"
     pattern: "$X.unwrap()"
 
+  # Range indexing panics when the range is not a UTF-8 char boundary and
+  # the target is a String/&str (byte-slice class from the 0.9.8 UTF-8 audit).
+  # FP possible on byte-array slices — message says so; --fix --preview first.
+  - id: rust_string_byte_slice
+    language: rust
+    severity: warning
+    message: "Range indexing panics on non-char-boundary positions if $X is a String/&str — use $X.get(..N) (returns None instead of panicking) or char-safe truncation"
+    pattern: "$X[..$Y]"
+    fix: "$X.get(..$Y).unwrap_or($X)"
+
   # Self-assignment (a = a) is almost always a bug
   - id: rust_self_assignment
     language: rust

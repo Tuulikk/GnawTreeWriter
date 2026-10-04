@@ -998,3 +998,189 @@ fn integration_sources_investigate_payload() {
     assert_eq!(sources[0]["file"], "src/core/undo_redo.rs");
     assert!(payload.get("result").is_some(), "result still present");
 }
+
+/// ROADMAP 9.5: get_skeleton must never answer with a bare header —
+/// the node lines ride in content.text, and truncation is explicit.
+#[tokio::test]
+async fn integration_mcp_get_skeleton_never_bare_header() -> Result<(), Box<dyn std::error::Error>>
+{
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, rx) = oneshot::channel::<()>();
+    let token = Some("secret".to_string());
+
+    let server_handle = tokio::spawn(async move {
+        let shutdown_fut = async move {
+            let _ = rx.await;
+        };
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
+            .await
+            .unwrap();
+    });
+
+    let url = format!("http://{}/", addr);
+    let client = Client::new();
+    let mut ready = false;
+    for _ in 0..40 {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                ready = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_connect() {
+                    sleep(Duration::from_millis(50)).await;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(ready, "server did not become ready in time");
+
+    let dir = tempfile::tempdir()?;
+    let target = dir.path().join("skel.rs");
+    std::fs::write(&target, "fn outer() {\n    fn inner() {}\n}\nstruct S;\n")?;
+
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&json!({
+            "jsonrpc":"2.0",
+            "method":"tools/call",
+            "id": 2,
+            "params": { "name": "get_skeleton", "arguments": { "file_path": target.to_string_lossy(), "max_depth": 2 } }
+        }))
+        .send()
+        .await?;
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").expect("JSON-RPC result");
+    assert_ne!(
+        r.get("isError"),
+        Some(&json!(true)),
+        "skeleton parse must succeed"
+    );
+
+    // The text channel carries the actual skeleton, not just the title.
+    let text = r["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains('\n'),
+        "content.text must include node lines, got only: {:?}",
+        text
+    );
+    assert!(
+        text.contains("outer"),
+        "skeleton must list named items: {:?}",
+        text
+    );
+
+    // Structured fields: count + explicit truncation flag (never implied).
+    assert!(r.get("skeleton").is_some(), "structured skeleton missing");
+    let nodes = r["nodes"].as_u64().unwrap_or(0);
+    assert!(nodes >= 1, "node count must be reported, got {}", nodes);
+    assert_eq!(
+        r.get("truncated"),
+        Some(&json!(false)),
+        "truncated flag must be explicit"
+    );
+
+    let _ = tx.send(());
+    server_handle.await?;
+
+    Ok(())
+}
+
+/// ROADMAP 9.5: `doctor` answers "is GTW alive and sane here?" in one call —
+/// healthy flag + counts + per-check detail, never a bare status string.
+#[tokio::test]
+async fn integration_mcp_doctor_reports_health() -> Result<(), Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, rx) = oneshot::channel::<()>();
+    let token = Some("secret".to_string());
+
+    let server_handle = tokio::spawn(async move {
+        let shutdown_fut = async move {
+            let _ = rx.await;
+        };
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
+            .await
+            .unwrap();
+    });
+
+    let url = format!("http://{}/", addr);
+    let client = Client::new();
+    let mut ready = false;
+    for _ in 0..40 {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                ready = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_connect() {
+                    sleep(Duration::from_millis(50)).await;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(ready, "server did not become ready in time");
+
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&json!({
+            "jsonrpc":"2.0",
+            "method":"tools/call",
+            "id": 2,
+            "params": { "name": "doctor", "arguments": {} }
+        }))
+        .send()
+        .await?;
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").expect("JSON-RPC result");
+    assert_ne!(
+        r.get("isError"),
+        Some(&json!(true)),
+        "doctor runs even when unhealthy"
+    );
+
+    // Counts + explicit health flag.
+    assert!(r.get("healthy").is_some(), "healthy flag missing");
+    let total = r["total"].as_u64().unwrap_or(0);
+    assert!(
+        total >= 20,
+        "expected the full parser smoke table, got total={}",
+        total
+    );
+    let passed = r["passed"].as_u64().unwrap_or(0);
+    assert!(passed + r["failed"].as_u64().unwrap_or(0) <= total);
+    let checks = r["checks"].as_array().expect("checks[] detail");
+    assert_eq!(checks.len() as u64, total, "one entry per check");
+
+    // Text channel names the tool and the verdict (guidance, not bare data).
+    let text = r["content"][0]["text"].as_str().unwrap_or("");
+    assert!(text.starts_with("doctor:"), "got: {:?}", text);
+    assert!(text.contains("checks passed"), "got: {:?}", text);
+
+    let _ = tx.send(());
+    server_handle.await?;
+
+    Ok(())
+}

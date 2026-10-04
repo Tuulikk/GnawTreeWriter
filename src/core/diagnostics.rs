@@ -92,6 +92,37 @@ pub struct DoctorCheck {
     pub detail: Option<String>,
 }
 
+/// Pure parser smoke — builds the check without touching the report, so
+/// run_full_doctor can run all smokes in parallel (they were costing ~60 s
+/// in series: every grammar cold-loads per process).
+pub fn run_parser_smoke(extension: &str, code: &str) -> DoctorCheck {
+    use crate::parser::get_parser;
+    let file_name = format!("test.{}", extension);
+    let path = std::path::PathBuf::from(&file_name);
+    let mut check = DoctorCheck {
+        category: "parser".to_string(),
+        name: format!(".{}", extension),
+        status: "fail".to_string(),
+        message: String::new(),
+        detail: None,
+    };
+    check.message = match get_parser(&path) {
+        Ok(parser) => match parser.parse(code) {
+            Ok(tree) => {
+                check.status = "pass".to_string();
+                format!(
+                    "Parsed OK — root: '{}', {} nodes",
+                    tree.node_type,
+                    count_nodes(&tree)
+                )
+            }
+            Err(e) => format!("Parse failed: {}", e.message),
+        },
+        Err(e) => format!("No parser available: {}", e),
+    };
+    check
+}
+
 // ---- Implementation ----
 
 impl DiagnosticReport {
@@ -376,43 +407,26 @@ impl DoctorReport {
         self.total_checks += 1;
     }
 
+    /// Record a prebuilt check with the SAME counter semantics as
+    /// pass()/fail()/warn() — one accounting path for sequential and
+    /// parallel checks alike.
+    pub fn record_check(&mut self, check: DoctorCheck) {
+        match check.status.as_str() {
+            "pass" => self.passed += 1,
+            "fail" => {
+                self.failed += 1;
+                self.overall_healthy = false;
+            }
+            "warn" => self.warnings += 1,
+            _ => {}
+        }
+        self.total_checks += 1;
+        self.checks.push(check);
+    }
+
     /// Run a parser health check for a given extension
     pub fn check_parser(&mut self, extension: &str, code: &str) {
-        use crate::parser::get_parser;
-        use std::path::PathBuf;
-
-        let file_name = format!("test.{}", extension);
-        let path = PathBuf::from(&file_name);
-
-        match get_parser(&path) {
-            Ok(parser) => match parser.parse(code) {
-                Ok(tree) => {
-                    self.pass(
-                        "parser",
-                        &format!(".{}", extension),
-                        &format!(
-                            "Parsed OK — root: '{}', {} nodes",
-                            tree.node_type,
-                            count_nodes(&tree)
-                        ),
-                    );
-                }
-                Err(e) => {
-                    self.fail(
-                        "parser",
-                        &format!(".{}", extension),
-                        &format!("Parse failed: {}", e.message),
-                    );
-                }
-            },
-            Err(e) => {
-                self.fail(
-                    "parser",
-                    &format!(".{}", extension),
-                    &format!("No parser available: {}", e),
-                );
-            }
-        }
+        self.record_check(run_parser_smoke(extension, code));
     }
 
     /// Check backup integrity
@@ -424,55 +438,57 @@ impl DoctorReport {
             return;
         }
 
-        match crate::core::backup::list_backup_files(&backup_dir) {
-            Ok(backups) => {
-                if backups.is_empty() {
-                    self.warn(
-                        "backup",
-                        "backup_count",
-                        "Backup directory exists but is empty",
-                    );
-                } else {
-                    self.pass(
-                        "backup",
-                        "backup_count",
-                        &format!("Found {} backup(s)", backups.len()),
-                    );
-
-                    // Validate a few backups can be parsed
-                    let to_check = backups.iter().take(3);
-                    for b in to_check {
-                        match crate::core::backup::parse_backup_file(&b.path) {
-                            Ok(_) => {
-                                self.pass(
-                                    "backup",
-                                    &format!(
-                                        "backup_{}",
-                                        b.path.file_name().unwrap_or_default().to_string_lossy()
-                                    ),
-                                    "Backup file is valid",
-                                );
-                            }
-                            Err(e) => {
-                                self.fail(
-                                    "backup",
-                                    &format!(
-                                        "backup_{}",
-                                        b.path.file_name().unwrap_or_default().to_string_lossy()
-                                    ),
-                                    &format!("Corrupt backup: {}", e),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
+        // LIGHT SCAN: list_backup_files() fully parses every backup (2 GB of
+        // JSON = ~80 s) just to sort by timestamp. For health we only need
+        // the count plus a validity sample — count by filename, validate the
+        // 3 newest by mtime, never load the rest.
+        let entries = match std::fs::read_dir(&backup_dir) {
+            Ok(e) => e,
             Err(e) => {
                 self.fail(
                     "backup",
                     "backup_scan",
                     &format!("Failed to scan backups: {}", e),
                 );
+                return;
+            }
+        };
+        let mut files: Vec<(std::path::PathBuf, std::time::SystemTime)> = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
+                let mtime = entry
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                files.push((path, mtime));
+            }
+        }
+
+        if files.is_empty() {
+            self.warn(
+                "backup",
+                "backup_count",
+                "Backup directory exists but is empty",
+            );
+            return;
+        }
+
+        self.pass(
+            "backup",
+            "backup_count",
+            &format!("Found {} backup(s)", files.len()),
+        );
+
+        files.sort_by_key(|(_, m)| std::cmp::Reverse(*m));
+        for (path, _) in files.iter().take(3) {
+            let name = format!(
+                "backup_{}",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            );
+            match crate::core::backup::parse_backup_file(path) {
+                Ok(_) => self.pass("backup", &name, "Backup file is valid"),
+                Err(e) => self.fail("backup", &name, &format!("Corrupt backup: {}", e)),
             }
         }
     }
@@ -606,4 +622,58 @@ fn is_important_node_type(ntype: String) -> bool {
         "method_definition",
     ];
     important.iter().any(|&i| ntype == i)
+}
+
+pub fn run_full_doctor(project_root: &std::path::Path) -> DoctorReport {
+    let mut report = DoctorReport::new();
+
+    let parser_tests = [
+        ("py", "def hello(): pass"),
+        ("rs", "fn main() {}"),
+        ("js", "function hello() {}"),
+        ("ts", "const x: number = 1;"),
+        ("go", "package main\nfunc main() {}"),
+        ("java", "class Main {}"),
+        ("c", "int main() { return 0; }"),
+        ("cpp", "int main() { return 0; }"),
+        ("html", "<html></html>"),
+        ("css", "body { margin: 0; }"),
+        ("json", "{\"key\": \"value\"}"),
+        ("yaml", "key: value"),
+        ("toml", "[section]\nkey = \"value\""),
+        ("sql", "SELECT 1;"),
+        ("sh", "echo hello"),
+        ("zig", "pub fn main() void {}"),
+        ("php", "<?php echo 1;"),
+        ("svelte", "<script>let x = 0;</script>"),
+        ("dart", "void main() {}"),
+        ("cs", "using System;"),
+    ];
+    // Grammar cold-loads cost ~60 s in series — run the smokes in parallel
+    // (each thread builds its own parser instance; grammars are static).
+    let smoke_results: Vec<DoctorCheck> = std::thread::scope(|s| {
+        let handles: Vec<_> = parser_tests
+            .iter()
+            .map(|(ext, code)| s.spawn(move || run_parser_smoke(ext, code)))
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| {
+                h.join().unwrap_or_else(|_| DoctorCheck {
+                    category: "parser".to_string(),
+                    name: "unknown".to_string(),
+                    status: "fail".to_string(),
+                    message: "parser smoke thread panicked".to_string(),
+                    detail: None,
+                })
+            })
+            .collect()
+    });
+    for check in smoke_results {
+        report.record_check(check);
+    }
+
+    report.check_backups(project_root);
+    report.check_transaction_log(project_root);
+    report
 }

@@ -171,13 +171,27 @@ Detaljerad bevisning: `GAP-REPORT-2026-10-04.md`.*
   (63/102, inkrementellt `ai index` kan köras senare i bakgrunden); 4 äldre MCP-daemoner
   kör fortfarande före-install-binären tills deras sessioner startas om
 
-### 9.5 — Stäng öppna poster ur GTW_MCP_ISSUE_LOG.md
+### 9.5 — Stäng öppna poster ur GTW_MCP_ISSUE_LOG.md ✅ KLAR 2026-10-04
 - [x] MCP `undo`/`batch`-stubbar (hardkodat "Undo executed"/"Batch executed") — ersatta med riktiga
   implementationer + E2E-tester 2026-10-04 (se 9.1-sidovinster)
-- [ ] `get_skeleton` tomt svar på stora filer: returnera fel eller begränsat skelett + `truncated: true` — tomt svar får aldrig vara tyst
-- [ ] Stäng 2026-09-30:s halvfärdiga triage-checklistor (roten åtgärdades i v0.9.8)
-- [ ] Lägg till lint-regel som flaggar `&X[..N]` byte-slices på strängar (kvar ur UTF-8-audit + rökprov på rule-flödet)
-- [ ] Utvärdera `status`/`doctor` som MCP-post (CLI har redan båda) — agenter ska kunna diagnosera "är GTW vid liv" i ett anrop
+- [x] `get_skeleton` tomt svar på stora filer: text-kanalen bar bara rubriken
+  (skelettet låg på result-nivå) → skelettet finns nu i `content.text`,
+  `truncated`-flagga explicit vid 500-nod-taket, tom skelett = guident fel
+  (aldrig tyst). Kontraktstest `integration_mcp_get_skeleton_never_bare_header`
+- [x] Stäng 2026-09-30:s halvfärdiga triage-checklistor — alla tre posterna
+  (omgång 1, omgång 3, rotsak) avbockade med domar; "FIX-presentationen"
+  för sense-zoom/satelit-textkanalen utförd (träffar i text + guidad tomhet)
+- [x] Lägg till lint-regeln `rust_string_byte_slice` (`$X[..$Y]` med fix-mall
+  `$X.get(..$Y).unwrap_or($X)`) i rules/builtin.yaml + rökprov: träffar på
+  riktiga byte-slices i xml.rs/qml.rs, `--fix --preview` visar korrekt
+  transform. Sidovinster: meddelanden interpolerar nu `$X`-bindings
+  (`interpolate_message`), okänt rule-id = högljutt fel med nästa steg
+  (inte tyst "No issues" — samma princip som fynd #14)
+- [x] `doctor` som MCP-post: delad kärna `run_full_doctor` (CLI + MCP kan inte
+  divergera, mönstret från run_lint), {healthy, passed, failed, warnings,
+  checks[]} + guidad text. Sidovynt: `check_backups` ljusskannar nu (räknar
+  per filnamn + validerar 3 nyaste) istället för att fullt-parsa 2 GB/128
+  backups → doctor 80 s → 0,5 s; parser-smokes parallella (12 ms)
 
 ### 9.6 — GTW ska vara mer guidande och redovisande
 - [x] Skill registrerad i opencode (`SKILL.md` symlinkad till `~/.config/opencode/skills/gnawtreewriter/`) — 2026-10-04

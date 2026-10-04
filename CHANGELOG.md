@@ -1,3 +1,53 @@
+## [0.12.0] - 2026-10-04
+
+### Added
+- **MCP `doctor` tool** (ROADMAP 9.5): one-call health diagnostic — parser
+  smokes, backup integrity, transaction log → `{healthy, passed, failed,
+  warnings, total, checks[]}` with guided text. Shares `run_full_doctor`
+  with the CLI (`gnawtreewriter doctor`) so the two can never diverge
+  (same pattern as `run_lint`).
+- **Lint rule `rust_string_byte_slice`** (`$X[..$Y]` + fix template
+  `$X.get(..$Y).unwrap_or($X)`) — the byte-slice class left over from the
+  0.9.8 UTF-8 audit, smoke-proven against real hits in `xml.rs`/`qml.rs`
+  and through `lint --fix --preview`.
+- **`$X`-binding interpolation in rule messages** (`interpolate_message`):
+  findings read "… if `code` is a String/&str" instead of the raw template;
+  unbound names stay literal (messages never fail).
+
+### Fixed
+- **Finding #14: `quick-replace` could report "✓ applied" while changing
+  zero bytes** — the exact lie the tool must never tell. A replace now
+  fails loudly when the search text is not found (or the replacement is
+  identical), with next-step guidance ("re-read the file after cargo fmt
+  and retry"). No bytes are written on a no-match; preview fails the same
+  way. Two regression tests.
+- **`get_skeleton` could answer with a bare header** (issue-log triage):
+  the skeleton now rides in `content.text`, `truncated` is an explicit
+  flag at the 500-node cap, and an empty skeleton is a guided error —
+  never a silent empty success. Contract test added.
+- **`sense` zoom/satellite returned header-only text** (issue-log FIX
+  prescription): top matches now appear in the text channel
+  (`"Zoom …: 5 node(s) — 106 (0.81) …"`); empty zoom returns a guided
+  error instead of a naked label.
+- **Unknown `--rule` id passed silently as "No issues"** — now fails
+  loudly with the loaded-rule count and pointers (`rules list`,
+  `rules add`).
+- **`doctor` took 80 s in backup-heavy projects**: `check_backups` now
+  light-scans (count by filename, validate the 3 newest by mtime) instead
+  of fully parsing every backup JSON (2 GB/128 files here); parser smokes
+  run in parallel. Doctor: 80 s → 0.5 s.
+
+### Changed
+- CLI `doctor` section headers collapsed into one line (checks unchanged);
+  internals delegated to the shared `run_full_doctor`.
+
+### Docs
+- ROADMAP 9.5 complete (all items, with implementation notes).
+- `GTW_MCP_ISSUE_LOG.md`: all three 2026-09-30/10-01 triage checklists
+  closed with verdicts; zoom/satellite text-channel FIX marked done;
+  open remainder documented (satellite index-build lacks an MCP tool —
+  known gap, outside 9.5 scope).
+
 ## [0.11.0] - 2026-10-04
 
 ### Added

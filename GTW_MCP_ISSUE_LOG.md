@@ -34,15 +34,20 @@ samma dag (falskt negativ: `\.coach\b`-mönstret matchade inte
 `self.config.semantic.coach`-användningen i en annan fil), vilket var
 skälet att gå till GTW från början.
 
-**Bedömning (fylls vid triage):**
-- [ ] Använt fel? (t.ex. MCP-servern ej startad/i dåligt läge i hosten,
-      stor fil, nätverk)
-- [ ] Bugg? (timeout-tröskel för låg för skeleton/sense på ~860-raders
-      fil / projekt-scope-sökning)
-- [ ] Saknad funktion? (ingen timeout-feedback/kpartiell respons; ingen
-      retry-semantik)
-- [ ] Under förmåga? (sense borde ha hittat coach-användningen tidigare
-      samma dag — opreparerat eftersom anropen då inte gjordes)
+**Bedömning (triage stängd 2026-10-04, ROADMAP 9.5d):**
+- [x] Använt fel? — NEJ: server startad, anrop legitima, symptomen
+      reproducerbara över flera dagar
+- [x] Bugg? — JA: timeout-tröskel/filstorlek på stora filer → åtgärdad i
+      0.9.7/0.9.8 (panik-isolering, storlekscaps, delad broker — se
+      valideringstabellen i 2026-10-01-omgången nedan)
+- [x] Saknad funktion? — JA (dels) → åtgärdad: panik-isolering ger
+      JSON-RPC-fel istället för död anslutning (0.9.7); `get_skeleton`
+      returnerar nu explicit `truncated`-flagga och kan aldrig svara tyst
+      tomt (9.5a); `doctor` svarar "är GTW vid liv" i ett anrop (9.5c)
+- [x] Under förmåga? — DELVIS, kvarstår öppet: sense-kvalitet på cap:ad
+      index = "lokalisering", inte fullständig sökning (dokumenterat i
+      konstanternas doc-kommentarer; satellit-ranking toppas av
+      moduldeklarationer — se 2026-10-01-noten)
 
 **Notera även (positivt/OBS):** inga GTW-anrop lyckades denna session
 än så länge — jämför med tidigare sessioner där GTW använts med framgång
@@ -105,17 +110,18 @@ levande sessioner och lämnades.
 **Omväg som användes i stället:** grep/Read för system.rs-fynd (som vanligt),
 `ps -L`/wchan för tråddiagnos. Fungerade direkt.
 
-**Bedömning (fylls vid triage):**
-- [ ] Använt fel? — mindre troligt nu: identiska anrop fungerat tidigare,
-      reproducerbara över två dagar
-- [ ] Bugg? — troligast, tre separata symptom: (a) häng i sense/get_skeleton
-      på stora filer/projekt-scope → host-timeout → anslutning dör utan
-      återanslutning; (b) minnesackumulering 511 MB/5,5 h; (c) tomt
-      "Satelite search results"-svar från projekt-scope sense
-- [ ] Saknad funktion? — delvis: ingen timeout-feedback/partiell respons,
-      ingen återanslutning eller hälsoproba i MCP-läge
-- [ ] Under förmåga? — projekt-scope sense borde hitta eller rapportera
-      "inga träffar", aldrig en tom etikettrad
+**Bedömning (triage stängd 2026-10-04, ROADMAP 9.5d):**
+- [x] Använt fel? — NEJ: reproducerbart över två dagar, anropen legitima
+- [x] Bugg? — JA: alla tre symptomen bekräftade → rotorsaker fanns och
+      åtgärdades direkt efter denna triage (nästa post: panik på
+      char-boundary, ny broker per anrop, obegränsad JIT-cache — alla fem
+      kodifierade i 0.9.7, stabiliserade i 0.9.8)
+- [x] Saknad funktion? — JA (dels) → åtgärdad: panik-isolering per
+      request + återanslutningsvänliga fel (0.9.7); idag även
+      `doctor`-diagnostik och `truncated`-signal (9.5)
+- [x] Under förmåga? — JA på punkten "tom etikettrad": satelit-svaret
+      rapporterar numera antal + tomhets-ledtråd, aldrig en naken etikett
+      (0.9.7). Kvarstår öppet: själva träffkvaliteten (se2026-10-01)
 
 **Nästa steg:** (1) döda hängd process (797441) → host spawnar ny, validera
 små-fil-anrop; (2) bevaka RSS på färsk process under normalt arbete;
@@ -172,10 +178,11 @@ städdades; diskfullhet kan ha bidragit till tidigare strul.
 **Bedömning:**
 - [x] Bugg — alla fem rotorsaker kodifierade och åtgärdade
 - [x] Saknad funktion — panik-isolering + delad broker tillför saknad robusthet
-- [ ] Använt fel — nej; anropen var legitima
-- [ ] Under förmåga — löses delvis (bättre felmeddelanden); sense-kvalitet
-      på cap:ad index är "lokalisering", inte fullständig — dokumenterat i
-      konstanternas doc-kommentarer
+- [x] Använt fel — nej; anropen var legitima (triage stängd 2026-10-04)
+- [x] Under förmåga — delvis: felmeddelanden bättre; sense-kvalitet på
+      cap:ad index är "lokalisering", inte fullständig — dokumenterat i
+      konstanternas doc-kommentarer. Kvarstår öppet som känd brist
+      (adoption: satellit-ranking prioriterar moduldeklarationer)
 
 **Kvar att bevaka:** (a) första sense-anropet i en färsk MCP-process betalar
 modellladdning (~10–30 s) — hostens timeout måste vara ≥60 s; (b) RSS på
@@ -277,6 +284,13 @@ steg (riktig stil); zoom-rubriken guiding? nej (rubrik utan innehåll).
 — stabiliteten bekräftad åtminstone för zoom på 800+ raders Rust-fil.
 Satellit utan index = guidad avvisning, inte crash. Punkten betraktas som
 stängd för stabilitet, öppen för MCP-ytan ovan.
+
+**FIX-presentationen utförd 2026-10-04 (9.5):** både zoom och satelit bär
+nu träfflistan I text-delen (`"Zoom …: 5 node(s) — 106 (0.81) …"`,
+`"Satellite …: 10 match(es) — file:node (0.91) …"`); tom zoom svarar med
+guident fel, aldrig en naken rubrik. Kvarstår öppet: satelitens
+index-bygge saknar ett MCP-verktyg (pekar på CLI-kommandot) — noterat som
+känd lucka, ej i 9.5-omfånget.
 
 ---
 

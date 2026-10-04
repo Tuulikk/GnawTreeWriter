@@ -4436,6 +4436,24 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
         // Prepare modified content (simple global replace)
         let modified = original.replace(search, &replacement_text);
 
+        // NO-OP GUARD (issue log finding #14): a replace must change bytes or
+        // fail loudly — never report "applied" for zero changed bytes.
+        if !original.contains(search) {
+            anyhow::bail!(
+                "search text not found in {} — 0 bytes would change, nothing was written. \
+The file may have changed since you last read it (e.g. after cargo fmt or another agent edit) \
+— re-read it (read_node / analyze / search_nodes) and retry with fresh text.",
+                file
+            );
+        }
+        if modified == original {
+            anyhow::bail!(
+                "replacement is identical to the search text in {} — 0 bytes would change, \
+nothing was written. Give a replacement that actually differs.",
+                file
+            );
+        }
+
         // VALIDATION: Try to parse the modified code in memory before saving
         let validation_path = Path::new(file);
         if let Err(e) = crate::parser::get_parser(validation_path)
@@ -5012,50 +5030,18 @@ Use without --preview to apply the clone"
     }
 
     fn handle_doctor(format: Option<&str>) -> Result<()> {
-        use crate::core::diagnostics::DoctorReport;
         use colored::*;
 
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
 
-        let mut report = DoctorReport::new();
-
-        // --- Parser Health Checks ---
-        println!("\n{}", "🔬 Parser Health Checks".bold());
-        let parser_tests = [
-            ("py", "def hello(): pass"),
-            ("rs", "fn main() {}"),
-            ("js", "function hello() {}"),
-            ("ts", "const x: number = 1;"),
-            ("go", "package main\nfunc main() {}"),
-            ("java", "class Main {}"),
-            ("c", "int main() { return 0; }"),
-            ("cpp", "int main() { return 0; }"),
-            ("html", "<html></html>"),
-            ("css", "body { margin: 0; }"),
-            ("json", "{\"key\": \"value\"}"),
-            ("yaml", "key: value"),
-            ("toml", "[section]\nkey = \"value\""),
-            ("sql", "SELECT 1;"),
-            ("sh", "echo hello"),
-            ("zig", "pub fn main() void {}"),
-            ("php", "<?php echo 'hello';"),
-            ("svelte", "<script>let x = 0;</script>"),
-            ("dart", "void main() {}"),
-            ("cs", "using System;"),
-        ];
-
-        for (ext, code) in &parser_tests {
-            report.check_parser(ext, code);
-        }
-
-        // --- Backup Integrity ---
-        println!("\n{}", "💾 Backup Integrity".bold());
-        report.check_backups(&project_root);
-
-        // --- Transaction Log ---
-        println!("\n{}", "📝 Transaction Log".bold());
-        report.check_transaction_log(&project_root);
+        // Shared implementation with the MCP `doctor` tool — one source of
+        // truth (same pattern as rules::run_lint), never diverging copies.
+        let report = crate::core::diagnostics::run_full_doctor(&project_root);
+        println!(
+            "\n{}",
+            "🔬 Doctor checks: parsers, backup integrity, transaction log".bold()
+        );
 
         // --- Print results ---
         match format {
@@ -5672,6 +5658,77 @@ mod tests {
         let tlog = TransactionLog::load(project_root)?;
         let history = tlog.get_file_history(&file_path)?;
         assert!(!history.is_empty());
+
+        std::env::set_current_dir(orig_dir)?;
+        Ok(())
+    }
+
+    /// Finding #14: a replace that matches nothing must FAIL LOUDLY —
+    /// never report "applied" for zero changed bytes.
+    #[test]
+    fn test_quick_replace_no_match_fails() -> Result<()> {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let tmp = tempdir()?;
+        let project_root = tmp.path();
+        fs::create_dir(project_root.join(".git"))?;
+
+        let orig_dir = std::env::current_dir()?;
+        std::env::set_current_dir(project_root)?;
+
+        let file_path = project_root.join("quick_nomatch.txt");
+        fs::write(&file_path, "hello foo world")?;
+
+        let err = Cli::handle_quick_replace(
+            file_path.to_str().unwrap(),
+            "does-not-exist",
+            "whatever",
+            false,
+            false,
+        )
+        .expect_err("no-match replace must fail, not fake success");
+        let msg = format!("{:#}", err);
+        assert!(msg.contains("search text not found"), "got: {}", msg);
+        assert!(
+            msg.contains("re-read"),
+            "must guide to next step, got: {}",
+            msg
+        );
+
+        // Zero bytes were written.
+        assert_eq!(fs::read_to_string(&file_path)?, "hello foo world");
+        // And preview mode must fail the same way (no silent empty diff).
+        Cli::handle_quick_replace(
+            file_path.to_str().unwrap(),
+            "does-not-exist",
+            "whatever",
+            false,
+            true,
+        )
+        .expect_err("no-match preview must also fail");
+
+        std::env::set_current_dir(orig_dir)?;
+        Ok(())
+    }
+
+    /// Finding #14, second branch: replacement identical to search = 0 bytes.
+    #[test]
+    fn test_quick_replace_identical_fails() -> Result<()> {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let tmp = tempdir()?;
+        let project_root = tmp.path();
+        fs::create_dir(project_root.join(".git"))?;
+
+        let orig_dir = std::env::current_dir()?;
+        std::env::set_current_dir(project_root)?;
+
+        let file_path = project_root.join("quick_identical.txt");
+        fs::write(&file_path, "hello foo world")?;
+
+        let err =
+            Cli::handle_quick_replace(file_path.to_str().unwrap(), "foo", "foo", false, false)
+                .expect_err("identical replacement must fail");
+        assert!(format!("{:#}", err).contains("identical"));
+        assert_eq!(fs::read_to_string(&file_path)?, "hello foo world");
 
         std::env::set_current_dir(orig_dir)?;
         Ok(())

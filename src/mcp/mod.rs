@@ -166,6 +166,7 @@ pub mod mcp_server {
                             .map(|d| d as usize);
                         Ok(handle_list_nodes(state, fp, filter, max_depth, false))
                     }
+                    "doctor" => Ok(handle_doctor_mcp()),
                     "get_skeleton" => {
                         let fp = validate_arg("file_path")?;
                         let max_depth = arguments
@@ -478,6 +479,16 @@ pub mod mcp_server {
                         "max_depth": { "type": "integer", "description": "Limit tree depth (fewer = shallower listing)" }
                     },
                     "required": ["file_path"]
+                }
+            }),
+            json!({
+                "name": "doctor",
+                "title": "Health check (parsers, backups, transaction log)",
+                "description": "One-call health diagnostic: smoke-tests every parser, verifies backup integrity and the transaction log, and reports whether GnawTreeWriter is alive and sane in this project. WHEN: first contact with a repo, after a crash, or when any edit/tool behaves oddly — one call instead of guessing. RETURNS: {healthy, passed, failed, warnings, total, checks[]} — unhealthy is data, not an error, and the failure details point at restore-project. Takes no arguments. Example: {}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
                 }
             }),
             json!({
@@ -1193,7 +1204,41 @@ pub mod mcp_server {
         }
     }
 
+    /// `doctor`: one-call health diagnostic (parser smokes, backup integrity,
+    /// transaction log) — shares run_full_doctor with the CLI so the two can
+    /// never diverge. Answers "is GTW alive and sane in this project?" without
+    /// the agent having to guess. Zero arguments; healthy/unhealthy is data,
+    /// not an error — diagnosis succeeded either way.
+    fn handle_doctor_mcp() -> Value {
+        let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let project_root = crate::core::find_project_root(&root);
+        let report = crate::core::diagnostics::run_full_doctor(&project_root);
+        let status = if report.overall_healthy {
+            format!(
+                "doctor: {} / {} checks passed ({} warnings) — GTW is healthy in this project. Checks covered: parsers, backup integrity, transaction log.",
+                report.passed, report.total_checks, report.warnings
+            )
+        } else {
+            format!(
+                "doctor: {} / {} checks passed, {} FAILED, {} warnings — inspect checks[] below for the failing item; for transaction/backup trouble start with `gnawtreewriter restore-project --preview`.",
+                report.passed, report.total_checks, report.failed, report.warnings
+            )
+        };
+        tool_success(
+            status,
+            Some(json!({
+                "healthy": report.overall_healthy,
+                "passed": report.passed,
+                "failed": report.failed,
+                "warnings": report.warnings,
+                "total": report.total_checks,
+                "checks": report.checks,
+            })),
+        )
+    }
+
     fn handle_get_skeleton(file_path: &str, max_depth: usize) -> Value {
+        const NODE_LIMIT: usize = 500;
         match GnawTreeWriter::new(file_path) {
             Ok(w) => {
                 let mut s = String::new();
@@ -1219,12 +1264,34 @@ pub mod mcp_server {
                     }
                 }
                 build(w.analyze(), &mut s, 0, max_depth, &mut count);
+                let truncated = count >= NODE_LIMIT;
+                // NEVER silently empty (ROADMAP 9.5): an empty skeleton must
+                // fail loudly with next steps, not return a bare header.
+                if s.is_empty() {
+                    return tool_error(format!(
+                        "get_skeleton produced no nodes for {} (max_depth={}) — this must never be \
+read as a valid empty answer. Next: raise max_depth, run analyze for the raw tree, \
+or list_nodes for a flat index of this file.",
+                        file_path, max_depth
+                    ));
+                }
+                let header = format!(
+                    "Skeleton of {} ({} node(s){})
+{}",
+                    file_path,
+                    count,
+                    if truncated { ", truncated at 500 — raise max_depth only after list_nodes" } else { "" },
+                    s
+                );
                 tool_success(
-                    format!("Skeleton of {}", file_path),
-                    Some(json!({"skeleton": s})),
+                    header,
+                    Some(json!({"skeleton": s, "nodes": count, "truncated": truncated})),
                 )
             }
-            Err(e) => tool_error(format!("IO error: {}", e)),
+            Err(e) => tool_error(format!(
+                "get_skeleton could not read {}: {} — check the path exists and is a supported source file (search_nodes finds files, analyze parses any supported file).",
+                file_path, e
+            )),
         }
     }
 
@@ -2211,8 +2278,24 @@ pub mod mcp_server {
                                     query
                                 ))
                         } else {
+                            let top: String = matches
+                                .iter()
+                                .take(5)
+                                .map(|m| {
+                                    let first =
+                                        m.content_preview.lines().next().unwrap_or("").trim();
+                                    format!(
+                                        "{}:{} ({:.2}) {}",
+                                        m.file_path,
+                                        m.node_path.as_deref().unwrap_or("?"),
+                                        m.score,
+                                        first
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("; ");
                             tool_success(
-                                format!("Satellite search: {} match(es)", matches.len()),
+                                format!("Satellite search: {} match(es) — {}", matches.len(), top),
                                 Some(json!({"matches": matches})),
                             )
                         }
@@ -2221,10 +2304,34 @@ pub mod mcp_server {
                         file_path,
                         nodes,
                         impact,
-                    } => tool_success(
-                        format!("Zoom search results for {}", file_path),
-                        Some(json!({"nodes": nodes, "impact": impact})),
-                    ),
+                    } => {
+                        if nodes.is_empty() {
+                            // Never a naked header: empty must guide.
+                            tool_error(format!(
+                                "Zoom search: no nodes matched in {} — try a more specific query, or use list_nodes if you need the raw structure. (Zoom ranks definitions inside ONE file.)",
+                                file_path
+                            ))
+                        } else {
+                            let top: String = nodes
+                                .iter()
+                                .take(5)
+                                .map(|n| {
+                                    let first = n.preview.lines().next().unwrap_or("").trim();
+                                    format!("{} ({:.2}) {}", n.path, n.score, first)
+                                })
+                                .collect::<Vec<_>>()
+                                .join("; ");
+                            tool_success(
+                                format!(
+                                    "Zoom search results for {}: {} node(s) — {}",
+                                    file_path,
+                                    nodes.len(),
+                                    top
+                                ),
+                                Some(json!({"nodes": nodes, "impact": impact})),
+                            )
+                        }
+                    }
                 },
                 Err(e) => tool_error(e.to_string()),
             }

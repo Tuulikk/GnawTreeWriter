@@ -651,6 +651,38 @@ pub fn fix_batch(findings: &[Finding], rules: &[Rule]) -> Result<(crate::core::B
 /// Shared lint core used by both the CLI `lint` command and the MCP `lint`
 /// tool — single implementation so the two never diverge. Report-only:
 /// this function never writes to disk.
+/// Substitute $METAVARS in a rule message with the matched bindings so a
+/// finding reads e.g. "… if `code` is a String/&str" instead of the raw
+/// template. Unbound names stay literal (messages must never fail — unlike
+/// fix templates, which validate bindings strictly).
+pub fn interpolate_message(msg: &str, captures: &HashMap<String, String>) -> String {
+    let mut out = String::with_capacity(msg.len());
+    let mut rest = msg;
+    while let Some(pos) = rest.find('$') {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos + 1..];
+        let name: String = after
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if name.is_empty() {
+            out.push('$');
+            rest = after;
+            continue;
+        }
+        match captures.get(&name) {
+            Some(v) => out.push_str(v),
+            None => {
+                out.push('$');
+                out.push_str(&name);
+            }
+        }
+        rest = &after[name.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
 pub fn run_lint(paths: &[String], opts: &LintOptions) -> Result<LintResult> {
     // Build the rule set. An ad-hoc pattern replaces stored rules entirely:
     // callers ask "where does this pattern occur", not "what rules fire".
@@ -686,6 +718,19 @@ pub fn run_lint(paths: &[String], opts: &LintOptions) -> Result<LintResult> {
             let yaml = std::fs::read_to_string(rf)
                 .map_err(|e| anyhow::anyhow!("failed to read rules file {}: {}", rf, e))?;
             rules.extend(load_rules_yaml(&yaml)?);
+        }
+    }
+
+    // Unknown rule id must fail loudly — a silent empty result would read
+    // as "the rule passed" (the exact lie finding #14 was about).
+    if let (Some(rf), None) = (opts.rule_filter, opts.ad_hoc_pattern) {
+        if !rules.iter().any(|r| r.id == rf) {
+            anyhow::bail!(
+                "unknown rule id {} — not in the {} loaded rules (builtin + project + --rules file). \
+Run `gnawtreewriter rules list` to see ids, or add it with `rules add` / MCP add_rule.",
+                rf,
+                rules.len()
+            );
         }
     }
 
@@ -845,7 +890,7 @@ fn match_pattern_recursive(
         findings.push(Finding {
             rule_id: rule.rule.id.clone(),
             severity: rule.rule.severity,
-            message: rule.rule.message.clone(),
+            message: interpolate_message(&rule.rule.message, &captures),
             file: file.to_string(),
             line: source.start_line,
             column: source.start_col,
@@ -1159,5 +1204,52 @@ mod tests {
         );
         let findings = run_rule(&rule, &tree, "test.py");
         assert_eq!(findings.len(), 1, "only bare except: pass should match");
+    }
+
+    #[test]
+    fn interpolate_message_binds_metavars() {
+        let mut caps = HashMap::new();
+        caps.insert("X".to_string(), "code".to_string());
+        assert_eq!(
+            interpolate_message("slice on $X; check $X twice", &caps),
+            "slice on code; check code twice"
+        );
+        // Unbound names stay literal — messages must never fail.
+        assert_eq!(interpolate_message("keep $Z as-is", &caps), "keep $Z as-is");
+        // Bare dollar survives.
+        assert_eq!(interpolate_message("cost: 5$ ok", &caps), "cost: 5$ ok");
+    }
+
+    #[test]
+    fn run_lint_unknown_rule_id_fails_loudly() {
+        let opts = LintOptions {
+            rule_filter: Some("finns_inte"),
+            ..Default::default()
+        };
+        let err = run_lint(&["src".to_string()], &opts)
+            .err()
+            .expect("unknown id must not pass silently");
+        let msg = format!("{}", err);
+        assert!(msg.contains("unknown rule id"), "got: {}", msg);
+        assert!(
+            msg.contains("rules list"),
+            "must point at next step: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn run_lint_known_rule_id_zero_findings_is_ok() {
+        let opts = LintOptions {
+            rule_filter: Some("rust_string_byte_slice"),
+            ..Default::default()
+        };
+        // Fresh temp file without byte slices: legitimately empty, no error.
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("clean.rs");
+        std::fs::write(&f, "fn main() { let x = 1; println!(\"{}\", x); }").unwrap();
+        let res = run_lint(&[f.to_string_lossy().to_string()], &opts)
+            .expect("known id on clean file must succeed");
+        assert_eq!(res.findings.len(), 0);
     }
 }
