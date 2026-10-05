@@ -3203,6 +3203,10 @@ Use --no-preview to write batch file"
     }
 
     async fn handle_ai_index(path: Option<PathBuf>, gpu: bool) -> Result<()> {
+        // gpu läses bara med modernbert-featuren (device-val nedan) —
+        // cfg-noop i stället för allow-maskering.
+        #[cfg(not(feature = "modernbert"))]
+        let _ = gpu;
         #[cfg(feature = "modernbert")]
         {
             // Device mode for this run: --gpu (transient) > gnawtreewriter.yaml
