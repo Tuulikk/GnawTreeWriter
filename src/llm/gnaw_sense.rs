@@ -83,8 +83,13 @@ pub enum SenseResponse {
 #[derive(Debug, serde::Serialize)]
 pub struct FileMatch {
     pub file_path: String,
+    /// PARENT node path — chunked index entries (`8[chunk:2]`) are mapped
+    /// back so read_node always resolves (chain must not break).
     pub node_path: Option<String>,
+    /// Reranked display score (cosine + bounded priors) — can exceed 1.0.
     pub score: f32,
+    /// Raw cosine from the embedding model, verbatim (0.0..=1.0).
+    pub cosine: Option<f32>,
     /// Chunk preview straight from the index (ROADMAP 9.4 nice-to-have):
     /// score + preview in one response saves an extra read_node round-trip.
     pub content_preview: String,
@@ -201,11 +206,14 @@ impl GnawSenseBroker {
             Ok(SenseResponse::Satelite {
                 matches: results
                     .into_iter()
-                    .map(|(entry, score)| FileMatch {
-                        file_path: entry.file_path.clone(),
-                        node_path: Some(entry.node_path.clone()),
-                        score,
-                        content_preview: entry.content_preview.clone(),
+                    .map(|hit| FileMatch {
+                        file_path: hit.entry.file_path.clone(),
+                        node_path: Some(
+                            crate::llm::parent_node_path(&hit.entry.node_path).to_string(),
+                        ),
+                        score: hit.adjusted,
+                        cosine: Some(hit.cosine),
+                        content_preview: hit.entry.content_preview.clone(),
                     })
                     .collect(),
             })

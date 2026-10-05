@@ -216,19 +216,56 @@ fn classify_preview(preview: &str) -> PreviewKind {
     }
 }
 
+/// A satellite hit after reranking: the entry plus BOTH scores — the raw
+/// cosine (what the model actually measured) and the adjusted ranking
+/// value (cosine + bounded priors). Consumers must never mistake the
+/// adjusted value for a cosine; it can exceed 1.0.
+pub struct RerankedHit<'a> {
+    pub entry: &'a NodeEmbedding,
+    pub cosine: f32,
+    pub adjusted: f32,
+}
+
+/// Index entries may be chunked (`8[chunk:2]`) — such paths do not exist
+/// in the tree and would fail `read_node` (diagnostic-chain break).
+/// Responses carry the PARENT node path; the chunk identity stays visible
+/// in content_preview ("(Chunk 2) …").
+pub fn parent_node_path(path: &str) -> &str {
+    match path.find("[chunk:") {
+        Some(idx) => &path[..idx],
+        None => path,
+    }
+}
+
+/// Light symmetric normalization for lexical matching: plural 's' trimmed
+/// on BOTH sides of the comparison ("modules" == "module") as long as at
+/// least 3 chars remain — symmetric, so it can never create a mismatch.
+fn lex_norm(word: &str) -> &str {
+    let trimmed = word.trim_end_matches('s');
+    if word.len() > 3 && trimmed.len() >= 3 {
+        trimmed
+    } else {
+        word
+    }
+}
+
+/// One file must not crowd out the whole top list: an agent asking
+/// "where does X live" wants breadth, not 10 nodes of cli.rs.
+const MAX_PER_FILE: usize = 3;
+
 /// Rerank satellite hits: adjusted = cosine + lexical bonus - decl penalty.
-/// Fetch a WIDER raw window than you serve (e.g. search(.., 30) then
+/// Fetch a WIDER raw window than you serve (e.g. search(.., 2000) then
 /// rerank(.., top=10)) so demoted decls release slots to implementations.
 pub fn rerank_satellite<'a>(
     query: &str,
     hits: Vec<(&'a NodeEmbedding, f32)>,
     top: usize,
-) -> Vec<(&'a NodeEmbedding, f32)> {
+) -> Vec<RerankedHit<'a>> {
     let q_tokens: Vec<String> = query
         .to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
         .filter(|t| t.len() >= 3)
-        .map(str::to_string)
+        .map(|t| lex_norm(t).to_string())
         .collect();
 
     // Inventory-intent queries ("which modules exist …") ANSWER with
@@ -244,7 +281,7 @@ pub fn rerank_satellite<'a>(
     // In inventory mode declarations ARE the answer: nudge them like items.
     let decl_bonus = if inventory_intent { IMPL_BONUS } else { 0.0 };
 
-    let mut scored: Vec<(&NodeEmbedding, f32)> = hits
+    let mut scored: Vec<(&NodeEmbedding, f32, f32)> = hits
         .into_iter()
         .map(|(entry, cosine)| {
             // Lexical reward scans preview AND identifiers — a query for
@@ -256,9 +293,21 @@ pub fn rerank_satellite<'a>(
                 entry.file_path.to_lowercase(),
                 entry.node_path.to_lowercase()
             );
+            // Word-boundary matching (normalized): substring `contains`
+            // let "log" hit "catalog"/"dialog". Tokens >= 4 chars may
+            // still match inside a word so CamelCase identifiers
+            // ("UndoRedoManager" for "undo") keep working.
+            let words: std::collections::HashSet<String> = haystack
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|w| !w.is_empty())
+                .map(|w| lex_norm(w).to_string())
+                .collect();
             let matched = q_tokens
                 .iter()
-                .filter(|t| haystack.contains(t.as_str()))
+                .filter(|t| {
+                    words.contains(t.as_str())
+                        || (t.chars().count() >= 4 && words.iter().any(|w| w.contains(t.as_str())))
+                })
                 .count();
             let lex = if q_tokens.is_empty() {
                 0.0
@@ -280,13 +329,31 @@ pub fn rerank_satellite<'a>(
                 PreviewKind::ImplLike => impl_bonus,
                 PreviewKind::Other => 0.0,
             } + LEX_WEIGHT * lex;
-            (entry, cosine + adjust)
+            (entry, cosine, cosine + adjust)
         })
         .collect();
 
-    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    scored.truncate(top);
-    scored
+    scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Per-file diversification: greedy over the sorted list.
+    let mut per_file: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut out: Vec<RerankedHit<'a>> = Vec::with_capacity(top);
+    for (entry, cosine, adjusted) in scored {
+        let count = per_file.entry(entry.file_path.as_str()).or_insert(0);
+        if *count >= MAX_PER_FILE {
+            continue;
+        }
+        *count += 1;
+        out.push(RerankedHit {
+            entry,
+            cosine,
+            adjusted,
+        });
+        if out.len() >= top {
+            break;
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -320,9 +387,9 @@ mod tests {
         let e3 = entry("3", "use crate::llm::Source;");
         let hits = vec![(&e1, 0.90), (&e2, 0.89), (&e3, 0.88)];
         let out = rerank_satellite("how is undo implemented", hits, 10);
-        assert_eq!(out[0].0.node_path, "2", "impl must outrank mod decl");
-        assert_eq!(out[1].0.node_path, "1");
-        assert_eq!(out[2].0.node_path, "3");
+        assert_eq!(out[0].entry.node_path, "2", "impl must outrank mod decl");
+        assert_eq!(out[1].entry.node_path, "1");
+        assert_eq!(out[2].entry.node_path, "3");
     }
 
     #[test]
@@ -331,7 +398,7 @@ mod tests {
         let e2 = entry("2", "fn undo_transaction() {}");
         let hits = vec![(&e1, 0.90), (&e2, 0.88)];
         let out = rerank_satellite("undo the transaction", hits, 10);
-        assert_eq!(out[0].0.node_path, "2", "lexical overlap must win");
+        assert_eq!(out[0].entry.node_path, "2", "lexical overlap must win");
     }
 
     #[test]
@@ -350,7 +417,7 @@ mod tests {
         let e2 = entry("2", "pub mod m;");
         let hits = vec![(&e1, 0.5), (&e2, 0.4)];
         let out = rerank_satellite("", hits, 10);
-        assert_eq!(out[0].0.node_path, "1");
+        assert_eq!(out[0].entry.node_path, "1");
     }
 
     #[test]
@@ -362,7 +429,7 @@ mod tests {
         let hits = vec![(&e1, 0.80), (&e2, 0.80)];
         let out = rerank_satellite("which modules exist in this project", hits, 10);
         assert_eq!(
-            out[0].0.node_path, "2",
+            out[0].entry.node_path, "2",
             "decl must win an inventory query at equal cosine"
         );
     }
@@ -388,6 +455,83 @@ mod tests {
         assert_eq!(
             classify_preview("(Chunk 3) pub mod whatever;"),
             PreviewKind::Decl
+        );
+    }
+
+    #[test]
+    fn parent_node_path_strips_chunk_marker() {
+        // Critical: chunk paths do not exist in the tree — read_node on
+        // them would fail (diagnostic-chain break).
+        assert_eq!(parent_node_path("8[chunk:2]"), "8");
+        assert_eq!(parent_node_path("14.2.11[chunk:0]"), "14.2.11");
+        assert_eq!(parent_node_path("41"), "41", "plain paths unchanged");
+        assert_eq!(parent_node_path("1.2"), "1.2");
+    }
+
+    #[test]
+    fn rerank_diversifies_across_files() {
+        // 5 high hits from file A must not crowd out file B entirely.
+        let mk = |path: &str, file: &str, preview: &str| NodeEmbedding {
+            file_path: file.to_string(),
+            node_path: path.to_string(),
+            content_preview: preview.to_string(),
+            vector: vec![0.0],
+        };
+        let a: Vec<NodeEmbedding> = (0..5)
+            .map(|i| mk(&format!("a{i}"), "src/a.rs", "fn alpha() {}"))
+            .collect();
+        let b = vec![
+            mk("b0", "src/b.rs", "fn beta() {}"),
+            mk("b1", "src/b.rs", "fn gamma() {}"),
+        ];
+        let mut hits: Vec<(&NodeEmbedding, f32)> = a.iter().map(|e| (e, 0.9)).collect();
+        hits.extend(b.iter().map(|e| (e, 0.5)));
+        let out = rerank_satellite("anything specific", hits, 10);
+        let files: std::collections::HashSet<&str> =
+            out.iter().map(|h| h.entry.file_path.as_str()).collect();
+        assert!(
+            files.contains("src/b.rs"),
+            "file B must survive the per-file cap: {:?}",
+            files
+        );
+        let a_count = out
+            .iter()
+            .filter(|h| h.entry.file_path == "src/a.rs")
+            .count();
+        assert!(a_count <= 3, "file A capped at 3, got {a_count}");
+    }
+
+    #[test]
+    fn rerank_lexical_uses_word_boundaries() {
+        // "log" must not match "catalog" (substring-before); CamelCase
+        // still matches via >=4-char in-word check.
+        let e1 = entry("1", "fn handle_catalog() {}");
+        let e2 = entry("2", "fn transaction_log_writer() {}");
+        let hits = vec![(&e1, 0.7), (&e2, 0.7)];
+        let out = rerank_satellite("transaction log", hits, 10);
+        assert_eq!(
+            out[0].entry.node_path, "2",
+            "word match must win over substring noise"
+        );
+
+        let c1 = entry("1", "impl UndoRedoManager {");
+        let hits = vec![(&c1, 0.7)];
+        let out = rerank_satellite("how is undo handled", hits, 10);
+        assert!(
+            out[0].adjusted > out[0].cosine,
+            "CamelCase identifier still lex-matches"
+        );
+    }
+
+    #[test]
+    fn rerank_exposes_raw_cosine_and_adjusted() {
+        let e1 = entry("1", "impl UndoRedoManager {");
+        let hits = vec![(&e1, 0.80)];
+        let out = rerank_satellite("undo the thing", hits, 10);
+        assert_eq!(out[0].cosine, 0.80, "raw cosine preserved verbatim");
+        assert!(
+            out[0].adjusted > out[0].cosine,
+            "impl bonus + lex show up only in the adjusted value"
         );
     }
 }
