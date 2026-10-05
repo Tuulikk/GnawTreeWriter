@@ -36,6 +36,18 @@ pub mod mcp_server {
         /// client timeouts on large files.
         #[cfg(feature = "modernbert")]
         sense_broker: tokio::sync::OnceCell<std::sync::Arc<crate::llm::GnawSenseBroker>>,
+        /// Background semantic-index run state (index_project tool):
+        /// one run at a time, last report kept for status polling.
+        #[cfg(feature = "modernbert")]
+        index_run: std::sync::Arc<IndexRun>,
+    }
+
+    /// Shared state for the background `index_project` tool.
+    #[cfg(feature = "modernbert")]
+    #[derive(Default)]
+    struct IndexRun {
+        running: std::sync::atomic::AtomicBool,
+        last: std::sync::Mutex<Option<Value>>,
     }
 
     #[cfg(feature = "modernbert")]
@@ -66,6 +78,7 @@ pub mod mcp_server {
                     token,
                     project_root,
                     sense_broker: tokio::sync::OnceCell::new(),
+                    index_run: std::sync::Arc::new(IndexRun::default()),
                 }
             }
         }
@@ -244,6 +257,20 @@ pub mod mcp_server {
                             include_uncommitted,
                             use_saved_state,
                         ))
+                    }
+                    "history" => {
+                        let limit =
+                            arguments.get("limit").and_then(Value::as_u64).unwrap_or(10) as usize;
+                        Ok(handle_history_mcp(state.clone(), limit))
+                    }
+                    "stats" => Ok(handle_stats_mcp(state.clone())),
+                    #[cfg(feature = "modernbert")]
+                    "index_project" => {
+                        let action = arguments
+                            .get("action")
+                            .and_then(Value::as_str)
+                            .unwrap_or("start");
+                        Ok(handle_index_project(state.clone(), action))
                     }
                     "index_entities" => {
                         let paths = resolve_file_paths(&arguments);
@@ -454,7 +481,7 @@ pub mod mcp_server {
     /// (vs. Read/Grep/Edit) and WHAT it returns; the registry contract
     /// test enforces this.
     fn tool_definitions() -> Vec<Value> {
-        vec![
+        let mut tools = vec![
             json!({
                 "name": "analyze",
                 "title": "Analyze file structure",
@@ -579,7 +606,7 @@ pub mod mcp_server {
             json!({
                 "name": "index_entities",
                 "title": "Extract entities from source file(s)",
-                "description": "Extract functions, structs, enums, impls and other entities from one or more files for knowledge-graph indexing. WHEN: building a project map or after large changes. Provide file_path OR file_paths (at least one). RETURNS: entity records with kind, name and location. Example: {\"file_paths\": [\"src/core/*.rs\"]}.",
+                "description": "Extract functions, structs, enums, impls and other entities from one or more files — builds the KNOWLEDGE GRAPH (entity/relation edges), NOT the vector index that satellite sense searches (that is index_project). WHEN: building a project map or after large changes. Provide file_path OR file_paths (at least one). RETURNS: entity records with kind, name and location. Example: {\"file_paths\": [\"src/core/*.rs\"]}.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -593,7 +620,7 @@ pub mod mcp_server {
             json!({
                 "name": "index_relations",
                 "title": "Extract relations from source file(s)",
-                "description": "Extract call relationships, imports, type usage and impl relations from one or more files for knowledge-graph edges. WHEN: together with index_entities to map how code connects. Provide file_path OR file_paths (at least one). RETURNS: relation records (caller → callee, import, impl). Example: {\"file_paths\": [\"src/cli.rs\", \"src/core/mod.rs\"]}.",
+                "description": "Extract call relationships, imports, type usage and impl relations from one or more files — edges of the KNOWLEDGE GRAPH, not the vector index satellite sense searches (that is index_project). WHEN: together with index_entities to map how code connects. Provide file_path OR file_paths (at least one). RETURNS: relation records (caller → callee, import, impl). Example: {\"file_paths\": [\"src/cli.rs\", \"src/core/mod.rs\"]}.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -874,7 +901,52 @@ pub mod mcp_server {
                     }
                 }
             }),
-        ]
+        ];
+
+        tools.push(json!({
+            "name": "history",
+            "title": "Recent edit history (transaction log)",
+            "description": "Recent transactions from the project transaction log — the MCP view of `gnawtreewriter history`: what changed, in which order, with stable ids. WHEN: after a series of edits, before deciding what to undo, or when asked \"what did GTW change here?\". RETURNS: {transactions: [{id, timestamp, operation, file, node_path, description}], count}, newest first; empty history is reported as a normal state with setup guidance. Example: {\"limit\": 5}.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "integer", "description": "How many of the newest transactions to return (default 10)" }
+                },
+                "required": []
+            }
+        }));
+        tools.push(json!({
+            "name": "stats",
+            "title": "Project statistics",
+            "description": "Project statistics behind `gnawtreewriter stats`: files, lines, tokens, per-language breakdown, largest files, compression estimate. WHEN: sizing up a repo, deciding what to pack/curate, or answering \"how big is this codebase?\". RETURNS: the full ProjectStats JSON plus a one-line human summary. Takes no arguments (uses the project root). Example: {}.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }));
+
+        // modernbert-only: builds the vector index satellite sense searches
+        // (index_entities extracts the knowledge graph instead).
+        #[cfg(feature = "modernbert")]
+        tools.push(json!({
+            "name": "index_project",
+            "title": "Build the semantic search index (background)",
+            "description": "Build the SEMANTIC (vector) index that satellite sense searches — the MCP-side equivalent of `gnawtreewriter ai index`, same pipeline, same GPU/20%-VRAM gate. NOT index_entities, which extracts the knowledge graph. Runs in the BACKGROUND: call with {\"action\":\"start\"} (default), then poll {\"action\":\"status\"} until running=false and read last_run — full runs take ~1-2 min on GPU. Until it has completed once, satellite sense (no file_path) has nothing to search; zoom sense works regardless. Example: {\"action\": \"status\"}.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["start", "status"],
+                        "description": "start (default) begins a background run if none is running; status reports running + last_run {ok, files, seconds, message}"
+                    }
+                },
+                "required": []
+            }
+        }));
+
+        tools
     }
 
     async fn rpc_handler(
@@ -1686,6 +1758,173 @@ or list_nodes for a flat index of this file.",
         vec![]
     }
 
+    /// `history`: recent transactions from the project transaction log —
+    /// the MCP view of `gnawtreewriter history`. What changed, in which
+    /// order, with ids you can feed to undo / restore-project.
+    fn handle_history_mcp(state: Arc<AppState>, limit: usize) -> Value {
+        let root = state.project_root.clone();
+        match crate::core::transaction_log::TransactionLog::load(&root) {
+            Ok(log) => match log.get_last_n_transactions(limit) {
+                Ok(txs) => {
+                    if txs.is_empty() {
+                        return tool_success(
+                            "Transaction history is empty — no GTW edits have been logged in this project yet (edit_node/insert/batch/CLI writes create entries; `gnawtreewriter session-start` groups them).".to_string(),
+                            Some(json!({"transactions": [], "count": 0})),
+                        );
+                    }
+                    let entries: Vec<Value> = txs
+                        .iter()
+                        .rev()
+                        .map(|t| {
+                            json!({
+                                "id": t.id,
+                                "timestamp": t.timestamp.to_rfc3339(),
+                                "operation": format!("{:?}", t.operation),
+                                "file": t.file_path.display().to_string(),
+                                "node_path": t.node_path,
+                                "description": t.description,
+                            })
+                        })
+                        .collect();
+                    tool_success(
+                        format!(
+                            "{} transaction(s), newest first — ids identify ops for undo; `restore-project --preview` goes deeper than the tail.",
+                            txs.len()
+                        ),
+                        Some(json!({"transactions": entries, "count": txs.len()})),
+                    )
+                }
+                Err(e) => tool_error(format!(
+                    "Cannot read transaction history: {} — inspect on the CLI with `gnawtreewriter history`.",
+                    e
+                )),
+            },
+            Err(e) => tool_error(format!(
+                "No transaction log in {}: {} — GTW edits create one on first write; an empty project having none is expected, not an outage.",
+                root.display(),
+                e
+            )),
+        }
+    }
+
+    /// `stats`: project statistics behind `gnawtreewriter stats` —
+    /// files/lines/tokens per language + largest files (Motor2 plan #24:
+    /// the data already existed in TransactionLog/stats, only the MCP
+    /// surface was missing).
+    fn handle_stats_mcp(state: Arc<AppState>) -> Value {
+        let root = state.project_root.clone();
+        match crate::core::stats::analyze_project(&root) {
+            Ok(s) => {
+                let largest = s
+                    .largest_files
+                    .first()
+                    .map(|f| format!("{} ({} lines)", f.path, f.lines))
+                    .unwrap_or_else(|| "n/a".to_string());
+                tool_success(
+                    format!(
+                        "{} files, {} lines, {} tokens, {} language(s); largest: {}.",
+                        s.total_files, s.total_lines, s.total_tokens, s.languages.len(), largest
+                    ),
+                    Some(serde_json::to_value(&s).unwrap_or(json!({}))),
+                )
+            }
+            Err(e) => tool_error(format!(
+                "Stats failed for {}: {} — the path must be an existing directory (verify with explore first).",
+                root.display(),
+                e
+            )),
+        }
+    }
+
+    /// `index_project`: build the SEMANTIC (vector) index that satellite
+    /// `sense` searches — the MCP-side equivalent of `gnawtreewriter ai
+    /// index` (same pipeline, same GPU/20%-VRAM gate). NOT `index_entities`,
+    /// which extracts the knowledge graph. Long runs happen in the
+    /// background (poll with action=status) so the call never outruns
+    /// client timeouts.
+    fn handle_index_project(state: Arc<AppState>, action: &str) -> Value {
+        use std::sync::atomic::Ordering;
+        match action {
+            "status" => {
+                let running = state.index_run.running.load(Ordering::SeqCst);
+                let last = state.index_run.last.lock().ok().and_then(|g| g.clone());
+                if running {
+                    tool_success(
+                        "Semantic indexing is RUNNING in the background — satellite sense will search it when done. Poll again with action: \"status\" (a full run takes ~1-2 min on GPU, minutes on CPU).".to_string(),
+                        Some(json!({"running": true, "last_run": last})),
+                    )
+                } else if let Some(report) = last {
+                    let msg = report
+                        .get("message")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("last run finished")
+                        .to_string();
+                    tool_success(msg, Some(json!({"running": false, "last_run": report})))
+                } else {
+                    tool_success(
+                        "No indexing run yet — start one with action: \"start\" (or run `gnawtreewriter ai index` in the project). Until then satellite sense has nothing to search; zoom sense (with file_path) works regardless.".to_string(),
+                        Some(json!({"running": false, "last_run": null})),
+                    )
+                }
+            }
+            "start" | "" => {
+                if state
+                    .index_run
+                    .running
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_err()
+                {
+                    return tool_success(
+                        "Semantic indexing is already running — poll with action: \"status\" instead of starting a second run.".to_string(),
+                        Some(json!({"running": true})),
+                    );
+                }
+                let root = state.project_root.clone();
+                let run = state.index_run.clone();
+                tokio::spawn(async move {
+                    let t0 = std::time::Instant::now();
+                    let outcome: Result<usize, String> =
+                        match crate::llm::ProjectIndexer::new(&root) {
+                            Ok(indexer) => {
+                                indexer.index_all(&root).await.map_err(|e| e.to_string())
+                            }
+                            Err(e) => Err(e.to_string()),
+                        };
+                    let report = match outcome {
+                        Ok(files) => json!({
+                            "ok": true,
+                            "files": files,
+                            "seconds": t0.elapsed().as_secs_f32().round(),
+                            "message": format!("Indexed {} files — satellite sense now searches them", files),
+                        }),
+                        Err(e) => json!({
+                            "ok": false,
+                            "error": e,
+                            "seconds": t0.elapsed().as_secs_f32().round(),
+                            "message": format!("Indexing failed: {} — check `gnawtreewriter ai status`, then retry with action: \"start\"", e),
+                        }),
+                    };
+                    if let Ok(mut last) = run.last.lock() {
+                        *last = Some(report);
+                    }
+                    run.running.store(false, Ordering::SeqCst);
+                });
+                let root_disp = state.project_root.display().to_string();
+                tool_success(
+                    format!(
+                        "Semantic indexing started in the background for {} — poll with action: \"status\" (the GPU/20%-VRAM gate applies as always). NOTE: this builds the VECTOR index satellite sense searches; index_entities builds the knowledge graph instead.",
+                        root_disp
+                    ),
+                    Some(json!({"running": true})),
+                )
+            }
+            other => tool_error(format!(
+                "Unknown index_project action {:?} — use \"start\" (default) or \"status\".",
+                other
+            )),
+        }
+    }
+
     fn handle_index_entities_batch(paths: &[String], include_private: bool) -> Value {
         // Parallel: index each file independently (order preserved).
         let results: Vec<Result<crate::core::index_entities::EntityIndex, String>> = paths
@@ -2283,7 +2522,7 @@ or list_nodes for a flat index of this file.",
                     SenseResponse::Satelite { matches } => {
                         if matches.is_empty() {
                             tool_error(format!(
-                                    "Satellite search: no matches for \"{}\". The project semantic index may be missing — build it with `gnawtreewriter ai index`, or pass file_path for single-file zoom search.",
+                                    "Satellite search: no matches for \"{}\". The project semantic index may be missing — build it with the index_project tool (action: start, then status) or `gnawtreewriter ai index` on the CLI, or pass file_path for single-file zoom search.",
                                     query
                                 ))
                         } else {
@@ -2373,6 +2612,12 @@ or list_nodes for a flat index of this file.",
                         Ok(w) => w,
                         Err(e) => return tool_error(format!("Could not open {} for the proposed insert: {} — verify file_path exists (explore/search_nodes)", file_path, e)),
                     };
+                    let transparency = json!({
+                        "anchor_path": proposal.anchor_path,
+                        "confidence": proposal.confidence,
+                        "parent_path": proposal.parent_path,
+                        "position": proposal.position,
+                    });
                     let op = EditOperation::Insert {
                         parent_path: proposal.parent_path,
                         position: proposal.position,
@@ -2386,7 +2631,10 @@ or list_nodes for a flat index of this file.",
                                     "Successfully inserted code near anchor '{}' (confidence: {:.2})",
                                     proposal.anchor_path, proposal.confidence
                                 ),
-                                None,
+                                // Motor2 plan #19: structured transparency
+                                // alongside the human line (fields captured
+                                // before parent_path moved into the op).
+                                Some(transparency),
                                 pulse,
                             )
                         }
@@ -2420,12 +2668,68 @@ or list_nodes for a flat index of this file.",
             match broker.sense(query, Some(file_path)).await {
                 Ok(SenseResponse::Zoom { nodes, .. }) if !nodes.is_empty() => {
                     let best_node = &nodes[0];
-                    handle_edit_node_internal(state, file_path, &best_node.path, content)
+                    let confidence = best_node.score;
+                    let candidates: Vec<Value> = nodes
+                        .iter()
+                        .take(5)
+                        .map(|n| json!({"path": n.path, "score": n.score, "preview": n.preview}))
+                        .collect();
+                    let summary = format!(
+                        "semantic_edit matched {} (confidence {:.2}); top candidates: {}",
+                        best_node.path,
+                        confidence,
+                        candidates
+                            .iter()
+                            .filter_map(|c| {
+                                Some(format!(
+                                    "{} ({:.2})",
+                                    c.get("path")?.as_str()?,
+                                    c.get("score")?.as_f64()?
+                                ))
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                    // Motor2 plan #19: transparency on HIT — the edit result
+                    // carries what was matched, with what confidence, and which
+                    // alternatives were considered.
+                    let mut result =
+                        handle_edit_node_internal(state, file_path, &best_node.path, content);
+                    if let Some(obj) = result.as_object_mut() {
+                        obj.insert(
+                            "semantic_match".to_string(),
+                            json!({
+                                "matched_path": best_node.path,
+                                "confidence": confidence,
+                                "candidates": candidates,
+                            }),
+                        );
+                        if let Some(arr) = obj.get_mut("content").and_then(|c| c.as_array_mut()) {
+                            if let Some(Value::String(text)) =
+                                arr.first_mut().and_then(|c| c.get_mut("text"))
+                            {
+                                text.push('\n');
+                                text.push_str(&summary);
+                            }
+                        }
+                    }
+                    result
                 }
-                Ok(_) => tool_error(format!(
-                    "Could not find a semantic match for '{}' in {} — try a different anchor phrase, or insert_node with a parent_path from list_nodes",
-                    query, file_path
-                )),
+                Ok(_) => {
+                    // Motor2 plan #19: transparency on MISS — explicit zero
+                    // confidence + empty candidate set, never a bare denial.
+                    let mut err = tool_error(format!(
+                        "Could not find a semantic match for '{}' in {} — no node scored above the relevance floor. Try a different anchor phrase, list_nodes for the raw structure, or insert_node with a parent_path. (semantic_match: confidence 0, no candidates)",
+                        query, file_path
+                    ));
+                    if let Some(obj) = err.as_object_mut() {
+                        obj.insert(
+                            "semantic_match".to_string(),
+                            json!({"confidence": 0.0, "candidates": [], "matched_path": null}),
+                        );
+                    }
+                    err
+                }
                 Err(e) => tool_error(format!("sense failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md", e)),
             }
         }

@@ -1236,3 +1236,106 @@ fn integration_error_strings_carry_guidance() {
         "guidance must point at model setup and the issue log"
     );
 }
+
+/// Motor2 bug 2 (issue log 2026-10-05): index_project builds the VECTOR
+/// index satellite sense searches (index_entities = knowledge graph).
+/// Status must be safe to poll — never kicks a run — and unknown actions
+/// fail loudly with the valid ones.
+#[tokio::test]
+async fn integration_mcp_index_project_status() -> Result<(), Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, rx) = oneshot::channel::<()>();
+    let token = Some("secret".to_string());
+    let server_handle = tokio::spawn(async move {
+        let shutdown_fut = async move {
+            let _ = rx.await;
+        };
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
+            .await
+            .unwrap();
+    });
+    let url = format!("http://{}/", addr);
+    let client = Client::new();
+    let mut ready = false;
+    for _ in 0..40 {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                ready = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_connect() {
+                    sleep(Duration::from_millis(50)).await;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(ready, "server did not become ready in time");
+
+    // status on a fresh server: no run, no side effects, actionable text.
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&json!({
+            "jsonrpc":"2.0",
+            "method":"tools/call",
+            "id": 2,
+            "params": { "name": "index_project", "arguments": { "action": "status" } }
+        }))
+        .send()
+        .await?;
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").expect("result");
+    assert_ne!(r.get("isError"), Some(&json!(true)));
+    assert_eq!(
+        r["running"],
+        json!(false),
+        "fresh status must not be running"
+    );
+    assert!(r["last_run"].is_null(), "no prior run on a fresh server");
+    let text = r["content"][0]["text"].as_str().unwrap_or("");
+    assert!(text.contains("No indexing run yet"), "got: {:?}", text);
+    assert!(
+        text.contains("index_project") || text.contains("start"),
+        "must say how to start"
+    );
+
+    // unknown action: loud, with the valid set.
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&json!({
+            "jsonrpc":"2.0",
+            "method":"tools/call",
+            "id": 3,
+            "params": { "name": "index_project", "arguments": { "action": "banana" } }
+        }))
+        .send()
+        .await?;
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").expect("result");
+    assert_eq!(
+        r.get("isError"),
+        Some(&json!(true)),
+        "unknown action must error"
+    );
+    let text = r["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("start") && text.contains("status"),
+        "got: {:?}",
+        text
+    );
+
+    let _ = tx.send(());
+    server_handle.await?;
+    Ok(())
+}
