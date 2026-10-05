@@ -426,7 +426,11 @@ pub mod mcp_server {
                     "sense" => {
                         let query = validate_arg("query")?;
                         let fp = arguments.get("file_path").and_then(Value::as_str);
-                        Ok(handle_sense(state, query, fp).await)
+                        let expand = arguments
+                            .get("expand")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        Ok(handle_sense(state, query, fp, expand).await)
                     }
                     "semantic_insert" => {
                         let fp = validate_arg("file_path")?;
@@ -838,12 +842,13 @@ pub mod mcp_server {
             json!({
                 "name": "sense",
                 "title": "Semantic Search (GnawSense)",
-                "description": "Search for code semantically using AI. Good for finding where something is implemented when you only have a vague description.",
+                "description": "Search for code semantically using AI — satellite (whole project) or zoom (one file, pass file_path). Returns matches with score + cosine + preview, plus search_quality {prior_failures, suspect_reason, expansion}: suspect flags results the ranker distrusts (no lexical overlap with the query) and prior_failures says how often this exact query failed before (logged in .gnawtreewriter_search_log.jsonl). WHEN: 'where/how is X implemented' without knowing file names; prefer over grep for meaning, verify with read_node. expand=true adds an LFM2.5 query-expansion channel (mamba builds; skipped with a note otherwise).",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "query": { "type": "string", "description": "Semantic query (e.g., 'how is backup handled?')" },
-                        "file_path": { "type": "string", "description": "Optional: Limit search to this file (Zoom mode)" }
+                        "file_path": { "type": "string", "description": "Optional: Limit search to this file (Zoom mode)" },
+                        "expand": { "type": "boolean", "description": "Satellite only: expand the query via LFM2.5 and fuse a second semantic channel (mamba builds; default false — costs one LLM call + one extra embedding)" }
                     },
                     "required": ["query"]
                 }
@@ -1634,7 +1639,7 @@ or list_nodes for a flat index of this file.",
             };
 
             match broker.sense(query, file_path).await {
-                Ok(crate::llm::SenseResponse::Satelite { matches }) => {
+                Ok(crate::llm::SenseResponse::Satelite { matches, quality }) => {
                     let results: Vec<Value> = matches
                         .iter()
                         .take(max_results)
@@ -1649,7 +1654,7 @@ or list_nodes for a flat index of this file.",
                         .collect();
                     tool_success(
                         format!("Found {} matches for \"{}\"", results.len(), query),
-                        Some(json!({"matches": results, "query": query, "mode": "satellite"})),
+                        Some(json!({"matches": results, "query": query, "mode": "satellite", "search_quality": quality})),
                     )
                 }
                 Ok(crate::llm::SenseResponse::Zoom {
@@ -2688,7 +2693,12 @@ or list_nodes for a flat index of this file.",
         }
     }
 
-    async fn handle_sense(state: Arc<AppState>, query: &str, file_path: Option<&str>) -> Value {
+    async fn handle_sense(
+        state: Arc<AppState>,
+        query: &str,
+        file_path: Option<&str>,
+        expand: bool,
+    ) -> Value {
         #[cfg(feature = "modernbert")]
         {
             use crate::llm::SenseResponse;
@@ -2697,13 +2707,14 @@ or list_nodes for a flat index of this file.",
                 Err(e) => return tool_error_code(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e), "E_MODEL_UNAVAILABLE"),
             };
 
-            match broker.sense(query, file_path).await {
+            match broker.sense_with(query, file_path, expand).await {
                 Ok(response) => match response {
-                    SenseResponse::Satelite { matches } => {
+                    SenseResponse::Satelite { matches, quality } => {
                         if matches.is_empty() {
                             tool_error(format!(
-                                    "Satellite search: no matches for \"{}\". The project semantic index may be missing — build it with the index_project tool (action: start, then status) or `gnawtreewriter ai index` on the CLI, or pass file_path for single-file zoom search.",
-                                    query
+                                    "Satellite search: no matches for \"{}\". The project semantic index may be missing — build it with the index_project tool (action: start, then status) or `gnawtreewriter ai index` on the CLI, or pass file_path for single-file zoom search. (This query has now failed {} time(s) before this call — outcomes are logged in .gnawtreewriter_search_log.jsonl.)",
+                                    query,
+                                    quality.prior_failures
                                 ))
                         } else {
                             let top: String = matches
@@ -2722,9 +2733,21 @@ or list_nodes for a flat index of this file.",
                                 })
                                 .collect::<Vec<_>>()
                                 .join("; ");
+                            let suspect_note = match &quality.suspect_reason {
+                                Some(reason) => format!(
+                                    " ⚠ suspect: {} (prior failures for this query: {} — logged in .gnawtreewriter_search_log.jsonl)",
+                                    reason, quality.prior_failures
+                                ),
+                                None => String::new(),
+                            };
                             tool_success(
-                                format!("Satellite search: {} match(es) — {}", matches.len(), top),
-                                Some(json!({"matches": matches})),
+                                format!(
+                                    "Satellite search: {} match(es) — {}{}",
+                                    matches.len(),
+                                    top,
+                                    suspect_note
+                                ),
+                                Some(json!({"matches": matches, "search_quality": quality})),
                             )
                         }
                     }

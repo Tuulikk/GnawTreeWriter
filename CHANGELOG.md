@@ -1,3 +1,39 @@
+## [0.16.0] - 2026-10-05
+
+### Added
+- **Query expansion for satellite `sense`** (`expand: true`, opt-in):
+  LFM2.5 expands the question into content terms (same prompt as
+  investigate step 1); the expanded text runs as a SECOND semantic
+  channel fused with the original by max cosine
+  (`fuse_by_max`), and feeds the reranker's lexical side. Costs one LLM
+  call + one extra embedding — default false. Non-mamba builds respond
+  with an explicit note instead of failing. Live-verified in a
+  release+mamba build (7.4 s end-to-end, terms like
+  `['transaction log', 'persistence', 'entry storage', …]`).
+- **Search feedback loop** (roadmap AUTO-koppling):
+  - `search_quality {prior_failures, suspect_reason, expansion}` on
+    every satellite answer; suspect reasons: `empty`, `low_cosine`
+    (top raw cosine < 0.5), `no_lex_overlap` (top hit shares no query
+    word — catches the flat-cosine saturation where unrelated code
+    scores 0.85+).
+  - Failures append to `.gnawtreewriter_search_log.jsonl`
+    (gitignored, rotated at 1 MB → newest 500 lines); `prior_failures`
+    counts earlier failures of the SAME normalized query and is shown
+    in both the success note and the no-matches error — an agent sees
+    "this query keeps failing" instead of trusting a flat field.
+  - Live-verified: nonsense query flagged `no_lex_overlap`, second call
+    showed `prior_failures: 1`, JSONL entries well-formed.
+
+### Fixed
+- `edit --ask "…" --all --preview` ignored the preview flag (writes
+  were gated only by `!force`) — preview now always wins, even
+  combined with `--force`; also clears the mamba-only unused-parameter
+  warning.
+
+### Docs
+- `sense` schema: `expand` property + description documents
+  `search_quality` semantics; `.gitignore` covers the search log.
+
 ## [0.15.0] - 2026-10-05
 
 ### Added

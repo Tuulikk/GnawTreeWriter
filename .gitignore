@@ -34,3 +34,4 @@ GnawData/
 
 # CommandCode (OpenCode-alternativ)
 .commandcode/
+.gnawtreewriter_search_log.jsonl

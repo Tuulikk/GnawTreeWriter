@@ -66,6 +66,16 @@ const EXTRACT_TEMP: f32 = 0.1;
 const SYNTH_TEMP: f32 = 0.4;
 
 /// Extract a JSON array of strings/numbers from model output (lenient).
+/// Expand a search question into content terms with the local LFM2.5
+/// (same prompt as investigate's step 1) — used by satellite sense when
+/// the caller passes expand=true. Empty vec = model produced nothing;
+/// callers decide whether that is worth reporting.
+pub fn expand_query_terms(mgr: &AiManager, question: &str) -> Result<Vec<String>> {
+    let prompt = prompts::expand_query_prompt(question);
+    let gen = mgr.generate_lfm25(&prompt, 60, EXTRACT_TEMP)?;
+    Ok(parse_json_array(&gen.text).unwrap_or_default())
+}
+
 fn parse_json_array(s: &str) -> Option<Vec<String>> {
     let start = s.find('[')?;
     let end = s.rfind(']')?;

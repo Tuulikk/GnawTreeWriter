@@ -68,10 +68,103 @@ struct CachedFileIndex {
     content_hash: String,
 }
 
+/// Search-outcome log (feedback loop / roadmap AUTO-koppling): failed
+/// satellite searches are appended so `prior_failures` can be surfaced
+/// to agents and the data can drive future scoring work.
+pub const SEARCH_LOG_FILE: &str = ".gnawtreewriter_search_log.jsonl";
+
+fn normalize_search_query(q: &str) -> String {
+    q.to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Failures recorded for this exact query BEFORE now (0 = first time).
+pub fn search_log_prior_failures(project_root: &std::path::Path, query: &str) -> u64 {
+    let norm = normalize_search_query(query);
+    std::fs::read_to_string(project_root.join(SEARCH_LOG_FILE))
+        .ok()
+        .map(|text| {
+            text.lines()
+                .filter(|line| {
+                    serde_json::from_str::<serde_json::Value>(line)
+                        .ok()
+                        .and_then(|v| {
+                            v.get("query_norm")
+                                .and_then(|n| n.as_str())
+                                .map(str::to_string)
+                        })
+                        .as_deref()
+                        == Some(norm.as_str())
+                })
+                .count() as u64
+        })
+        .unwrap_or(0)
+}
+
+/// Append one failure entry; rotate above 1 MB (keep the newest 500).
+pub fn search_log_record_failure(
+    project_root: &std::path::Path,
+    query: &str,
+    reason: &str,
+    result_count: usize,
+    top_cosine: Option<f32>,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    let path = project_root.join(SEARCH_LOG_FILE);
+    let entry = serde_json::json!({
+        "ts": chrono::Utc::now().to_rfc3339(),
+        "query": query,
+        "query_norm": normalize_search_query(query),
+        "reason": reason,
+        "result_count": result_count,
+        "top_cosine": top_cosine,
+    });
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)?;
+    writeln!(file, "{}", entry)?;
+    drop(file);
+    if std::fs::metadata(&path)
+        .map(|m| m.len() > 1_048_576)
+        .unwrap_or(false)
+    {
+        let text = std::fs::read_to_string(&path)?;
+        let mut kept: Vec<&str> = text.lines().rev().take(500).collect();
+        kept.reverse();
+        std::fs::write(&path, format!("{}\n", kept.join("\n")))?;
+    }
+    Ok(())
+}
+
+/// Quality signals attached to satellite answers (feedback loop): what
+/// was suspect about this search and how often the same query failed
+/// before — so agents can adjust instead of trusting a flat result.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SatelliteQuality {
+    /// Failures for this exact query recorded BEFORE this call.
+    pub prior_failures: u64,
+    /// None = looked fine; else "empty" | "low_cosine" | "no_lex_overlap".
+    pub suspect_reason: Option<String>,
+    /// Present only when expand=true was requested.
+    pub expansion: Option<ExpansionInfo>,
+}
+
+/// Query-expansion outcome (expand=true; LFM2.5 terms, mamba builds).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ExpansionInfo {
+    pub applied: bool,
+    pub terms: Vec<String>,
+    pub note: Option<String>,
+}
+
 #[derive(Debug, serde::Serialize)]
 pub enum SenseResponse {
     Satelite {
         matches: Vec<FileMatch>,
+        quality: SatelliteQuality,
     },
     Zoom {
         file_path: String,
@@ -135,6 +228,20 @@ impl GnawSenseBroker {
 
     #[cfg(feature = "modernbert")]
     pub async fn sense(&self, query: &str, file_context: Option<&str>) -> Result<SenseResponse> {
+        self.sense_with(query, file_context, false).await
+    }
+
+    /// `expand = true` (satellite only): expand the query with LFM2.5
+    /// terms (mamba builds), embed the expanded text as a SECOND channel,
+    /// fuse both searches by max cosine, and give the reranker the
+    /// expanded text for its lexical side. One extra embedding (+ one LLM
+    /// call when mamba is present) — opt-in per call.
+    pub async fn sense_with(
+        &self,
+        query: &str,
+        file_context: Option<&str>,
+        expand: bool,
+    ) -> Result<SenseResponse> {
         let model = self
             .ai_manager
             .load_model(AiModel::ModernBert, DeviceType::Cpu)?;
@@ -192,16 +299,128 @@ impl GnawSenseBroker {
             // SATELITE MODE: Search across the entire project index
             let index_mgr = crate::llm::SemanticIndexManager::new(&self.project_root);
             let project_index = index_mgr.load_project_index()?;
-            // Wider raw window, then rerank: pure cosine lets module decls
-            // crowd out implementations for name-heavy queries (9.x quality fix).
+
+            // Query expansion (opt-in): a second semantic channel fused by
+            // max cosine; the expanded text also feeds the reranker's
+            // lexical side. Skips gracefully on non-mamba builds.
+            // (cfg-split bindings: mut lives inside each branch, so neither
+            // build sees a needlessly-mut variable.)
+            #[cfg(feature = "mamba")]
+            let (lex_query, expanded, mut expansion_info) = {
+                let mut lex_query = query.to_string();
+                let mut expanded = false;
+                let mut expansion_info: Option<ExpansionInfo> = None;
+                if expand {
+                    let outcome = crate::llm::AiManager::new(&self.project_root)
+                        .and_then(|mgr| crate::llm::pipeline::expand_query_terms(&mgr, query));
+                    match outcome {
+                        Ok(terms) if !terms.is_empty() => {
+                            lex_query = format!("{} {}", query, terms.join(" "));
+                            expanded = true;
+                            expansion_info = Some(ExpansionInfo {
+                                applied: true,
+                                terms,
+                                note: None,
+                            });
+                        }
+                        Ok(_) => {
+                            expansion_info = Some(ExpansionInfo {
+                                applied: false,
+                                terms: vec![],
+                                note: Some("expansion model returned no terms".to_string()),
+                            });
+                        }
+                        Err(e) => {
+                            expansion_info = Some(ExpansionInfo {
+                                applied: false,
+                                terms: vec![],
+                                note: Some(format!("expansion failed: {}", e)),
+                            });
+                        }
+                    }
+                }
+                (lex_query, expanded, expansion_info)
+            };
+            #[cfg(not(feature = "mamba"))]
+            let (lex_query, expanded, mut expansion_info) = {
+                let expansion_info = if expand {
+                    Some(ExpansionInfo {
+                        applied: false,
+                        terms: vec![],
+                        note: Some(
+                            "expansion requires the 'mamba' feature — rebuild with --features mamba"
+                                .to_string(),
+                        ),
+                    })
+                } else {
+                    None
+                };
+                (query.to_string(), false, expansion_info)
+            };
+
             // Wide net: implementations are long/diffuse and rank low in
             // raw cosine, so a narrow window would never even show them to
             // the reranker. Lower floor + large window, then rerank to 10.
-            let results = crate::llm::rerank_satellite(
-                query,
-                project_index.search_with_threshold(&query_vector, 2000, 0.1),
-                10,
-            );
+            let base_hits = project_index.search_with_threshold(&query_vector, 2000, 0.1);
+            let hits = if expanded {
+                match model.get_embedding(&lex_query) {
+                    Ok(exp_tensor) => {
+                        let exp_vector: Vec<f32> = exp_tensor.to_vec1()?;
+                        let exp_hits = project_index.search_with_threshold(&exp_vector, 2000, 0.1);
+                        crate::llm::fuse_by_max(base_hits, exp_hits)
+                    }
+                    Err(e) => {
+                        if let Some(info) = expansion_info.as_mut() {
+                            info.applied = false;
+                            info.note = Some(format!("expanded embedding failed: {}", e));
+                        }
+                        base_hits
+                    }
+                }
+            } else {
+                base_hits
+            };
+            let results = crate::llm::rerank_satellite(&lex_query, hits, 10);
+
+            // Feedback loop (roadmap AUTO-koppling): flag suspicious
+            // outcomes and remember failures so the agent sees
+            // prior_failures instead of trusting a flat field blindly.
+            let (suspect_reason, top_cosine) = if results.is_empty() {
+                (Some("empty".to_string()), None)
+            } else {
+                let top = &results[0];
+                let hay = format!(
+                    "{} {}",
+                    top.entry.content_preview.to_lowercase(),
+                    top.entry.file_path.to_lowercase()
+                );
+                let lex_hit = lex_query
+                    .split(|c: char| !c.is_alphanumeric())
+                    .filter(|w| w.len() >= 3)
+                    .any(|w| hay.contains(w));
+                if top.cosine < 0.5 {
+                    (Some("low_cosine".to_string()), Some(top.cosine))
+                } else if !lex_hit {
+                    (Some("no_lex_overlap".to_string()), Some(top.cosine))
+                } else {
+                    (None, Some(top.cosine))
+                }
+            };
+            let prior_failures = search_log_prior_failures(&self.project_root, query);
+            if let Some(reason) = &suspect_reason {
+                let _ = search_log_record_failure(
+                    &self.project_root,
+                    query,
+                    reason,
+                    results.len(),
+                    top_cosine,
+                );
+            }
+            let quality = SatelliteQuality {
+                prior_failures,
+                suspect_reason,
+                expansion: expansion_info,
+            };
 
             Ok(SenseResponse::Satelite {
                 matches: results
@@ -216,6 +435,7 @@ impl GnawSenseBroker {
                         content_preview: hit.entry.content_preview.clone(),
                     })
                     .collect(),
+                quality,
             })
         }
     }
@@ -553,5 +773,79 @@ mod tests {
         assert_eq!(truncate_preview("fn main() {}", 97), "fn main() {}");
         let s = "—".repeat(97); // exactly at the limit
         assert_eq!(truncate_preview(&s, 97), s);
+    }
+
+    /// Feedback loop: failures persist, prior_failures counts per exact
+    /// query (normalized), successes are never logged by the helpers.
+    #[test]
+    fn search_log_records_and_counts_prior_failures() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+
+        assert_eq!(
+            super::search_log_prior_failures(root, "how does undo work"),
+            0,
+            "no log yet"
+        );
+
+        super::search_log_record_failure(root, "how does undo work", "empty", 0, None)
+            .expect("record");
+        // Normalization: case + whitespace must match the same query.
+        assert_eq!(
+            super::search_log_prior_failures(root, "  HOW does   undo work "),
+            1
+        );
+        // Different query unaffected.
+        assert_eq!(super::search_log_prior_failures(root, "other query"), 0);
+
+        super::search_log_record_failure(
+            root,
+            "how does undo work",
+            "no_lex_overlap",
+            10,
+            Some(0.87),
+        )
+        .expect("record");
+        assert_eq!(
+            super::search_log_prior_failures(root, "how does undo work"),
+            2,
+            "second failure counted"
+        );
+
+        // The log file holds parseable JSONL with the expected shape.
+        let text = std::fs::read_to_string(root.join(super::SEARCH_LOG_FILE)).unwrap();
+        assert_eq!(text.lines().count(), 2);
+        let first: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!(first["reason"], "empty");
+        assert_eq!(first["result_count"], 0);
+        assert!(first["ts"].is_string());
+    }
+
+    #[test]
+    fn search_log_rotates_large_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let path = root.join(super::SEARCH_LOG_FILE);
+        // Fake a > 1 MB log (padded so 600 lines cross the threshold).
+        let line = format!(
+            "{}{}",
+            r#"{"ts":"2026-10-05T00:00:00Z","query":"q","query_norm":"q","reason":"empty","result_count":0,"top_cosine":null,"pad":"#,
+            "x".repeat(2000)
+        );
+        std::fs::write(&path, format!("{}\n", vec![line; 600].join("\n"))).unwrap();
+        assert!(std::fs::metadata(&path).unwrap().len() > 1_048_576);
+
+        super::search_log_record_failure(root, "new query", "empty", 0, None)
+            .expect("record+rotate");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            text.lines().count(),
+            500,
+            "rotation keeps the newest 500 lines (the just-appended entry included)"
+        );
+        assert!(
+            text.lines().last().unwrap().contains("new query"),
+            "newest entry survives rotation"
+        );
     }
 }

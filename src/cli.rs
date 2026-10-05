@@ -2275,7 +2275,10 @@ Use --no-preview to write batch file"
             }
 
             match response {
-                SenseResponse::Satelite { matches } => {
+                SenseResponse::Satelite {
+                    matches,
+                    quality: _,
+                } => {
                     if matches.is_empty() {
                         println!(
                             "\n🛰️ Satelite View: No relevant results found for \"{}\".",
@@ -2616,8 +2619,9 @@ Use --no-preview to write batch file"
         }
         println!("   found {} occurrence(s)", count);
 
-        if !force {
-            // Preview: show the replacement without writing.
+        if preview || !force {
+            // Preview: show the replacement without writing. --preview must
+            // ALWAYS win — even combined with --force it never writes.
             let previewed = source.replace(&old_line, &new_line);
             print_diff(&source, &previewed);
             Self::print_budget(&proposal.budget);

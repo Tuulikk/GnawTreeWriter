@@ -253,6 +253,29 @@ fn lex_norm(word: &str) -> &str {
 /// "where does X live" wants breadth, not 10 nodes of cli.rs.
 const MAX_PER_FILE: usize = 3;
 
+/// Fuse two satellite searches over the SAME index by taking, per entry,
+/// the higher cosine (dedup on file_path+node_path). Used for query
+/// expansion: the natural-language query and its expanded form each run
+/// their own search; the fused set feeds rerank_satellite. Order is not
+/// meaningful — rerank sorts anyway.
+pub fn fuse_by_max<'a>(
+    a: Vec<(&'a NodeEmbedding, f32)>,
+    b: Vec<(&'a NodeEmbedding, f32)>,
+) -> Vec<(&'a NodeEmbedding, f32)> {
+    let mut best: std::collections::HashMap<(&'a str, &'a str), (&'a NodeEmbedding, f32)> =
+        std::collections::HashMap::new();
+    for (entry, score) in a.into_iter().chain(b) {
+        let key = (entry.file_path.as_str(), entry.node_path.as_str());
+        match best.get(&key) {
+            Some((_, existing)) if *existing >= score => {}
+            _ => {
+                best.insert(key, (entry, score));
+            }
+        }
+    }
+    best.into_values().collect()
+}
+
 /// Rerank satellite hits: adjusted = cosine + lexical bonus - decl penalty.
 /// Fetch a WIDER raw window than you serve (e.g. search(.., 2000) then
 /// rerank(.., top=10)) so demoted decls release slots to implementations.
@@ -533,5 +556,27 @@ mod tests {
             out[0].adjusted > out[0].cosine,
             "impl bonus + lex show up only in the adjusted value"
         );
+    }
+
+    #[test]
+    fn fuse_by_max_dedups_and_keeps_best_score() {
+        let e1 = entry("1", "fn alpha() {}");
+        let e2 = entry("2", "fn beta() {}");
+        // Same entry from both channels (query + expansion): max wins.
+        let fused = fuse_by_max(vec![(&e1, 0.60)], vec![(&e1, 0.85), (&e2, 0.40)]);
+        assert_eq!(fused.len(), 2, "deduped on file+node");
+        let scores: std::collections::HashMap<&str, f32> = fused
+            .iter()
+            .map(|(e, s)| (e.node_path.as_str(), *s))
+            .collect();
+        assert_eq!(scores["1"], 0.85, "higher cosine kept");
+        assert_eq!(scores["2"], 0.40, "entry only in second channel kept");
+    }
+
+    #[test]
+    fn fuse_by_max_empty_channels() {
+        let e1 = entry("1", "fn alpha() {}");
+        assert!(fuse_by_max(vec![], vec![]).is_empty());
+        assert_eq!(fuse_by_max(vec![(&e1, 0.5)], vec![]).len(), 1);
     }
 }
