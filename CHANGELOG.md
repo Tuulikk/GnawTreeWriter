@@ -1,3 +1,61 @@
+## [0.15.0] - 2026-10-05
+
+### Added
+- **MCP `index_project` tool** (Motor2 bug 2): builds the SEMANTIC/vector
+  index satellite `sense` searches — the MCP side of `ai index`, same
+  pipeline, same GPU/20%-VRAM gate. Background runs (`{action: start}` /
+  `status`) so calls never outrun client timeouts; single-run guard via
+  compare_exchange. `index_entities`/`index_relations` descriptions now
+  state they build the knowledge graph, NOT this index; the satellite
+  no-matches error points at the tool first.
+- **MCP `history` + `stats` tools** (Motor2 plan #24): transaction log
+  newest-first with stable ids (empty log = normal state with setup
+  guidance) and full ProjectStats with a one-line summary.
+- **Semantic edit transparency** (Motor2 plan #19): `semantic_edit` hit
+  returns `semantic_match {matched_path, confidence, candidates[5]}` on
+  the result AND in the text channel; a miss attaches explicit zero
+  confidence + empty candidates instead of a bare denial.
+  `semantic_insert` success adds structured
+  `{anchor_path, confidence, parent_path, position}`.
+- **Stable error codes** (Motor2 plan #25): `tool_error_code` puts
+  `code` next to the human text — `E_FILE_NOT_FOUND`, `E_STRICT_PARSE`,
+  `E_NODE_NOT_FOUND`, `E_EDIT_REJECTED`, `E_VALIDATION`,
+  `E_SEMANTIC_NO_MATCH`, `E_MODEL_UNAVAILABLE`, `E_RULE_REJECTED`,
+  `E_BATCH_ROLLED_BACK` (~40 call sites). Registry:
+  `docs/ERROR_CODES.md`, kept in sync mechanically by
+  `integration_error_codes_documented` (both directions).
+- **Duplex metrics** (Motor2 plan #23): `proposed`/`validated`/
+  `rejected`/`applied` counters persisted at
+  `.gnawtreewriter_metrics.json` from edit_node/insert/edit_ask/
+  semantic_insert outcomes (move/batch keep their own transactions —
+  documented scope).
+- **Retry-with-feedback** (Motor2 plan #23): `edit_ask` feeds the AST
+  validation error back to the model for ONE repair round; success is
+  flagged `retried: true` with `first_error`, double failure reports
+  both attempts.
+- **Partial-grace parsing for READ paths** (Motor2 brief): new
+  `ParserEngine::parse_lenient` (default = strict; Rust overrides via
+  tree-sitter's error-tolerant tree) + `GnawTreeWriter::new_lenient`.
+  `analyze`/`get_skeleton`/`list_nodes`/`search_nodes`/`read_node`
+  now answer broken-but-largely-valid files with the partial tree and
+  an explicit `syntax_warning` (text + structured), while EDITORS stay
+  strict — same file gets `E_STRICT_PARSE` with a pointer to the read
+  paths, zero bytes written. Contract test:
+  `integration_mcp_partial_parse_read_paths`.
+
+### Fixed
+- Strict parse refusals were coded `E_FILE_NOT_FOUND` (misleading
+  aggregation — syntax errors would count as missing files); split via
+  `open_error` into `E_STRICT_PARSE` vs `E_FILE_NOT_FOUND`.
+- `preview_edit` validation failure carried a bogus "sense failed"
+  guidance — now `E_VALIDATION` with preview-specific next steps.
+- `test_debug_mcp_relations` sanity cap made size-relative (fixed 200
+  broke as mcp/mod.rs grew with real features).
+
+### Docs
+- `docs/ERROR_CODES.md` (new): registry table with meanings and next
+  steps; sync-tested against `tool_error_code` call sites.
+
 ## [0.14.0] - 2026-10-05
 
 ### Added

@@ -111,6 +111,36 @@ impl GnawTreeWriter {
         })
     }
 
+    /// Read-path constructor (partial-grace): like `new`, but uses the
+    /// parser's `parse_lenient` — a localized syntax error yields a
+    /// PARTIAL tree plus the warning instead of refusing the file. Only
+    /// read-only MCP tools (analyze/skeleton/list/read) opt in; editors
+    /// (`new` + edit/insert/quick-replace) stay strict. Parsers without
+    /// a lenient override behave exactly like `new`.
+    pub fn new_lenient(file_path: &str) -> Result<(Self, Option<crate::parser::SyntaxError>)> {
+        let path = Path::new(file_path);
+        let source_code =
+            fs::read_to_string(path).context(format!("Failed to read file: {}", file_path))?;
+
+        let parser = get_parser(path)?;
+        let (tree_result, warning) = parser.parse_lenient(&source_code);
+        let tree = tree_result?;
+
+        let project_root = find_project_root(path);
+        let transaction_log = TransactionLog::load(project_root)?;
+
+        Ok((
+            Self {
+                file_path: file_path.to_string(),
+                source_code,
+                tree,
+                transaction_log,
+                last_backup: None,
+            },
+            warning,
+        ))
+    }
+
     /// Senast skapade backup-sökväg (None om ingen edit skett).
     /// Exponerar backup-id:t som motor2-gtw behöver (spec-gtw-backup-id.md).
     pub fn last_backup_path(&self) -> Option<PathBuf> {

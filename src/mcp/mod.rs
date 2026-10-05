@@ -1089,6 +1089,68 @@ pub mod mcp_server {
     fn tool_error(msg: String) -> Value {
         json!({"content": [{ "type": "text", "text": msg }], "isError": true})
     }
+
+    /// Duplex-loop metrics (Motor2 plan #23): propose/validate/apply counts
+    /// persisted at <project>/.gnawtreewriter_metrics.json so integrations
+    /// can aggregate rates across sessions. Read-modify-write (rare
+    /// concurrent edits may lose a tick — acceptable for counters).
+    /// Scope: edit_node/insert/edit_ask/semantic_insert call outcomes;
+    /// move/batch count their own transactions, not these keys.
+    pub fn bump_duplex_metric(project_root: &std::path::Path, key: &str) {
+        let path = project_root.join(".gnawtreewriter_metrics.json");
+        let mut data: Value = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_else(|| json!({"duplex": {}}));
+        if !data.is_object() {
+            data = json!({"duplex": {}});
+        }
+        let obj = data.as_object_mut().unwrap();
+        if !obj.contains_key("duplex") || !obj["duplex"].is_object() {
+            obj.insert("duplex".to_string(), json!({}));
+        }
+        let duplex = obj.get_mut("duplex").unwrap().as_object_mut().unwrap();
+        let current = duplex.get(key).and_then(Value::as_u64).unwrap_or(0);
+        duplex.insert(key.to_string(), json!(current + 1));
+        if let Ok(text) = serde_json::to_string_pretty(&data) {
+            let _ = std::fs::write(&path, text);
+        }
+    }
+
+    /// Map a strict GnawTreeWriter::new failure to the right stable code:
+    /// a syntax refusal of the EXISTING file is not a missing file —
+    /// read paths still answer partially, editors must refuse loudly.
+    fn open_error(file_path: &str, e: &impl std::fmt::Display) -> Value {
+        let msg = format!("{}", e);
+        if msg.contains("Syntax error") || msg.contains("Failed to parse") {
+            tool_error_code(
+                format!(
+                    "Strict parse refused {}: {} — the EXISTING file has syntax errors. Read paths (analyze/skeleton) still return partial trees with the position; fix the file before editing.",
+                    file_path, msg
+                ),
+                "E_STRICT_PARSE",
+            )
+        } else {
+            tool_error_code(
+                format!(
+                    "Failed to open {}: {} — verify file_path exists (explore/search_nodes find it)",
+                    file_path, msg
+                ),
+                "E_FILE_NOT_FOUND",
+            )
+        }
+    }
+
+    /// tool_error with a STABLE machine code (Motor2 plan #25): integrations
+    /// aggregate on `code`, humans read `content[0].text`. Codes are listed
+    /// in docs/ERROR_CODES.md and must never be renamed silently.
+    fn tool_error_code(msg: String, code: &str) -> Value {
+        let mut v = tool_error(msg);
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert("code".to_string(), json!(code));
+        }
+        v
+    }
     fn tool_success(msg: String, data: Option<Value>) -> Value {
         let mut res = json!({"content": [{ "type": "text", "text": msg }]});
         if let Some(d) = data {
@@ -1193,17 +1255,27 @@ pub mod mcp_server {
     }
 
     fn handle_analyze(file_path: &str) -> Value {
-        match GnawTreeWriter::new(file_path) {
-            Ok(w) => {
+        match GnawTreeWriter::new_lenient(file_path) {
+            Ok((w, warning)) => {
                 let source = w.get_source();
                 let tokens = crate::core::token_count::estimate_code_tokens(source);
                 let mut tree_json = serde_json::to_value(w.analyze()).unwrap_or(json!(null));
                 if let Some(obj) = tree_json.as_object_mut() {
                     obj.insert("estimated_tokens".to_string(), json!(tokens));
                 }
-                json!({"content": [{ "type": "text", "text": format!("Analyzed {} ({} tokens)", file_path, tokens)}], "data": tree_json})
+                let note = match &warning {
+                    Some(wn) => format!(" ⚠ PARTIAL PARSE: syntax error at line {}, col {} — results may be incomplete; editors still refuse this file strictly", wn.line, wn.column),
+                    None => String::new(),
+                };
+                if let (Some(obj), Some(wn)) = (tree_json.as_object_mut(), &warning) {
+                    obj.insert(
+                        "syntax_warning".to_string(),
+                        json!({"line": wn.line, "column": wn.column, "message": wn.message}),
+                    );
+                }
+                json!({"content": [{ "type": "text", "text": format!("Analyzed {} ({} tokens){}", file_path, tokens, note)}], "data": tree_json})
             }
-            Err(e) => tool_error(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e)),
+            Err(e) => tool_error_code(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e), "E_FILE_NOT_FOUND"),
         }
     }
 
@@ -1214,8 +1286,8 @@ pub mod mcp_server {
         max_depth: Option<usize>,
         all: bool,
     ) -> Value {
-        match GnawTreeWriter::new(file_path) {
-            Ok(w) => {
+        match GnawTreeWriter::new_lenient(file_path) {
+            Ok((w, warning)) => {
                 let label_mgr = LabelManager::load(&state.project_root).ok();
                 let mut nodes = Vec::new();
                 let effective_max_depth = if all {
@@ -1270,9 +1342,22 @@ pub mod mcp_server {
                 if nodes.len() >= 1000 {
                     msg.push_str(" (limit reached)");
                 }
-                tool_success(msg, Some(json!({"nodes": nodes})))
+                let mut payload = json!({"nodes": nodes});
+                if let Some(wn) = &warning {
+                    msg.push_str(&format!(
+                        " ⚠ partial parse (syntax error at {}:{})",
+                        wn.line, wn.column
+                    ));
+                    if let Some(obj) = payload.as_object_mut() {
+                        obj.insert(
+                            "syntax_warning".to_string(),
+                            json!({"line": wn.line, "column": wn.column, "message": wn.message}),
+                        );
+                    }
+                }
+                tool_success(msg, Some(payload))
             }
-            Err(e) => tool_error(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e)),
+            Err(e) => tool_error_code(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e), "E_FILE_NOT_FOUND"),
         }
     }
 
@@ -1311,8 +1396,8 @@ pub mod mcp_server {
 
     fn handle_get_skeleton(file_path: &str, max_depth: usize) -> Value {
         const NODE_LIMIT: usize = 500;
-        match GnawTreeWriter::new(file_path) {
-            Ok(w) => {
+        match GnawTreeWriter::new_lenient(file_path) {
+            Ok((w, warning)) => {
                 let mut s = String::new();
                 let mut count = 0;
                 fn build(n: &TreeNode, out: &mut String, d: usize, md: usize, count: &mut usize) {
@@ -1347,7 +1432,7 @@ or list_nodes for a flat index of this file.",
                         file_path, max_depth
                     ));
                 }
-                let header = format!(
+                let mut header = format!(
                     "Skeleton of {} ({} node(s){})
 {}",
                     file_path,
@@ -1355,10 +1440,21 @@ or list_nodes for a flat index of this file.",
                     if truncated { ", truncated at 500 — raise max_depth only after list_nodes" } else { "" },
                     s
                 );
-                tool_success(
-                    header,
-                    Some(json!({"skeleton": s, "nodes": count, "truncated": truncated})),
-                )
+                let mut payload =
+                    json!({"skeleton": s, "nodes": count, "truncated": truncated});
+                if let Some(wn) = &warning {
+                    header = format!(
+                        "⚠ PARTIAL PARSE: syntax error at line {} col {} — skeleton may be incomplete (editors still refuse this file strictly)\n{}",
+                        wn.line, wn.column, header
+                    );
+                    if let Some(obj) = payload.as_object_mut() {
+                        obj.insert(
+                            "syntax_warning".to_string(),
+                            json!({"line": wn.line, "column": wn.column, "message": wn.message}),
+                        );
+                    }
+                }
+                tool_success(header, Some(payload))
             }
             Err(e) => tool_error(format!(
                 "get_skeleton could not read {}: {} — check the path exists and is a supported source file (search_nodes finds files, analyze parses any supported file).",
@@ -1501,7 +1597,7 @@ or list_nodes for a flat index of this file.",
         {
             let mgr = match crate::llm::ai_manager::AiManager::new(&state.project_root) {
                 Ok(m) => m,
-                Err(e) => return tool_error(format!("AiManager init failed: {} — run `gnawtreewriter ai setup` to download models (ai status shows what is installed), then retry", e)),
+                Err(e) => return tool_error_code(format!("AiManager init failed: {} — run `gnawtreewriter ai setup` to download models (ai status shows what is installed), then retry", e), "E_MODEL_UNAVAILABLE"),
             };
             match mgr.generate_semantic_report(file_path).await {
                 Ok(report) => tool_success(
@@ -1515,7 +1611,7 @@ or list_nodes for a flat index of this file.",
         {
             let _ = state;
             let _ = file_path;
-            tool_error("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into())
+            tool_error_code("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into(), "E_MODEL_UNAVAILABLE")
         }
     }
 
@@ -1529,12 +1625,12 @@ or list_nodes for a flat index of this file.",
         {
             let _mgr = match crate::llm::ai_manager::AiManager::new(&state.project_root) {
                 Ok(m) => m,
-                Err(e) => return tool_error(format!("AiManager init failed: {} — run `gnawtreewriter ai setup` to download models (ai status shows what is installed), then retry", e)),
+                Err(e) => return tool_error_code(format!("AiManager init failed: {} — run `gnawtreewriter ai setup` to download models (ai status shows what is installed), then retry", e), "E_MODEL_UNAVAILABLE"),
             };
 
             let broker = match crate::llm::GnawSenseBroker::new(&state.project_root) {
                 Ok(b) => b,
-                Err(e) => return tool_error(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e)),
+                Err(e) => return tool_error_code(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e), "E_MODEL_UNAVAILABLE"),
             };
 
             match broker.sense(query, file_path).await {
@@ -2093,7 +2189,7 @@ or list_nodes for a flat index of this file.",
                 ),
                 Err(e) => tool_error(format!("Explain failed: {} — local model problem? `gnawtreewriter ai status`; fallback: read_node + read the code yourself", e)),
             },
-            Err(e) => tool_error(format!("AiManager init failed: {} — download the local models first with `gnawtreewriter ai setup`, then retry (ai status shows what is installed)", e)),
+            Err(e) => tool_error_code(format!("AiManager init failed: {} — download the local models first with `gnawtreewriter ai setup`, then retry (ai status shows what is installed)", e), "E_MODEL_UNAVAILABLE"),
         }
     }
     #[cfg(not(feature = "mamba"))]
@@ -2116,36 +2212,101 @@ or list_nodes for a flat index of this file.",
                 request,
                 crate::llm::Resolution::Auto,
             ) {
-                Ok(proposal) => {
-                    // Validate via the Duplex Loop before returning.
-                    match crate::GnawTreeWriter::new(file_path) {
-                        Ok(mut writer) => {
-                            let op = crate::core::EditOperation::Edit {
-                                node_path: proposal.node_path.clone(),
-                                content: proposal.content.clone(),
-                            };
-                            match writer.preview_edit(op) {
-                                Ok(modified) => tool_success(
-                                    "Validated edit proposal".to_string(),
-                                    Some(json!({
-                                        "node_path": proposal.node_path,
-                                        "content": proposal.content,
-                                        "valid": true,
-                                        "preview": modified,
-                                        "tokens": proposal.budget,
-                                    })),
-                                ),
-                                Err(e) => {
-                                    tool_error(format!("Proposed edit failed validation: {}", e))
+                Ok(first) => {
+                    bump_duplex_metric(&project_root, "proposed");
+                    // Open once — preview_edit is &self, the same writer
+                    // validates both the first and the repaired proposal.
+                    let writer = match crate::GnawTreeWriter::new(file_path) {
+                        Ok(w) => w,
+                        Err(e) => {
+                            return open_error(file_path, &e);
+                        }
+                    };
+                    let validate = |node_path: &str, content: &str| -> anyhow::Result<String> {
+                        let op = crate::core::EditOperation::Edit {
+                            node_path: node_path.to_string(),
+                            content: content.to_string(),
+                        };
+                        writer.preview_edit(op)
+                    };
+                    let proposal_ok = |proposal: &crate::llm::pipeline::EditProposal,
+                                       retried: bool,
+                                       first_error: Option<String>| {
+                        json!({
+                            "node_path": proposal.node_path,
+                            "content": proposal.content,
+                            "valid": true,
+                            "preview": "",
+                            "retried": retried,
+                            "first_error": first_error,
+                            "tokens": proposal.budget,
+                        })
+                    };
+                    match validate(&first.node_path, &first.content) {
+                        Ok(modified) => {
+                            bump_duplex_metric(&project_root, "validated");
+                            let mut payload = proposal_ok(&first, false, None);
+                            if let Some(obj) = payload.as_object_mut() {
+                                obj.insert("preview".to_string(), json!(modified));
+                            }
+                            tool_success("Validated edit proposal".to_string(), Some(payload))
+                        }
+                        Err(e1) => {
+                            bump_duplex_metric(&project_root, "rejected");
+                            // Motor2 plan #23: ONE repair round — feed the
+                            // AST error back to the model; small models
+                            // improve most from a single concrete retry.
+                            let retry_request = format!(
+                                "{}\n\nPREVIOUS PROPOSAL FAILED RUST VALIDATION: {}\nReturn a corrected proposal for the SAME request that parses — keep the same target node unless the error shows it was wrong.",
+                                request, e1
+                            );
+                            match crate::llm::pipeline::propose_edit(
+                                &mgr,
+                                file_path,
+                                &retry_request,
+                                crate::llm::Resolution::Auto,
+                            ) {
+                                Ok(second) => {
+                                    bump_duplex_metric(&project_root, "proposed");
+                                    match validate(&second.node_path, &second.content) {
+                                        Ok(modified) => {
+                                            bump_duplex_metric(&project_root, "validated");
+                                            let mut payload =
+                                                proposal_ok(&second, true, Some(e1.to_string()));
+                                            if let Some(obj) = payload.as_object_mut() {
+                                                obj.insert("preview".to_string(), json!(modified));
+                                            }
+                                            tool_success(
+                                                "Validated edit proposal (repaired: the first attempt failed validation and the AST error was fed back for one retry)".to_string(),
+                                                Some(payload),
+                                            )
+                                        }
+                                        Err(e2) => {
+                                            bump_duplex_metric(&project_root, "rejected");
+                                            tool_error_code(
+                                                format!(
+                                                    "Proposed edit failed validation even after one repair round. First error: {} — retry error: {}. Adjust the request, or use edit_node with a node path from list_nodes.",
+                                                    e1, e2
+                                                ),
+                                                "E_VALIDATION",
+                                            )
+                                        }
+                                    }
                                 }
+                                Err(e_retry) => tool_error_code(
+                                    format!(
+                                        "Proposed edit failed validation ({}) and the repair retry itself failed: {}. Check model health (`gnawtreewriter ai status`) or go straight to edit_node with a node path from list_nodes.",
+                                        e1, e_retry
+                                    ),
+                                    "E_VALIDATION",
+                                ),
                             }
                         }
-                        Err(e) => tool_error(format!("Failed to open {}: {} — verify file_path exists (explore/search_nodes find it)", file_path, e)),
                     }
                 }
                 Err(e) => tool_error(format!("Edit proposal failed: {} — retry with a more concrete request, or go straight to edit_node once you know the node path", e)),
             },
-            Err(e) => tool_error(format!("AiManager init failed: {} — download the local models first with `gnawtreewriter ai setup`, then retry (ai status shows what is installed)", e)),
+            Err(e) => tool_error_code(format!("AiManager init failed: {} — download the local models first with `gnawtreewriter ai setup`, then retry (ai status shows what is installed)", e), "E_MODEL_UNAVAILABLE"),
         }
     }
     #[cfg(not(feature = "mamba"))]
@@ -2172,7 +2333,7 @@ or list_nodes for a flat index of this file.",
                 ),
                 Err(e) => tool_error(format!("Summarize failed: {} — local model problem? `gnawtreewriter ai status`; fallback: get_skeleton for structure", e)),
             },
-            Err(e) => tool_error(format!("AiManager init failed: {} — download the local models first with `gnawtreewriter ai setup`, then retry (ai status shows what is installed)", e)),
+            Err(e) => tool_error_code(format!("AiManager init failed: {} — download the local models first with `gnawtreewriter ai setup`, then retry (ai status shows what is installed)", e), "E_MODEL_UNAVAILABLE"),
         }
     }
     #[cfg(not(feature = "mamba"))]
@@ -2198,7 +2359,7 @@ or list_nodes for a flat index of this file.",
                 ),
                 Err(e) => tool_error(format!("Investigate failed: {} — local model problem? `gnawtreewriter ai status`; fallback: search_nodes + read_node", e)),
             },
-            Err(e) => tool_error(format!("AiManager init failed: {} — download the local models first with `gnawtreewriter ai setup`, then retry (ai status shows what is installed)", e)),
+            Err(e) => tool_error_code(format!("AiManager init failed: {} — download the local models first with `gnawtreewriter ai setup`, then retry (ai status shows what is installed)", e), "E_MODEL_UNAVAILABLE"),
         }
     }
     #[cfg(not(feature = "mamba"))]
@@ -2364,10 +2525,13 @@ or list_nodes for a flat index of this file.",
                         ),
                         None,
                     ),
-                    Err(e) => tool_error(format!(
-                        "Batch failed and was rolled back: {}. Fix the operations in {} and re-run, or run with preview=true first.",
-                        e, file
-                    )),
+                    Err(e) => tool_error_code(
+                        format!(
+                            "Batch failed and was rolled back: {}. Fix the operations in {} and re-run, or run with preview=true first.",
+                            e, file
+                        ),
+                        "E_BATCH_ROLLED_BACK",
+                    ),
                 }
         }
     }
@@ -2447,16 +2611,19 @@ or list_nodes for a flat index of this file.",
         };
         // Validate the pattern compiles for the language.
         if let Err(e) = crate::core::rules::compile_rule(&rule) {
-            return tool_error(format!("Rule rejected: {} — the pattern must parse as valid {} code with $X placeholders; fix the pattern and retry (rules add validates before writing)", e, language));
+            return tool_error_code(format!("Rule rejected: {} — the pattern must parse as valid {} code with $X placeholders; fix the pattern and retry (rules add validates before writing)", e, language), "E_RULE_REJECTED");
         }
         // A fix template must parse as valid code — never store a rewrite
         // that would produce broken syntax.
         if let Some(fix_template) = fix {
             if let Err(e) = crate::core::rules::validate_fix(language, fix_template) {
-                return tool_error(format!(
-                    "Fix rejected: {}. A $NAME in the fix must be captured by the pattern.",
-                    e
-                ));
+                return tool_error_code(
+                    format!(
+                        "Fix rejected: {}. A $NAME in the fix must be captured by the pattern.",
+                        e
+                    ),
+                    "E_RULE_REJECTED",
+                );
             }
         }
         match crate::core::rules::append_project_rule(&rule) {
@@ -2476,13 +2643,13 @@ or list_nodes for a flat index of this file.",
                     "active": true,
                 })),
             ),
-            Err(e) => tool_error(format!("Failed to add rule: {} — nothing was written; fix the reported issue and retry (rules add validates first)", e)),
+            Err(e) => tool_error_code(format!("Failed to add rule: {} — nothing was written; fix the reported issue and retry (rules add validates first)", e), "E_RULE_REJECTED"),
         }
     }
 
     fn handle_search_nodes(file_path: &str, pattern: &str) -> Value {
-        match GnawTreeWriter::new(file_path) {
-            Ok(w) => {
+        match GnawTreeWriter::new_lenient(file_path) {
+            Ok((w, warning)) => {
                 let mut m = Vec::new();
                 fn find(n: &TreeNode, acc: &mut Vec<Value>, p: &str) {
                     if acc.len() >= 500 {
@@ -2502,9 +2669,22 @@ or list_nodes for a flat index of this file.",
                 if m.len() >= 500 {
                     msg.push_str(" (limit reached)");
                 }
-                tool_success(msg, Some(json!({"matches": m})))
+                let mut payload = json!({"matches": m});
+                if let Some(wn) = &warning {
+                    msg.push_str(&format!(
+                        " ⚠ partial parse (syntax error at {}:{})",
+                        wn.line, wn.column
+                    ));
+                    if let Some(obj) = payload.as_object_mut() {
+                        obj.insert(
+                            "syntax_warning".to_string(),
+                            json!({"line": wn.line, "column": wn.column, "message": wn.message}),
+                        );
+                    }
+                }
+                tool_success(msg, Some(payload))
             }
-            Err(e) => tool_error(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e)),
+            Err(e) => tool_error_code(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e), "E_FILE_NOT_FOUND"),
         }
     }
 
@@ -2514,7 +2694,7 @@ or list_nodes for a flat index of this file.",
             use crate::llm::SenseResponse;
             let broker = match state.sense_broker().await {
                 Ok(b) => b,
-                Err(e) => return tool_error(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e)),
+                Err(e) => return tool_error_code(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e), "E_MODEL_UNAVAILABLE"),
             };
 
             match broker.sense(query, file_path).await {
@@ -2587,7 +2767,7 @@ or list_nodes for a flat index of this file.",
         #[cfg(not(feature = "modernbert"))]
         {
             let _ = (state, query, file_path);
-            tool_error("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into())
+            tool_error_code("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into(), "E_MODEL_UNAVAILABLE")
         }
     }
 
@@ -2603,14 +2783,15 @@ or list_nodes for a flat index of this file.",
             use crate::llm::GnawSenseBroker;
             let broker = match GnawSenseBroker::new(&state.project_root) {
                 Ok(b) => b,
-                Err(e) => return tool_error(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e)),
+                Err(e) => return tool_error_code(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e), "E_MODEL_UNAVAILABLE"),
             };
 
             match broker.propose_edit(anchor_query, file_path, intent).await {
                 Ok(proposal) => {
+                    bump_duplex_metric(&state.project_root, "proposed");
                     let mut writer = match GnawTreeWriter::new(file_path) {
                         Ok(w) => w,
-                        Err(e) => return tool_error(format!("Could not open {} for the proposed insert: {} — verify file_path exists (explore/search_nodes)", file_path, e)),
+                        Err(e) => return open_error(file_path, &e),
                     };
                     let transparency = json!({
                         "anchor_path": proposal.anchor_path,
@@ -2625,6 +2806,8 @@ or list_nodes for a flat index of this file.",
                     };
                     match writer.edit(op, false) {
                         Ok(_) => {
+                            bump_duplex_metric(&state.project_root, "validated");
+                            bump_duplex_metric(&state.project_root, "applied");
                             let pulse = generate_pulse(state, file_path, &proposal.anchor_path);
                             tool_success_with_pulse(
                                 format!(
@@ -2638,16 +2821,19 @@ or list_nodes for a flat index of this file.",
                                 pulse,
                             )
                         }
-                        Err(e) => tool_error(format!("sense failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md", e)),
+                        Err(e) => {
+                            bump_duplex_metric(&state.project_root, "rejected");
+                            tool_error_code(format!("sense failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md", e), "E_EDIT_REJECTED")
+                        }
                     }
                 }
-                Err(e) => tool_error(format!("sense failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md", e)),
+                Err(e) => tool_error_code(format!("sense failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md", e), "E_MODEL_UNAVAILABLE"),
             }
         }
         #[cfg(not(feature = "modernbert"))]
         {
             let _ = (state, file_path, anchor_query, content, intent);
-            tool_error("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into())
+            tool_error_code("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into(), "E_MODEL_UNAVAILABLE")
         }
     }
 
@@ -2662,7 +2848,7 @@ or list_nodes for a flat index of this file.",
             use crate::llm::{GnawSenseBroker, SenseResponse};
             let broker = match GnawSenseBroker::new(&state.project_root) {
                 Ok(b) => b,
-                Err(e) => return tool_error(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e)),
+                Err(e) => return tool_error_code(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e), "E_MODEL_UNAVAILABLE"),
             };
 
             match broker.sense(query, Some(file_path)).await {
@@ -2718,10 +2904,13 @@ or list_nodes for a flat index of this file.",
                 Ok(_) => {
                     // Motor2 plan #19: transparency on MISS — explicit zero
                     // confidence + empty candidate set, never a bare denial.
-                    let mut err = tool_error(format!(
-                        "Could not find a semantic match for '{}' in {} — no node scored above the relevance floor. Try a different anchor phrase, list_nodes for the raw structure, or insert_node with a parent_path. (semantic_match: confidence 0, no candidates)",
-                        query, file_path
-                    ));
+                    let mut err = tool_error_code(
+                        format!(
+                            "Could not find a semantic match for '{}' in {} — no node scored above the relevance floor. Try a different anchor phrase, list_nodes for the raw structure, or insert_node with a parent_path. (semantic_match: confidence 0, no candidates)",
+                            query, file_path
+                        ),
+                        "E_SEMANTIC_NO_MATCH",
+                    );
                     if let Some(obj) = err.as_object_mut() {
                         obj.insert(
                             "semantic_match".to_string(),
@@ -2736,16 +2925,23 @@ or list_nodes for a flat index of this file.",
         #[cfg(not(feature = "modernbert"))]
         {
             let _ = (state, file_path, query, content);
-            tool_error("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into())
+            tool_error_code("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into(), "E_MODEL_UNAVAILABLE")
         }
     }
 
     fn handle_read_node(file_path: &str, node_path: &str) -> Value {
-        match GnawTreeWriter::new(file_path) {
-            Ok(w) => w
-                .show_node(node_path)
-                .map_or_else(|e| tool_error(format!("Node read failed: {} — node_path may be stale; run analyze or list_nodes for current paths and retry", e)), |c| tool_success(c, None)),
-            Err(e) => tool_error(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e)), // Corrected: escaped curly brace
+        match GnawTreeWriter::new_lenient(file_path) {
+            Ok((w, warning)) => w.show_node(node_path).map_or_else(
+                |e| tool_error_code(format!("Node read failed: {} — node_path may be stale; run analyze or list_nodes for current paths and retry", e), "E_NODE_NOT_FOUND"),
+                |c| match &warning {
+                    Some(wn) => tool_success(
+                        c,
+                        Some(json!({"syntax_warning": {"line": wn.line, "column": wn.column, "message": wn.message}})),
+                    ),
+                    None => tool_success(c, None),
+                },
+            ),
+            Err(e) => tool_error_code(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e), "E_FILE_NOT_FOUND"), // Corrected: escaped curly brace
         }
     }
 
@@ -2779,10 +2975,16 @@ or list_nodes for a flat index of this file.",
                             Some(json!({"diff": diff})),
                         )
                     }
-                    Err(e) => tool_error(format!("sense failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md", e)),
+                    Err(e) => tool_error_code(
+                        format!(
+                            "Preview rejected: {} — the PROPOSED content does not parse; fix the content (or preview_edit after an edit_node correction). Nothing was written.",
+                            e
+                        ),
+                        "E_VALIDATION",
+                    ),
                 }
             }
-            Err(e) => tool_error(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e)),
+            Err(e) => open_error(file_path, &e),
         }
     }
 
@@ -2800,11 +3002,14 @@ or list_nodes for a flat index of this file.",
                     content: content.to_string(),
                 };
                 if let Err(e) = w.edit(op, false) {
-                    return tool_error(format!("Edit rejected: {} — the validation details are in the message; list_nodes for current paths, preview_edit first, then retry", e));
+                    bump_duplex_metric(&state.project_root, "rejected");
+                    return tool_error_code(format!("Edit rejected: {} — the validation details are in the message; list_nodes for current paths, preview_edit first, then retry", e), "E_EDIT_REJECTED");
                 }
 
                 let new_source_loaded = std::fs::read_to_string(file_path).unwrap_or_default();
                 let diff = generate_diff_string(&old_source, &new_source_loaded);
+                bump_duplex_metric(&state.project_root, "validated");
+                bump_duplex_metric(&state.project_root, "applied");
                 let pulse = generate_pulse(state, file_path, node_path);
                 tool_success_with_pulse(
                     format!("Node edited.\nDiff:\n{}", diff),
@@ -2812,7 +3017,7 @@ or list_nodes for a flat index of this file.",
                     pulse,
                 )
             }
-            Err(e) => tool_error(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e)),
+            Err(e) => open_error(file_path, &e),
         }
     }
 
@@ -2832,11 +3037,14 @@ or list_nodes for a flat index of this file.",
                     content: content.to_string(),
                 };
                 if let Err(e) = w.edit(op, false) {
-                    return tool_error(format!("Edit rejected: {} — the validation details are in the message; list_nodes for current paths, preview_edit first, then retry", e));
+                    bump_duplex_metric(&state.project_root, "rejected");
+                    return tool_error_code(format!("Edit rejected: {} — the validation details are in the message; list_nodes for current paths, preview_edit first, then retry", e), "E_EDIT_REJECTED");
                 }
 
                 let new_source_loaded = std::fs::read_to_string(file_path).unwrap_or_default();
                 let diff = generate_diff_string(&old_source, &new_source_loaded);
+                bump_duplex_metric(&state.project_root, "validated");
+                bump_duplex_metric(&state.project_root, "applied");
                 let pulse = generate_pulse(state, file_path, parent_path); // Pulse for parent
                 tool_success_with_pulse(
                     format!("Content inserted.\nDiff:\n{}", diff),
@@ -2844,7 +3052,7 @@ or list_nodes for a flat index of this file.",
                     pulse,
                 )
             }
-            Err(e) => tool_error(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e)), // Corrected: escaped curly brace
+            Err(e) => open_error(file_path, &e),
         }
     }
 
@@ -2862,7 +3070,7 @@ or list_nodes for a flat index of this file.",
                     node_path: source_path.to_string(),
                 };
                 if let Err(e) = src_w.edit(delete_op, false) {
-                    return tool_error(format!("Source edit rejected: {} — source_path must be an existing node (search_nodes finds it); retry with a fresh path", e));
+                    return tool_error_code(format!("Source edit rejected: {} — source_path must be an existing node (search_nodes finds it); retry with a fresh path", e), "E_NODE_NOT_FOUND");
                 }
 
                 let insert_op = EditOperation::Insert {
@@ -2874,7 +3082,7 @@ or list_nodes for a flat index of this file.",
                     Ok(mut tgt_w) => {
                         let old_target = tgt_w.get_source().to_string();
                         if let Err(e) = tgt_w.edit(insert_op, false) {
-                            return tool_error(format!("Target edit rejected: {} — target_path must exist as a parent (list_nodes shows valid paths); retry with a fresh path", e));
+                            return tool_error_code(format!("Target edit rejected: {} — target_path must exist as a parent (list_nodes shows valid paths); retry with a fresh path", e), "E_NODE_NOT_FOUND");
                         }
                         let new_target = std::fs::read_to_string(target_file).unwrap_or_default();
                         let diff = generate_diff_string(&old_target, &new_target);
@@ -2888,10 +3096,10 @@ or list_nodes for a flat index of this file.",
                             pulse,
                         )
                     }
-                    Err(e) => tool_error(format!("IO error on target: {} — target_path must exist as a parent node (list_nodes shows valid paths)", e)),
+                    Err(e) => open_error(target_file, &e),
                 }
             }
-            Err(e) => tool_error(format!("IO error on source: {} — source_path must name an existing node (search_nodes finds it)", e)),
+            Err(e) => open_error(source_file, &e),
         }
     }
 

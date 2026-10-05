@@ -1237,6 +1237,62 @@ fn integration_error_strings_carry_guidance() {
     );
 }
 
+/// Motor2 plan #25: stable error codes must stay in sync with their
+/// registry — every code emitted via tool_error_code appears in
+/// docs/ERROR_CODES.md, and vice versa (no stale doc lines, no
+/// undocumented codes).
+#[test]
+fn integration_error_codes_documented() {
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src = std::fs::read_to_string(manifest.join("src/mcp/mod.rs")).expect("mcp/mod.rs");
+    let docs =
+        std::fs::read_to_string(manifest.join("docs/ERROR_CODES.md")).expect("docs/ERROR_CODES.md");
+
+    // Codes emitted: every "E_..." string literal in the server source
+    // (call sites may span lines, so scan the whole text, not per line).
+    let mut codes_in_code: Vec<String> = Vec::new();
+    let mut rest = src.as_str();
+    while let Some(start) = rest.find("\"E_") {
+        let tail = &rest[start + 1..];
+        if let Some(end) = tail.find("\"") {
+            let code = tail[..end].to_string();
+            if !codes_in_code.contains(&code) {
+                codes_in_code.push(code);
+            }
+            rest = &tail[end + 1..];
+        } else {
+            break;
+        }
+    }
+    assert!(
+        !codes_in_code.is_empty(),
+        "expected at least one coded tool_error"
+    );
+    for code in &codes_in_code {
+        assert!(
+            docs.contains(&format!("`{}`", code)),
+            "code {} emitted in mcp/mod.rs but missing from docs/ERROR_CODES.md",
+            code
+        );
+    }
+
+    // Docs must not rot either: every E_ code in the registry is emitted
+    // somewhere (registry lines look like: | `E_CODE` | meaning | ...).
+    for line in docs.lines() {
+        if let Some(start) = line.find("`E_") {
+            let tail = &line[start + 1..];
+            if let Some(end) = tail.find("`") {
+                let code = tail[..end].to_string();
+                assert!(
+                    src.contains(&format!("\"{}\"", code)),
+                    "docs list {} but no tool_error_code emits it",
+                    code
+                );
+            }
+        }
+    }
+}
+
 /// Motor2 bug 2 (issue log 2026-10-05): index_project builds the VECTOR
 /// index satellite sense searches (index_entities = knowledge graph).
 /// Status must be safe to poll — never kicks a run — and unknown actions
@@ -1333,6 +1389,193 @@ async fn integration_mcp_index_project_status() -> Result<(), Box<dyn std::error
         text.contains("start") && text.contains("status"),
         "got: {:?}",
         text
+    );
+
+    let _ = tx.send(());
+    server_handle.await?;
+    Ok(())
+}
+
+/// Motor2 plan #23: duplex metrics persist at
+/// <project>/.gnawtreewriter_metrics.json with monotonic counters.
+#[test]
+fn integration_duplex_metrics_persist() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+
+    gnawtreewriter::mcp::mcp_server::bump_duplex_metric(root, "proposed");
+    gnawtreewriter::mcp::mcp_server::bump_duplex_metric(root, "proposed");
+    gnawtreewriter::mcp::mcp_server::bump_duplex_metric(root, "applied");
+
+    let raw = std::fs::read_to_string(root.join(".gnawtreewriter_metrics.json"))
+        .expect("metrics file written");
+    let v: serde_json::Value = serde_json::from_str(&raw).expect("valid json");
+    assert_eq!(v["duplex"]["proposed"], json!(2));
+    assert_eq!(v["duplex"]["applied"], json!(1));
+    assert!(
+        v["duplex"]["validated"].is_null(),
+        "untouched keys stay absent (consumers read null/0)"
+    );
+
+    // A second round keeps accumulating (not overwritten).
+    gnawtreewriter::mcp::mcp_server::bump_duplex_metric(root, "applied");
+    let v: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join(".gnawtreewriter_metrics.json")).expect("read back"),
+    )
+    .expect("valid json");
+    assert_eq!(v["duplex"]["applied"], json!(2));
+
+    // Corrupt pre-existing file must not panic — starts fresh.
+    let dir2 = tempfile::tempdir().expect("tempdir2");
+    std::fs::write(dir2.path().join(".gnawtreewriter_metrics.json"), "not json").unwrap();
+    gnawtreewriter::mcp::mcp_server::bump_duplex_metric(dir2.path(), "rejected");
+    let v: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir2.path().join(".gnawtreewriter_metrics.json"))
+            .expect("read back"),
+    )
+    .expect("valid json");
+    assert_eq!(v["duplex"]["rejected"], json!(1));
+}
+
+/// Motor2 brief (partial-grace): a localized syntax error must not void
+/// the file for READ paths — skeleton/analyze return the partial tree
+/// plus an explicit syntax_warning — while EDITORS stay strict (same
+/// file, E_EDIT_REJECTED, no bytes written).
+#[tokio::test]
+async fn integration_mcp_partial_parse_read_paths() -> Result<(), Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, rx) = oneshot::channel::<()>();
+    let token = Some("secret".to_string());
+    let server_handle = tokio::spawn(async move {
+        let shutdown_fut = async move {
+            let _ = rx.await;
+        };
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
+            .await
+            .unwrap();
+    });
+    let url = format!("http://{}/", addr);
+    let client = Client::new();
+    let mut ready = false;
+    for _ in 0..40 {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                ready = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_connect() {
+                    sleep(Duration::from_millis(50)).await;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(ready, "server did not become ready in time");
+
+    let dir = tempfile::tempdir()?;
+    let target = dir.path().join("partial.rs");
+    let broken = "fn healthy() -> i32 {\n    42\n}\nfn broken( {\n";
+    std::fs::write(&target, broken)?;
+
+    let call = |name: &str, args: serde_json::Value| {
+        json!({"jsonrpc":"2.0", "method":"tools/call", "id": 7,
+               "params": {"name": name, "arguments": args}})
+    };
+
+    // 1. get_skeleton: partial content + explicit warning, NOT an error.
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&call(
+            "get_skeleton",
+            json!({"file_path": target.to_string_lossy(), "max_depth": 3}),
+        ))
+        .send()
+        .await?;
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").unwrap();
+    assert_ne!(
+        r.get("isError"),
+        Some(&json!(true)),
+        "read must not fail whole-file"
+    );
+    let text = r["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("PARTIAL PARSE"),
+        "warning in text, got: {:?}",
+        text
+    );
+    assert!(
+        text.contains("healthy"),
+        "partial tree keeps what parsed: {:?}",
+        text
+    );
+    assert!(r["syntax_warning"]["line"].as_u64().unwrap_or(0) >= 1);
+
+    // 2. analyze: same guarantee on the data channel.
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&call(
+            "analyze",
+            json!({"file_path": target.to_string_lossy()}),
+        ))
+        .send()
+        .await?;
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").unwrap();
+    assert_ne!(r.get("isError"), Some(&json!(true)));
+    let text = r["content"][0]["text"].as_str().unwrap_or("");
+    assert!(text.contains("PARTIAL PARSE"), "got: {:?}", text);
+    assert!(r["data"]["syntax_warning"]["line"].as_u64().unwrap_or(0) >= 1);
+
+    // 3. edit on the same file: STRICT — rejected with a stable code,
+    //    and the file stays byte-identical (no partial garbage writes).
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&call(
+            "edit_node",
+            json!({
+                "file_path": target.to_string_lossy(),
+                "node_path": "0",
+                "content": "fn healthy() -> i32 { 7 }\nfn broken( {\n"
+            }),
+        ))
+        .send()
+        .await?;
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").unwrap();
+    assert_eq!(
+        r.get("isError"),
+        Some(&json!(true)),
+        "editors must stay strict"
+    );
+    assert_eq!(
+        r.get("code").and_then(|c| c.as_str()),
+        Some("E_STRICT_PARSE"),
+        "strict refusal of a broken file is E_STRICT_PARSE (not a missing file), got: {:?}",
+        r
+    );
+    let text = r["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("partial") || text.contains("analyze"),
+        "refusal must point at the partial read paths, got: {:?}",
+        text
+    );
+    assert_eq!(
+        std::fs::read_to_string(&target)?,
+        broken,
+        "no bytes written on refusal"
     );
 
     let _ = tx.send(());

@@ -176,6 +176,14 @@ impl TreeNode {
 pub trait ParserEngine {
     fn parse(&self, code: &str) -> ParseResult<TreeNode>;
     fn get_supported_extensions(&self) -> Vec<&'static str>;
+
+    /// Strict parse with a partial-grace fallback for READ paths
+    /// (Motor2 brief: valid-looking big files must not die whole-file on
+    /// a localized error). Returns (strict-result, warning-if-partial).
+    /// Default: strict only — parsers opt in by overriding (see rust.rs).
+    fn parse_lenient(&self, code: &str) -> (ParseResult<TreeNode>, Option<SyntaxError>) {
+        (self.parse(code), None)
+    }
 }
 
 pub fn to_parse_result<T>(res: anyhow::Result<T>) -> ParseResult<T> {

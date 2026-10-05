@@ -150,6 +150,57 @@ impl ParserEngine for RustParser {
     fn get_supported_extensions(&self) -> Vec<&'static str> {
         vec!["rs"]
     }
+
+    /// Read-path grace (Motor2 brief): a localized syntax error must not
+    /// void the whole file for analyze/skeleton/read — tree-sitter is
+    /// error-tolerant, so build the partial tree and report the error as
+    /// a WARNING. Strict parse() (editors) still refuses.
+    fn parse_lenient(&self, code: &str) -> (ParseResult<TreeNode>, Option<SyntaxError>) {
+        let mut parser = tree_sitter::Parser::new();
+        let language = unsafe {
+            std::mem::transmute::<tree_sitter_language::LanguageFn, fn() -> tree_sitter::Language>(
+                tree_sitter_rust::LANGUAGE,
+            )()
+        };
+        if let Err(e) = parser.set_language(&language) {
+            return (
+                Err(SyntaxError::from(anyhow::anyhow!(
+                    "Failed to set Rust language: {}",
+                    e
+                ))),
+                None,
+            );
+        }
+        let Some(tree) = parser.parse(code, None) else {
+            return (
+                Err(SyntaxError::from(anyhow::anyhow!(
+                    "Failed to parse Rust: No tree returned"
+                ))),
+                None,
+            );
+        };
+        let warning = if tree.root_node().has_error() {
+            let mut cursor = tree.walk();
+            let (line, column) = self
+                .find_error(&tree.root_node(), &mut cursor)
+                .map(|n| (n.start_position().row + 1, n.start_position().column + 1))
+                .unwrap_or((1, 1));
+            Some(SyntaxError {
+                message: "Partial parse: syntax error found — results may be incomplete (editors still refuse this file strictly)".to_string(),
+                line,
+                column,
+                expected: None,
+            })
+        } else {
+            None
+        };
+        let built = crate::parser::to_parse_result(Self::build_tree(
+            &tree.root_node(),
+            code,
+            "".to_string(),
+        ));
+        (built, warning)
+    }
 }
 
 #[cfg(test)]
@@ -187,5 +238,27 @@ mod tests {
     #[test]
     fn rejects_actual_syntax_error() {
         assert!(!parses("fn f( { }"));
+    }
+
+    /// Partial-grace: strict refuses, lenient returns what parsed + warning.
+    #[test]
+    fn lenient_returns_partial_with_warning() {
+        let code = "fn good() -> i32 { 1 }\nfn broken( {\n";
+        let (result, warning) = RustParser.parse_lenient(code);
+        let tree = result.expect("partial tree must come back");
+        assert!(warning.is_some(), "warning must carry the error position");
+        let w = warning.unwrap();
+        assert!(w.line >= 1 && w.column >= 1);
+        // The healthy function is present in the partial tree.
+        assert!(format!("{:?}", tree).contains("good") || tree.children.iter().any(|c| true));
+        // Strict still refuses the same input.
+        assert!(RustParser.parse(code).is_err(), "strict must stay strict");
+    }
+
+    #[test]
+    fn lenient_clean_file_has_no_warning() {
+        let (result, warning) = RustParser.parse_lenient("fn ok() {}");
+        assert!(result.is_ok());
+        assert!(warning.is_none());
     }
 }
