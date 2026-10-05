@@ -638,6 +638,32 @@ fältet `relational_indexer`, `index_file_cached`,
 **Bedömning:** [x] bugg — min (0.16.0:s) — gate-slip vid ny publik
 metod. Vägledning träffad? Ja — rapporten pekade exakt rätt fil/fix/mönster.
 
+## 2026-10-05 — index_relations: "calls"-relationer med TOMT `from` (Motor2-dashboard, lib-konsument)
+
+**Kontext:** Motor2:s dashboard använder `index_entities`/`index_relations`
+(lib-API, motor2-server → gnawtreewriter path-dep 0.15/0.16) för en
+per-fil entitetsgraf. På `crates/motor2-shadow/src/manager.rs` (91
+relationer, 15 calls) har FLERA "calls"-rader tomt `from` — t.ex.
+`"" -> table_cols` upprepade. Mönstret: call sites inuti impl-block där
+anropssajten inte går att namnge → from blir tom sträng i stället för
+någon form av id. UI fick rendera "→ table_cols"; Motor2 lappade med
+"(intern)"-platshållare (pkg/gede/project-map.js).
+
+**Omväg:** UI-platshållare — funkar men döljer information (vilken metod
+ringer? raden finns i relationens `line` men from-id saknas).
+
+**Bedömning:** [x] under förmåga (levererar inte vad namnet lovar) —
+relationens `from` är del av kontraktet `gtw:{file}:{type}:{name}`; tom
+sträng bryter det. Låg allvarlighetsgrad, hög enkelhet: antingen (a)
+resolva till omslutande metod-namn när det finns, (b) syntetiskt id
+`gtw:{file}:callsite:{line}`, eller (c) dokumentera tom-sträng-konventionen
+så konsumenter vet vad de ska förvänta sig.
+
+**Vägledning träffad?** [x] ja — lib-API:t returnerade data (inte fel),
+men kontraktet var odokumenterat för detta fall.
+
+---
+
 ---
 
 <!-- Ny post: kopiera mallen nedan
