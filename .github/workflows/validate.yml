@@ -24,3 +24,9 @@ jobs:
 
       - name: Run clippy
         run: cargo clippy -- -D warnings
+
+      # Motor2 regression (bug report 2026-10-05): default AND mamba both
+      # have modernbert on — only this config catches feature-gate holes
+      # in the no-default-features build (path-dependents like motor2-gtw).
+      - name: Check no-default-features build
+        run: cargo check --no-default-features --all-targets

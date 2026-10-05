@@ -14,6 +14,12 @@ categories = ["development-tools", "parser-implementations"]
 name = "gnawtreewriter"
 path = "src/main.rs"
 
+# Needs ModernBERT/candle — skip under --no-default-features (Motor2
+# regression: cargo check --no-default-features --all-targets must pass).
+[[example]]
+name = "debug_loading"
+required-features = ["modernbert"]
+
 [dependencies]
 tree-sitter = "0.26.3"
 tree-sitter-python = "0.25.0"

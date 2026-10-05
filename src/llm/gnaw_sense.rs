@@ -236,6 +236,7 @@ impl GnawSenseBroker {
     /// fuse both searches by max cosine, and give the reranker the
     /// expanded text for its lexical side. One extra embedding (+ one LLM
     /// call when mamba is present) — opt-in per call.
+    #[cfg(feature = "modernbert")]
     pub async fn sense_with(
         &self,
         query: &str,
@@ -438,6 +439,23 @@ impl GnawSenseBroker {
                 quality,
             })
         }
+    }
+
+    /// Honest stub for --no-default-features builds (Motor2 bug report
+    /// 2026-10-05): the real sense_with body needs ModernBERT. Callers
+    /// get a clean runtime error instead of a compile failure — external
+    /// path-dependents may call this directly.
+    #[cfg(not(feature = "modernbert"))]
+    pub async fn sense_with(
+        &self,
+        query: &str,
+        file_context: Option<&str>,
+        expand: bool,
+    ) -> Result<SenseResponse> {
+        let _ = (query, file_context, expand);
+        anyhow::bail!(
+            "sense_with requires the 'modernbert' feature — rebuild with --features modernbert (README: Full power)"
+        )
     }
 
     #[cfg(feature = "modernbert")]

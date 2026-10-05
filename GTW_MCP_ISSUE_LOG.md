@@ -596,9 +596,47 @@ som "parse partial-grace" snarare än att låta KLAR stå som fullständig.
    VEKTORINDEXET (`.gnawtreewriter_ai/index`) — samma namnfamilj, två
    olika databaser. "no matches efter index_entities" är ett integrations-
    misförstånd, inte en trasig sädeskälla. Åtgärd: nytt MCP-verktyg som
-   kör samma indexeringspipeline som `ai index` (GPU-gaten gäller automatiskt)
-   — låg som känd lucka i9.5-loggen och återfinns här; tar vi som nästa
-   steg om ni vill.
+    kör samma indexeringspipeline som `ai index` (GPU-gaten gäller automatiskt)
+    — låg som känd lucka i9.5-loggen och återfinns här; tar vi som nästa
+    steg om ni vill.
+
+---
+
+## 2026-10-05 — FIXAD: v0.16.0 bröt --no-default-features-byggen (Motor2 buggrapport)
+
+**Kontext:** Motor2-agenten rapporterade (vid ace036e): `cargo check
+--no-default-features` → 8 fel i `src/llm/gnaw_sense.rs` — nya
+`sense_with` (query-expansionen från 0.16.0) saknade feature-gate medan
+kroppen använder modernbert-gated kod (importerna `AiModel`/`DeviceType`,
+fältet `relational_indexer`, `index_file_cached`,
+`extract_name_from_preview`). Vår default- ≠ mamba-matris har alltid
+`modernbert` på → greppades aldrig.
+
+**Åtgärd (direkt):**
+1. `#[cfg(feature = "modernbert")]` på `sense_with`.
+2. `#[cfg(not(feature = "modernbert"))]`-stub som `anyhow::bail!` med
+   tydligt fel ("sense_with requires the 'modernbert' feature —
+   rebuild with --features modernbert") — externa path-dependents
+   (motor2-gtw) får kompilering + ärligt runtime-fel i stället för
+   E0433/E0599/E0609 i vår kod.
+3. **Granskning av resten av 0.16** (feedback-loop/search_quality/
+   fuse_by_max/expand_query_terms): rena — hjälpna är serde/chrono/fs
+   utan modernbert-typer, `expand_query_terms` bor i det mamba-gatade
+   pipeline-modulen, mcp-sättningen ligger i `handle_sense`'s
+   modernbert-block. Bekräftat av att `--no-default-features` går
+   rent.
+4. **Regressionströskel:** `validate.yml` kör nu
+   `cargo check --no-default-features --all-targets` — default OCH
+   mamba båda har modernbert, bara denna konfig hittar gathål.
+   `examples/debug_loading.rs` fick `required-features = ["modernbert"]`
+   (pre-existerande hål: candle-import utan gate) så all-targets går.
+
+**Verifiering:** `cargo check --no-default-features --all-targets` ✓,
+`cargo check --features mamba` ✓, clippy `--lib -D warnings` ✓,
+232 tester gröna.
+
+**Bedömning:** [x] bugg — min (0.16.0:s) — gate-slip vid ny publik
+metod. Vägledning träffad? Ja — rapporten pekade exakt rätt fil/fix/mönster.
 
 ---
 
