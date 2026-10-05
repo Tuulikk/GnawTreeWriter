@@ -187,7 +187,16 @@ impl GnawSenseBroker {
             // SATELITE MODE: Search across the entire project index
             let index_mgr = crate::llm::SemanticIndexManager::new(&self.project_root);
             let project_index = index_mgr.load_project_index()?;
-            let results = project_index.search(&query_vector, 10);
+            // Wider raw window, then rerank: pure cosine lets module decls
+            // crowd out implementations for name-heavy queries (9.x quality fix).
+            // Wide net: implementations are long/diffuse and rank low in
+            // raw cosine, so a narrow window would never even show them to
+            // the reranker. Lower floor + large window, then rerank to 10.
+            let results = crate::llm::rerank_satellite(
+                query,
+                project_index.search_with_threshold(&query_vector, 2000, 0.1),
+                10,
+            );
 
             Ok(SenseResponse::Satelite {
                 matches: results
@@ -388,10 +397,14 @@ impl GnawSenseBroker {
             nodes.sort_by_key(|n| std::cmp::Reverse(n.content.len()));
             nodes.truncate(MAX_EMBED_NODES);
         }
-        for node in nodes {
-            let embed_text: String = node.content.chars().take(MAX_EMBED_CHARS).collect();
-            let vector_tensor = model.get_embedding(&embed_text)?;
-            let vector: Vec<f32> = vector_tensor.to_vec1()?;
+        // One forward per 16 nodes instead of one per node (batched embedding).
+        let texts: Vec<String> = nodes
+            .iter()
+            .map(|n| n.content.chars().take(MAX_EMBED_CHARS).collect())
+            .collect();
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+        let vectors = model.get_embeddings(&refs)?;
+        for (node, vector) in nodes.into_iter().zip(vectors) {
             let preview = truncate_preview(&node.content, 97);
             index.entries.push(NodeEmbedding {
                 file_path: file_path.to_string(),
@@ -435,10 +448,14 @@ impl GnawSenseBroker {
             nodes.sort_by_key(|n| std::cmp::Reverse(n.content.len()));
             nodes.truncate(MAX_EMBED_NODES);
         }
-        for node in nodes {
-            let embed_text: String = node.content.chars().take(MAX_EMBED_CHARS).collect();
-            let vector_tensor = model.get_embedding(&embed_text)?;
-            let vector: Vec<f32> = vector_tensor.to_vec1()?;
+        // One forward per 16 nodes instead of one per node (batched embedding).
+        let texts: Vec<String> = nodes
+            .iter()
+            .map(|n| n.content.chars().take(MAX_EMBED_CHARS).collect())
+            .collect();
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+        let vectors = model.get_embeddings(&refs)?;
+        for (node, vector) in nodes.into_iter().zip(vectors) {
             let preview = truncate_preview(&node.content, 97);
             index.entries.push(NodeEmbedding {
                 file_path: file_path.to_string(),

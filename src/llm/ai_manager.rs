@@ -309,6 +309,77 @@ impl ModernBertModel {
         let embeddings = self.model.forward(&input_ids, &mask)?;
         Ok(embeddings.mean(1)?.squeeze(0)?)
     }
+
+    /// Batched embedding: texts are embedded in chunks of EMBED_BATCH in
+    /// ONE forward pass each (zero-padded + masked mean-pool). Order-
+    /// preserving — out[i] is the embedding of texts[i]. This turns the
+    /// indexing hot path (one forward PER NODE) into one forward per 16
+    /// nodes; a single row reduces exactly to get_embedding.
+    pub fn get_embeddings(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        const EMBED_BATCH: usize = 16;
+        // Attention-score budget per forward: B * max_len^2. A flat padded
+        // batch of long definition bodies (<= 8000 chars each) blew CUDA
+        // OOM at B=16; greedy windows keep short rows batched (the common
+        // case) while giant rows degenerate to B=1 — the sequential path
+        // that already ran fine on GPU.
+        const MAX_B_T2: usize = 4_194_304; // 2^22
+        let mut out: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
+        let encodings = texts
+            .iter()
+            .map(|t| self.tokenizer.encode(*t, true).map_err(anyhow::Error::msg))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut i = 0;
+        while i < encodings.len() {
+            // Greedy consecutive window: extend while (rows * max_len^2)
+            // fits the budget and the batch cap — order is preserved, so
+            // out[k] always corresponds to texts[k].
+            let mut j = i;
+            let mut max_len = 1usize;
+            while j < encodings.len() {
+                let len = encodings[j].get_ids().len();
+                let new_max = max_len.max(len);
+                let n = j - i + 1;
+                if n > 1 && n * new_max * new_max > MAX_B_T2 {
+                    break;
+                }
+                if n >= EMBED_BATCH {
+                    break;
+                }
+                max_len = new_max;
+                j += 1;
+            }
+
+            let batch = &encodings[i..j];
+            let mut flat_ids: Vec<i64> = Vec::with_capacity(batch.len() * max_len);
+            let mut flat_mask: Vec<i64> = Vec::with_capacity(batch.len() * max_len);
+            for enc in batch {
+                let ids = enc.get_ids();
+                flat_ids.extend(ids.iter().map(|&id| id as i64));
+                flat_mask.extend(std::iter::repeat_n(1i64, ids.len()));
+                let pad = max_len - ids.len();
+                flat_ids.extend(std::iter::repeat_n(0i64, pad));
+                flat_mask.extend(std::iter::repeat_n(0i64, pad));
+            }
+            let input_ids = Tensor::from_vec(flat_ids, (batch.len(), max_len), &self.device)?;
+            let mask = Tensor::from_vec(flat_mask, (batch.len(), max_len), &self.device)?;
+            let embeddings = self.model.forward(&input_ids, &mask)?; // [B, T, H]
+
+            // Masked mean-pool: sum(x * mask) / sum(mask); pads carry 0 and
+            // every row has >= 1 real token, so the denominator never vanishes.
+            let mask_f = mask
+                .to_dtype(DType::F32)?
+                .unsqueeze(candle_core::D::Minus1)?; // [B, T, 1]
+            let masked = embeddings.broadcast_mul(&mask_f)?; // [B, T, H]
+            let summed = masked.sum(1)?; // [B, H]
+            let denom = mask_f.sum(1)?; // [B, 1]
+            let pooled = summed.broadcast_div(&denom)?;
+            out.extend(pooled.to_vec2::<f32>()?);
+
+            i = j;
+        }
+        Ok(out)
+    }
 }
 
 pub struct AiManager {

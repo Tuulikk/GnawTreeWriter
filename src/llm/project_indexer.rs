@@ -64,10 +64,24 @@ impl ProjectIndexer {
                     }
 
                     if let Ok(tree) = parser.parse(&content) {
-                        let mut entries = Vec::new();
-                        self.collect_embeddings(&tree, &file_path_str, model, &mut entries)?;
-
-                        if !entries.is_empty() {
+                        // Two phases: walk collects (node_path, preview, text)
+                        // triples, then ONE batched embedding call per file
+                        // (16 nodes per forward instead of one per node).
+                        let mut pending: Vec<(String, String, String)> = Vec::new();
+                        Self::collect_pending(&tree, &mut pending);
+                        if !pending.is_empty() {
+                            let texts: Vec<&str> = pending.iter().map(|t| t.2.as_str()).collect();
+                            let vectors = model.get_embeddings(&texts)?;
+                            let entries = pending
+                                .into_iter()
+                                .zip(vectors)
+                                .map(|((node_path, content_preview, _), vector)| NodeEmbedding {
+                                    file_path: file_path_str.clone(),
+                                    node_path,
+                                    content_preview,
+                                    vector,
+                                })
+                                .collect();
                             self.index_manager.save_index(&file_path_str, entries)?;
                             total_files += 1;
                         }
@@ -83,60 +97,37 @@ impl ProjectIndexer {
         Ok(total_files)
     }
 
-    fn collect_embeddings(
-        &self,
-        node: &TreeNode,
-        file_path: &str,
-        model: &crate::llm::ModernBertModel,
-        acc: &mut Vec<NodeEmbedding>,
-    ) -> Result<()> {
+    /// Walk the tree collecting (node_path, preview, text) triples for
+    /// every embeddable node/chunk — embedding happens afterwards in ONE
+    /// batched call per file (see ModernBertModel::get_embeddings). No
+    /// model in this phase, so the walk is trivially cheap.
+    fn collect_pending(node: &TreeNode, acc: &mut Vec<(String, String, String)>) {
         // Index functions, classes, and important definitions
         if node.node_type.contains("definition") || node.node_type.contains("item") {
-            // CHUNKING LOGIC: If node is too large, split it
-            // ModernBERT safe limit is roughly 8192 tokens.
-            // Chunking thresholds must respect ModernBERT's 8192-token rope
-            // context. Worst case is ~1 token/char (CJK), so chunks are kept
-            // at 4000 chars; nodes over 8000 chars are chunked. (The old
-            // 15000-char threshold could blow the context and crash the
-            // model, and chunking itself was byte-based — panic on multibyte
-            // UTF-8.)
+            // CHUNKING LOGIC: If node is too large, split it.
+            // ModernBERT safe limit is roughly 8192 tokens. Chunking
+            // thresholds must respect the 8192-token rope context; worst
+            // case is ~1 token/char (CJK), so chunks stay at 4000 chars and
+            // nodes over 8000 chars are chunked.
             if node.content.chars().count() > 8000 {
                 let chunks = Self::chunk_text(&node.content, 4000, 500);
                 for (i, chunk) in chunks.into_iter().enumerate() {
-                    let vector_tensor = model.get_embedding(&chunk)?;
-                    let vector: Vec<f32> = vector_tensor.to_vec1()?;
-
-                    acc.push(NodeEmbedding {
-                        file_path: file_path.to_string(),
-                        node_path: format!("{}[chunk:{}]", node.path, i),
-                        content_preview: format!(
-                            "(Chunk {}) {}",
-                            i,
-                            crate::llm::gnaw_sense::truncate_preview(chunk.trim(), 97)
-                        ),
-                        vector,
-                    });
+                    let preview = format!(
+                        "(Chunk {}) {}",
+                        i,
+                        crate::llm::gnaw_sense::truncate_preview(chunk.trim(), 97)
+                    );
+                    acc.push((format!("{}[chunk:{}]", node.path, i), preview, chunk));
                 }
             } else {
-                let vector_tensor = model.get_embedding(&node.content)?;
-                let vector: Vec<f32> = vector_tensor.to_vec1()?;
-
                 let preview = crate::llm::gnaw_sense::truncate_preview(&node.content, 97);
-
-                acc.push(NodeEmbedding {
-                    file_path: file_path.to_string(),
-                    node_path: node.path.clone(),
-                    content_preview: preview,
-                    vector,
-                });
+                acc.push((node.path.clone(), preview, node.content.clone()));
             }
         }
 
         for child in &node.children {
-            self.collect_embeddings(child, file_path, model, acc)?;
+            Self::collect_pending(child, acc);
         }
-
-        Ok(())
     }
 
     /// Split `text` into overlapping chunks of at most `size` CHARACTERS

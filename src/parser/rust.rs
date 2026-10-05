@@ -165,8 +165,12 @@ mod tests {
     /// raw-references and rejected whole files. Fixed by 0.24.2 — pinned here.
     #[test]
     fn parses_plain_raw_borrow() {
-        assert!(parses("fn f() -> i32 { let raw = 1; g(&raw) }\nfn g(_: &i32) -> i32 { 2 }"));
-        assert!(parses("fn f(raw: String) -> i32 { g(&raw) }\nfn g(_: &String) -> i32 { 2 }"));
+        assert!(parses(
+            "fn f() -> i32 { let raw = 1; g(&raw) }\nfn g(_: &i32) -> i32 { 2 }"
+        ));
+        assert!(parses(
+            "fn f(raw: String) -> i32 { g(&raw) }\nfn g(_: &String) -> i32 { 2 }"
+        ));
         assert!(parses(
             "fn f(raw: &str) -> Result<Option<serde_json::Value>, String> {\n    let parsed = serde_json::from_str::<serde_json::Value>(raw)\n        .unwrap_or_else(|_| serde_json::json!({ \"raw\": raw }));\n    Ok(Some(parsed.unwrap_or_default()))\n}"
         ));

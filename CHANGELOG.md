@@ -1,3 +1,48 @@
+## [0.14.0] - 2026-10-05
+
+### Added
+- **Satellite sense ranking quality**: `rerank_satellite` in front of raw
+  cosine. Declarations (module/use/attribute heads) are demoted with a
+  penalty scaled by query-term overlap, implementations get a nudge, and
+  lexical matches count across preview + file/node paths; `(Chunk N)`
+  prefixes are classified on the real code head. Raw window widened
+  (2000 @ floor 0.1) so long, diffuse implementations are even *visible*
+  to the reranker, then trimmed to 10. Inventory-intent queries ("which
+  modules exist…") flip the priors: declarations ARE the answer and get
+  the item bonus instead of the penalty. Result on the reference query
+  "how is undo implemented…": real `impl`/`fn` nodes on top — before,
+  all ten hits were module declarations and `#[command]` attributes.
+- **Batched embeddings** (`ModernBertModel::get_embeddings`): one
+  forward per window of up to 16 texts with padded masked mean-pooling,
+  order-preserving, single row exactly equivalent to `get_embedding`.
+  Wired into the project indexer (two-phase: walk collects
+  (path, preview, text) triples, then one batched call per file) and
+  both zoom-JIT node loops. Forward passes go from N to ~N/16.
+
+### Fixed
+- **CUDA OOM during GPU indexing**: a flat padded batch of long
+  definition bodies (≤8000 chars each) blew VRAM at B=16. Batching is
+  now budget-aware — greedy consecutive windows keep `B × max_len² ≤
+  2^22`, so short rows (the common case) stay batched while giant rows
+  degenerate to B=1, the sequential path that already ran fine on GPU.
+  Full reindex after the fix: **223 files in 90 s, exit 0** (RTX 4070
+  SUPER, 20%-VRAM gate passed at 28% free).
+
+### Changed
+- `#[ignore]` on the heavy ModernBERT equivalence test (debug-mode
+  forwards ~2-3 min): run explicitly with
+  `cargo test --test ai_modernbert_tests -- --ignored --nocapture`
+  when touching `get_embeddings` — it also prints sequential-vs-batch
+  timing. Short-text debug micro-bench shows 1.1-1.2× (debug overhead
+  dominates); the structural win is fewer forwards + launch reduction
+  + long-row OOM safety.
+
+### Docs
+- Issue log: reply to the Motor2 2026-10-05 entry (root cause of bug 1:
+  tree-sitter-rust 0.24.0 treated plain `&raw` borrows as Rust 1.82
+  `&raw const/mut` starts — fixed by 0.24.2, committed in 6413302;
+  bug 2 confirmed as two-separate-indexes gap, MCP index tool pending).
+
 ## [0.13.0] - 2026-10-04
 
 ### Added
