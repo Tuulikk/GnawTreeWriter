@@ -151,3 +151,37 @@ impl ParserEngine for RustParser {
         vec!["rs"]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parses(code: &str) -> bool {
+        RustParser.parse(code).is_ok()
+    }
+
+    /// Regression (issue log 2026-10-05, Motor2 database.rs): tree-sitter-rust
+    /// 0.24.0 mistook plain `&raw` borrows for Rust 1.82 `&raw const/mut`
+    /// raw-references and rejected whole files. Fixed by 0.24.2 — pinned here.
+    #[test]
+    fn parses_plain_raw_borrow() {
+        assert!(parses("fn f() -> i32 { let raw = 1; g(&raw) }\nfn g(_: &i32) -> i32 { 2 }"));
+        assert!(parses("fn f(raw: String) -> i32 { g(&raw) }\nfn g(_: &String) -> i32 { 2 }"));
+        assert!(parses(
+            "fn f(raw: &str) -> Result<Option<serde_json::Value>, String> {\n    let parsed = serde_json::from_str::<serde_json::Value>(raw)\n        .unwrap_or_else(|_| serde_json::json!({ \"raw\": raw }));\n    Ok(Some(parsed.unwrap_or_default()))\n}"
+        ));
+    }
+
+    #[test]
+    fn parses_raw_as_ordinary_identifier() {
+        assert!(parses("fn f() -> i32 { let raw = 1; raw + 1 }"));
+        assert!(parses("fn f(raw: &str) -> usize { raw.len() }"));
+        // The real raw-reference syntax must also keep parsing.
+        assert!(parses("fn f(x: i32) { let _p = &raw const x; }"));
+    }
+
+    #[test]
+    fn rejects_actual_syntax_error() {
+        assert!(!parses("fn f( { }"));
+    }
+}

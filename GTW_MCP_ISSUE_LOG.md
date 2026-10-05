@@ -544,6 +544,64 @@ GPU vid 28 % VRAM fri; ingen fil → konservativ CPU-default; `--gpu` → GPU).
 
 ---
 
+## 2026-10-05 — Motor2-verifiering: parse-bugg på giltig Rust (database.rs:6097), satellit-sense kräver fortfarande CLI-index
+
+**Kontext:** Verifiering av 9.5/9.6 mot nystartad 0.13.0-daemon (Motor2-repot,
+PID 3259463, exe = live `libexec/gnawtreewriter` — aktuell binär, ej stale).
+
+| # | Anrop | Parametrar | Resultat |
+|---|-------|-----------|----------|
+| 1 | `get_skeleton` | `crates/motor2-session/src/database.rs` (11 476 rader), max_depth 1–2 | ✗ "Syntax error at line 6097, col 72" — men raden ÄR giltig Rust (`serde_json::from_str::<serde_json::Value>(&raw).unwrap_or_else(\|_\| ...)`, turbofish + closure); `cargo build --release` RC=0 |
+| 2 | `analyze` | samma fil | ✗ samma parse-fel — HELA diagnoskedjan (analyze→sense→read_node→edit_node) faller för filen |
+| 3 | `get_skeleton` | `crates/motor2-chat/src/bridge/tests.rs` (6 371 rader) | ✓ 500 noder — INTE storleksrelaterat, konstrukt-relaterat |
+| 4 | `sense` | utan file_path, projektfråga | ✗ "no matches ... build it with `ai index`" — även EFTER MCP `index_entities` (56 entiteter indexerade, 0 errors) — MCP-indexering fyller INTE satellit-indexet |
+| 5 | `sense` | MED file_path (bridge/mod.rs) | ✓ 5/5 relevanta träffar (distill_completed_turns etc, 0.77–0.80) |
+
+**Omväg:** läs fil-regionen med Read (6090–6104), verifiera giltighet via
+cargo-bygge; zoom-sense med file_path i stället för satellit.
+
+**Bedömning:** [x] bugg — två separata:
+1. **Parse-robusthet:** tree-sitter-grammatikan stöter på en giltig
+   Rust-konstruktion (turbofish-generic i metodkedja med
+   `unwrap_or_else(\|_\| json!({...})`-fallback är primär misstanke, col 72)
+   och avvisar HELA filen. Giltig kod får aldrig ge "Syntax error" —
+   minst: felsäkert PARTIAL-parse (posta felet, returnera det som gick).
+2. **Satellit-sense-capacitet:** MCP-`index_entities`/`index_relations`
+   och satellit-`sense` använder skilda index — agenten som indexerar via
+   MCP förväntar sig att sense sedan svarar; "no matches" är då ett
+   integrationsfel (två index, en förväntan). Guidande-meddelandet är bra
+   men capabiliteten saknas.
+
+**Vägledning träffad?** Delvis ja — 9.6-leveransen syns (sense pekar på
+`ai index`/file_path; skeleton ger explicit fel i stället för tyst tomt).
+9.5-KLAR-markeringen (ROADMAP ✅ 2026-10-04) täcker symptomet "tomt svar"
+men INTE underliggande parse-robusthet — rekommenderar att öppna posten
+som "parse partial-grace" snarare än att låta KLAR stå som fullständig.
+
+**Svar (GTW, 2026-10-05): ROTSAKEN HITTAD OCH FIXAD — utan delvis-parse.**
+1. **Parse-buggen = `&raw` + tree-sitter-rust 0.24.0.** Minimering visade
+   att varje konstrukt (`turbofish`, `json!`, multi-line-kedja, `&self`)
+   var oskyldig — triggern var identen **`raw` efter `&`**: grammatsparer
+   för Rust 1.82:s `&raw const/mut` (raw-referenser) kräver `const`/`mut`
+   efter `&raw` och stöter på `g(&raw)` (vanligt variabelnamn!). Bevis:
+   `g(&s)` OK, `g(&raw)` fail, `raw + 1` OK, `&raw const x` OK.
+   **Fix: `cargo update -p tree-sitter-rust` 0.24.0 → 0.24.2** (uppströms-
+   rättad ambiguëtitet) — hela `database.rs` (11 476 rader) parserar nu OK,
+   inkl. era fem anrop. Regressionsspik: `parser::rust::tests::
+   parses_plain_raw_borrow` (+2) gröna. Delvis-parse (punkt 1:n i
+   bedömningen) kvarstår som hårdhetsbacklog AANNÅLST — men ingen
+   workaround behövs längre för att filer ska fungera.
+2. **Satellit-index-klyftan: BEKRÄFTAD och delvis öppen.** `index_entities`/
+   `index_relations` (MCP) skriver KUNSKAPSGRAFEN; satellit-`sense` läser
+   VEKTORINDEXET (`.gnawtreewriter_ai/index`) — samma namnfamilj, två
+   olika databaser. "no matches efter index_entities" är ett integrations-
+   misförstånd, inte en trasig sädeskälla. Åtgärd: nytt MCP-verktyg som
+   kör samma indexeringspipeline som `ai index` (GPU-gaten gäller automatiskt)
+   — låg som känd lucka i9.5-loggen och återfinns här; tar vi som nästa
+   steg om ni vill.
+
+---
+
 <!-- Ny post: kopiera mallen nedan
 ## ÅÅÅÅ-MM-DD — kort rubrik
 **Kontext:**
