@@ -1,3 +1,27 @@
+## [Unreleased]
+
+### Fixed
+- **`--no-default-features` builds** (Motor2 bug report, fixed in
+  `18962b2`): `sense_with` lacked a feature gate while its body uses
+  modernbert-gated code — 8 compile errors for path-dependents like
+  motor2-gtw. Now gated with an honest not-modernbert stub; regression
+  threshold added: `validate.yml` runs
+  `cargo check --no-default-features --all-targets` (default AND mamba
+  both carry modernbert, only this config catches gate holes).
+  `examples/debug_loading.rs` got `required-features` (pre-existing
+  candle hole).
+
+### Docs
+- **Doc-drift pass**: GTW_INSTRUCTIONS.md said "30 tools" while 34 were
+  registered (doctor/history/stats/index_project had landed without
+  updating it) — now complete, and `integration_mcp_instructions_listed`
+  pins EVERY registered tool name to the file so the drift cannot
+  recur. SKILL.md gained situations-rows/MCP-ref entries for
+  index_project/history/stats plus `expand`/`search_quality` guidance
+  and the `E_STRICT_PARSE` row; README lists updated (incl. a
+  nonexistent `diff_to_batch` MCP tool claim corrected to CLI-only
+  `diff-to-batch`); v0.16.0 notes test count corrected 232 → 233.
+
 ## [0.16.0] - 2026-10-05
 
 ### Added

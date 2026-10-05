@@ -600,6 +600,11 @@ som "parse partial-grace" snarare än att låta KLAR stå som fullständig.
     — låg som känd lucka i9.5-loggen och återfinns här; tar vi som nästa
     steg om ni vill.
 
+**Uppföljning (samma dag):** punkt 2 är avstämd — `index_project`
+(start/status i bakgrund, GPU-gaten gäller) landade i `f58989d` (v0.15.0);
+`index_entities`-beskrivningarna pekar nu uttryckligen på den skillnaden
+och satellitens no-matches-mädelandе nämner verktyget först.
+
 ---
 
 ## 2026-10-05 — FIXAD: v0.16.0 bröt --no-default-features-byggen (Motor2 buggrapport)

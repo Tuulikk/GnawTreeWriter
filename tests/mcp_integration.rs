@@ -1396,6 +1396,45 @@ async fn integration_mcp_index_project_status() -> Result<(), Box<dyn std::error
     Ok(())
 }
 
+/// Anti-drift for the agent-facing catalog: every registered tool must
+/// appear (backticked) in GTW_INSTRUCTIONS.md — the file that has
+/// drifted twice (17 -> 30 tools, then 30 -> 34 when index_project/
+/// history/stats/doctor landed without updating it).
+#[test]
+fn integration_mcp_instructions_listed() {
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src = std::fs::read_to_string(manifest.join("src/mcp/mod.rs")).expect("mcp/mod.rs");
+    let doc =
+        std::fs::read_to_string(manifest.join("GTW_INSTRUCTIONS.md")).expect("GTW_INSTRUCTIONS");
+
+    let mut names: Vec<String> = Vec::new();
+    let mut rest = src.as_str();
+    while let Some(start) = rest.find("\"name\": \"") {
+        let tail = &rest[start + "\"name\": \"".len()..];
+        if let Some(end) = tail.find("\"") {
+            let name = tail[..end].to_string();
+            if !names.contains(&name) {
+                names.push(name);
+            }
+            rest = &tail[end + 1..];
+        } else {
+            break;
+        }
+    }
+    assert!(
+        names.len() >= 30,
+        "expected the full registry, found only {}",
+        names.len()
+    );
+    for name in &names {
+        assert!(
+            doc.contains(&format!("`{}`", name)),
+            "tool {} is registered but missing from GTW_INSTRUCTIONS.md — update the table with it",
+            name
+        );
+    }
+}
+
 /// Motor2 plan #23: duplex metrics persist at
 /// <project>/.gnawtreewriter_metrics.json with monotonic counters.
 #[test]

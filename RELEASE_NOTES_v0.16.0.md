@@ -31,7 +31,7 @@ query through the local LLM for a second semantic channel.
   wins (even with `--force`).
 
 ### Verified
-- 232 tests green, clippy `-D warnings` clean on default AND mamba
+- 233 tests green, clippy `-D warnings` clean on default AND mamba
   builds, fmt clean; feedback loop + expansion live-tested against the
   real index and models.
 

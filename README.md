@@ -20,7 +20,7 @@ gnawtreewriter edit src/main.rs --ask "fix the self-assignment bug" --force
 gnawtreewriter edit src/main.rs --ask "replace every unwrap with expect" --all
 ```
 
-**MCP tools added**: `explain`, `summarize`, `investigate`, `add_rule`, `lint` — all available to AI agents.
+**MCP tools added**: `explain`, `summarize`, `investigate`, `add_rule`, `lint`, `doctor`, `history`, `stats`, `index_project` — all available to AI agents.
 
 **Roadmap**: Phase 8 (Local LLM) + Rules Engine steps 1–5 all marked complete. Spec at `docs/RULES_ENGINE_SPEC.md`.
 
@@ -356,8 +356,10 @@ And one thing *with* the local model:
   consistently to every matching line (`multi-edit`)
 
 All of these are also available as MCP tools (`explore`, `pack`, `curate`, `compress`,
-`diff_to_batch`, `index_entities`, `index_relations`, `explain`, `summarize`,
-`investigate`, `add_rule`, `lint`) for agents working through Claude Desktop, Zed, or VSCode.
+`diff_since`, `index_entities`, `index_relations`, `explain`, `summarize`,
+`investigate`, `add_rule`, `lint`, `doctor`, `history`, `stats`, `index_project`)
+for agents working through Claude Desktop, Zed, or VSCode. (Converting a unified
+diff to a batch spec is CLI-only: `gnawtreewriter diff-to-batch`.)
 
 ## 🤖 AI Agent Integration (VS Code / Copilot)
 

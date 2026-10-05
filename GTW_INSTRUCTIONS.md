@@ -1,19 +1,22 @@
 GnawTreeWriter MCP-server är registrerad för alla OpenCode-sessioner.
 
-30 GTW-verktyg finns tillgängliga (antal verifieras av kontraktstestet
-`integration_mcp_tools_adoption_contract` — uppdatera listan när nya läggs till):
+34 GTW-verktyg finns tillgängliga (synkhanteras av kontraktstestet
+`integration_mcp_instructions_listed` — varje registrerat verktyg måste
+finnas i tabellen här nedan; nya verktyg läggs till här samtidigt):
 
 | Steg | Verktyg | Användning |
 |------|---------|------------|
 | Orientera | `explore`, `summarize`, `analyze`, `get_skeleton`, `list_nodes` | Kartlägg projekt/fil utan att läsa hela källor |
-| Hitta | `sense`, `search_semantic`, `search_nodes`, `investigate` | "Var är X?" utan att veta filnamn — returnerar nod-sökvägar |
-| Läsa | `read_node`, `explain` | Exakt en nods källkod eller förklaring — ingen fil-dump |
+| Hitta | `sense`, `search_semantic`, `search_nodes`, `investigate` | "Var är X?" utan att veta filnamn — returnerar nod-sökvägar; satellit-svar har `search_quality` (suspect/prior_failures), `expand: true` lägger en LFM2.5-kanal |
+| Läsa | `read_node`, `explain` | Exakt en nods källkod eller förklaring — ingen fil-dump (trasiga filer svarar delvis med `syntax_warning`) |
 | Redigera | `edit_node`, `insert_node`, `move_node`, `preview_edit`, `edit_ask` | AST-validerad precision — syntax kontrolleras FÖRE skrivning |
-| Semantisk redigering | `semantic_edit`, `semantic_insert` | Beskriv VAD ska ändras, GTW hittar noden |
+| Semantisk redigering | `semantic_edit`, `semantic_insert` | Beskriv VAD ska ändras, GTW hittar noden (svarar med `semantic_match`: nod + confidence + kandidater) |
 | Koordinera | `batch`, `undo` | Atomära multi-fil-transaktioner; snabb återställning |
+| Historik & status | `history`, `stats`, `doctor` | Vad ändrades nyss / hur stort är projektet / är GTW vid liv (hälsa i ett anrop) |
 | AI-kontext | `compress`, `pack`, `curate`, `diff_since`, `save_state` | Token-medveten analys, projekt-paketering, ändringsspårning |
-| Indexera | `index_entities`, `index_relations` | Kunskapsgraf: entiteter + relationer |
-| AI-rapporter | `get_semantic_report`, `add_rule` | Kodkvalitetsrapport; lint-regler (med `fix:`-stöd) |
+| Indexera | `index_project`, `index_entities`, `index_relations` | `index_project` bygger VEKTORINDEXET som satellit-`sense` söker (start/status i bakgrund); de två andra bygger KUNSKAPSGRAFEN |
+| Lint & regler | `lint`, `add_rule` | Mönsterlintering (`fix`/`preview` för automatisering); skriv egna regler |
+| AI-rapporter | `get_semantic_report` | Kodkvalitetsrapport med källcitat (`sources`) |
 
 ## Diagnostisk kedja (standard-arbetsflöde)
 
@@ -23,6 +26,9 @@ GnawTreeWriter MCP-server är registrerad för alla OpenCode-sessioner.
 4. **Ändra**: `edit_node`/`semantic_edit`/`insert_node` → förhandsgranska med
    `preview_edit` vid riskfyllda ändringar
 5. **Verifiera**: kör bygg/test (`cargo check`), diffa vid behov; vid fel → `undo`
+
+Saknas satellit-indexet? `index_project {"action":"start"}` (polla med
+`"status"`) — meddelandet från tomt `sense` pekar på samma.
 
 ## Varför AST-nivå istället för textnivå
 

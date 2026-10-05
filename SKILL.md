@@ -34,6 +34,9 @@ You are an expert in using **GnawTreeWriter** for surgical, AST-based code editi
 | Auto-apply rule fixes | `lint {fix: true}` (+ `preview: true` first!) | `lint {"paths": ["src"], "fix": true, "preview": true}` |
 | Write a rule | `add_rule` (pattern + optional `fix`) | `add_rule {"id": "proj_no_todo", "language": "rust", "pattern": "todo!()", "severity": "warning", "message": "..."}` |
 | Is GTW alive/sane here? | `doctor` → `gnawtreewriter doctor` | `doctor {}` → `{healthy, passed, failed, checks[]}` |
+| Build/refresh the search index satellite sense needs | `index_project` → `gnawtreewriter ai index` | `index_project {"action": "start"}` → poll `{"action": "status"}` (background, GPU gate applies) |
+| "What did GTW change just now?" | `history` → `gnawtreewriter history` | `history {"limit": 5}` → transactions, newest first, stable ids for undo |
+| "How big is this codebase?" | `stats` → `gnawtreewriter stats` | `stats {}` → files/lines/tokens/languages + largest files |
 | Plain-language explanation | `explain` / `investigate` (mamba build) | `explain {"file_path": "src/core/batch.rs", "node": "1.2"}` |
 | Find text inside one file | `search_nodes` → `search <file> "<pattern>"` | `search_nodes {"file_path": "cli.rs", "pattern": "handle_lint"}` |
 | Snappy text replace (not AST) | (CLI) `quick-replace` — FAILS LOUD on no-match | `gnawtreewriter quick-replace f.rs 'old' 'new' --preview` |
@@ -97,7 +100,16 @@ gnawtreewriter sense "how is X done?"   # satellite (needs index)
 gnawtreewriter sense "X" src/file.rs     # zoom (no index needed)
 ```
 
-Empty satellite result = index missing → the error message says so; build it with `ai index` (background it: `nohup gnawtreewriter ai index &`).
+Empty satellite result = index missing → the error message says so; build it with `index_project {"action":"start"}` (MCP, background — poll with `"status"`) or `ai index` on the CLI.
+
+**Reading satellite answers:** every response carries
+`search_quality {prior_failures, suspect_reason, expansion}` —
+`suspect_reason` (`no_lex_overlap`/`low_cosine`/`empty`) means the ranker
+distrusts its own top hit, and `prior_failures` counts earlier failures of
+the same query (log: `.gnawtreewriter_search_log.jsonl`). Do not trust a
+flat score when these flag it — adjust the query or fall back.
+`expand: true` (mamba builds) adds an LFM2.5 query-expansion channel:
+`sense {"query": "...", "expand": true}`.
 
 ## 🛡️ Error handling (what GTW tells you)
 
@@ -109,6 +121,7 @@ Empty satellite result = index missing → the error message says so; build it w
 | `unknown rule id …` | typo or rule not loaded — `rules list` / `gnawtreewriter rules list` |
 | `get_skeleton … must never be read as a valid empty answer` | raise `max_depth`, or use `analyze`/`list_nodes` |
 | `Zoom search: no nodes matched` | broaden the query, or `list_nodes` for raw structure |
+| `Strict parse refused …` (`E_STRICT_PARSE`) | the EXISTING file has syntax errors — read paths (`analyze`/`get_skeleton`/`read_node`) still answer partially with `syntax_warning`; fix the file before editing |
 | `doctor: N FAILED` | read `checks[]` — transaction/backup trouble → `restore-project --preview` |
 | timeout / Not connected | **Fallback Rule above** — detour + log to `GTW_MCP_ISSUE_LOG.md` |
 
@@ -119,7 +132,7 @@ Full schemas via `tools/list` — every description carries VAD/NÄR/RETURNERAR/
 ```
 analyze {"file_path"}            list_nodes {"file_path", "filter"?, "max_depth"?}
 get_skeleton {"file_path", "max_depth"?}       read_node {"file_path", "node_path"}
-search_nodes {"file_path", "pattern"}          sense {"query", "file_path"?}
+search_nodes {"file_path", "pattern"}          sense {"query", "file_path"?, "expand"?}
 preview_edit {"file_path","node_path","content"}    edit_node {"file_path","node_path","content"}
 insert_node {"file_path","parent_path","position","content"}
 semantic_edit {"file_path","query","content"}   semantic_insert {"file_path","anchor_query","content"}
@@ -127,6 +140,8 @@ move_node {"source_file","source_path","target_path"?}
 batch {"file","preview"?}        undo {"steps"?}
 lint {"paths","recursive"?,"severity_filter"?,"pattern"?,"fix"?,"preview"?}
 add_rule {"id","language","pattern","message"?, "fix"?}     doctor {}
+history {"limit"?}                 stats {}
+index_project {"action"?}          expand lives on sense (satellite only, mamba)
 explain {"file_path","node"}     get_semantic_report {"file_path"}
 ```
 
