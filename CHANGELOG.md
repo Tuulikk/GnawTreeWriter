@@ -1,6 +1,50 @@
-## [Unreleased]
+## [0.17.0] - 2026-10-05
+
+### Added — Phase 10: Agent Confidence & Motivation (trygghet + maning)
+- **`validate <file>` (CLI + MCP `{file_path}`)**: strict pre-edit syntax
+  gate — node count on success; on failure `E_STRICT_PARSE` + the error
+  position + pointer to the partial read paths, nonzero exit on the CLI.
+  (AGENTS.md advertised this command in three places while it did not
+  exist — following our own docs gave "unrecognized subcommand".)
+  Shared core: `parser::validate_file`.
+- **MCP `diff`**: independent post-write verification — `{old_file,
+  new_file}` (text/json) or `{file_path, old_path, node_path}`, same core
+  as CLI `gnaw-diff`, reads only.
+- **`undo {preview: true}`**: lists what WOULD be reverted
+  (id/file/operation/description, newest first) with zero mutation —
+  `UndoRedoManager::peek_undo`; e2e-verified by history counts before and
+  after.
+- **Write receipts**: `transaction_id` on edit_node/insert/semantic_insert
+  responses, `transaction_ids [src, tgt]` on move, one id per written file
+  on batch apply — correlates with `history`/`undo` (`RefCell`,
+  source-compatible for lib consumers).
+- **Idempotent retries**: `edit_node` whose target already equals the
+  requested content answers `already_applied: true` (trimmed compare, zero
+  bytes written) instead of a scary `E_EDIT_REJECTED` — closes the
+  historical timeout → retry → rejection spiral.
+- **MCP `guide {situation?}`**: machine-readable mirror of the skill
+  situations table (21 when/tool/example rows) for hosts that never load
+  SKILL.md (Motor2); token-match filtering, no-match fails loudly;
+  test pins every referenced tool to the live registry.
+- **Cold-start notes** in the five model-tool descriptions ("first call
+  may take 20-30 s — raise the host timeout") — untold latencies were the
+  source of false "Not connected" exits.
+
+### BREAKING (lib) — policy established
+- Release checklist (AGENTS.md) now requires a `### BREAKING (lib)`
+  section before release for enum/struct field additions and new
+  required params; the retroactive 0.16.0 note (SenseResponse::quality)
+  stands as the first entry. Integrators that path-depend (Motor2) rely
+  on being warned.
 
 ### Fixed
+- **`index_relations`: "calls" relations never carry an empty `from`**
+  (`a655cd2`, Motor2 dashboard report): call sites inside impl blocks
+  resolved to `gtw:{file}:function:{enclosing}`; scope-less calls get the
+  synthetic `gtw:{file}:callsite:{line}`. Verified against Motor2's
+  exact report file: 91 relations, 0 empty — their "(intern)" UI patch
+  can go when they bump the path-dep. Rustdoc documents the contract;
+  invariants tested on fixture and on a real 3000-line file.
 - **`--no-default-features` builds** (Motor2 bug report, fixed in
   `18962b2`): `sense_with` lacked a feature gate while its body uses
   modernbert-gated code — 8 compile errors for path-dependents like
