@@ -65,6 +65,9 @@ pub struct GnawTreeWriter {
     /// Senast skapade backup-sökväg (spec-gtw-backup-id.md, Väg A).
     /// Sätts i create_backup efter lyckad write. None om ingen edit skett.
     last_backup: Option<PathBuf>,
+    /// Receipt: id of the last transaction THIS writer logged (Phase 10 —
+    /// MCP callers correlate writes with history/undo). None until edit().
+    last_transaction_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +111,7 @@ impl GnawTreeWriter {
             tree,
             transaction_log,
             last_backup: None,
+            last_transaction_id: None,
         })
     }
 
@@ -136,6 +140,7 @@ impl GnawTreeWriter {
                 tree,
                 transaction_log,
                 last_backup: None,
+                last_transaction_id: None,
             },
             warning,
         ))
@@ -145,6 +150,12 @@ impl GnawTreeWriter {
     /// Exponerar backup-id:t som motor2-gtw behöver (spec-gtw-backup-id.md).
     pub fn last_backup_path(&self) -> Option<PathBuf> {
         self.last_backup.clone()
+    }
+
+    /// Receipt (Phase 10): id of the last transaction this writer logged —
+    /// None if nothing went through edit().
+    pub fn last_transaction_id(&self) -> Option<String> {
+        self.last_transaction_id.clone()
     }
 
     pub(crate) fn create_backup(&mut self) -> Result<PathBuf> {
@@ -388,6 +399,7 @@ impl GnawTreeWriter {
             description.clone(),
             HashMap::new(),
         )?;
+        self.last_transaction_id = Some(transaction_id.clone());
 
         // ALF INTEGRATION: Automatically log the tool use
         let project_root = find_project_root(Path::new(&self.file_path));

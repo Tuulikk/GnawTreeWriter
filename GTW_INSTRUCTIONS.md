@@ -1,15 +1,15 @@
 GnawTreeWriter MCP-server är registrerad för alla OpenCode-sessioner.
 
-34 GTW-verktyg finns tillgängliga (synkhanteras av kontraktstestet
+37 GTW-verktyg finns tillgängliga (synkhanteras av kontraktstestet
 `integration_mcp_instructions_listed` — varje registrerat verktyg måste
 finnas i tabellen här nedan; nya verktyg läggs till här samtidigt):
 
 | Steg | Verktyg | Användning |
 |------|---------|------------|
-| Orientera | `explore`, `summarize`, `analyze`, `get_skeleton`, `list_nodes` | Kartlägg projekt/fil utan att läsa hela källor |
+| Orientera | `guide`, `explore`, `summarize`, `analyze`, `get_skeleton`, `list_nodes` | `guide {situation}` → vilket verktyg passar; Kartlägg projekt/fil utan att läsa hela källor |
 | Hitta | `sense`, `search_semantic`, `search_nodes`, `investigate` | "Var är X?" utan att veta filnamn — returnerar nod-sökvägar; satellit-svar har `search_quality` (suspect/prior_failures), `expand: true` lägger en LFM2.5-kanal |
-| Läsa | `read_node`, `explain` | Exakt en nods källkod eller förklaring — ingen fil-dump (trasiga filer svarar delvis med `syntax_warning`) |
-| Redigera | `edit_node`, `insert_node`, `move_node`, `preview_edit`, `edit_ask` | AST-validerad precision — syntax kontrolleras FÖRE skrivning |
+| Läsa | `read_node`, `explain`, `validate` | Exakt en nods källkod eller förklaring — ingen fil-dump (trasiga filer svarar delvis med `syntax_warning`); `validate` = strikt syntaxgate före edit |
+| Redigera | `edit_node`, `insert_node`, `move_node`, `preview_edit`, `edit_ask`, `diff` | AST-validerad precision — syntax kontrolleras FÖRE skrivning; `diff` = oberoende verifiering efter skrivning |
 | Semantisk redigering | `semantic_edit`, `semantic_insert` | Beskriv VAD ska ändras, GTW hittar noden (svarar med `semantic_match`: nod + confidence + kandidater) |
 | Koordinera | `batch`, `undo` | Atomära multi-fil-transaktioner; snabb återställning |
 | Historik & status | `history`, `stats`, `doctor` | Vad ändrades nyss / hur stort är projektet / är GTW vid liv (hälsa i ett anrop) |

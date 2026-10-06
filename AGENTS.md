@@ -855,7 +855,7 @@ Use this as a quick reference:
 
 - [ ] Determine version number (semver)
 - [ ] Update `Cargo.toml` version
-- [ ] Update `CHANGELOG.md`
+- [ ] Update `CHANGELOG.md` (lib-yteändringar i enum/struct-fält, nya obligatoriska parametrar = `### BREAKING (lib)`-sektion INNAN release — Motor2 m.fl. path-dep:ar och litar på att brytningar ropas ut)
 - [ ] Create `RELEASE_NOTES_vX.Y.Z.md`
 - [ ] Run `cargo clean && cargo build --release`
 - [ ] Run `cargo test` (all pass)

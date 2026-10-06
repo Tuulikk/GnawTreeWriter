@@ -49,6 +49,10 @@
     showed `prior_failures: 1`, JSONL entries well-formed.
 
 ### Fixed
+### BREAKING (lib)
+- **`SenseResponse::Satelite` gained the `quality` field** (search feedback loop): downstream code that pattern-matches the variant with an exact field list must add `quality: _` (or `..`). MCP clients are unaffected (wire format only gained optional fields). Policy from now on: every lib-API breaking change gets a `### BREAKING (lib)` section here BEFORE release — integrators like Motor2 path-dep GTW and rely on being warned (see the AGENTS.md release checklist).
+
+### Fixed
 - `edit --ask "…" --all --preview` ignored the preview flag (writes
   were gated only by `!force`) — preview now always wins, even
   combined with `--force`; also clears the mamba-only unused-parameter

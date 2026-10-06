@@ -64,6 +64,12 @@ impl UndoRedoManager {
     }
 
     /// Undo the last N operations
+    /// Transaction ids `undo(steps)` WOULD revert, newest first —
+    /// read-only (Motor2/Phase 10: preview before mutating).
+    pub fn peek_undo(&self, steps: usize) -> Vec<String> {
+        self.undo_stack.iter().rev().take(steps).cloned().collect()
+    }
+
     pub fn undo(&mut self, steps: usize) -> Result<Vec<UndoRedoResult>> {
         let mut results = Vec::new();
         let steps_to_undo = std::cmp::min(steps, self.undo_stack.len());

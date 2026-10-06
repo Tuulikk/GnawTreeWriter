@@ -644,6 +644,7 @@ pub fn fix_batch(findings: &[Finding], rules: &[Rule]) -> Result<(crate::core::B
     let batch = crate::core::Batch {
         description: Some("lint --fix auto-edits".to_string()),
         operations: ops,
+        transaction_ids: std::cell::RefCell::new(Vec::new()),
     };
     Ok((batch, skipped))
 }

@@ -190,6 +190,20 @@ pub fn to_parse_result<T>(res: anyhow::Result<T>) -> ParseResult<T> {
     res.map_err(SyntaxError::from)
 }
 
+/// Strict-parse `path` and report how many nodes it produced — the core
+/// of `validate` (CLI + MCP): Ok = safe to edit, Err carries the error
+/// position (read paths still answer partially via parse_lenient).
+pub fn validate_file(path: &std::path::Path) -> Result<usize, SyntaxError> {
+    let code = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))?;
+    let parser = get_parser(path)?;
+    let tree = parser.parse(&code)?;
+    fn count(n: &TreeNode) -> usize {
+        1 + n.children.iter().map(count).sum::<usize>()
+    }
+    Ok(count(&tree))
+}
+
 /// A wrapper to let older parsers that return anyhow::Result work with the new ParseResult.
 pub struct LegacyParserWrapper<P: ParserEngineLegacy> {
     inner: P,

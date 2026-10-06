@@ -78,6 +78,11 @@ pub struct FileDiff {
 
 #[derive(Debug, Serialize, Default)]
 pub struct Batch {
+    /// Receipt (Phase 10): transaction ids logged by the last apply()
+    /// (one per written file), in write order. Interior mutability keeps
+    /// apply(&self) source-compatible for lib consumers.
+    #[serde(skip)]
+    pub transaction_ids: std::cell::RefCell<Vec<String>>,
     pub description: Option<String>,
     pub operations: Vec<BatchOp>,
 }
@@ -118,6 +123,7 @@ impl Batch {
         Self {
             description: None,
             operations: batch_ops,
+            transaction_ids: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -133,6 +139,7 @@ impl Batch {
         Ok(Self {
             description: bf.description,
             operations: bf.operations,
+            transaction_ids: std::cell::RefCell::new(Vec::new()),
         })
     }
 
@@ -214,6 +221,9 @@ impl Batch {
     /// Apply the batch atomically: create backups, write changes, log transactions.
     /// If any write fails, roll back already written files using their backups.
     pub fn apply(&self) -> Result<()> {
+        // Fresh receipt list per apply (Phase 10).
+        self.transaction_ids.borrow_mut().clear();
+
         // Validate first and compute final contents per file
         let diffs = self.preview()?;
 
@@ -273,7 +283,7 @@ impl Batch {
             let before_hash = Some(calculate_content_hash(&fd.before));
             let after_hash = Some(calculate_content_hash(&fd.after));
 
-            let _txn_id = transaction_log.log_transaction(
+            let txn_id = transaction_log.log_transaction(
                 crate::core::OperationType::Edit,
                 PathBuf::from(&fd.file),
                 None,
@@ -282,6 +292,7 @@ impl Batch {
                 format!("Batch apply: {}", self.description_or_ops()),
                 std::collections::HashMap::new(),
             )?;
+            self.transaction_ids.borrow_mut().push(txn_id);
 
             written.push(fd.file.clone());
         }
@@ -353,6 +364,7 @@ mod tests {
 
         let batch = Batch {
             description: Some("Simple test".into()),
+            transaction_ids: std::cell::RefCell::new(Vec::new()),
             operations: vec![
                 BatchOp::Edit {
                     file: p1.to_string_lossy().to_string(),
@@ -396,6 +408,7 @@ mod tests {
         // so simply assert that preview + apply paths are consistent.
         let batch = Batch {
             description: Some("Fail test".into()),
+            transaction_ids: std::cell::RefCell::new(Vec::new()),
             operations: vec![BatchOp::Edit {
                 file: p1.to_string_lossy().to_string(),
                 path: "0".to_string(),

@@ -88,7 +88,7 @@ src/core/
 
 ---
 
-## Phase 9: Agent Adoption & MCP Parity 🔄 IN PROGRESS — 🔥 CURRENT PRIORITY (9.1 ✅ + 9.2 ✅ 2026-10-04)
+## Phase 9: Agent Adoption & MCP Parity ✅ COMPLETE 2026-10-05 (9.1–9.6 samtliga klara)
 **Target: v0.10 | Source: GAP-REPORT-2026-10-04.md (uppdaterad in i roadmap 2026-10-04)**
 
 *Diagnos: Motor2-agenter använder GTW nästan aldrig (diagnos/sökning/edit) trots "GTW först"-policyn,
@@ -213,6 +213,51 @@ Detaljerad bevisning: `GAP-REPORT-2026-10-04.md`.*
 **Definition of done (per item):** `cargo build` + `cargo clippy -- -D warnings` rent; tester gröna inkl. nya
 (beteendetest — verifiera att datan flödar MCP-in → resultat ut); `GTW_INSTRUCTIONS.md` + `GTW_MCP_ISSUE_LOG.md` uppdaterade.
 Motor2-sidans §35-utrullning sköts separat — hör inte hit.
+
+---
+
+## Phase 10: Agent Confidence & Motivation (tryghet + maning) 🔥 PRIORITERAD 2026-10-05
+**Syfte:** LLM-agenter (framförallt OpenCode + Motor2) ska *känna sig trygga*
+och *våga* använda GTW. Trygghet = kunna verifiera, förutsäga och återställa
+i vartegrepp; maning = veta vad verktyget kan utan att ha läst vår SKILL.
+Alla poster är **publika fixar** (syns i release notes).
+
+### 10.1 — Säkerhetsluckor (verifiering + förutsägbarhet) ✅ KLAR 2026-10-05
+- [x] **`validate <file>`** — AGENTS.md lär ut kommandot på TRE ställen
+  (workflow, fel-tips, testexempel) men det **finns inte** → agenter som
+  följer våra egna instruktioner får "unrecognized subcommand". Implementera
+  (strict parse → OK/rapport + exit-kod) + som MCP-läsverktyg
+  (`validate {file_path}` → E_STRICT_PARSE vid fel, guidad)
+- [x] **MCP `diff`** — oberoende verifiering efter skrivning (CLI `gnaw-diff`
+  finns, MCP saknas): `diff {old_file, new_file}` — "trust but verify" utan
+  att lita på GTW:s egen svarstext
+- [x] **`undo {preview: true}`** — visa vad som *skulle* återställas
+  (transaktioner/filer) innan man återställer — samma preview-filosofi som
+  för skrivningar, åt andra hållet; förutsätter att agenter vågar trycka
+- [x] **Skrivkvitton** — `transaction_id`/`backup_id` i alla skrivsvar
+  (edit_node, insert, move, batch, semantic_insert) så agenten kan
+  korrelera med `history` och peka på exakt transaktion
+- [x] **Idempotens vid retry** — `edit_node` när målets innehåll redan ==
+  begärt → succé med `already_applied: true` i stället för
+  `E_EDIT_REJECTED` (Motor2:s historiska dödsfall: timeout → retry →
+  skrämmande avslag trots att målet redan nåtts)
+
+### 10.2 — Maning (veta vad GTW kan) ✅ KLAR 2026-10-05
+- [x] **Kallstart-latens i beskrivningarna** — `sense`/`doctor` beskrivningar
+  säger "första anrop efter serverstart kan ta 20–30 s (modelllastning) —
+  höja värdens timeout" → färre falska "Not connected"-utgångar som tär på
+  tilliten
+- [x] **`guide {situation?}` MCP-verktyg** — SKILL:s situations-tabell som
+  maskinläsbar coaching för värdar som inte läser vår SKILL.md (Motor2):
+  situation → verktyg → exempelanrop. Driftsäkrat: test att alla citerade
+  verktygsnamn finns i registret
+- [x] **BREAKING-disciplin för lib-konsumenter** — v0.16 lade till fält i
+  `SenseResponse`-varianten (brytande för exhaustiva matchare) utan
+  utropstecken i CHANGELOG. Lägg `BREAKING`-sektion + semver-policy för
+  lib-ytan i AGENTS release-checklista (integratorer som Motor2 path-dep
+  litar på repo som ropar ut brytningar)
+
+**Definition of done (per item):** `cargo build` + `cargo clippy -- -D warnings` + `cargo check --no-default-features --all-targets` rent; tester gröna inkl. nya beteendetester (MCP-in → resultat ut); `GTW_INSTRUCTIONS.md`/`SKILL.md` uppdaterade där verktygsytan ändras; release notes nämjer posten.
 
 ---
 

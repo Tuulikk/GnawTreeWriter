@@ -250,7 +250,10 @@ mod tests {
         let w = warning.unwrap();
         assert!(w.line >= 1 && w.column >= 1);
         // The healthy function is present in the partial tree.
-        assert!(format!("{:?}", tree).contains("good") || tree.children.iter().any(|c| true));
+        assert!(
+            format!("{:?}", tree).contains("good"),
+            "partial tree must keep the healthy function"
+        );
         // Strict still refuses the same input.
         assert!(RustParser.parse(code).is_err(), "strict must stay strict");
     }

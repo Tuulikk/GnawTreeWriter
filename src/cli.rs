@@ -598,6 +598,12 @@ enum Commands {
         #[arg(long)]
         recursive: bool,
     },
+    /// Check file syntax without making changes (strict parse;
+    /// nonzero exit on syntax error — what AGENTS.md workflows verify with)
+    Validate {
+        /// File to validate
+        file: PathBuf,
+    },
     /// AST-aware diff between files (gnaw-diff)
     GnawDiff {
         #[arg(long)]
@@ -1474,6 +1480,9 @@ impl Cli {
                     target_location.as_deref(),
                     recursive,
                 )?;
+            }
+            Commands::Validate { file } => {
+                Self::handle_validate(&file)?;
             }
             Commands::GnawDiff {
                 old_file,
@@ -2947,6 +2956,29 @@ Use --no-preview to write batch file"
 
         print!("{}", gnaw_refactor::format_refactor_text(&result));
         Ok(())
+    }
+
+    /// `validate <file>` — strict parse check, nothing written. Ok prints
+    /// a node count; Err prints the position + next steps and fails the
+    /// process (nonzero exit — scripts and agents gate on it).
+    fn handle_validate(file: &std::path::Path) -> Result<()> {
+        match crate::parser::validate_file(file) {
+            Ok(nodes) => {
+                println!(
+                    "✓ {} parses cleanly ({} nodes) — safe to edit",
+                    file.display(),
+                    nodes
+                );
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("✗ {} does NOT parse: {}", file.display(), e);
+                eprintln!(
+                    "  hint: read paths still work — `analyze`/`skeleton` return a partial tree with the error position (syntax_warning); fix the file before editing."
+                );
+                Err(anyhow::anyhow!("syntax error in {}: {}", file.display(), e))
+            }
+        }
     }
 
     fn handle_gnaw_diff(

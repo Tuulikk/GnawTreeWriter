@@ -1621,3 +1621,310 @@ async fn integration_mcp_partial_parse_read_paths() -> Result<(), Box<dyn std::e
     server_handle.await?;
     Ok(())
 }
+
+/// Phase 10 surfaces in one session: guide (coaching + tool pinning),
+/// validate (syntax gate), diff (independent verification), history/stats
+/// (introspection) and undo preview (see-before-revert, zero mutation).
+#[tokio::test]
+async fn integration_mcp_phase10_surfaces() -> Result<(), Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, rx) = oneshot::channel::<()>();
+    let token = Some("secret".to_string());
+    let server_handle = tokio::spawn(async move {
+        let shutdown_fut = async move {
+            let _ = rx.await;
+        };
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
+            .await
+            .unwrap();
+    });
+    let url = format!("http://{}/", addr);
+    let client = Client::new();
+    let mut ready = false;
+    for _ in 0..40 {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                ready = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_connect() {
+                    sleep(Duration::from_millis(50)).await;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(ready, "server did not become ready in time");
+
+    let call = |name: &str, args: serde_json::Value| {
+        json!({"jsonrpc":"2.0", "method":"tools/call", "id": 9,
+               "params": {"name": name, "arguments": args}})
+    };
+    let post = |body: serde_json::Value| {
+        let url = url.clone();
+        let client = client.clone();
+        async move {
+            let resp = client
+                .post(&url)
+                .header("Authorization", "Bearer secret")
+                .json(&body)
+                .send()
+                .await
+                .expect("http");
+            let v: serde_json::Value = resp.json().await.expect("json");
+            v.get("result").expect("result").clone()
+        }
+    };
+
+    // --- guide: full catalog, every pinned tool must be registered.
+    let resp_list = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&json!({"jsonrpc":"2.0","method":"tools/list","id":1}))
+        .send()
+        .await?;
+    let vl: serde_json::Value = resp_list.json().await?;
+    let registered: Vec<String> = vl["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t["name"].as_str().map(str::to_string))
+        .collect();
+
+    let r = post(call("guide", json!({}))).await;
+    assert_ne!(r.get("isError"), Some(&json!(true)));
+    let situations = r["situations"].as_array().expect("catalog");
+    assert!(
+        situations.len() >= 20,
+        "full catalog, got {}",
+        situations.len()
+    );
+    for s in situations {
+        let tool = s["tool"].as_str().expect("tool field");
+        assert!(
+            registered.iter().any(|t| t == tool),
+            "guide pins unknown tool {:?} — not in tools/list",
+            tool
+        );
+        assert!(s["example"].as_str().unwrap_or("").contains('{'));
+    }
+
+    // guide filter (matches on when/tool/example — the doc example query).
+    let r = post(call("guide", json!({"situation": "undo a bad edit"}))).await;
+    assert_ne!(r.get("isError"), Some(&json!(true)), "filter must hit");
+    let rows = r["situations"].as_array().unwrap();
+    assert!(rows.iter().any(|s| s["tool"] == "undo"));
+
+    // guide no-match: loud, not empty.
+    let r = post(call("guide", json!({"situation": "zzz impossible"}))).await;
+    assert_eq!(r.get("isError"), Some(&json!(true)));
+
+    // --- validate: clean file green, broken file fails with the stable code.
+    let dir = tempfile::tempdir()?;
+    let clean = dir.path().join("clean.rs");
+    std::fs::write(&clean, "fn ok() -> i32 { 1 }")?;
+    let r = post(call(
+        "validate",
+        json!({"file_path": clean.to_string_lossy()}),
+    ))
+    .await;
+    assert_ne!(r.get("isError"), Some(&json!(true)));
+    assert_eq!(r["valid"], json!(true));
+    assert!(r["nodes"].as_u64().unwrap_or(0) >= 1);
+
+    let broken = dir.path().join("broken.rs");
+    std::fs::write(&broken, "fn broken( {")?;
+    let r = post(call(
+        "validate",
+        json!({"file_path": broken.to_string_lossy()}),
+    ))
+    .await;
+    assert_eq!(r.get("isError"), Some(&json!(true)));
+    assert_eq!(
+        r.get("code").and_then(|c| c.as_str()),
+        Some("E_STRICT_PARSE"),
+        "validate failure carries the stable code: {:?}",
+        r
+    );
+    let text = r["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("partial"),
+        "must point at read paths: {text:?}"
+    );
+
+    // --- diff: file mode + missing-args guidance.
+    let before = dir.path().join("before.txt");
+    let after = dir.path().join("after.txt");
+    std::fs::write(&before, "line one\n")?;
+    std::fs::write(&after, "line one\ntwo\n")?;
+    let r = post(call(
+        "diff",
+        json!({"old_file": before.to_string_lossy(), "new_file": after.to_string_lossy()}),
+    ))
+    .await;
+    assert_ne!(r.get("isError"), Some(&json!(true)));
+    assert_eq!(r["mode"], json!("files"));
+    let dtext = r["diff"].as_str().unwrap_or("");
+    assert!(!dtext.is_empty(), "diff text must not be empty");
+
+    let r = post(call("diff", json!({}))).await;
+    assert_eq!(r.get("isError"), Some(&json!(true)));
+    let text = r["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("old_file"),
+        "must teach the two modes: {text:?}"
+    );
+
+    // --- stats: real numbers from the project.
+    let r = post(call("stats", json!({}))).await;
+    assert_ne!(r.get("isError"), Some(&json!(true)));
+    assert!(
+        r["total_files"].as_u64().unwrap_or(0) >= 1,
+        "stats must count the repo: {:?}",
+        r
+    );
+
+    // --- history + undo preview: preview lists ops and mutates NOTHING.
+    let before = post(call("history", json!({"limit": 500}))).await;
+    let count_before = before["count"].as_u64().unwrap_or(0);
+    assert!(count_before >= 1, "repo log should have entries today");
+
+    let r = post(call("undo", json!({"steps": 1, "preview": true}))).await;
+    assert_ne!(
+        r.get("isError"),
+        Some(&json!(true)),
+        "repo has undoable ops: {:?}",
+        r["content"]
+    );
+    assert_eq!(r["preview"], json!(true));
+    let ops = r["operations"].as_array().expect("preview operations");
+    assert!(!ops.is_empty());
+    assert!(ops[0].get("id").is_some() && ops[0].get("file").is_some());
+
+    let after = post(call("history", json!({"limit": 500}))).await;
+    assert_eq!(
+        after["count"].as_u64().unwrap_or(0),
+        count_before,
+        "preview must not write or revert anything"
+    );
+
+    let _ = tx.send(());
+    server_handle.await?;
+    Ok(())
+}
+
+/// Phase 10 receipts + idempotency: writes carry transaction_id; a
+/// retried edit with identical content succeeds with already_applied
+/// (no bytes rewritten — the host-timeout retry case).
+#[tokio::test]
+async fn integration_mcp_write_receipts_idempotent() -> Result<(), Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, rx) = oneshot::channel::<()>();
+    let token = Some("secret".to_string());
+    let server_handle = tokio::spawn(async move {
+        let shutdown_fut = async move {
+            let _ = rx.await;
+        };
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
+            .await
+            .unwrap();
+    });
+    let url = format!("http://{}/", addr);
+    let client = Client::new();
+    let mut ready = false;
+    for _ in 0..40 {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                ready = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_connect() {
+                    sleep(Duration::from_millis(50)).await;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(ready, "server did not become ready in time");
+
+    // Isolated project: .git marker makes find_project_root stop here, so
+    // transactions never touch the real repo log.
+    let dir = tempfile::tempdir()?;
+    std::fs::create_dir(dir.path().join(".git"))?;
+    let target = dir.path().join("f.rs");
+    std::fs::write(&target, "fn a() {}\n")?;
+
+    let edit = |content: &str| {
+        json!({"jsonrpc":"2.0", "method":"tools/call", "id": 5,
+        "params": {"name": "edit_node", "arguments": {
+            "file_path": target.to_string_lossy(),
+            "node_path": "0",
+            "content": content
+        }}})
+    };
+
+    // First write: receipt present.
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&edit("fn a() { /* v2 */ }\n"))
+        .send()
+        .await?;
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").unwrap();
+    assert_ne!(r.get("isError"), Some(&json!(true)), "{:?}", r["content"]);
+    let txn = r["transaction_id"].as_str().unwrap_or("");
+    assert!(
+        !txn.is_empty(),
+        "write must carry a transaction_id receipt: {r:?}"
+    );
+    assert!(r["diff"].as_str().unwrap_or("").contains("v2"));
+
+    // Retry with identical content: idempotent success, no rewrite.
+    let bytes_before = std::fs::read_to_string(&target)?;
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&edit("fn a() { /* v2 */ }\n"))
+        .send()
+        .await?;
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").unwrap();
+    assert_ne!(
+        r.get("isError"),
+        Some(&json!(true)),
+        "retry must not fail: {r:?}"
+    );
+    assert_eq!(
+        r["already_applied"],
+        json!(true),
+        "expected idempotent hit: {r:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&target)?,
+        bytes_before,
+        "no bytes rewritten"
+    );
+
+    let _ = tx.send(());
+    server_handle.await?;
+    Ok(())
+}

@@ -40,6 +40,10 @@ You are an expert in using **GnawTreeWriter** for surgical, AST-based code editi
 | Plain-language explanation | `explain` / `investigate` (mamba build) | `explain {"file_path": "src/core/batch.rs", "node": "1.2"}` |
 | Find text inside one file | `search_nodes` → `search <file> "<pattern>"` | `search_nodes {"file_path": "cli.rs", "pattern": "handle_lint"}` |
 | Snappy text replace (not AST) | (CLI) `quick-replace` — FAILS LOUD on no-match | `gnawtreewriter quick-replace f.rs 'old' 'new' --preview` |
+| Which tool fits this situation? (no skill loaded) | `guide` | `guide {"situation": "undo a bad edit"}` → {when, tool, example} |
+| Is this file safe to edit? (syntax gate) | `validate` → `gnawtreewriter validate <file>` | `validate {"file_path": "src/main.rs"}` → {valid, nodes} eller E_STRICT_PARSE |
+| Verify exactly what changed after a write | `diff` (samma kärna som `gnaw-diff`) | `diff {"old_file": "/tmp/before.rs", "new_file": "src/lib.rs"}` |
+| Show what undo WOULD revert first | `undo {preview: true}` | `undo {"steps": 1, "preview": true}` → operations-lista, noll ändringar |
 
 **Diagnostic chain**: `analyze`/`get_skeleton` → `sense`/`search_nodes` → `read_node` → `preview_edit` → `edit_node`/`semantic_edit` → verify (`cargo check`/tests) → `undo` if wrong.
 
