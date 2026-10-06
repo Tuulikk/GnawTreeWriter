@@ -11,7 +11,7 @@ GnawSense ska inte kräva exakta sökvägar. Den ska arbeta med **Riktning** och
 ### Flödet: Satelit -> Zoom -> Precision
 
 1.  **Satelit-läget (Direction):**
-    När en agent ger en vag instruktion ("Fixa git-grejen"), söker GnawSense i projektets semantiska index (ModernBERT). Den svarar med en hög-nivå-karta över *var* i projektet detta koncept bor.
+    När en agent ger en vag instruktion ("Fixa git-grejen"), söker GnawSense i projektets semantiska index (BGE base v1.5, retrieval-tränad — sedan 0.18.0). Den svarar med en hög-nivå-karta över *var* i projektet detta koncept bor.
     *   *Exempel:* "Jag ser tre relevanta klossar: `core/git`, `cli/args` och `docs/manual`. Vilket spår vill du utforska?"
 
 2.  **Zoom-läget (Context):**

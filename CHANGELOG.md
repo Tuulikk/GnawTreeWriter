@@ -1,13 +1,16 @@
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-06
+
 ### Changed — Semantic search: real retrieval embedder (BGE)
 - **Embedding backend switched** from the raw ModernBERT masked-LM
   checkpoint (`answerdotai/ModernBERT-base`, mean pooling) to
   **BAAI/bge-base-en-v1.5** (CLS pooling + L2 normalization), because
   the new recall@k harness (`ai recall-eval`, evals/sense_recall.json)
   measured **recall@5 = 0%** on the MLM features — anisotropic space,
-  all cosines ~0.9. The legacy path is kept as
-  `EmbeddingBackbone::ModernBertMlm` so old model dirs still load.
+  all cosines ~0.9. After the switch (BGE, GPU-indexed, SQLite-stored):
+  **recall@1 12.5%, recall@5 54.2%, MRR 0.30**. The legacy path is kept
+  as `EmbeddingBackbone::ModernBertMlm` so old model dirs still load.
 - **Query/passage split**: `get_query_embedding` prepends the BGE v1.5
   retrieval prefix ("Represent this sentence for searching relevant
   passages:") on the query side only; `get_embedding`/`get_embeddings`
@@ -17,13 +20,22 @@
   on ModernBERT); long node bodies are silently truncated at embed time.
 - `AiModel::Bge` added; models cached under
   `.gnawtreewriter_ai/models/bge-base/`; `ai setup` downloads it.
-  Re-index after upgrading: `rm .gnawtreewriter_ai/index/*.json &&
-  gnawtreewriter ai index` — vectors from the MLM model are useless.
+  **Re-index after upgrading** — vectors from the MLM model are useless:
+  delete the old index and run `gnawtreewriter ai index` again.
 - Known limitation: BGE documents are embedded one forward per node on
   CPU (no batching yet) — indexing is noticeably slower than the old
-  batched MLM path, but produces embeddings that actually work.
+  batched MLM path, but produces embeddings that actually work. GPU
+  builds (`scripts/build-gpu.sh` + `indexing.device: auto`) index a
+  full src/ tree in ~20 s.
 
 ### BREAKING (lib)
+- `AiModel` (`src/llm/ai_manager.rs`) gained a variant `Bge` —
+  exhaustive matches break; `AiModel::ModernBert` remains as the legacy
+  MLM path. `ModernBertModel`'s field `model: ModernBert` was replaced
+  by `backbone: EmbeddingBackbone` (new pub enum:
+  `ModernBertMlm(ModernBert)` | `Bge(BertModel)`); embed via
+  `get_embedding` (documents) / `get_query_embedding` (queries), never
+  on the inner model.
 - `IntegrityReport` (`src/core/guardian.rs`) gained a field
   `deltas: Vec<EditDelta>` (`#[serde(skip)]`). Struct-literal
   construction of `IntegrityReport` outside the crate breaks — build
@@ -33,6 +45,31 @@
   RefCell<Option<Value>>` and `impacts: RefCell<Vec<Value>>`
   (`#[serde(skip)]`). Struct-literal construction breaks; prefer
   `Batch::new`/`from_json`/`with_file`. (Fas 4.1 batch parity.)
+
+### Added — recall@k harness
+- `ai recall-eval <eval-set> [--k N] [--json]`: runs an eval set
+  (JSON array of `{query, expect_file, expect_preview?}`) against the
+  current index and reports recall@1 / recall@k / MRR plus embed/search
+  timings. `evals/sense_recall.json` ships 24 cases as the project
+  baseline. Measurement only — the basis for model and storage
+  decisions (found the 0% recall of the MLM checkpoint).
+  Requires the `modernbert` feature.
+
+### Added — SQLite-backed index storage
+- The vector index is now a single `embeddings.db` (SQLite, WAL,
+  bundled rusqlite) instead of one pretty-JSON shard per file: ~8×
+  smaller on disk (93 MB → 11 MB on this repo) and fast to load
+  (raw BLOB reads replace JSON parsing of every shard).
+- **Orphan fix**: `save_index` now deletes a file's previous rows in
+  the same transaction before inserting — re-indexed files can no
+  longer leave stale entries behind (the JSON shards had no delete at
+  all, so renamed/moved node sets accumulated forever).
+- **Automatic one-time migration**: the first `load_project_index`
+  imports legacy `<file_hash>.json` shards + `model_info.json` into
+  the DB and renames the sources `*.migrated` (idempotent — never
+  re-imports). `model_info` moved to the DB with a legacy-JSON
+  fallback read. Public API unchanged; verified A/B: recall identical
+  pre/post migration.
 
 ### Added — Guardian v2 (docs/GUARDIAN_V2_PLAN.md, Fas 0–4 + 5.1–5.3)
 - **Structural deltas (Fas 1)**: `EditDelta` diff of old/new node trees

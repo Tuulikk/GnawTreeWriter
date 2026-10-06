@@ -7,6 +7,7 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::{self, VarBuilder};
 #[cfg(feature = "modernbert")]
 use candle_transformers::models::bert::{BertModel, Config as BertEmbeddingConfig};
+#[cfg(feature = "modernbert")]
 use candle_transformers::models::modernbert::{Config, ModernBert};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -158,6 +159,7 @@ pub struct ModernBertModel {
 
 /// See AiModel::Bge docs. Kept as an enum so old indexes can still be
 /// inspected with the legacy MLM path while retrieval uses BGE.
+#[cfg(feature = "modernbert")]
 pub enum EmbeddingBackbone {
     ModernBertMlm(ModernBert),
     Bge(BertModel),

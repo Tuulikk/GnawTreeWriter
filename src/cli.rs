@@ -666,6 +666,7 @@ enum AiSubcommands {
     /// Measure semantic-search quality: run an eval set of queries
     /// against the current index and report recall@1 / recall@k / MRR.
     /// Measurement only — the baseline for model and storage decisions.
+    #[cfg(feature = "modernbert")]
     RecallEval {
         /// Path to the eval set (JSON array of {query, expect_file, expect_preview?})
         eval_path: PathBuf,
@@ -1405,6 +1406,7 @@ impl Cli {
                 AiSubcommands::Report { limit, output } => {
                     Self::handle_ai_report(limit, output).await?;
                 }
+                #[cfg(feature = "modernbert")]
                 AiSubcommands::RecallEval { eval_path, k, json } => {
                     crate::llm::recall_eval::run_recall_eval(&eval_path, k, json)?;
                 }

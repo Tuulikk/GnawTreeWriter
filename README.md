@@ -67,7 +67,7 @@ The **Duplex Loop** is now more than just a gatekeeper; it's a teacher. If an ed
 ---
 
 ## 🧠 GnawSense: AI-Powered Navigation & Action
-Powered by **ModernBERT**, GnawSense transforms GnawTreeWriter from a precision editor into a **semantically-aware cognitive infrastructure**.
+Powered by a **retrieval-tuned embedding model (BGE base v1.5)**, GnawSense transforms GnawTreeWriter from a precision editor into a **semantically-aware cognitive infrastructure**. Search quality is tracked by a recall@k harness (`ai recall-eval`): recall@5 went from 0% (raw MLM features) to ~54% after the model switch. The index lives in a single SQLite file (`.gnawtreewriter_ai/index/embeddings.db`) — atomic per-file upserts, automatic migration from the old JSON shards.
 
 - **Semantic Search (`sense`)**: Search for logic by description (e.g., "how is backup handled?"). Includes *Satelite View* for project-wide discovery and *Zoom View* for file-specific focus.
 - **Semantic Insertion (`sense-insert`)**: Insert code near a landmark without knowing its path. Just describe the anchor point (e.g., "after the login function") and let GnawSense find the correct AST position.
