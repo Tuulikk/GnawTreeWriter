@@ -1627,6 +1627,15 @@ async fn integration_mcp_partial_parse_read_paths() -> Result<(), Box<dyn std::e
 /// (introspection) and undo preview (see-before-revert, zero mutation).
 #[tokio::test]
 async fn integration_mcp_phase10_surfaces() -> Result<(), Box<dyn std::error::Error>> {
+    // Hermetic: the server is rooted in a throwaway project (git marker +
+    // fixture files) so history/undo preview NEVER depend on the checked-out
+    // repo's transaction log — CI runs on a fresh clone where the log is
+    // gitignored and contains nothing undoable (the exact CI failure this
+    // test caused before being made hermetic).
+    let dir = tempfile::tempdir()?;
+    std::fs::create_dir(dir.path().join(".git"))?;
+    let root_buf = dir.path().to_path_buf();
+
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
     let (tx, rx) = oneshot::channel::<()>();
@@ -1635,9 +1644,14 @@ async fn integration_mcp_phase10_surfaces() -> Result<(), Box<dyn std::error::Er
         let shutdown_fut = async move {
             let _ = rx.await;
         };
-        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
-            .await
-            .unwrap();
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown_root(
+            listener,
+            token,
+            root_buf,
+            shutdown_fut,
+        )
+        .await
+        .unwrap();
     });
     let url = format!("http://{}/", addr);
     let client = Client::new();
@@ -1729,7 +1743,6 @@ async fn integration_mcp_phase10_surfaces() -> Result<(), Box<dyn std::error::Er
     assert_eq!(r.get("isError"), Some(&json!(true)));
 
     // --- validate: clean file green, broken file fails with the stable code.
-    let dir = tempfile::tempdir()?;
     let clean = dir.path().join("clean.rs");
     std::fs::write(&clean, "fn ok() -> i32 { 1 }")?;
     let r = post(call(
@@ -1793,27 +1806,65 @@ async fn integration_mcp_phase10_surfaces() -> Result<(), Box<dyn std::error::Er
         r
     );
 
-    // --- history + undo preview: preview lists ops and mutates NOTHING.
-    let before = post(call("history", json!({"limit": 500}))).await;
-    let count_before = before["count"].as_u64().unwrap_or(0);
-    assert!(count_before >= 1, "repo log should have entries today");
+    // --- history + undo preview (hermetic): empty project first, then a
+    // real edit creates ONE undoable op; preview lists it and mutates
+    // nothing (history count proves it).
+    let r = post(call("history", json!({"limit": 500}))).await;
+    assert_eq!(
+        r["count"],
+        json!(1),
+        "fresh project logs exactly the SessionStart: {r:?}"
+    );
+    assert_eq!(
+        r["transactions"][0]["operation"],
+        json!("SessionStart"),
+        "load() opens the session on first use"
+    );
+
+    let r = post(call("undo", json!({"steps": 1, "preview": true}))).await;
+    assert_eq!(
+        r.get("isError"),
+        Some(&json!(true)),
+        "preview on empty log must say Nothing to undo: {:?}",
+        r["content"]
+    );
+
+    // One reversible op in THIS project.
+    let target = dir.path().join("f.rs");
+    std::fs::write(&target, "fn a() {}\n")?;
+    let r = post(call(
+        "edit_node",
+        json!({"file_path": target.to_string_lossy(), "node_path": "0", "content": "fn a() { /*x*/ }\n"}),
+    ))
+    .await;
+    assert_ne!(
+        r.get("isError"),
+        Some(&json!(true)),
+        "edit must work: {r:?}"
+    );
+    assert!(
+        !r["transaction_id"].as_str().unwrap_or("").is_empty(),
+        "write receipt in passing flow too"
+    );
+    let count_after = post(call("history", json!({"limit": 500}))).await;
+    assert_eq!(count_after["count"], json!(2), "SessionStart + the edit");
 
     let r = post(call("undo", json!({"steps": 1, "preview": true}))).await;
     assert_ne!(
         r.get("isError"),
         Some(&json!(true)),
-        "repo has undoable ops: {:?}",
+        "preview must list the op: {:?}",
         r["content"]
     );
     assert_eq!(r["preview"], json!(true));
     let ops = r["operations"].as_array().expect("preview operations");
-    assert!(!ops.is_empty());
+    assert_eq!(ops.len(), 1, "exactly our op");
     assert!(ops[0].get("id").is_some() && ops[0].get("file").is_some());
 
     let after = post(call("history", json!({"limit": 500}))).await;
     assert_eq!(
         after["count"].as_u64().unwrap_or(0),
-        count_before,
+        2,
         "preview must not write or revert anything"
     );
 
