@@ -10,7 +10,8 @@
 //! (case-insensitive).
 
 use crate::core::find_project_root;
-use crate::llm::semantic_index::{rerank_satellite, NodeEmbedding};
+use crate::llm::relational_index::RelationalIndexer;
+use crate::llm::semantic_index::{rerank_satellite_with_graphs, NodeEmbedding};
 use crate::llm::{indexing_device, AiManager, AiModel, SemanticIndexManager};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -92,6 +93,11 @@ pub fn run_recall_eval(eval_path: &Path, k: usize, json_out: bool) -> Result<()>
     let mut per_case = Vec::new();
     let mut sum_embed_ms = 0.0f64;
     let mut sum_search_ms = 0.0f64;
+    // Knowledge graphs for the third rerank channel (graph proximity)
+    // — loaded once; absent graphs degrade to the two-channel floor.
+    let graphs = RelationalIndexer::new(&project_root)
+        .load_all_graphs()
+        .unwrap_or_default();
     let mut reciprocal_sum = 0.0f64;
     let mut raw_reciprocal_sum = 0.0f64;
 
@@ -108,9 +114,10 @@ pub fn run_recall_eval(eval_path: &Path, k: usize, json_out: bool) -> Result<()>
         sum_search_ms += search_ms;
 
         // The wide window + rerank the sense pipeline actually serves
-        // (same shape as gnaw_sense: 2000 candidates, threshold 0.1).
+        // (same shape as gnaw_sense: 2000 candidates, threshold 0.1,
+        // graph-proximity channel from the knowledge graphs).
         let wide = index.search_with_threshold(&query_vector, 2000, 0.1);
-        let reranked = rerank_satellite(&case.query, wide, k);
+        let reranked = rerank_satellite_with_graphs(&case.query, wide, k, Some(&graphs));
 
         let is_hit = |e: &NodeEmbedding| {
             e.file_path.ends_with(&case.expect_file)

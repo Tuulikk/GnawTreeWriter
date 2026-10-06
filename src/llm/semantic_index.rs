@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::llm::relational_index::FileGraph;
+
 /// Vector BLOB codec: little-endian f32 sequence (768 dims = 3 KB/row).
 fn vector_to_blob(vector: &[f32]) -> Vec<u8> {
     vector.iter().flat_map(|f| f.to_le_bytes()).collect()
@@ -281,15 +283,34 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
-/// Bounded rerank adjustment for satellite hits (see rerank_satellite).
-/// Declaration heads demoted, implementation heads nudged, query-term
-/// overlap rewarded — pure cosine alone ranks `pub mod x;` above `impl`s
-/// for name-heavy queries: short decls are lexically tight (their names
-/// ARE the query terms) while real implementations are long and diffuse.
-/// Declarations are pointers; implementations are answers.
-const DECL_PENALTY: f32 = 0.35;
-const IMPL_BONUS: f32 = 0.06;
-const LEX_WEIGHT: f32 = 0.18;
+/// Multiplicative kind priors for satellite rerank (see
+/// rerank_satellite): declaration heads demoted, implementation heads
+/// nudged — pure cosine alone ranks `pub mod x;` above `impl`s for
+/// name-heavy queries: short decls are lexically tight (their names
+/// ARE the query terms) while real implementations are long and
+/// diffuse. Declarations are pointers; implementations are answers.
+/// Applied MULTIPLICATIVELY on the fused RRF score so the adjustment
+/// scales with the entry's own standing — absolute additions let a
+/// lexically perfect tail entry leapfrog the whole ranking (measured:
+/// pipeline@100 72% vs raw@100 90% before this change).
+const DECL_PENALTY: f32 = 0.15;
+const IMPL_BONUS: f32 = 0.03;
+/// Reciprocal-rank-fusion constants: RRF_K is the standard smoothing
+/// constant; the lexical channel is weighted at half the cosine channel.
+const RRF_K: f32 = 60.0;
+const LEX_CHANNEL_WEIGHT: f32 = 0.5;
+/// Third channel: call-graph proximity. Weight per rrf unit — a rank-0
+/// graph neighbor adds GRAPH_CHANNEL_WEIGHT/(RRF_K) ≈ 0.0033, enough to
+/// climb ~5 cosine positions. Eval-calibrated: 0.4 hurt head recall
+/// (hub adjacency promoted generic files), 3.0 destroyed the ranking
+/// outright; 0.2 keeps the head intact and adds +2 recall@100.
+const GRAPH_CHANNEL_WEIGHT: f32 = 0.2;
+/// How many top files (two-channel order) seed the graph expansion.
+const GRAPH_SEED_K: usize = 8;
+/// Files with more resolved edges than this are hubs (core/mod.rs,
+/// cli.rs): adjacency to them is topical noise, so they are excluded
+/// both as seeds and as promoted neighbors.
+const GRAPH_HUB_DEGREE: usize = 100;
 
 #[derive(PartialEq, Clone, Copy, Debug)]
 enum PreviewKind {
@@ -361,8 +382,10 @@ fn classify_preview(preview: &str) -> PreviewKind {
 
 /// A satellite hit after reranking: the entry plus BOTH scores — the raw
 /// cosine (what the model actually measured) and the adjusted ranking
-/// value (cosine + bounded priors). Consumers must never mistake the
-/// adjusted value for a cosine; it can exceed 1.0.
+/// value (RRF fusion of cosine and lexical rank, scaled by the kind
+/// prior). Consumers must never mistake the adjusted value for a
+/// cosine: it lives on the reciprocal-rank scale (roughly 0.001–0.04
+/// for realistic windows) and only orders hits WITHIN one search.
 pub struct RerankedHit<'a> {
     pub entry: &'a NodeEmbedding,
     pub cosine: f32,
@@ -419,13 +442,53 @@ pub fn fuse_by_max<'a>(
     best.into_values().collect()
 }
 
-/// Rerank satellite hits: adjusted = cosine + lexical bonus - decl penalty.
+/// Rerank satellite hits by RECIPROCAL-RANK FUSION of channels — cosine
+/// and lexical overlap (optionally graph proximity, see the
+/// graph-channel variant) — instead of absolute score additions:
+///
+///   fused = rrf(cos_rank) + LEX_CHANNEL_WEIGHT * rrf(lex_rank)
+///   adjusted = fused * (1 + kind_prior)
+///
+/// with rrf(r) = 1/(RRF_K + r). Every channel contributes a BOUNDED
+/// term, so a lexically perfect tail entry can climb a few places but
+/// can no longer leapfrog the whole ranking. Equal cosines tie-break
+/// by lexical overlap (substring noise must not claim the better
+/// rank); remaining ties keep the raw order. The kind prior is
+/// multiplicative — it scales with the entry's own standing. In
+/// inventory mode ("which modules/files exist …") declarations ARE
+/// the answer and get the boost instead of the penalty.
+///
 /// Fetch a WIDER raw window than you serve (e.g. search(.., 2000) then
-/// rerank(.., top=10)) so demoted decls release slots to implementations.
+/// rerank(.., top=10)) so lexical channel candidates exist at all.
 pub fn rerank_satellite<'a>(
     query: &str,
     hits: Vec<(&'a NodeEmbedding, f32)>,
     top: usize,
+) -> Vec<RerankedHit<'a>> {
+    rerank_satellite_with_graphs(query, hits, top, None)
+}
+
+/// Canonical path key: graph JSONs store ABSOLUTE paths while the
+/// semantic index stores project-relative ones — compare both from the
+/// first "src/" segment so the two spellings collide correctly.
+fn graph_path_key(p: &str) -> &str {
+    match p.find("src/") {
+        Some(i) => &p[i..],
+        None => p,
+    }
+}
+
+/// As [rerank_satellite], plus an OPTIONAL third channel: call-graph
+/// proximity. Seeds = files of the best two-channel entries; a seed's
+/// callers and callees get a bounded GRAPH_CHANNEL_WEIGHT-weighted rrf
+/// term, best-seed-first. Structs co-designed with a strong hit rise
+/// even when their own text never mentions the query — exactly the
+/// model's blind spot. Pass None for the plain two-channel ranking.
+pub fn rerank_satellite_with_graphs<'a>(
+    query: &str,
+    hits: Vec<(&'a NodeEmbedding, f32)>,
+    top: usize,
+    graphs: Option<&[FileGraph]>,
 ) -> Vec<RerankedHit<'a>> {
     let q_tokens: Vec<String> = query
         .to_lowercase()
@@ -434,8 +497,6 @@ pub fn rerank_satellite<'a>(
         .map(|t| lex_norm(t).to_string())
         .collect();
 
-    // Inventory-intent queries ("which modules exist …") ANSWER with
-    // declarations — soft-penalize decls and stop boosting impls there.
     let q_lower = query.to_lowercase();
     let inventory_intent = [
         "module", "modules", "import", "imports", "file", "files", "symbol", "symbols", "export",
@@ -443,26 +504,17 @@ pub fn rerank_satellite<'a>(
     ]
     .iter()
     .any(|w| q_lower.contains(w));
-    let impl_bonus = if inventory_intent { 0.0 } else { IMPL_BONUS };
-    // In inventory mode declarations ARE the answer: nudge them like items.
-    let decl_bonus = if inventory_intent { IMPL_BONUS } else { 0.0 };
 
-    let mut scored: Vec<(&NodeEmbedding, f32, f32)> = hits
+    // Lexical overlap per entry (word-boundary rules unchanged).
+    let mut entries: Vec<(&NodeEmbedding, f32, f32, PreviewKind)> = hits
         .into_iter()
         .map(|(entry, cosine)| {
-            // Lexical reward scans preview AND identifiers — a query for
-            // "undo" should find undo_redo.rs even when the preview head
-            // is a generic item signature.
             let haystack = format!(
                 "{} {} {}",
                 entry.content_preview.to_lowercase(),
                 entry.file_path.to_lowercase(),
                 entry.node_path.to_lowercase()
             );
-            // Word-boundary matching (normalized): substring `contains`
-            // let "log" hit "catalog"/"dialog". Tokens >= 4 chars may
-            // still match inside a word so CamelCase identifiers
-            // ("UndoRedoManager" for "undo") keep working.
             let words: std::collections::HashSet<String> = haystack
                 .split(|c: char| !c.is_alphanumeric())
                 .filter(|w| !w.is_empty())
@@ -481,30 +533,158 @@ pub fn rerank_satellite<'a>(
                 matched as f32 / q_tokens.len() as f32
             };
             let kind = classify_preview(&entry.content_preview);
-            let adjust = match kind {
-                // Normal mode: scale the penalty by (1 - lex) — a decl whose
-                // NAME answers the query keeps some standing; irrelevant
-                // decls die. Inventory mode: decls get the item bonus.
+            (entry, cosine, lex, kind)
+        })
+        .collect();
+
+    // Primary channel: cosine rank. Equal cosines break by lexical
+    // overlap so noise cannot claim the better rank; rest is stable.
+    entries.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal))
+    });
+
+    // Secondary channel: lexical rank — all entries with ANY overlap
+    // compete, but the channel contribution is CONTINUOUS
+    // (LEX_CHANNEL_WEIGHT * lex * rrf(rank)): a 1/3 overlap gets a
+    // third of a full match's boost, so weak noise cannot buy the
+    // climb a perfect identifier match earns (binary membership made
+    // the channel outrank cosine positions 100+ deep — the tail leak).
+    let mut lex_order: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].2 > 0.0).collect();
+    lex_order.sort_by(|&a, &b| {
+        entries[b]
+            .2
+            .partial_cmp(&entries[a].2)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut lex_rank = vec![usize::MAX; entries.len()];
+    for (place, &i) in lex_order.iter().enumerate() {
+        lex_rank[i] = place;
+    }
+
+    let rrf = |rank: usize| 1.0 / (RRF_K + rank as f32);
+
+    let mut scored: Vec<(&NodeEmbedding, f32, f32)> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, (entry, cosine, _lex, kind))| {
+            let mut fused = rrf(i)
+                + if lex_rank[i] == usize::MAX {
+                    0.0
+                } else {
+                    LEX_CHANNEL_WEIGHT * entries[i].2 * rrf(lex_rank[i])
+                };
+            let prior = match kind {
                 PreviewKind::Decl => {
                     if inventory_intent {
-                        decl_bonus
+                        2.0 * IMPL_BONUS
                     } else {
-                        -DECL_PENALTY * (1.0 - lex)
+                        -DECL_PENALTY
                     }
                 }
-                PreviewKind::ImplLike => impl_bonus,
+                PreviewKind::ImplLike => {
+                    if inventory_intent {
+                        0.0
+                    } else {
+                        IMPL_BONUS
+                    }
+                }
                 PreviewKind::Other => 0.0,
-            } + LEX_WEIGHT * lex;
-            (entry, cosine, cosine + adjust)
+            };
+            fused *= 1.0 + prior;
+            (*entry, *cosine, fused)
         })
         .collect();
 
     scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Per-file diversification: greedy over the sorted list.
+    // Third channel (optional): graph proximity over the two-channel
+    // order. Top GRAPH_SEED_K distinct files seed a BFS over the call
+    // graph — out-edges (seed calls target) and in-edges (target calls
+    // seed) — and each neighbor gets rrf(its best seed rank) weighted
+    // by GRAPH_CHANNEL_WEIGHT, then the fused order re-sorts. The
+    // channel is deliberately silent when graphs are absent or carry
+    // no edges for the seeds: two-channel behavior is the floor.
+    if let Some(graphs) = graphs {
+        let seed_files: Vec<String> = {
+            let mut seen = std::collections::HashSet::new();
+            scored
+                .iter()
+                .filter(|(e, _, _)| seen.insert(e.file_path.clone()))
+                .take(GRAPH_SEED_K)
+                .map(|(e, _, _)| e.file_path.clone())
+                .collect()
+        };
+        if !seed_files.is_empty() {
+            let seeds: std::collections::HashSet<&str> =
+                seed_files.iter().map(|s| s.as_str()).collect();
+            // Hub exclusion: files wired to everything (core/mod.rs,
+            // cli.rs) make adjacency meaningless — a call to them says
+            // nothing about topical kinship. Skip them as seeds AND as
+            // neighbors; degree = resolved in+out edges over the graph.
+            let mut degree: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
+            for graph in graphs {
+                let fk = graph_path_key(&graph.file_path).to_string();
+                *degree.entry(fk).or_insert(0) += graph.relations.len();
+                for rel in &graph.relations {
+                    if let Some(t) = &rel.to_file {
+                        *degree.entry(graph_path_key(t).to_string()).or_insert(0) += 1;
+                    }
+                }
+            }
+            // neighbor file -> best (lowest) seed order adjacent to it
+            let mut neighbor_rank: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
+            let bump =
+                |file: &str, order: usize, map: &mut std::collections::HashMap<String, usize>| {
+                    map.entry(file.to_string())
+                        .and_modify(|r| *r = (*r).min(order))
+                        .or_insert(order);
+                };
+            for (order, seed) in seed_files.iter().enumerate() {
+                for graph in graphs {
+                    let gk = graph_path_key(&graph.file_path);
+                    if degree.get(gk).copied().unwrap_or(0) > GRAPH_HUB_DEGREE {
+                        continue;
+                    }
+                    if gk == seed.as_str() {
+                        for rel in &graph.relations {
+                            if let Some(target) = &rel.to_file {
+                                let key = graph_path_key(target).to_string();
+                                if !seeds.contains(key.as_str())
+                                    && degree.get(key.as_str()).copied().unwrap_or(0)
+                                        <= GRAPH_HUB_DEGREE
+                                {
+                                    bump(&key, order, &mut neighbor_rank);
+                                }
+                            }
+                        }
+                    } else if !seeds.contains(gk)
+                        && graph.relations.iter().any(|rel| {
+                            rel.to_file.as_deref().map(graph_path_key) == Some(seed.as_str())
+                        })
+                    {
+                        bump(gk, order, &mut neighbor_rank);
+                    }
+                }
+            }
+            if !neighbor_rank.is_empty() {
+                for (entry, _, fused) in scored.iter_mut() {
+                    if let Some(&g_rank) = neighbor_rank.get(&entry.file_path) {
+                        *fused += GRAPH_CHANNEL_WEIGHT * rrf(g_rank);
+                    }
+                }
+                scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+            }
+        }
+    }
+
+    // Per-file diversification: greedy over the fused ranking.
     let mut per_file: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     let mut out: Vec<RerankedHit<'a>> = Vec::with_capacity(top);
-    for (entry, cosine, adjusted) in scored {
+    for (entry, cosine, fused) in scored {
         let count = per_file.entry(entry.file_path.as_str()).or_insert(0);
         if *count >= MAX_PER_FILE {
             continue;
@@ -513,7 +693,7 @@ pub fn rerank_satellite<'a>(
         out.push(RerankedHit {
             entry,
             cosine,
-            adjusted,
+            adjusted: fused,
         });
         if out.len() >= top {
             break;
@@ -668,6 +848,74 @@ mod tests {
     }
 
     #[test]
+    fn graph_channel_promotes_call_neighbor() {
+        use crate::llm::relational_index::{Relation, RelationType};
+        // 11 files: f00..f08 (cosine ranks 0-8), nb (9), tgt (10).
+        // tgt calls f00. GRAPH_SEED_K = 8: seeds = f00..f07, so tgt is
+        // NOT a seed and earns the graph term — overtaking nb and f08
+        // despite the lowest cosine.
+        let mk = |file: &str, path: &str| NodeEmbedding {
+            file_path: file.to_string(),
+            node_path: path.to_string(),
+            content_preview: "fn generic_body() {}".to_string(),
+            vector: vec![0.0],
+        };
+        let entries: Vec<NodeEmbedding> = (0..9)
+            .map(|i| mk(&format!("f0{i}.rs"), &format!("{i}")))
+            .chain(std::iter::once(mk("nb.rs", "9")))
+            .chain(std::iter::once(mk("tgt.rs", "10")))
+            .collect();
+        let hits: Vec<(&NodeEmbedding, f32)> = entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e, 0.60 - 0.001 * i as f32))
+            .collect();
+        let graphs = vec![FileGraph {
+            file_path: "tgt.rs".to_string(),
+            relations: std::iter::once(Relation {
+                from_file: "tgt.rs".to_string(),
+                from_path: "0".to_string(),
+                to_file: Some("f00.rs".to_string()),
+                to_name: "g".to_string(),
+                relation_type: RelationType::Call,
+            })
+            .collect(),
+            definitions: Default::default(),
+            imports: Default::default(),
+        }];
+        let out = rerank_satellite_with_graphs("anything specific", hits, 11, Some(&graphs));
+        // The neighbor overtakes the ENTIRE seed block - that is the
+        // channel contract (silent co-designed code rises to the top
+        // with its anchor). Whether overtaking even the top seed is
+        // the right strength is a weight question for the eval.
+        assert_eq!(
+            out[0].entry.file_path, "tgt.rs",
+            "call neighbor of the top seed outranks every seed"
+        );
+        assert_eq!(out[1].entry.file_path, "f00.rs", "seeds keep their order");
+        assert_eq!(
+            out[10].entry.file_path, "nb.rs",
+            "unrelated files sink to the tail"
+        );
+    }
+
+    #[test]
+    fn graph_channel_none_or_empty_matches_plain_rerank() {
+        let a = entry("1", "impl UndoRedoManager {");
+        let b = entry("2", "fn other() {}");
+        let hits: Vec<(&NodeEmbedding, f32)> = vec![(&a, 0.9), (&b, 0.4)];
+        let plain = rerank_satellite("undo the thing", hits.clone(), 10);
+        let none = rerank_satellite_with_graphs("undo the thing", hits.clone(), 10, None);
+        let empty = rerank_satellite_with_graphs("undo the thing", hits, 10, Some(&[]));
+        for ((p, n), e) in plain.iter().zip(&none).zip(&empty) {
+            assert_eq!(p.entry.node_path, n.entry.node_path);
+            assert_eq!(p.entry.node_path, e.entry.node_path);
+            assert!((p.adjusted - n.adjusted).abs() < 1e-9);
+            assert!((p.adjusted - e.adjusted).abs() < 1e-9);
+        }
+    }
+
+    #[test]
     fn rerank_lexical_uses_word_boundaries() {
         // "log" must not match "catalog" (substring-before); CamelCase
         // still matches via >=4-char in-word check.
@@ -680,24 +928,35 @@ mod tests {
             "word match must win over substring noise"
         );
 
+        // RRF scale: the lexical match shows up as a fused-rank WIN over
+        // an equal-cosine entry with no overlap — not as adjusted > cosine
+        // (adjusted is a reciprocal-rank value, a different unit).
         let c1 = entry("1", "impl UndoRedoManager {");
-        let hits = vec![(&c1, 0.7)];
+        let c2 = entry("2", "fn completely_different_thing() {}");
+        let hits = vec![(&c1, 0.7), (&c2, 0.7)];
         let out = rerank_satellite("how is undo handled", hits, 10);
-        assert!(
-            out[0].adjusted > out[0].cosine,
-            "CamelCase identifier still lex-matches"
+        assert_eq!(
+            out[0].entry.node_path, "1",
+            "CamelCase identifier still lex-matches (wins the fused rank)"
         );
     }
 
     #[test]
-    fn rerank_exposes_raw_cosine_and_adjusted() {
-        let e1 = entry("1", "impl UndoRedoManager {");
-        let hits = vec![(&e1, 0.80)];
+    fn rerank_exposes_raw_cosine_and_fused_rank() {
+        let e_impl = entry("1", "impl UndoRedoManager {");
+        let e_decl = entry("2", "pub mod unrelated_thing;");
+        // Equal cosines: the impl head with lexical overlap must win the
+        // fused ranking; the raw cosine stays verbatim on the hit.
+        let hits = vec![(&e_impl, 0.80), (&e_decl, 0.80)];
         let out = rerank_satellite("undo the thing", hits, 10);
         assert_eq!(out[0].cosine, 0.80, "raw cosine preserved verbatim");
+        assert_eq!(
+            out[0].entry.node_path, "1",
+            "impl+lex beats a decl at equal cosine"
+        );
         assert!(
-            out[0].adjusted > out[0].cosine,
-            "impl bonus + lex show up only in the adjusted value"
+            out[0].adjusted > 0.0 && out[0].adjusted < 1.0,
+            "adjusted is an RRF-scale ranking value, not a cosine"
         );
     }
 

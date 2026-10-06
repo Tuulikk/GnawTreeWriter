@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Added
+- **Graph-proximity channel in the sense reranker**: `rerank_satellite_with_graphs` fuses a third reciprocal-rank channel — call-graph adjacency of the top seed files (callers + callees, BFS-best-seed order) — into the ranking. Hubs (files with >100 resolved edges, e.g. `core/mod.rs`, `cli.rs`) are excluded as seeds and neighbors: adjacency to them is topical noise. Graph JSONs store absolute paths while the semantic index stores relative ones; `graph_path_key` normalizes both from the first `src/` segment. Absent or empty graphs degrade silently to the two-channel ranking. `ai recall-eval` runs the same pipeline (incl. the graph channel). Recall (50 cases): 60/66/72/76 @ k=5/10/20/100 (two-channel: 60/66/72/74; raw cosine: 54/70/76/90).
+
 ## [0.18.0] - 2026-10-06
 
 ### Changed — Semantic search: real retrieval embedder (BGE)

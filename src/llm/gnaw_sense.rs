@@ -379,7 +379,14 @@ impl GnawSenseBroker {
             } else {
                 base_hits
             };
-            let results = crate::llm::rerank_satellite(&lex_query, hits, 10);
+            // Graph channel: call-graph proximity feeds the reranker
+            // (silent degrade — no graphs on disk means two-channel).
+            let graph_ok = self
+                .relational_indexer
+                .load_all_graphs()
+                .unwrap_or_default();
+            let results =
+                crate::llm::rerank_satellite_with_graphs(&lex_query, hits, 10, Some(&graph_ok));
 
             // Feedback loop (roadmap AUTO-koppling): flag suspicious
             // outcomes and remember failures so the agent sees
