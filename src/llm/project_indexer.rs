@@ -115,12 +115,12 @@ impl ProjectIndexer {
                     let preview = format!(
                         "(Chunk {}) {}",
                         i,
-                        crate::llm::gnaw_sense::truncate_preview(chunk.trim(), 97)
+                        crate::llm::gnaw_sense::truncate_preview(chunk.trim(), 240)
                     );
                     acc.push((format!("{}[chunk:{}]", node.path, i), preview, chunk));
                 }
             } else {
-                let preview = crate::llm::gnaw_sense::truncate_preview(&node.content, 97);
+                let preview = crate::llm::gnaw_sense::truncate_preview(&node.content, 240);
                 acc.push((node.path.clone(), preview, node.content.clone()));
             }
         }

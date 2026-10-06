@@ -682,18 +682,23 @@ pub fn rerank_satellite_with_graphs<'a>(
     }
 
     // Per-file diversification: greedy over the fused ranking. The cap
-    // binds ONLY in the headline zone (the first slots an agent
-    // actually reads) — beyond it recall wins: 9/12 eval misses were
-    // exact symbols crowded out by their own file's better-ranked
-    // heads while the pipeline already named the right FILE. Skipped
-    // entries are NOT dropped: a second pass serves them in the tail.
+    // binds ONLY while filling the headline zone (the first HEAD_ZONE
+    // SERVED slots — what an agent actually reads); entries deferred
+    // there lead the tail pass in fused order, so nothing within the
+    // served window is ever dropped. (9/12 eval misses were exact
+    // symbols crowded out by their own file's better-ranked heads
+    // while the pipeline already named the right FILE.)
     const HEAD_ZONE: usize = 5;
     let mut per_file: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     let mut out: Vec<RerankedHit<'a>> = Vec::with_capacity(top);
     let mut deferred: Vec<(&'a NodeEmbedding, f32, f32)> = Vec::new();
-    for (entry, cosine, fused) in scored {
+    let mut iter = scored.into_iter();
+    while out.len() < HEAD_ZONE.min(top) {
+        let Some((entry, cosine, fused)) = iter.next() else {
+            break;
+        };
         let count = per_file.entry(entry.file_path.as_str()).or_insert(0);
-        if out.len() < HEAD_ZONE && *count >= MAX_PER_FILE {
+        if *count >= MAX_PER_FILE {
             deferred.push((entry, cosine, fused));
             continue;
         }
@@ -703,12 +708,10 @@ pub fn rerank_satellite_with_graphs<'a>(
             cosine,
             adjusted: fused,
         });
-        if out.len() >= top {
-            break;
-        }
     }
-    // Tail pass: everything the headline deferred, in fused order.
-    for (entry, cosine, fused) in deferred {
+    // Tail: the headline-deferred first (they carry the best fused
+    // scores of the tail), then the remaining fused order, uncapped.
+    for (entry, cosine, fused) in deferred.into_iter().chain(iter) {
         if out.len() >= top {
             break;
         }
