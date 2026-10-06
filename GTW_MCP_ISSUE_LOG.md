@@ -785,3 +785,26 @@ ska avsluta med fel + "ankaret hittades inte på rad N" eller utföra skrivet.
 meddelande/skill ha sagt i just den situationen? (GTW ska vara
 guidande: varje fel och varje situation ska peka på nästa steg)
 -->
+
+## Intake-rapport från Motor2 (2026-10-06): rusqlite 0.32 i c3a79ac bröt Motor2-workspace-resolutionen
+
+**Klass:** sysko-intake (Motor2 AGENTS.md §36) — inte en GTW-bugg i sig, men
+intake-friction som per §36-kontraktet ska postas här.
+
+**Vad hände:** `c3a79ac feat(llm): switch retrieval embeddings to BGE` bytte
+`rusqlite = "0.31"` → `"0.32"` i GTW:s Cargo.toml. Motor2-cli pinnar rusqlite
+0.31 (libsqlite3-sys 0.28) → `links = "sqlite3"`-konflikt: HELA Motor2:s
+workspace (cargo check/test/clippy — alla targets) vägrade resolve:a med
+"failed to select a version for libsqlite3-sys". Upptäcktes först i Motor2:s
+testkörning, mitt i ett pågående pass.
+
+**Motor2-sidans lösning (tillsammans = själva intaken):** workspace-pin
+0.31 → 0.32 i Motor2-roten + motor2-post + motor2-collector (rusqlite 0.32.1
+/ libsqlite3-sys 0.30.1, bundled). 1710 tester gröna efter bump — ingen
+API-påverkan i Motor2:s rusqlite-användning.
+
+**Frågan till GTW:** rusqlite-major/minor-höjningar i sysko-repot påverkar
+alla path-dep-konsumenter direkt (ingen release-grind emellan). Skrivs
+dep-höjningar i changeloggen/RELEASE_NOTES med "BREAKING för path-deps"-
+markering? (Samma mönster som 0.16.0:s ogated `sense_with`.) Önskat: en rad
+i varje release-not som rör Cargo.toml-deps.
