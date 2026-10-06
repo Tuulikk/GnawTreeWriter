@@ -417,7 +417,7 @@ fn lex_norm(word: &str) -> &str {
 
 /// One file must not crowd out the whole top list: an agent asking
 /// "where does X live" wants breadth, not 10 nodes of cli.rs.
-const MAX_PER_FILE: usize = 3;
+const MAX_PER_FILE: usize = 4;
 
 /// Fuse two satellite searches over the SAME index by taking, per entry,
 /// the higher cosine (dedup on file_path+node_path). Used for query
@@ -681,12 +681,20 @@ pub fn rerank_satellite_with_graphs<'a>(
         }
     }
 
-    // Per-file diversification: greedy over the fused ranking.
+    // Per-file diversification: greedy over the fused ranking. The cap
+    // binds ONLY in the headline zone (the first slots an agent
+    // actually reads) — beyond it recall wins: 9/12 eval misses were
+    // exact symbols crowded out by their own file's better-ranked
+    // heads while the pipeline already named the right FILE. Skipped
+    // entries are NOT dropped: a second pass serves them in the tail.
+    const HEAD_ZONE: usize = 5;
     let mut per_file: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     let mut out: Vec<RerankedHit<'a>> = Vec::with_capacity(top);
+    let mut deferred: Vec<(&'a NodeEmbedding, f32, f32)> = Vec::new();
     for (entry, cosine, fused) in scored {
         let count = per_file.entry(entry.file_path.as_str()).or_insert(0);
-        if *count >= MAX_PER_FILE {
+        if out.len() < HEAD_ZONE && *count >= MAX_PER_FILE {
+            deferred.push((entry, cosine, fused));
             continue;
         }
         *count += 1;
@@ -698,6 +706,18 @@ pub fn rerank_satellite_with_graphs<'a>(
         if out.len() >= top {
             break;
         }
+    }
+    // Tail pass: everything the headline deferred, in fused order.
+    for (entry, cosine, fused) in deferred {
+        if out.len() >= top {
+            break;
+        }
+        *per_file.entry(entry.file_path.as_str()).or_insert(0) += 1;
+        out.push(RerankedHit {
+            entry,
+            cosine,
+            adjusted: fused,
+        });
     }
     out
 }
@@ -840,11 +860,20 @@ mod tests {
             "file B must survive the per-file cap: {:?}",
             files
         );
+        // Headline zone: within the first HEAD_ZONE slots no file may
+        // exceed MAX_PER_FILE entries.
+        let head_a = out
+            .iter()
+            .take(5)
+            .filter(|h| h.entry.file_path == "src/a.rs")
+            .count();
+        assert!(head_a <= 4, "headline zone caps file A at 4, got {head_a}");
+        // Beyond the zone recall wins: every A entry is served.
         let a_count = out
             .iter()
             .filter(|h| h.entry.file_path == "src/a.rs")
             .count();
-        assert!(a_count <= 3, "file A capped at 3, got {a_count}");
+        assert_eq!(a_count, 5, "tail zone serves every entry: got {a_count}");
     }
 
     #[test]

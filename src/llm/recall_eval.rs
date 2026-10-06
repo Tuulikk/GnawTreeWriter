@@ -38,6 +38,15 @@ pub struct CaseResult {
     pub top_cosine: f32,
     /// Adjusted (post-rerank) score of the top pipeline hit.
     pub top_adjusted: Option<f32>,
+    /// Rank of the expected entry in the RAW cosine window (2000 cap)
+    /// — model-side diagnostic. None = the model never surfaced it.
+    pub expected_cosine_rank: Option<usize>,
+    /// Rank of the expected entry in the FULL reranked order (not
+    /// capped at k) — reranker-side diagnostic. > k means the reranker
+    /// pushed the answer below the served window.
+    pub expected_pipeline_rank: Option<usize>,
+    /// file_paths of the 10 highest pipeline hits (displacement audit).
+    pub top_pipeline_files: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -117,8 +126,6 @@ pub fn run_recall_eval(eval_path: &Path, k: usize, json_out: bool) -> Result<()>
         // (same shape as gnaw_sense: 2000 candidates, threshold 0.1,
         // graph-proximity channel from the knowledge graphs).
         let wide = index.search_with_threshold(&query_vector, 2000, 0.1);
-        let reranked = rerank_satellite_with_graphs(&case.query, wide, k, Some(&graphs));
-
         let is_hit = |e: &NodeEmbedding| {
             e.file_path.ends_with(&case.expect_file)
                 && case
@@ -127,8 +134,21 @@ pub fn run_recall_eval(eval_path: &Path, k: usize, json_out: bool) -> Result<()>
                     .map(|p| e.content_preview.to_lowercase().contains(&p.to_lowercase()))
                     .unwrap_or(true)
         };
+        // Calibration diagnostics: where does the expected entry sit in
+        // the RAW window, and in the FULL reranked order (not capped at
+        // k)? This separates "the model never surfaced it" from "the
+        // reranker pushed it out of the served window".
+        let expected_cosine_rank = wide.iter().position(|(e, _)| is_hit(e)).map(|i| i + 1);
+        let window = wide.len();
+        let reranked = rerank_satellite_with_graphs(&case.query, wide, window, Some(&graphs));
         let hit_at_rank = hits.iter().position(|(e, _)| is_hit(e)).map(|i| i + 1);
-        let hit_at_rank_pipeline = reranked.iter().position(|h| is_hit(h.entry)).map(|i| i + 1);
+        let expected_pipeline_rank = reranked.iter().position(|h| is_hit(h.entry)).map(|i| i + 1);
+        let hit_at_rank_pipeline = expected_pipeline_rank.filter(|r| *r <= k);
+        let top_pipeline_files: Vec<String> = reranked
+            .iter()
+            .take(10)
+            .map(|h| h.entry.file_path.clone())
+            .collect();
 
         if let Some(rank) = hit_at_rank_pipeline {
             reciprocal_sum += 1.0 / rank as f64;
@@ -143,6 +163,9 @@ pub fn run_recall_eval(eval_path: &Path, k: usize, json_out: bool) -> Result<()>
             hit_at_rank_pipeline,
             top_cosine: hits.first().map(|(_, s)| *s).unwrap_or(0.0),
             top_adjusted: reranked.first().map(|h| h.adjusted),
+            expected_cosine_rank,
+            expected_pipeline_rank,
+            top_pipeline_files,
         });
     }
 
