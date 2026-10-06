@@ -1,8 +1,22 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// Vector BLOB codec: little-endian f32 sequence (768 dims = 3 KB/row).
+fn vector_to_blob(vector: &[f32]) -> Vec<u8> {
+    vector.iter().flat_map(|f| f.to_le_bytes()).collect()
+}
+
+fn blob_to_vector(blob: &[u8]) -> Vec<f32> {
+    blob.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| f32::from_le_bytes(*c))
+        .collect()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeEmbedding {
@@ -41,54 +55,183 @@ impl SemanticIndexManager {
         &self.storage_dir
     }
 
+    /// Open (and initialize) the embeddings DB. One file
+    /// (`embeddings.db`, WAL mode) replaces the per-file JSON shards.
+    fn open_db(&self) -> Result<Connection> {
+        let conn = Connection::open(self.storage_dir.join("embeddings.db"))?;
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             CREATE TABLE IF NOT EXISTS model_info (
+                 id INTEGER PRIMARY KEY CHECK (id = 1),
+                 model_name TEXT NOT NULL,
+                 dimension INTEGER NOT NULL,
+                 created_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS embeddings (
+                 file_hash TEXT NOT NULL,
+                 file_path TEXT NOT NULL,
+                 node_path TEXT NOT NULL,
+                 content_preview TEXT NOT NULL,
+                 vector BLOB NOT NULL,
+                 PRIMARY KEY (file_path, node_path)
+             );
+             CREATE INDEX IF NOT EXISTS idx_embeddings_hash ON embeddings(file_hash);",
+        )?;
+        Ok(conn)
+    }
+
     pub fn save_model_info(&self, model_name: &str, dimension: usize) -> Result<()> {
-        let info = ModelInfo {
-            model_name: model_name.to_string(),
-            dimension,
-            created_at: Utc::now(),
-        };
-        let save_path = self.storage_dir.join("model_info.json");
-        let data = serde_json::to_string_pretty(&info)?;
-        fs::write(save_path, data)?;
+        let conn = self.open_db()?;
+        conn.execute(
+            "INSERT INTO model_info (id, model_name, dimension, created_at)
+             VALUES (1, ?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET model_name = ?1, dimension = ?2, created_at = ?3",
+            rusqlite::params![model_name, dimension as i64, Utc::now().to_rfc3339()],
+        )?;
         Ok(())
     }
 
     pub fn get_model_info(&self) -> Result<Option<ModelInfo>> {
+        let conn = self.open_db()?;
+        let mut stmt =
+            conn.prepare("SELECT model_name, dimension, created_at FROM model_info WHERE id = 1")?;
+        let mut rows = stmt.query([])?;
+        if let Some(row) = rows.next()? {
+            return Ok(Some(ModelInfo {
+                model_name: row.get(0)?,
+                dimension: row.get::<_, i64>(1)? as usize,
+                created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(2)?)?
+                    .with_timezone(&Utc),
+            }));
+        }
+        // Legacy fallback: pre-SQLite projects keep model_info.json.
         let load_path = self.storage_dir.join("model_info.json");
         if load_path.exists() {
-            let data = fs::read_to_string(load_path)?;
-            let info = serde_json::from_str(&data)?;
-            Ok(Some(info))
-        } else {
-            Ok(None)
+            let info: ModelInfo = serde_json::from_str(&fs::read_to_string(load_path)?)?;
+            return Ok(Some(info));
         }
+        Ok(None)
     }
 
     pub fn save_index(&self, file_path: &str, entries: Vec<NodeEmbedding>) -> Result<()> {
         let file_hash = crate::core::transaction_log::calculate_content_hash(file_path);
-        let save_path = self.storage_dir.join(format!("{}.json", file_hash));
-        let data = serde_json::to_string_pretty(&entries)?;
-        fs::write(save_path, data)?;
+        let mut conn = self.open_db()?;
+        // Upsert semantics: a re-indexed file REPLACES all its previous
+        // rows. The per-file JSON storage kept stale rows forever whenever
+        // a file's node set changed (the orphan defect).
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM embeddings WHERE file_path = ?1", [file_path])?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT OR REPLACE INTO embeddings
+                     (file_hash, file_path, node_path, content_preview, vector)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
+            for e in &entries {
+                stmt.execute(rusqlite::params![
+                    file_hash,
+                    e.file_path,
+                    e.node_path,
+                    e.content_preview,
+                    vector_to_blob(&e.vector)
+                ])?;
+            }
+        }
+        tx.commit()?;
         Ok(())
     }
 
     pub fn load_project_index(&self) -> Result<SemanticIndex> {
-        let mut index = SemanticIndex::default();
         if !self.storage_dir.exists() {
-            return Ok(index);
+            return Ok(SemanticIndex::default());
         }
+        let mut conn = self.open_db()?;
+        Self::migrate_legacy_json(&mut conn, &self.storage_dir)?;
+        let mut index = SemanticIndex::default();
+        let mut stmt =
+            conn.prepare("SELECT file_path, node_path, content_preview, vector FROM embeddings")?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let vector: Vec<u8> = row.get(3)?;
+            index.entries.push(NodeEmbedding {
+                file_path: row.get(0)?,
+                node_path: row.get(1)?,
+                content_preview: row.get(2)?,
+                vector: blob_to_vector(&vector),
+            });
+        }
+        Ok(index)
+    }
 
-        for entry in fs::read_dir(&self.storage_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                let data = fs::read_to_string(path)?;
-                if let Ok(mut entries) = serde_json::from_str::<Vec<NodeEmbedding>>(&data) {
-                    index.entries.append(&mut entries);
+    /// One-time import of the legacy per-file JSON storage
+    /// (`<file_hash>.json` + `model_info.json`): rows move into the
+    /// embeddings DB, source files are renamed `*.migrated` so the
+    /// migration is idempotent and never imports twice.
+    fn migrate_legacy_json(conn: &mut Connection, storage_dir: &Path) -> Result<()> {
+        let legacy: Vec<(PathBuf, Vec<NodeEmbedding>)> = fs::read_dir(storage_dir)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.extension().and_then(|s| s.to_str()) == Some("json")
+                    && p.file_name().and_then(|s| s.to_str()) != Some("model_info.json")
+            })
+            .filter_map(|p| {
+                let data = fs::read_to_string(&p).ok()?;
+                let entries: Vec<NodeEmbedding> = serde_json::from_str(&data).ok()?;
+                Some((p, entries))
+            })
+            .collect();
+        let legacy_info = storage_dir.join("model_info.json");
+        if legacy.is_empty() && !legacy_info.exists() {
+            return Ok(());
+        }
+        let tx = conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT OR REPLACE INTO embeddings
+                     (file_hash, file_path, node_path, content_preview, vector)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
+            for (path, entries) in &legacy {
+                let hash = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                for e in entries {
+                    stmt.execute(rusqlite::params![
+                        hash,
+                        e.file_path,
+                        e.node_path,
+                        e.content_preview,
+                        vector_to_blob(&e.vector)
+                    ])?;
                 }
             }
         }
-        Ok(index)
+        let has_model: i64 = tx.query_row("SELECT COUNT(*) FROM model_info", [], |r| r.get(0))?;
+        if has_model == 0 && legacy_info.exists() {
+            if let Ok(info) = serde_json::from_str::<ModelInfo>(&fs::read_to_string(&legacy_info)?)
+            {
+                tx.execute(
+                    "INSERT OR REPLACE INTO model_info (id, model_name, dimension, created_at)
+                     VALUES (1, ?1, ?2, ?3)",
+                    rusqlite::params![
+                        info.model_name,
+                        info.dimension as i64,
+                        info.created_at.to_rfc3339()
+                    ],
+                )?;
+            }
+        }
+        tx.commit()?;
+        for (path, _) in &legacy {
+            let mut renamed = path.clone().into_os_string();
+            renamed.push(".migrated");
+            let _ = fs::rename(path, renamed);
+        }
+        if legacy_info.exists() {
+            let mut renamed = legacy_info.clone().into_os_string();
+            renamed.push(".migrated");
+            let _ = fs::rename(&legacy_info, renamed);
+        }
+        Ok(())
     }
 }
 
@@ -578,5 +721,117 @@ mod tests {
         let e1 = entry("1", "fn alpha() {}");
         assert!(fuse_by_max(vec![], vec![]).is_empty());
         assert_eq!(fuse_by_max(vec![(&e1, 0.5)], vec![]).len(), 1);
+    }
+
+    // ---- SQLite storage ----
+
+    fn sqlite_entry(file: &str, node: &str, vector: Vec<f32>) -> NodeEmbedding {
+        NodeEmbedding {
+            file_path: file.to_string(),
+            node_path: node.to_string(),
+            content_preview: format!("fn node_{node}() {{}}"),
+            vector,
+        }
+    }
+
+    #[test]
+    fn sqlite_roundtrip_preserves_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = SemanticIndexManager::new(dir.path());
+        let v: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
+        mgr.save_index(
+            "src/a.rs",
+            vec![
+                sqlite_entry("src/a.rs", "1", v.clone()),
+                sqlite_entry("src/a.rs", "2", vec![0.5]),
+            ],
+        )
+        .unwrap();
+        let loaded = mgr.load_project_index().unwrap();
+        assert_eq!(loaded.entries.len(), 2);
+        let e = loaded
+            .entries
+            .iter()
+            .find(|e| e.node_path == "1")
+            .expect("node 1 present");
+        assert_eq!(e.file_path, "src/a.rs");
+        assert_eq!(e.vector, v, "f32 bytes must round-trip exactly");
+    }
+
+    #[test]
+    fn sqlite_upsert_deletes_stale_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = SemanticIndexManager::new(dir.path());
+        mgr.save_index(
+            "src/a.rs",
+            vec![
+                sqlite_entry("src/a.rs", "1", vec![0.1]),
+                sqlite_entry("src/a.rs", "2", vec![0.2]),
+            ],
+        )
+        .unwrap();
+        // File re-indexed with a DIFFERENT node set: old node 1 must die.
+        mgr.save_index(
+            "src/a.rs",
+            vec![
+                sqlite_entry("src/a.rs", "2", vec![0.2]),
+                sqlite_entry("src/a.rs", "3", vec![0.3]),
+            ],
+        )
+        .unwrap();
+        let loaded = mgr.load_project_index().unwrap();
+        let nodes: Vec<&str> = loaded
+            .entries
+            .iter()
+            .map(|e| e.node_path.as_str())
+            .collect();
+        assert_eq!(nodes, vec!["2", "3"], "no orphans from the old node set");
+    }
+
+    #[test]
+    fn sqlite_migrates_legacy_json_idempotently() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = dir.path().join(".gnawtreewriter_ai").join("index");
+        fs::create_dir_all(&storage).unwrap();
+        let entries = vec![sqlite_entry("src/old.rs", "7", vec![0.25, 0.75])];
+        fs::write(
+            storage.join("abc123.json"),
+            serde_json::to_string(&entries).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            storage.join("model_info.json"),
+            serde_json::to_string(&ModelInfo {
+                model_name: "bge-base-en-v1.5".into(),
+                dimension: 768,
+                created_at: Utc::now(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mgr = SemanticIndexManager::new(dir.path());
+        let loaded = mgr.load_project_index().unwrap();
+        assert_eq!(loaded.entries.len(), 1, "legacy rows imported");
+        assert_eq!(loaded.entries[0].vector, vec![0.25, 0.75]);
+        let info = mgr.get_model_info().unwrap().expect("model info imported");
+        assert_eq!(info.model_name, "bge-base-en-v1.5");
+        // Sources renamed, not deleted — and never re-imported.
+        assert!(!storage.join("abc123.json").exists());
+        assert!(storage.join("abc123.json.migrated").exists());
+        let again = mgr.load_project_index().unwrap();
+        assert_eq!(again.entries.len(), 1, "migration is idempotent");
+    }
+
+    #[test]
+    fn sqlite_model_info_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = SemanticIndexManager::new(dir.path());
+        assert!(mgr.get_model_info().unwrap().is_none(), "fresh = none");
+        mgr.save_model_info("bge-base-en-v1.5", 768).unwrap();
+        mgr.save_model_info("bge-base-en-v1.5", 768).unwrap(); // upsert ok
+        let info = mgr.get_model_info().unwrap().expect("saved");
+        assert_eq!(info.model_name, "bge-base-en-v1.5");
+        assert_eq!(info.dimension, 768);
     }
 }
