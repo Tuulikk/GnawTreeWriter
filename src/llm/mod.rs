@@ -9,6 +9,8 @@ pub mod pipeline;
 pub mod project_indexer;
 #[cfg(feature = "mamba")]
 pub mod prompts;
+#[cfg(feature = "modernbert")]
+pub mod recall_eval;
 pub mod relational_index;
 pub mod semantic_index;
 
@@ -19,5 +21,7 @@ pub use impact_analyzer::*;
 pub use llm_integration::*;
 #[cfg(feature = "modernbert")]
 pub use project_indexer::*;
+#[cfg(feature = "modernbert")]
+pub use recall_eval::*;
 pub use relational_index::*;
 pub use semantic_index::*;

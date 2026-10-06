@@ -243,10 +243,8 @@ impl GnawSenseBroker {
         file_context: Option<&str>,
         expand: bool,
     ) -> Result<SenseResponse> {
-        let model = self
-            .ai_manager
-            .load_model(AiModel::ModernBert, DeviceType::Cpu)?;
-        let query_vector_tensor = model.get_embedding(query)?;
+        let model = self.ai_manager.load_model(AiModel::Bge, DeviceType::Cpu)?;
+        let query_vector_tensor = model.get_query_embedding(query)?;
         let query_vector: Vec<f32> = query_vector_tensor.to_vec1()?;
 
         if let Some(file_path) = file_context {
@@ -465,12 +463,10 @@ impl GnawSenseBroker {
         file_path: &str,
         intent: &str,
     ) -> Result<EditProposal> {
-        let model = self
-            .ai_manager
-            .load_model(AiModel::ModernBert, DeviceType::Cpu)?;
+        let model = self.ai_manager.load_model(AiModel::Bge, DeviceType::Cpu)?;
         let index = self.index_file(file_path, model).await?;
 
-        let query_vector_tensor = model.get_embedding(anchor_query)?;
+        let query_vector_tensor = model.get_query_embedding(anchor_query)?;
         let query_vector: Vec<f32> = query_vector_tensor.to_vec1()?;
 
         let results = index.search(&query_vector, 1);

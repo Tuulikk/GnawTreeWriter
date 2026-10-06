@@ -1,5 +1,28 @@
 ## [Unreleased]
 
+### Changed — Semantic search: real retrieval embedder (BGE)
+- **Embedding backend switched** from the raw ModernBERT masked-LM
+  checkpoint (`answerdotai/ModernBERT-base`, mean pooling) to
+  **BAAI/bge-base-en-v1.5** (CLS pooling + L2 normalization), because
+  the new recall@k harness (`ai recall-eval`, evals/sense_recall.json)
+  measured **recall@5 = 0%** on the MLM features — anisotropic space,
+  all cosines ~0.9. The legacy path is kept as
+  `EmbeddingBackbone::ModernBertMlm` so old model dirs still load.
+- **Query/passage split**: `get_query_embedding` prepends the BGE v1.5
+  retrieval prefix ("Represent this sentence for searching relevant
+  passages:") on the query side only; `get_embedding`/`get_embeddings`
+  embed documents raw. `gnaw_sense`, `recall-eval` use the query path;
+  `ai index` embeds documents.
+- **512-token truncation** on the BGE tokenizer (was unbounded encode
+  on ModernBERT); long node bodies are silently truncated at embed time.
+- `AiModel::Bge` added; models cached under
+  `.gnawtreewriter_ai/models/bge-base/`; `ai setup` downloads it.
+  Re-index after upgrading: `rm .gnawtreewriter_ai/index/*.json &&
+  gnawtreewriter ai index` — vectors from the MLM model are useless.
+- Known limitation: BGE documents are embedded one forward per node on
+  CPU (no batching yet) — indexing is noticeably slower than the old
+  batched MLM path, but produces embeddings that actually work.
+
 ### BREAKING (lib)
 - `IntegrityReport` (`src/core/guardian.rs`) gained a field
   `deltas: Vec<EditDelta>` (`#[serde(skip)]`). Struct-literal

@@ -663,6 +663,19 @@ enum AiSubcommands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Measure semantic-search quality: run an eval set of queries
+    /// against the current index and report recall@1 / recall@k / MRR.
+    /// Measurement only — the baseline for model and storage decisions.
+    RecallEval {
+        /// Path to the eval set (JSON array of {query, expect_file, expect_preview?})
+        eval_path: PathBuf,
+        /// How many hits count as a success (the k in recall@k)
+        #[arg(long, default_value_t = 5)]
+        k: usize,
+        /// Emit the full report as JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1391,6 +1404,9 @@ impl Cli {
                 }
                 AiSubcommands::Report { limit, output } => {
                     Self::handle_ai_report(limit, output).await?;
+                }
+                AiSubcommands::RecallEval { eval_path, k, json } => {
+                    crate::llm::recall_eval::run_recall_eval(&eval_path, k, json)?;
                 }
             },
 
@@ -3164,7 +3180,7 @@ Use --no-preview to write batch file"
         println!("🚀 Setting up AI models in {}...", project_root.display());
         if let Err(e) = mgr
             .setup(
-                crate::llm::ai_manager::AiModel::ModernBert,
+                crate::llm::ai_manager::AiModel::Bge,
                 crate::llm::ai_manager::DeviceType::Cpu,
                 force,
             )
@@ -5290,7 +5306,7 @@ Use without --preview to apply the clone"
             }
 
             // Test load attempt (fast check)
-            match mgr.load_model(crate::llm::AiModel::ModernBert, crate::llm::DeviceType::Cpu) {
+            match mgr.load_model(crate::llm::AiModel::Bge, crate::llm::DeviceType::Cpu) {
                 Ok(_) => println!(
                     "  Runtime:      {}",
                     "✅ AI Services ready for GnawSense operations".green()

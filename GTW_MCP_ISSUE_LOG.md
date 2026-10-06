@@ -742,6 +742,31 @@ mot "GTW:s fel ska vara högljudda". Förslag: undo ska skriva vad den gör
 
 ---
 
+## 2026-10-06 — `quick-insert` rapporterade "applied: 0 insertion(s)" utan att skriva
+**Kontext:** CHANGELOG.md (markdown), ankare `## [Unreleased]` som första rad,
+`--after "<ankare>" --unique`, innehåll ~23 rader. Svaret var
+`✓ QuickInsert applied: 0 insertion(s)` — git diff visade **0 bytes ändrade**.
+"E applied" med antal 0 är en motstridig rapport: antingen hittades ankaret
+inte (då ska det vara ett FEL med radnumret som saknas) eller hittades det
+men skrev inte (bugg).
+| # | Anrop | Parametrar | Resultat |
+|---|-------|-----------|----------|
+| 1 | quick-insert | CHANGELOG.md, --after "## [Unreleased]", --unique | "applied: 0 insertion(s)", ingen filändring |
+| 2 | quick-insert | samma men --before | erkänt ogiltigt flag: "unexpected argument" (finns bara --after) |
+**Omväg:** OpenCode edit-verktyg (markdown är tillåtet textområde enligt
+AGENTS-policy) — skrev korrekt på första försöket.
+**Bedömning:** [ ] användarfel [x] bugg (tyst noll-skrivning rapporterad
+som framgång — bryter mot "GTW:s fel ska vara högljudda", jmf fynd #14)
+ [ ] saknad funktion [ ] sub-funktion saknas
+ [x] svår att nå/rätta användning (--before saknas trots att före/efter-
+insert är symmetriska behov; MCP-motsvarigheten insert_node har position)
+ [ ] inte hittad vid behov [ ] under förmåga
+
+**Vägledning träffad?** nej — 0 insertion(s) ska ALDRIG vara ✓-grönt;
+ska avsluta med fel + "ankaret hittades inte på rad N" eller utföra skrivet.
+
+---
+
 <!-- Ny post: kopiera mallen nedan
 ## ÅÅÅÅ-MM-DD — kort rubrik
 **Kontext:**

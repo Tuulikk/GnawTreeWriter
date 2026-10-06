@@ -6,6 +6,7 @@ use candle_core::{DType, Device, Tensor};
 #[cfg(feature = "modernbert")]
 use candle_nn::{self, VarBuilder};
 #[cfg(feature = "modernbert")]
+use candle_transformers::models::bert::{BertModel, Config as BertEmbeddingConfig};
 use candle_transformers::models::modernbert::{Config, ModernBert};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,7 +16,13 @@ use tokenizers::Tokenizer;
 /// Supported AI models for local execution
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AiModel {
+    /// Legacy raw ModernBERT masked-LM checkpoint (broken for retrieval —
+    /// anisotropic space, recall@5 = 0 on evals/sense_recall.json).
     ModernBert,
+    /// BAAI/bge-base-en-v1.5: contrastively trained embedder (CLS pooling,
+    /// L2-normalized, query prefix). The retrieval default since the
+    /// recall harness proved the MLM checkpoint unusable.
+    Bge,
     #[cfg(feature = "mamba")]
     Lfm25,
 }
@@ -144,9 +151,16 @@ pub fn indexing_device() -> DeviceType {
 
 #[cfg(feature = "modernbert")]
 pub struct ModernBertModel {
-    pub model: ModernBert,
+    pub backbone: EmbeddingBackbone,
     pub tokenizer: Tokenizer,
     pub device: Device,
+}
+
+/// See AiModel::Bge docs. Kept as an enum so old indexes can still be
+/// inspected with the legacy MLM path while retrieval uses BGE.
+pub enum EmbeddingBackbone {
+    ModernBertMlm(ModernBert),
+    Bge(BertModel),
 }
 
 /// LFM2.5 language model: candle quantized GGUF weights + tokenizer.
@@ -300,14 +314,63 @@ impl TokenBudget {
 #[cfg(feature = "modernbert")]
 impl ModernBertModel {
     pub fn get_embedding(&self, text: &str) -> Result<Tensor> {
+        match &self.backbone {
+            EmbeddingBackbone::ModernBertMlm(model) => {
+                let tokens = self
+                    .tokenizer
+                    .encode(text, true)
+                    .map_err(anyhow::Error::msg)?;
+                let input_ids = Tensor::new(tokens.get_ids(), &self.device)?.unsqueeze(0)?;
+                let mask = input_ids.ones_like()?;
+                let embeddings = model.forward(&input_ids, &mask)?;
+                Ok(embeddings.mean(1)?.squeeze(0)?)
+            }
+            // Document-side: no retrieval prefix, CLS pooled, L2-normalized.
+            EmbeddingBackbone::Bge(model) => self.bge_embed(model, text, false),
+        }
+    }
+
+    /// Query-side embedding. For retrieval embedders this adds the model's
+    /// query prefix (BGE v1.5: "Represent this sentence for searching
+    /// relevant passages:") — the index side embeds raw documents. The
+    /// legacy MLM path has no prefix concept and returns the same vector.
+    pub fn get_query_embedding(&self, text: &str) -> Result<Tensor> {
+        match &self.backbone {
+            EmbeddingBackbone::ModernBertMlm(model) => {
+                let tokens = self
+                    .tokenizer
+                    .encode(text, true)
+                    .map_err(anyhow::Error::msg)?;
+                let input_ids = Tensor::new(tokens.get_ids(), &self.device)?.unsqueeze(0)?;
+                let mask = input_ids.ones_like()?;
+                let embeddings = model.forward(&input_ids, &mask)?;
+                Ok(embeddings.mean(1)?.squeeze(0)?)
+            }
+            EmbeddingBackbone::Bge(model) => self.bge_embed(model, text, true),
+        }
+    }
+
+    /// BGE embed per model card: CLS pooling + L2 normalization;
+    /// queries get the retrieval prefix, passages are embedded raw.
+    fn bge_embed(&self, model: &BertModel, text: &str, is_query: bool) -> Result<Tensor> {
+        let text = if is_query {
+            format!(
+                "Represent this sentence for searching relevant passages: {}",
+                text
+            )
+        } else {
+            text.to_string()
+        };
         let tokens = self
             .tokenizer
-            .encode(text, true)
+            .encode(text.as_str(), true)
             .map_err(anyhow::Error::msg)?;
         let input_ids = Tensor::new(tokens.get_ids(), &self.device)?.unsqueeze(0)?;
-        let mask = input_ids.ones_like()?;
-        let embeddings = self.model.forward(&input_ids, &mask)?;
-        Ok(embeddings.mean(1)?.squeeze(0)?)
+        let token_type_ids = input_ids.zeros_like()?;
+        let sequence = model.forward(&input_ids, &token_type_ids, None)?; // [1, T, H]
+        let cls = sequence.squeeze(0)?.get(0)?; // [T, H] -> CLS row [H]
+        let norm = cls.sqr()?.sum_all()?.sqrt()?;
+        Ok(cls.broadcast_div(&norm)?)
     }
 
     /// Batched embedding: texts are embedded in chunks of EMBED_BATCH in
@@ -316,6 +379,15 @@ impl ModernBertModel {
     /// indexing hot path (one forward PER NODE) into one forward per 16
     /// nodes; a single row reduces exactly to get_embedding.
     pub fn get_embeddings(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        if matches!(self.backbone, EmbeddingBackbone::Bge(_)) {
+            // Correctness-first: BGE via the single-text path (CLS +
+            // normalize). Indexing is a few times slower than the MLM
+            // batching, but the embeddings actually work for retrieval.
+            return texts
+                .iter()
+                .map(|t| Ok(self.get_embedding(t)?.to_vec1()?))
+                .collect();
+        }
         const EMBED_BATCH: usize = 16;
         // Attention-score budget per forward: B * max_len^2. A flat padded
         // batch of long definition bodies (<= 8000 chars each) blew CUDA
@@ -363,7 +435,10 @@ impl ModernBertModel {
             }
             let input_ids = Tensor::from_vec(flat_ids, (batch.len(), max_len), &self.device)?;
             let mask = Tensor::from_vec(flat_mask, (batch.len(), max_len), &self.device)?;
-            let embeddings = self.model.forward(&input_ids, &mask)?; // [B, T, H]
+            let EmbeddingBackbone::ModernBertMlm(model) = &self.backbone else {
+                unreachable!("BGE handled above");
+            };
+            let embeddings = model.forward(&input_ids, &mask)?; // [B, T, H]
 
             // Masked mean-pool: sum(x * mask) / sum(mask); pads carry 0 and
             // every row has >= 1 real token, so the denominator never vanishes.
@@ -501,7 +576,6 @@ impl AiManager {
             return Err(anyhow::anyhow!("Missing weights: {:?}", weights_path));
         }
 
-        let config: Config = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
         let tokenizer = Tokenizer::from_file(&tokenizer_path).map_err(anyhow::Error::msg)?;
 
         let device = match device_type {
@@ -512,11 +586,32 @@ impl AiManager {
 
         let vb =
             unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)? };
-        let model = ModernBert::load(vb, &config)?;
-        let loaded = ModernBertModel {
-            model,
-            tokenizer,
-            device,
+        let loaded = match model_type {
+            AiModel::Bge => {
+                // BGE-base: standard BERT weights (prefix "bert" comes from
+                // config.model_type) + CLS pooling + 512-token truncation.
+                let config: BertEmbeddingConfig =
+                    serde_json::from_str(&fs::read_to_string(&config_path)?)?;
+                let mut tokenizer = tokenizer;
+                tokenizer
+                    .with_truncation(Some(Default::default()))
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                let model = BertModel::load(vb, &config)?;
+                ModernBertModel {
+                    backbone: EmbeddingBackbone::Bge(model),
+                    tokenizer,
+                    device,
+                }
+            }
+            _ => {
+                let config: Config = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
+                let model = ModernBert::load(vb, &config)?;
+                ModernBertModel {
+                    backbone: EmbeddingBackbone::ModernBertMlm(model),
+                    tokenizer,
+                    device,
+                }
+            }
         };
 
         // Store in cache (get_or_init for the first call wins; subsequent calls reuse)
@@ -734,6 +829,28 @@ impl AiManager {
     pub async fn setup(&self, _model: AiModel, _device: DeviceType, _force: bool) -> Result<()> {
         #[cfg(feature = "modernbert")]
         {
+            // Retrieval embedder (default since recall@5=0 with the MLM
+            // checkpoint): BAAI/bge-base-en-v1.5, CLS-pooled, 768-dim.
+            let model_id = "BAAI/bge-base-en-v1.5";
+            let model_dir = self.get_model_path(&AiModel::Bge);
+            if !model_dir.exists() {
+                fs::create_dir_all(&model_dir)?;
+            }
+            for file in ["config.json", "model.safetensors", "tokenizer.json"] {
+                let dest = model_dir.join(file);
+                if !dest.exists() || _force {
+                    let url = format!("https://huggingface.co/{}/resolve/main/{}", model_id, file);
+                    println!("  Downloading {}...", file);
+                    let resp = ureq::get(&url)
+                        .call()
+                        .map_err(|e| anyhow::anyhow!("HTTP download failed: {}", e))?;
+                    let mut reader = resp.into_reader();
+                    let mut out = std::fs::File::create(&dest)
+                        .map_err(|e| anyhow::anyhow!("Failed to create {:?}: {}", dest, e))?;
+                    std::io::copy(&mut reader, &mut out)?;
+                }
+            }
+
             let model_id = "answerdotai/ModernBERT-base";
             let model_dir = self.get_model_path(&AiModel::ModernBert);
             if !model_dir.exists() {
@@ -815,6 +932,7 @@ impl AiManager {
     fn get_model_path(&self, model: &AiModel) -> PathBuf {
         match model {
             AiModel::ModernBert => self.model_cache_dir.join("modernbert"),
+            AiModel::Bge => self.model_cache_dir.join("bge-base"),
             #[cfg(feature = "mamba")]
             AiModel::Lfm25 => self.model_cache_dir.join("lfm25"),
         }

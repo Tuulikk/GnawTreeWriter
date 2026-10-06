@@ -27,10 +27,10 @@ impl ProjectIndexer {
         let mut total_files = 0;
         // GPU only here (indexing), behind the 20%-VRAM gate; sense/query
         // paths below stay on CPU by design — see ai_manager::indexing_device.
-        let model = self.broker.get_manager().load_model(
-            AiModel::ModernBert,
-            crate::llm::ai_manager::indexing_device(),
-        )?;
+        let model = self
+            .broker
+            .get_manager()
+            .load_model(AiModel::Bge, crate::llm::ai_manager::indexing_device())?;
 
         // Canonicalize target_path to ensure strip_prefix works
         let target_path = if target_path.is_relative() {
@@ -92,7 +92,7 @@ impl ProjectIndexer {
 
         // Save model metadata for the ecosystem
         self.index_manager
-            .save_model_info("ModernBERT-base-v1", 768)?;
+            .save_model_info("bge-base-en-v1.5", 768)?;
 
         Ok(total_files)
     }
