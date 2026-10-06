@@ -27,6 +27,11 @@ pub struct FileGraph {
     pub file_path: String,
     pub relations: HashSet<Relation>,
     pub definitions: HashMap<String, String>, // Name -> Path within file
+    /// Identifier tokens from this file's use/import statements (Fas 4.2
+    /// step 3) — file stems appearing here narrow ambiguous call targets.
+    /// `default` keeps older graph JSON files loadable.
+    #[serde(default)]
+    pub imports: HashSet<String>,
 }
 
 /// Resolution quality of the knowledge graph (Fas 4.2 step 1):
@@ -53,6 +58,36 @@ pub struct IndexStats {
 pub struct AmbiguousName {
     pub name: String,
     pub files: Vec<String>,
+}
+
+/// Fas 4.2 step 3: collect identifier tokens from use/import statements
+/// (rust `use_statement`, python `import_from_statement`, js/ts
+/// `import_statement`, ...). Tokens include BOTH module segments
+/// (crate::utils::parse -> crate, utils, parse) and imported names, so
+/// file-stem matching and future symbol-level narrowing share one set.
+/// Known noise: language keywords (filtered) and the calling file's own
+/// imported names — harmless for stem matching.
+fn collect_imports(node: &TreeNode, acc: &mut HashSet<String>) {
+    const KEYWORDS: [&str; 9] = [
+        "use", "crate", "self", "super", "pub", "as", "from", "import", "extern",
+    ];
+    let t = node.node_type.as_str();
+    if (t.contains("use") || t.contains("import")) && !t.contains("call") {
+        for tok in node
+            .content
+            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        {
+            if tok.len() > 1
+                && !tok.chars().next().unwrap().is_ascii_digit()
+                && !KEYWORDS.contains(&tok)
+            {
+                acc.insert(tok.to_string());
+            }
+        }
+    }
+    for child in &node.children {
+        collect_imports(child, acc);
+    }
 }
 
 pub struct RelationalIndexer {
@@ -144,6 +179,9 @@ impl RelationalIndexer {
                         let mut defs = HashMap::new();
                         self.collect_definitions(&tree, &mut defs);
 
+                        let mut imports = HashSet::new();
+                        collect_imports(&tree, &mut imports);
+
                         let file_str = path.to_string_lossy().to_string();
                         for name in defs.keys() {
                             self.symbol_table
@@ -152,7 +190,7 @@ impl RelationalIndexer {
                                 .push(file_str.clone());
                         }
 
-                        graphs.push((path.to_path_buf(), tree, defs));
+                        graphs.push((path.to_path_buf(), tree, defs, imports));
                     }
                 }
             }
@@ -160,15 +198,16 @@ impl RelationalIndexer {
 
         // 2. Second pass: Map calls to discovered definitions
         let mut final_graphs = Vec::new();
-        for (path, tree, defs) in graphs {
+        for (path, tree, defs, imports) in graphs {
             let file_str = path.to_string_lossy().to_string();
             let mut relations = HashSet::new();
-            self.extract_relations(&tree, &file_str, &defs, &mut relations);
+            self.extract_relations(&tree, &file_str, &defs, &imports, &mut relations);
 
             let graph = FileGraph {
                 file_path: file_str,
                 relations,
                 definitions: defs,
+                imports,
             };
 
             self.save_graph(&graph)?;
@@ -197,6 +236,7 @@ impl RelationalIndexer {
         node: &TreeNode,
         current_file: &str,
         defs: &HashMap<String, String>,
+        imports: &HashSet<String>,
         acc: &mut HashSet<Relation>,
     ) {
         if node.node_type.contains("call") || node.node_type.contains("usage") {
@@ -209,12 +249,41 @@ impl RelationalIndexer {
                 let to_file = if defs.contains_key(&name) {
                     Some(current_file.to_string())
                 } else {
-                    // Otherwise resolve honestly: Some(file) only when
-                    // exactly one file defines the name. Ambiguous or
-                    // unknown stays None instead of a first-match guess.
                     match self.symbol_table.get(&name) {
+                        // Unambiguous by definition.
                         Some(files) if files.len() == 1 => files.first().cloned(),
-                        _ => None,
+                        // Fas 4.2 step 3: import-aware narrowing — among the
+                        // candidate files, exactly one whose module name
+                        // appears in this file's import tokens wins. A
+                        // candidate's module names = file stem + parent
+                        // dir (src/core/mod.rs is module "core", so stem
+                        // alone would miss the dominant Rust layout).
+                        Some(files) => {
+                            let hits: Vec<&String> = files
+                                .iter()
+                                .filter(|f| {
+                                    let p = Path::new(f);
+                                    let stem_hit = p
+                                        .file_stem()
+                                        .and_then(|s| s.to_str())
+                                        .map(|stem| imports.contains(stem))
+                                        .unwrap_or(false);
+                                    let dir_hit = p
+                                        .parent()
+                                        .and_then(|d| d.file_name())
+                                        .and_then(|s| s.to_str())
+                                        .map(|dir| imports.contains(dir))
+                                        .unwrap_or(false);
+                                    stem_hit || dir_hit
+                                })
+                                .collect();
+                            if hits.len() == 1 {
+                                Some(hits[0].to_string())
+                            } else {
+                                None
+                            }
+                        }
+                        None => None,
                     }
                 };
 
@@ -229,7 +298,7 @@ impl RelationalIndexer {
         }
 
         for child in &node.children {
-            self.extract_relations(child, current_file, defs, acc);
+            self.extract_relations(child, current_file, defs, imports, acc);
         }
     }
 
@@ -297,6 +366,113 @@ mod tests {
             rel.to_file.as_deref(),
             Some(a.file_path.as_str()),
             "same-file rule wins over cross-file ambiguity"
+        );
+    }
+
+    #[test]
+    fn rust_use_stem_narrows_same_name_candidates() {
+        // parse is defined in BOTH a.rs and utils.rs; caller.rs imports
+        // it from utils — the use-stem match must resolve the caller.
+        let dir = tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join("a.rs"),
+            "pub fn parse(x: u32) -> u32 {\n    x\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("utils.rs"),
+            "pub fn parse(x: u32) -> u32 {\n    x * 2\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("caller.rs"),
+            "use crate::utils::parse;\n\npub fn run() -> u32 {\n    parse(1)\n}\n",
+        )
+        .unwrap();
+        let mut indexer = RelationalIndexer::new(dir.path());
+        let graphs = indexer.index_directory(dir.path()).unwrap();
+        let caller = graphs
+            .iter()
+            .find(|g| g.file_path.ends_with("caller.rs"))
+            .unwrap();
+        let rel = caller
+            .relations
+            .iter()
+            .find(|r| r.to_name == "parse" && r.relation_type == RelationType::Call)
+            .expect("parse call relation");
+        assert_eq!(
+            rel.to_file
+                .as_deref()
+                .map(|f| Path::new(f).file_stem().and_then(|s| s.to_str())),
+            Some(Some("utils")),
+            "import stem must pick utils.rs: {rel:?}"
+        );
+    }
+
+    #[test]
+    fn bare_call_without_imports_stays_ambiguous() {
+        // Same two definitions, but the caller has NO use statement —
+        // must stay None (no first-match guessing).
+        let dir = tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join("a.rs"),
+            "pub fn parse(x: u32) -> u32 {\n    x\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("utils.rs"),
+            "pub fn parse(x: u32) -> u32 {\n    x * 2\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("caller.rs"),
+            "pub fn run() -> u32 {\n    parse(1)\n}\n",
+        )
+        .unwrap();
+        let mut indexer = RelationalIndexer::new(dir.path());
+        let graphs = indexer.index_directory(dir.path()).unwrap();
+        let caller = graphs
+            .iter()
+            .find(|g| g.file_path.ends_with("caller.rs"))
+            .unwrap();
+        let rel = caller
+            .relations
+            .iter()
+            .find(|r| r.to_name == "parse" && r.relation_type == RelationType::Call)
+            .expect("parse call relation");
+        assert_eq!(rel.to_file, None, "no import = no guess");
+    }
+
+    #[test]
+    fn python_from_import_narrows_candidates() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(dir.path().join("utils.py"), "def parse(x):\n    return x\n").unwrap();
+        std::fs::write(dir.path().join("a.py"), "def parse(x):\n    return x + 1\n").unwrap();
+        std::fs::write(
+            dir.path().join("caller.py"),
+            "from utils import parse\n\n\ndef run():\n    return parse(1)\n",
+        )
+        .unwrap();
+        let mut indexer = RelationalIndexer::new(dir.path());
+        let graphs = indexer.index_directory(dir.path()).unwrap();
+        let caller = graphs
+            .iter()
+            .find(|g| g.file_path.ends_with("caller.py"))
+            .unwrap();
+        let rel = caller
+            .relations
+            .iter()
+            .find(|r| r.to_name == "parse" && r.relation_type == RelationType::Call)
+            .expect("parse call relation");
+        assert_eq!(
+            rel.to_file
+                .as_deref()
+                .map(|f| Path::new(f).file_stem().and_then(|s| s.to_str())),
+            Some(Some("utils")),
+            "from-import must pick utils.py: {rel:?}"
         );
     }
 

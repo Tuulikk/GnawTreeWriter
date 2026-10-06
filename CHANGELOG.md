@@ -53,6 +53,16 @@
   appropriately. A definition in the current file now wins for
   bare-name calls (same-module precedence), resolving most same-name
   ambiguity without path parsing.
+- **Import-aware call narrowing (Fas 4.2 step 3)**: `FileGraph` now
+  stores the identifier tokens of each file's use/import statements
+  (`#[serde(default)]` — old graph JSON stays loadable). When a bare
+  call's name is defined in several files, exactly one candidate whose
+  file stem appears in the caller's import tokens resolves the site
+  (`use crate::utils::parse`, `from utils import parse`,
+  `import { parse } from "./utils"`); zero or several stem matches
+  stay honestly ambiguous.
+  **BREAKING (lib)**: `FileGraph` gained a field — struct literals
+  must add `imports` (or `..Default::default()`).
 
 ## [0.17.0] - 2026-10-05
 

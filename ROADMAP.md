@@ -39,7 +39,7 @@ independently; step 1 makes each later win measurable.
 |---|------|--------|
 | 1 | **Observability**: `RelationalIndexer::resolution_stats()` (unique vs ambiguous symbol names, call-resolution rate, top-N ambiguous names with their files); surfaced in `doctor` (`knowledge_graph.resolution` check) and as `unresolved: N` in impact responses (MCP + CLI `📊 Impact (N unresolved)`) | ✅ 2026-10-06 |
 | 2 | **Same-file rule**: a definition in the current file wins for bare-name calls, even when other files define the same name (Rust same-module scoping) — resolves most ambiguity with zero path parsing | ✅ 2026-10-06 |
-| 3 | **Import awareness**: read `use` / `from x import y` / `import {y}` per file; a bare call is matched against imported candidates — one candidate = resolved, several = stays ambiguous | ⬜ |
+| 3 | **Import awareness**: read `use` / `from x import y` / `import {y}` per file; a bare call is matched against imported candidates — one candidate = resolved, several = stays ambiguous | ✅ 2026-10-06 |
 | 4 | **Qualified paths**: `mod::fn(...)` calls matched against definition module paths instead of last segment only | ⬜ |
 | 5 | **Module map (`mod` tree)**: full Rust scope chain for exact resolution; removes the same-name problem in principle | ⬜ |
 

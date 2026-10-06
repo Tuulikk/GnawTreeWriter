@@ -112,6 +112,7 @@ mod tests {
                 file_path: "src/b.rs".to_string(),
                 relations,
                 definitions: HashMap::new(),
+                imports: HashSet::new(),
             })
             .unwrap();
 
@@ -149,6 +150,7 @@ mod tests {
                 file_path: "src/b.rs".to_string(),
                 relations,
                 definitions: HashMap::new(),
+                imports: HashSet::new(),
             })
             .unwrap();
         let analyzer = ImpactAnalyzer::new(RelationalIndexer::new(dir.path()));
@@ -177,6 +179,7 @@ mod tests {
                 file_path: "src/b.rs".to_string(),
                 relations,
                 definitions: HashMap::new(),
+                imports: HashSet::new(),
             })
             .unwrap();
         let analyzer = ImpactAnalyzer::new(RelationalIndexer::new(dir.path()));
