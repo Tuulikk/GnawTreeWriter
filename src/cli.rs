@@ -825,6 +825,12 @@ impl Cli {
                     print_diff(writer.get_source(), &modified);
                 } else {
                     writer.edit(op, force)?;
+                    if let Some(r) = writer.last_edit_receipt() {
+                        println!(
+                            "✓ applied & verified on disk (bytes changed: {})",
+                            r.bytes_changed
+                        );
+                    }
                     Self::show_visual_diff(
                         &writer,
                         &target_path,

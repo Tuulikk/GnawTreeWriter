@@ -15,6 +15,7 @@ pub mod compress;
 pub mod curator;
 pub mod diagnostics;
 pub mod diff_parser;
+pub mod edit_delta;
 pub mod explore;
 pub mod file_walker;
 pub mod gnaw_diff;
@@ -68,6 +69,11 @@ pub struct GnawTreeWriter {
     /// Receipt: id of the last transaction THIS writer logged (Phase 10 —
     /// MCP callers correlate writes with history/undo). None until edit().
     last_transaction_id: Option<String>,
+    /// Receipt of the last completed edit (Fas 3). None until edit() ran.
+    last_receipt: Option<EditReceipt>,
+    /// Structured rejection verdict (Fas 5.1). Set when edit() rejects;
+    /// None while the last edit succeeded.
+    last_verdict: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -91,6 +97,20 @@ pub enum EditOperation {
     },
 }
 
+/// Receipt for a completed edit (Fas 3, docs/GUARDIAN_V2_PLAN.md): proves
+/// bytes actually landed on disk and reports how much changed. Finding #14
+/// class: a "success" without byte change must be loud, never silent.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EditReceipt {
+    pub transaction_id: String,
+    /// Disk content re-read and matched the intended content.
+    pub verified: bool,
+    /// Whole-file content hash differed before vs after.
+    pub changed: bool,
+    /// Position-aligned byte difference (see count_changed_bytes).
+    pub bytes_changed: usize,
+}
+
 impl GnawTreeWriter {
     pub fn new(file_path: &str) -> Result<Self> {
         let path = Path::new(file_path);
@@ -112,6 +132,8 @@ impl GnawTreeWriter {
             transaction_log,
             last_backup: None,
             last_transaction_id: None,
+            last_receipt: None,
+            last_verdict: None,
         })
     }
 
@@ -141,6 +163,8 @@ impl GnawTreeWriter {
                 transaction_log,
                 last_backup: None,
                 last_transaction_id: None,
+                last_receipt: None,
+                last_verdict: None,
             },
             warning,
         ))
@@ -156,6 +180,36 @@ impl GnawTreeWriter {
     /// None if nothing went through edit().
     pub fn last_transaction_id(&self) -> Option<String> {
         self.last_transaction_id.clone()
+    }
+
+    /// Receipt of the last completed edit (Fas 3, docs/GUARDIAN_V2_PLAN.md).
+    /// None until a successful edit() ran. MCP callers attach this to edit
+    /// responses so agents can verify bytes landed (breaks no-op loops).
+    pub fn last_edit_receipt(&self) -> Option<&EditReceipt> {
+        self.last_receipt.as_ref()
+    }
+
+    /// Structured rejection verdict (Fas 5.1, docs/GUARDIAN_V2_PLAN.md):
+    /// findings + suggestions for the last rejected edit. None while the
+    /// last edit() succeeded. MCP edit responses attach this as
+    /// `edit_verdict` so agents get machine-readable next steps.
+    pub fn last_edit_verdict(&self) -> Option<&serde_json::Value> {
+        self.last_verdict.as_ref()
+    }
+
+    fn set_verdict(
+        &mut self,
+        level: &str,
+        score: f32,
+        findings: Vec<serde_json::Value>,
+        suggestions: Vec<String>,
+    ) {
+        self.last_verdict = Some(serde_json::json!({
+            "level": level,
+            "score": score,
+            "findings": findings,
+            "suggestions": suggestions,
+        }));
     }
 
     pub(crate) fn create_backup(&mut self) -> Result<PathBuf> {
@@ -207,12 +261,33 @@ impl GnawTreeWriter {
     pub fn edit(&mut self, operation: EditOperation, force: bool) -> Result<()> {
         // Calculate before hash
         let before_hash = calculate_content_hash(&self.source_code);
+        let pre_edit_source = self.source_code.clone();
+        self.last_verdict = None;
 
         let modified_code = match &operation {
             EditOperation::Edit { node_path, content } => {
                 let resolved = self
                     .resolve_path(node_path)
                     .context(format!("Could not resolve node path: {}", node_path))?;
+                if resolved.content == *content {
+                    self.set_verdict(
+                        "notice",
+                        1.0,
+                        vec![serde_json::json!({
+                            "rule": "no_op",
+                            "severity": "warning",
+                            "message": "edit was a NO-OP (0 bytes would change)"
+                        })],
+                        vec![
+                            "Verify the node path and the intended change".to_string(),
+                            "Use preview_edit to inspect the target node".to_string(),
+                        ],
+                    );
+                    return Err(anyhow::anyhow!(
+                        "NO-OP: new content is identical to the current content of node {} (0 bytes would change). Nothing was written — verify the node path and intended change, or use preview_edit.",
+                        node_path
+                    ));
+                }
                 self.edit_node_at_path(&resolved.path, content)?
             }
             EditOperation::Insert {
@@ -245,17 +320,52 @@ impl GnawTreeWriter {
         };
 
         // GUARDIAN INTEGRITY CHECK: Analyze the impact of the change
-        if let EditOperation::Edit {
-            node_path,
-            content: _,
-        } = &operation
-        {
+        if let EditOperation::Edit { node_path, content } = &operation {
             if !force {
                 let resolved = self
                     .resolve_path(node_path)
                     .context("Guardian could not resolve node")?;
                 let guardian = crate::core::guardian::GuardianEngine::new();
-                let report = guardian.audit_edit(resolved, &modified_code);
+                let ext = Path::new(&self.file_path)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("");
+                let report = guardian.audit_edit_with_language(resolved, content, ext);
+
+                // Fas 5.1: structured verdict for the rejection path.
+                let level_str = match report.level {
+                    crate::core::guardian::IntegrityLevel::Critical => "critical",
+                    crate::core::guardian::IntegrityLevel::Warning => "warning",
+                    crate::core::guardian::IntegrityLevel::Notice => "notice",
+                    crate::core::guardian::IntegrityLevel::Safe => "safe",
+                };
+                let sev_str = if matches!(
+                    report.level,
+                    crate::core::guardian::IntegrityLevel::Critical
+                ) {
+                    "error"
+                } else {
+                    "warning"
+                };
+                self.set_verdict(
+                    level_str,
+                    report.score,
+                    report
+                        .messages
+                        .iter()
+                        .map(|m| {
+                            serde_json::json!({
+                                "rule": "structural_delta",
+                                "severity": sev_str,
+                                "message": m
+                            })
+                        })
+                        .collect(),
+                    vec![
+                        "Inspect the target with read_node before retrying".to_string(),
+                        "If the reduction is intentional, retry with force".to_string(),
+                    ],
+                );
 
                 match report.level {
                     crate::core::guardian::IntegrityLevel::Critical => {
@@ -300,7 +410,23 @@ impl GnawTreeWriter {
                         );
                         healed_code
                     } else {
-                        return Err(anyhow::anyhow!("Validation failed: The proposed edit would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e));
+                        self.set_verdict(
+                            "critical",
+                            0.0,
+                            vec![serde_json::json!({
+                                "rule": "syntax",
+                                "severity": "error",
+                                "message": e.to_string()
+                            })],
+                            vec![format!(
+                                "Automatic healing attempt ({}) did not resolve the syntax error",
+                                action.description
+                            )],
+                        );
+                        return Err(anyhow::anyhow!(
+                            "Validation failed: The proposed edit would result in invalid syntax.\nError: {}\nAutomatic healing attempt ({}) did not resolve it.\n\nChange was NOT applied.",
+                            e, action.description
+                        ));
                     }
                 } else {
                     let tip = match extension {
@@ -316,6 +442,16 @@ impl GnawTreeWriter {
                     }
                     msg.push_str(tip);
                     msg.push_str("\nChange was NOT applied.");
+                    self.set_verdict(
+                        "critical",
+                        0.0,
+                        vec![serde_json::json!({
+                            "rule": "syntax",
+                            "severity": "error",
+                            "message": e.to_string()
+                        })],
+                        vec![tip.trim().to_string()],
+                    );
                     return Err(anyhow::anyhow!(msg));
                 }
             }
@@ -330,24 +466,49 @@ impl GnawTreeWriter {
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             let (findings, _skipped, has_error) =
                 crate::core::rules::check_code_with_builtin(&modified_code, ext);
+            let describe = |f: &crate::core::rules::Finding| {
+                let fix = crate::core::rules::fix_for_finding(f)
+                    .map(|fx| fx.split_whitespace().collect::<Vec<_>>().join(" "))
+                    .map(|fx| format!(" — suggested fix: `{}`", fx))
+                    .unwrap_or_default();
+                format!("{} [{}:{}]{}", f.message, f.rule_id, f.line, fix)
+            };
             if has_error {
+                let findings_json: Vec<serde_json::Value> = findings
+                    .iter()
+                    .filter(|f| f.severity == crate::core::rules::Severity::Error)
+                    .map(|f| {
+                        serde_json::json!({
+                            "rule": f.rule_id,
+                            "severity": "error",
+                            "message": f.message,
+                            "fix": crate::core::rules::fix_for_finding(f)
+                        })
+                    })
+                    .collect();
+                self.set_verdict(
+                    "critical",
+                    0.0,
+                    findings_json,
+                    vec!["Rule fixes can be applied via `lint --fix` (preview first)".to_string()],
+                );
                 let msgs: Vec<String> = findings
                     .iter()
                     .filter(|f| f.severity == crate::core::rules::Severity::Error)
-                    .map(|f| f.message.clone())
+                    .map(describe)
                     .collect();
                 return Err(anyhow::anyhow!(
-                    "🛑 RULES GUARDIAN BLOCK: edit would introduce rule violations.\n- {}\nUse --force to override.",
+                    "🛑 RULES GUARDIAN BLOCK: edit would introduce rule violations.\n- {}\nRule fixes can be applied via `lint --fix` (preview first).\nUse --force to override.",
                     msgs.join("\n- ")
                 ));
             }
-            for f in findings {
+            for f in &findings {
                 let sev = match f.severity {
                     crate::core::rules::Severity::Error => "error",
                     crate::core::rules::Severity::Warning => "warning",
                     crate::core::rules::Severity::Info => "info",
                 };
-                eprintln!("⚠️  RULES GUARDIAN {}: {}", sev, f.message);
+                eprintln!("⚠️  RULES GUARDIAN {}: {}", sev, describe(f));
             }
         }
 
@@ -394,8 +555,8 @@ impl GnawTreeWriter {
             operation_type,
             PathBuf::from(&self.file_path),
             node_path,
-            Some(before_hash),
-            Some(after_hash),
+            Some(before_hash.clone()),
+            Some(after_hash.clone()),
             description.clone(),
             HashMap::new(),
         )?;
@@ -414,10 +575,31 @@ impl GnawTreeWriter {
         fs::write(&self.file_path, &modified_code)
             .context(format!("Failed to write file: {}", self.file_path))?;
 
+        // Post-write verification (Fas 3): re-read and prove the bytes
+        // landed. verified=false is an error, never a silent OK.
+        let written = fs::read_to_string(&self.file_path)
+            .context(format!("Failed to re-read after write: {}", self.file_path))?;
+        let verified = written == modified_code;
+
         // Refresh internal state to reflect the changes on disk
         self.source_code = modified_code;
         let parser = get_parser(Path::new(&self.file_path))?;
         self.tree = parser.parse(&self.source_code)?;
+
+        let receipt = EditReceipt {
+            transaction_id,
+            verified,
+            changed: before_hash != after_hash,
+            bytes_changed: count_changed_bytes(&pre_edit_source, &self.source_code),
+        };
+        let verified = receipt.verified;
+        self.last_receipt = Some(receipt);
+
+        if !verified {
+            return Err(anyhow::anyhow!(
+                "Post-write verification FAILED: file on disk does not match the intended content. The write may not have landed — inspect with history/doctor before retrying."
+            ));
+        }
 
         Ok(())
     }
@@ -770,5 +952,265 @@ pub fn find_project_root(start_path: &Path) -> PathBuf {
             // Reached root without finding anything, return start path (fallback)
             return start;
         }
+    }
+}
+
+/// Position-aligned byte difference between two source texts (Fas 3):
+/// differing bytes at shared positions, plus the length delta.
+fn count_changed_bytes(before: &str, after: &str) -> usize {
+    before
+        .bytes()
+        .zip(after.bytes())
+        .filter(|(a, b)| a != b)
+        .count()
+        + before.len().abs_diff(after.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_rust_file(code: &str) -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sample.rs");
+        std::fs::write(&path, code).unwrap();
+        let path_str = path.to_str().unwrap().to_string();
+        (dir, path_str)
+    }
+
+    /// Regression: the Guardian must compare the old NODE content with the
+    /// new NODE content. It was wired against the whole modified file,
+    /// which made the volume/complexity checks dead code.
+    #[test]
+    fn guardian_blocks_drastic_node_reduction() {
+        // `helper` keeps whole-file volume/complexity high after the edit:
+        // the pre-fix wiring (Guardian comparing node vs WHOLE FILE) passed
+        // this edit; node-vs-node correctly blocks it.
+        let code = concat!(
+            "fn big() {\n",
+            "    // alpha comment\n",
+            "    // beta comment\n",
+            "    // gamma comment\n",
+            "    if true { } else { }\n",
+            "    for i in 0..10 { }\n",
+            "    match 1 { _ => {} }\n",
+            "}\n",
+            "fn helper() {\n",
+            "    if true { } else { }\n",
+            "    for i in 0..10 { }\n",
+            "    match 1 { _ => {} }\n",
+            "}\n",
+        );
+        let (_dir, path) = temp_rust_file(code);
+        let mut gtw = GnawTreeWriter::new(&path).unwrap();
+
+        let result = gtw.edit(
+            EditOperation::Edit {
+                node_path: "@fn:big".to_string(),
+                content: "fn big() {}\n".to_string(),
+            },
+            false,
+        );
+
+        let msg = format!(
+            "{}",
+            result.expect_err("Guardian should block a drastic reduction")
+        );
+        assert!(
+            msg.contains("GUARDIAN BLOCK"),
+            "expected GUARDIAN BLOCK, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn guardian_allows_equal_size_edit() {
+        let code = concat!(
+            "fn small() {\n",
+            "    // alpha comment\n",
+            "    let x = 1;\n",
+            "}\n",
+        );
+        let (_dir, path) = temp_rust_file(code);
+        let mut gtw = GnawTreeWriter::new(&path).unwrap();
+
+        let result = gtw.edit(
+            EditOperation::Edit {
+                node_path: "@fn:small".to_string(),
+                content: "fn small() {\n    // beta comment\n    let x = 1;\n}\n".to_string(),
+            },
+            false,
+        );
+
+        assert!(
+            result.is_ok(),
+            "benign edit should pass: {:?}",
+            result.err()
+        );
+    }
+
+    /// Fas 3: an edit whose content equals the node content must be
+    /// rejected loudly (finding #14 class) and write nothing.
+    #[test]
+    fn edit_noop_is_rejected() {
+        let code = "fn small() {\n    let x = 1;\n}\n";
+        let (_dir, path) = temp_rust_file(code);
+        let mut gtw = GnawTreeWriter::new(&path).unwrap();
+        let current = gtw.show_node("@fn:small").unwrap();
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        let result = gtw.edit(
+            EditOperation::Edit {
+                node_path: "@fn:small".to_string(),
+                content: current,
+            },
+            false,
+        );
+
+        let msg = format!(
+            "{}",
+            result.expect_err("identical content must be rejected as NO-OP")
+        );
+        assert!(msg.contains("NO-OP"), "expected NO-OP, got: {}", msg);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            before,
+            "file must be untouched after a NO-OP rejection"
+        );
+    }
+
+    /// Fas 3: a successful edit produces a receipt proving bytes landed
+    /// on disk (verified) and how much changed (bytes_changed).
+    #[test]
+    fn edit_receipt_reports_verified_bytes() {
+        let code = "fn small() {\n    let x = 1;\n}\n";
+        let (_dir, path) = temp_rust_file(code);
+        let mut gtw = GnawTreeWriter::new(&path).unwrap();
+
+        gtw.edit(
+            EditOperation::Edit {
+                node_path: "@fn:small".to_string(),
+                content: "fn small() {\n    let y = 2;\n}\n".to_string(),
+            },
+            false,
+        )
+        .expect("edit should succeed");
+
+        let receipt = gtw
+            .last_edit_receipt()
+            .expect("successful edit must leave a receipt");
+        assert!(receipt.verified, "disk content must match intent");
+        assert!(
+            receipt.changed,
+            "content hash must differ after a real edit"
+        );
+        assert!(receipt.bytes_changed > 0, "bytes must have changed");
+        assert!(
+            !receipt.transaction_id.is_empty(),
+            "receipt must carry the transaction id"
+        );
+    }
+
+    /// Fas 5.2a: the RULES GUARDIAN BLOCK message must name the rule and
+    /// line so an agent can locate the violation without re-linting.
+    #[test]
+    fn rules_block_names_rule_and_line() {
+        let code = "fn small() {\n    let x = 1;\n}\n";
+        let (_dir, path) = temp_rust_file(code);
+        let mut gtw = GnawTreeWriter::new(&path).unwrap();
+
+        let result = gtw.edit(
+            EditOperation::Edit {
+                node_path: "@fn:small".to_string(),
+                content: "fn small() {\n    let a = 0;\n    a = a;\n}\n".to_string(),
+            },
+            false,
+        );
+
+        let msg = format!("{}", result.expect_err("self-assignment must be blocked"));
+        assert!(msg.contains("RULES GUARDIAN BLOCK"), "got: {}", msg);
+        assert!(msg.contains("rust_self_assignment"), "got: {}", msg);
+        assert!(msg.contains("lint --fix"), "got: {}", msg);
+    }
+
+    /// Fas 1: an edit that removes a guard AND changes the comparison is
+    /// blocked via context-aware severity upgrade, even though the file
+    /// parses and the heuristics alone would not reach Critical.
+    #[test]
+    fn guardian_blocks_guard_removal_with_operator_change() {
+        let code =
+            "fn f(a: usize, b: usize) -> usize {\n    if a < b && a > 0 { a } else { b }\n}\n";
+        let (_dir, path) = temp_rust_file(code);
+        let mut gtw = GnawTreeWriter::new(&path).unwrap();
+
+        let result = gtw.edit(
+            EditOperation::Edit {
+                node_path: "@fn:f".to_string(),
+                content: "fn f(a: usize, b: usize) -> usize {\n    if a != b { a } else { b }\n}\n"
+                    .to_string(),
+            },
+            false,
+        );
+
+        let msg = format!(
+            "{}",
+            result.expect_err("guard removal + operator change must block")
+        );
+        assert!(msg.contains("GUARDIAN BLOCK"), "got: {}", msg);
+        assert!(msg.contains("condition"), "delta message missing: {}", msg);
+    }
+
+    /// Fas 1: a lone operator change (possible legit bugfix) must NOT be
+    /// blocked — it surfaces as a warning/notice only (Gemini feedback:
+    /// avoid --force fatigue for valid changes).
+    /// Fas 2: a full regeneration that drops the bounds guard is blocked
+    /// by the invariant contract even though the tree shape changed.
+    #[test]
+    fn guardian_contract_blocks_regeneration_losing_guard() {
+        let code = "fn get(items: &[u8], i: usize) -> u8 {\n    if i < items.len() {\n        items[i]\n    } else {\n        0\n    }\n}\n";
+        let (_dir, path) = temp_rust_file(code);
+        let mut gtw = GnawTreeWriter::new(&path).unwrap();
+
+        let result = gtw.edit(
+            EditOperation::Edit {
+                node_path: "@fn:get".to_string(),
+                content: "fn get(items: &[u8], i: usize) -> u8 {\n    items[i]\n}\n".to_string(),
+            },
+            false,
+        );
+
+        let msg = format!(
+            "{}",
+            result.expect_err("regeneration losing the guard must block")
+        );
+        assert!(msg.contains("GUARDIAN BLOCK"), "got: {}", msg);
+        assert!(
+            msg.contains("Invariant contract"),
+            "contract message missing: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn lone_operator_change_is_allowed() {
+        let code =
+            "fn f(a: usize, b: usize) -> usize {\n    if a < b && a > 0 { a } else { b }\n}\n";
+        let (_dir, path) = temp_rust_file(code);
+        let mut gtw = GnawTreeWriter::new(&path).unwrap();
+
+        let result = gtw.edit(
+            EditOperation::Edit {
+                node_path: "@fn:f".to_string(),
+                content: "fn f(a: usize, b: usize) -> usize {\n    if a != b && a > 0 { a } else { b }\n}\n"
+                    .to_string(),
+            },
+            false,
+        );
+
+        assert!(
+            result.is_ok(),
+            "lone operator change must not block: {:?}",
+            result.err()
+        );
     }
 }

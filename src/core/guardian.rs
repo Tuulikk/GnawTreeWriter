@@ -1,3 +1,4 @@
+use crate::core::rules::Severity;
 use crate::parser::TreeNode;
 use serde::{Deserialize, Serialize};
 
@@ -31,8 +32,22 @@ impl GuardianEngine {
 
     /// Analyze the difference between the current node and the proposed new content
     pub fn audit_edit(&self, old_node: &TreeNode, new_content: &str) -> IntegrityReport {
+        self.audit_edit_with_language(old_node, new_content, "")
+    }
+
+    /// Fas 1 (docs/GUARDIAN_V2_PLAN.md): same audit, plus structural edit
+    /// deltas when the language parser is known. Lone operator changes stay
+    /// warnings; when the same edit also removed a condition or error
+    /// handling, operator changes are upgraded to error (context-aware
+    /// severity, Gemini feedback 2026-10-06).
+    pub fn audit_edit_with_language(
+        &self,
+        old_node: &TreeNode,
+        new_content: &str,
+        language: &str,
+    ) -> IntegrityReport {
         let mut messages = Vec::new();
-        let mut score = 1.0;
+        let mut score = 1.0f32;
 
         // 1. Volume Check (Quantitative)
         let old_len = old_node.content.len();
@@ -67,6 +82,52 @@ impl GuardianEngine {
             score -= 0.2;
             messages.push("Documentation/Comments appear to have been stripped.".into());
         }
+
+        // 4. Structural deltas (Fas 1): parse the new node content and
+        // compare trees. Penalties: error -0.35, warning -0.15, info -0.05.
+        if !language.is_empty() {
+            if let Ok(parser) = crate::parser::get_parser_for_language(language) {
+                if let Ok(new_tree) = parser.parse(new_content) {
+                    let new_root = crate::core::edit_delta::unwrap_root(&new_tree);
+                    let mut deltas = crate::core::edit_delta::diff_node_trees(old_node, new_root);
+
+                    // Fas 2: invariant contract — fires even when the edit
+                    // restructured the tree beyond index-pairing.
+                    let contract = crate::core::edit_delta::extract_contract(old_node);
+                    deltas.extend(crate::core::edit_delta::check_contract(
+                        &contract,
+                        new_content,
+                    ));
+
+                    let context_broken = deltas.iter().any(|d| {
+                        matches!(
+                            d.kind,
+                            crate::core::edit_delta::DeltaKind::ConditionRemoved
+                                | crate::core::edit_delta::DeltaKind::ErrorHandlingRemoved { .. }
+                        )
+                    });
+                    for d in deltas {
+                        let effective = if context_broken
+                            && matches!(
+                                d.kind,
+                                crate::core::edit_delta::DeltaKind::OperatorChange { .. }
+                            ) {
+                            Severity::Error
+                        } else {
+                            d.severity
+                        };
+                        score -= match effective {
+                            Severity::Error => 0.35,
+                            Severity::Warning => 0.15,
+                            Severity::Info => 0.05,
+                        };
+                        messages.push(d.message);
+                    }
+                }
+            }
+        }
+
+        let score = score.clamp(0.0, 1.0);
 
         let level = if score <= 0.3 {
             IntegrityLevel::Critical

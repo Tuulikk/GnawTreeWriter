@@ -455,6 +455,18 @@ pub fn check_code_with_builtin(code: &str, language: &str) -> (Vec<Finding>, usi
     (findings, skipped, has_error)
 }
 
+/// Fas 5.2a (docs/GUARDIAN_V2_PLAN.md): expand the `fix:` template of the
+/// builtin rule behind a finding with the finding's captured bindings.
+/// Returns None when the rule has no fix, is not a builtin rule, or the
+/// template cannot be expanded for this match.
+pub fn fix_for_finding(finding: &Finding) -> Option<String> {
+    let rule = builtin_rules()
+        .into_iter()
+        .find(|r| r.id == finding.rule_id)?;
+    let fix = rule.fix?;
+    expand_fix(&fix, &finding.captures).ok()
+}
+
 /// Options controlling a lint run over files or directories.
 pub struct LintOptions<'a> {
     /// Expand directories into their supported files. Without it, a
@@ -1013,6 +1025,25 @@ fn is_punct_node(node: &TreeNode) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fas 5.2a: fix_for_finding must expand the builtin rule's fix
+    /// template with the finding's captures (rust_string_byte_slice has
+    /// the only expression-fix among builtin rules).
+    #[test]
+    fn fix_for_finding_expands_builtin_fix() {
+        let code = "fn f(name: &str) -> usize { name[..3].len() }\n";
+        let (findings, _, _) = check_code_with_builtin(code, "rust");
+        let f = findings
+            .iter()
+            .find(|f| f.rule_id == "rust_string_byte_slice")
+            .expect("byte-slice finding expected");
+        let fix = fix_for_finding(f).expect("rule has a fix template");
+        assert!(
+            fix.contains("name.get(..3)"),
+            "captures not expanded: {}",
+            fix
+        );
+    }
 
     fn compile(pattern: &str, language: &str) -> CompiledRule {
         let rule = Rule {

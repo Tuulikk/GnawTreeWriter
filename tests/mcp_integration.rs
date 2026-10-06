@@ -1979,3 +1979,106 @@ async fn integration_mcp_write_receipts_idempotent() -> Result<(), Box<dyn std::
     server_handle.await?;
     Ok(())
 }
+
+/// Fas 5.1/5.3 contract: a rejected edit must carry a structured
+/// `edit_verdict` (level, findings, suggestions) in the MCP response.
+#[tokio::test]
+async fn integration_mcp_edit_rejection_carries_edit_verdict(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, rx) = oneshot::channel::<()>();
+    let token = Some("secret".to_string());
+    let server_handle = tokio::spawn(async move {
+        let shutdown_fut = async move {
+            let _ = rx.await;
+        };
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
+            .await
+            .unwrap();
+    });
+    let url = format!("http://{}/", addr);
+    let client = Client::new();
+    let mut ready = false;
+    for _ in 0..40 {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                ready = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_connect() {
+                    sleep(Duration::from_millis(50)).await;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(ready, "server did not become ready in time");
+
+    // Isolated project (hermetic — never operate on repo root state).
+    let dir = tempfile::tempdir()?;
+    std::fs::create_dir(dir.path().join(".git"))?;
+    let target = dir.path().join("f.rs");
+    let guarded = "fn get(items: &[u8], i: usize) -> u8 {\n    if i < items.len() {\n        items[i]\n    } else {\n        0\n    }\n}\n";
+    std::fs::write(&target, guarded)?;
+
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&json!({
+            "jsonrpc":"2.0", "method":"tools/call", "id": 9,
+            "params": {"name": "edit_node", "arguments": {
+                "file_path": target.to_string_lossy(),
+                "node_path": "@fn:get",
+                "content": "fn get(items: &[u8], i: usize) -> u8 {\n    items[i]\n}\n"
+            }}
+        }))
+        .send()
+        .await?;
+    let v: serde_json::Value = resp.json().await?;
+    let r = v
+        .get("result")
+        .expect("tool-level errors are results, not rpc errors");
+    assert_eq!(r.get("isError"), Some(&json!(true)), "{:?}", r["content"]);
+    assert_eq!(r["code"], json!("E_EDIT_REJECTED"));
+
+    let verdict = r
+        .get("edit_verdict")
+        .expect("rejected edit must carry edit_verdict");
+    assert_eq!(verdict["level"], json!("critical"));
+    let findings = verdict["findings"].as_array().expect("findings array");
+    assert!(
+        !findings.is_empty(),
+        "findings must be present: {verdict:?}"
+    );
+    assert!(
+        findings.iter().any(|f| f["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("guard") || m.contains("condition"))),
+        "findings must name the dropped guard: {verdict:?}"
+    );
+    let suggestions = verdict["suggestions"]
+        .as_array()
+        .expect("suggestions array");
+    assert!(
+        !suggestions.is_empty(),
+        "suggestions must be present: {verdict:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&target)?,
+        guarded,
+        "rejected edit must not touch the file"
+    );
+
+    let _ = tx.send(());
+    server_handle.await?;
+    Ok(())
+}

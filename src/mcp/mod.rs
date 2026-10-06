@@ -1227,6 +1227,17 @@ pub mod mcp_server {
         }
         v
     }
+    /// Fas 5.3: tool error with extra structured data (e.g. edit_verdict)
+    /// merged into the result object alongside content/code/isError.
+    fn tool_error_with_data(msg: String, code: &str, data: Value) -> Value {
+        let mut v = tool_error_code(msg, code);
+        if let Some(obj) = v.as_object_mut() {
+            if let Some(d) = data.as_object() {
+                obj.extend(d.clone());
+            }
+        }
+        v
+    }
     fn tool_success(msg: String, data: Option<Value>) -> Value {
         let mut res = json!({"content": [{ "type": "text", "text": msg }]});
         if let Some(d) = data {
@@ -3297,7 +3308,14 @@ or list_nodes for a flat index of this file.",
                 };
                 if let Err(e) = w.edit(op, false) {
                     bump_duplex_metric(&state.project_root, "rejected");
-                    return tool_error_code(format!("Edit rejected: {} — the validation details are in the message; list_nodes for current paths, preview_edit first, then retry", e), "E_EDIT_REJECTED");
+                    return match w.last_edit_verdict() {
+                        Some(v) => tool_error_with_data(
+                            format!("Edit rejected: {} — the validation details are in the message; list_nodes for current paths, preview_edit first, then retry", e),
+                            "E_EDIT_REJECTED",
+                            json!({"edit_verdict": v}),
+                        ),
+                        None => tool_error_code(format!("Edit rejected: {} — the validation details are in the message; list_nodes for current paths, preview_edit first, then retry", e), "E_EDIT_REJECTED"),
+                    };
                 }
 
                 let new_source_loaded = std::fs::read_to_string(file_path).unwrap_or_default();
@@ -3309,7 +3327,9 @@ or list_nodes for a flat index of this file.",
                     format!("Node edited.\nDiff:\n{}", diff),
                     Some(json!({
                         "diff": diff,
-                        "transaction_id": w.last_transaction_id()
+                        "transaction_id": w.last_transaction_id(),
+                        "verified": w.last_edit_receipt().map(|r| r.verified).unwrap_or(false),
+                        "bytes_changed": w.last_edit_receipt().map(|r| r.bytes_changed).unwrap_or(0)
                     })),
                     pulse,
                 )
@@ -3335,7 +3355,14 @@ or list_nodes for a flat index of this file.",
                 };
                 if let Err(e) = w.edit(op, false) {
                     bump_duplex_metric(&state.project_root, "rejected");
-                    return tool_error_code(format!("Edit rejected: {} — the validation details are in the message; list_nodes for current paths, preview_edit first, then retry", e), "E_EDIT_REJECTED");
+                    return match w.last_edit_verdict() {
+                        Some(v) => tool_error_with_data(
+                            format!("Edit rejected: {} — the validation details are in the message; list_nodes for current paths, preview_edit first, then retry", e),
+                            "E_EDIT_REJECTED",
+                            json!({"edit_verdict": v}),
+                        ),
+                        None => tool_error_code(format!("Edit rejected: {} — the validation details are in the message; list_nodes for current paths, preview_edit first, then retry", e), "E_EDIT_REJECTED"),
+                    };
                 }
 
                 let new_source_loaded = std::fs::read_to_string(file_path).unwrap_or_default();
@@ -3347,7 +3374,9 @@ or list_nodes for a flat index of this file.",
                     format!("Content inserted.\nDiff:\n{}", diff),
                     Some(json!({
                         "diff": diff,
-                        "transaction_id": w.last_transaction_id()
+                        "transaction_id": w.last_transaction_id(),
+                        "verified": w.last_edit_receipt().map(|r| r.verified).unwrap_or(false),
+                        "bytes_changed": w.last_edit_receipt().map(|r| r.bytes_changed).unwrap_or(0)
                     })),
                     pulse,
                 )
