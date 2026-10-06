@@ -667,8 +667,20 @@ så konsumenter vet vad de ska förvänta sig.
 **Vägledning träffad?** [x] ja — lib-API:t returnerade data (inte fel),
 men kontraktet var odokumenterat för detta fall.
 
----
-
+**Åtgärd (GTW, 2026-10-05):** variant (a)+(b) som föreslogs —
+`find_calls_in_scope` trådar nu det omslutande funktions-scoopen
+(`is_function_like`-hjälpare, samma nodtyper som `collect_defined_functions`)
+och sätter `from = gtw:{file}:function:{namn}`; scope-lösa anrop
+(statiska initialisrar) får det syntetiska `gtw:{file}:callsite:{line}`.
+Tom sträng är omöjlig — invarianten är testad både på fixtur
+(`calls_from_is_never_empty_and_resolves_scope`: impl-metod →
+`:function:run`, fritoppsfunn → `:function:main`, static → `:callsite:`)
+och på riktig fil (`test_debug_mcp_relations` kör nu "inget from är
+tomt" över hela mcp/mod.rs). Rustdoc på `Relation.from` dokumenterar
+kontraktet. **Verifierat mot er exakta rapportfil** (manager.rs, 91
+relationer / 15 calls som ni rapporterade): **0 tomma from**, calls
+resolver till `function:check_admission` m.fl. — er "(intern)"-lapp i
+pkg/gede/project-map.js kan tas bort när ni uppdaterar path-dep.
 ---
 
 <!-- Ny post: kopiera mallen nedan

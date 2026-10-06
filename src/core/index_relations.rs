@@ -11,7 +11,13 @@ use serde::Serialize;
 /// A relationship between two entities.
 #[derive(Debug, Clone, Serialize)]
 pub struct Relation {
-    /// Source entity ID (gtw:{file}:{type}:{name})
+    /// Source entity ID: `gtw:{file}:function:{name}` when the relation
+    /// originates inside a named function/method, `gtw:{file}:impl:{name}`
+    /// / `gtw:{file}:file:{stem}` for the other relation kinds — and for
+    /// calls without any enclosing scope (static initializers, top-level
+    /// expressions) the stable synthetic `gtw:{file}:callsite:{line}`.
+    /// NEVER an empty string (Motor2 report 2026-10-05 — consumers rely
+    /// on this to key their UIs).
     pub from: String,
     /// Target entity ID (gtw:{file}:{type}:{name})
     pub to: String,
@@ -178,7 +184,15 @@ fn extract_import_target(import_line: &str) -> Option<String> {
 fn extract_calls(tree: &TreeNode, file_path: &str, lines: &[&str], relations: &mut Vec<Relation>) {
     let mut defined_funcs: std::collections::HashSet<String> = std::collections::HashSet::new();
     collect_defined_functions(tree, &mut defined_funcs);
-    find_calls_in_scope(tree, &defined_funcs, file_path, lines, relations);
+    find_calls_in_scope(tree, &defined_funcs, file_path, lines, relations, None);
+}
+
+/// Function-like nodes whose name (when present) becomes the caller scope.
+fn is_function_like(node_type: &str) -> bool {
+    matches!(
+        node_type,
+        "function_item" | "function_definition" | "function_declaration" | "method_definition"
+    )
 }
 
 fn collect_defined_functions(tree: &TreeNode, funcs: &mut std::collections::HashSet<String>) {
@@ -201,14 +215,32 @@ fn find_calls_in_scope(
     file_path: &str,
     _lines: &[&str],
     relations: &mut Vec<Relation>,
+    enclosing: Option<&str>,
 ) {
+    // The innermost named function/method governs calls in this subtree —
+    // scope is threaded while descending (the empty-from bug report
+    // 2026-10-05 came from impl-internal call sites with no context at all).
+    let scope: Option<String> = if is_function_like(tree.node_type.as_str()) {
+        tree.get_name()
+    } else {
+        None
+    };
+    let current: Option<&str> = scope.as_deref().or(enclosing);
+
     if tree.node_type == "call_expression" {
         for child in &tree.children {
             if child.node_type == "identifier" {
                 let callee = child.get_name().unwrap_or_default();
                 if defined.contains(&callee) || callee.contains("::") {
+                    // NEVER empty (contract gtw:{file}:{type}:{name}): resolve
+                    // the enclosing function/method, else a stable synthetic
+                    // callsite id for scope-less calls (static initializers etc).
+                    let from = match current {
+                        Some(name) => format!("gtw:{}:function:{}", file_path, name),
+                        None => format!("gtw:{}:callsite:{}", file_path, tree.start_line),
+                    };
                     relations.push(Relation {
-                        from: String::new(),
+                        from,
                         to: callee,
                         relation_type: "calls".to_string(),
                         line: tree.start_line,
@@ -221,7 +253,7 @@ fn find_calls_in_scope(
     }
 
     for child in &tree.children {
-        find_calls_in_scope(child, defined, file_path, _lines, relations);
+        find_calls_in_scope(child, defined, file_path, _lines, relations, current);
     }
 }
 
@@ -380,6 +412,67 @@ fn process(data: HashMap<String, String>) -> bool {
         assert!(result.summary["imports"] >= 1);
     }
 
+    /// Motor2 report 2026-10-05: call sites inside impl blocks got an
+    /// EMPTY `from`, breaking the gtw:{file}:{type}:{name} contract.
+    /// from must always resolve to the enclosing function/method or a
+    /// stable synthetic callsite id — never "".
+    #[test]
+    fn calls_from_is_never_empty_and_resolves_scope() {
+        let source = r#"
+struct S;
+impl S {
+    fn helper() {}
+    fn run(&self) {
+        helper();
+    }
+}
+fn main() {
+    helper();
+}
+static TOP: i32 = seed();
+fn seed() -> i32 { 1 }
+"#;
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("scope_calls.rs");
+        fs::write(&path, source).unwrap();
+
+        let result = index_relations(path.to_str().unwrap()).unwrap();
+        let calls: Vec<&Relation> = result
+            .relations
+            .iter()
+            .filter(|r| r.relation_type == "calls")
+            .collect();
+        assert!(!calls.is_empty(), "expected call relations");
+
+        for r in &calls {
+            assert!(
+                !r.from.is_empty(),
+                "empty from at line {} (to={}) — contract broken",
+                r.line,
+                r.to
+            );
+            assert!(
+                r.from.starts_with("gtw:"),
+                "from must be a gtw id, got {:?}",
+                r.from
+            );
+        }
+        // Enclosing method resolved for the impl-internal call.
+        assert!(
+            calls.iter().any(|r| r.from.ends_with(":function:run")),
+            "impl-internal call must resolve to its method: {:?}",
+            calls.iter().map(|r| &r.from).collect::<Vec<_>>()
+        );
+        // Free-function scope resolves too.
+        assert!(calls.iter().any(|r| r.from.ends_with(":function:main")));
+        // Scope-less call (static initializer) gets the synthetic id.
+        assert!(
+            calls.iter().any(|r| r.from.contains(":callsite:")),
+            "static-init call must get a synthetic callsite id: {:?}",
+            calls.iter().map(|r| &r.from).collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn test_index_relations_impl_trait() {
         let source = r#"
@@ -477,5 +570,16 @@ def main():
             lines
         );
         assert!(result.relations.iter().any(|r| r.relation_type == "calls"));
+        // Real-file invariant (Motor2 report 2026-10-05): NO relation of
+        // any kind may carry an empty `from` — consumers key UIs on it.
+        for r in &result.relations {
+            assert!(
+                !r.from.is_empty(),
+                "empty from in {}:{} ({})",
+                r.file,
+                r.line,
+                r.relation_type
+            );
+        }
     }
 }
