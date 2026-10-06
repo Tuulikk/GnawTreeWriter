@@ -18,6 +18,7 @@ mcp_test.log
 !Cargo.toml
 !package.json
 !*batch.json
+!evals/*.json
 !extensions/gemini/gemini-extension.json
 !.github/hooks/*.json
 
