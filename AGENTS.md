@@ -1,8 +1,8 @@
-Ja# Contributing to GnawTreeWriter as an AI Agent
+# Contributing to GnawTreeWriter as an AI Agent
 
 **Guide for AI agents contributing to the GnawTreeWriter project through dogfooding**
 
-Version: 2.0 | Last Updated: 2025-12-27
+Version: 2.1 | Last Updated: 2026-10-06
 
 ---
 
@@ -30,6 +30,73 @@ edit the codebase, the way it is meant to be used.
   (`edit_node`, `semantic_edit`, `insert_node`, `batch`, `preview_edit`, `compress`, `pack`, `curate`, ...).
 - **In a terminal / CLI agent**: the `gnawtreewriter` binary
   (`gnawtreewriter edit <file> <path> -`, `gnawtreewriter batch <spec.json>`, ...).
+
+### 🧠 Lektioner från agent-sessioner (läs detta — det är dyr info)
+
+Dessa är icke-uppenbara fakta som orsakat riktiga problem under
+sessioner. De gäller oavsett vilket verktyg du använder.
+
+1. **Verifiera ALLTID GTW-skrivningar efteråt** (grep/omläs noden).
+   `quick-replace` har en gång rapporterat "✓ applied" utan att ändra
+   ett enda byte (fynd #14 — gardet finns nu i binären, men vanan är
+   policy: en opverifierad "framgång" ledde till en hel session felaktigt
+   diagnoserade buggar).
+2. **`quick-replace` ersätter ALLA förekomster per anrop** — loopa
+   ALDRIG ett ersättningssats där den nya texten innehåller den gamla
+   (blir exponentiell dubblett-explosion: 336 rader på minuter). Och
+   argument som börjar med `-` kräver `--`-avgränsare
+   (`quick-replace FIL -- '-sök' 'ersätt'`).
+3. **Källkod ≠ installerad binär.** Efter kodändringar är PATH:ens
+   `gnawtreewriter` ofta gammal (nytt flagga → "unrecognized subcommand",
+   fixar saknas). Bygg om: `scripts/build-gpu.sh` (GPU, podman) eller
+   `cargo install --path . --features modernbert,mcp`. Kontrollera med
+   `gnawtreewriter --version` mot `Cargo.toml`. Debug-bin:
+   `$CARGO_TARGET_DIR/debug/gnawtreewriter`.
+4. **MCP-daemoner lever kvar** i andras sessioner med binären de startade
+   med. Symptom: "gamla beteenden trots ny version". Kontroll:
+   `readlink /proc/<pid>/exe` → `(deleted)` = stela. `kill <pid>` — värden
+   spawnar nytt vid nästa anrop (inte omedelbart).
+5. **Feature-matrisen:** default OCH `mamba` båda har `modernbert` på —
+   cfg-hål utanför modernbert syns BARA i
+   `cargo check --no-default-features --all-targets` (CI kör det;
+   kör det lokalt om du rört `#[cfg]`/kommandon). LLM-vägar kräver
+   `--features mamba`.
+6. **Integrationstester MÅSTE vara hermetiska.** Aldrig operera på
+   repo-root-state (transaktionslogg/git-rötter): CI-checkoutar har
+   gitignorerade loggar, och lokalt korrumperade test ens eget repo (det
+   som såg ut som en "resurrection-bugg" var bara test som spelade
+   transaktioner). Recept: `tempfile::tempdir()` + `.git`-markör, eller
+   `serve_with_shutdown_root(listener, token, root, shutdown)`. Tunga
+   modelltester är `#[ignore]` — kör med
+   `cargo test -- --ignored --nocapture`.
+7. **Om "gammalt innehåll återkommer" efter GTW-editer** — misstänk EJ
+   GTW-cache (den misstänktes felaktigt en gång): kontrollera först
+   uppspelning av transaktionsloggar (punkt 6) och andra processer som
+   skriver filen. Och verifiera bytes — `git diff` är sanningen.
+8. **Redigeringsordning (policy):** GTW → OpenCode edit-verktyget →
+   *aldrig* python/`sed -i`/`dd`/`tee` på projektfiler (de kringgår både
+   GTW-validering och shadow-checkpoints; reglerna blockerar dem också).
+   GTW-fel är FYND: logga i `GTW_MCP_ISSUE_LOG.md` (verktyg + exakta
+   parametrar + svar + omväg), avboka sedan en kategori — varje stängd
+   post blev en riktig fix. Eskalering: ett fel → EN omväg, gå vidare,
+   logga sedan. Aldrig `git checkout` av GTW-edits (använd `undo` /
+   `restore-project --preview`).
+9. **CI innan du litar på grön status:** `validate.yml` (test + clippy
+   `-D warnings` + no-default-features) och `mcp-examples.yml`
+   (integration + Node/Python/Rust-klienter, **matris = två OS-ben ≈
+   8–10 min**) — en "in_progress"-fläta i flera minuter är normal.
+10. **Release:** följ "Release Process"-sektionen nedan; lib-yteändringar
+    (enum-/struct-fält, nya obligatoriska parametrar) kräver en
+    `### BREAKING (lib)`-sektion i CHANGELOG **innan** taggen — Motor2
+    och andra path-dep:ar litar på att brytningar ropas ut.
+11. **GPU för utvecklare:** `gnawtreewriter.yaml` → `indexing.device: auto`
+    (enda konfigen; 20 %-VRAM-gate gäller alltid) + bygg med
+    `scripts/build-gpu.sh` (podman, ingen CUDA-toolkit krävs på värden).
+    GPU är ALDRIG default — CPU är produkten, GPU är opt-in.
+12. **Diagnostik-filer att läsa innan du gissar:** `.gnawtreewriter_search_log.jsonl`
+    (misstänkta/nollträff-sökningar med prior_failures),
+    `.gnawtreewriter_metrics.json` (duplexräknare),
+    `gnawtreewriter doctor` (hälsa), `history` (vad GTW ändrade).
 
 ### GPU indexing (opt-in; devs recommended)
 
@@ -171,7 +238,9 @@ The best way to contribute to GnawTreeWriter is to use it! This practice—eatin
 
 #### Adding a New CLI Command
 
-**Scenario**: Add a `validate` command that checks file syntax
+**Scenario**: Lägg till ett nytt delkommando. Verkligt exempel:
+`validate` — **finns nu!** (`gnawtreewriter validate <file>`, både CLI och
+MCP `validate {file_path}`). Stegen nedan visar mönstret:
 
 ```bash
 # Step 1: Analyze the CLI structure
@@ -180,17 +249,27 @@ gnawtreewriter analyze src/cli.rs
 # Step 2: Find the Commands enum
 gnawtreewriter list src/cli.rs --filter-type enum_item
 
-# Step 3: Add new command variant (preview first)
-gnawtreewriter fuzzy-edit src/cli.rs "enum Commands" 'Validate { file: PathBuf }' --preview
+# Step 3: Add the variant — anchor an existing variant, prepend the new one (preview first)
+gnawtreewriter quick-replace src/cli.rs '    Status {' '    Validate {
+        /// File to validate (strict parse; nonzero exit on syntax error)
+        file: PathBuf,
+    },
+    Status {' --preview
 
-# Step 4: Apply the edit
-gnawtreewriter fuzzy-edit src/cli.rs "enum Commands" 'Validate { file: PathBuf }'
+# Step 4: Apply the same replacement WITHOUT --preview (preview wrote nothing —
+# the anchor still exists, so one apply = one insertion, never a duplicate)
+gnawtreewriter quick-replace src/cli.rs '    Status {' '    Validate {
+        /// File to validate (strict parse; nonzero exit on syntax error)
+        file: PathBuf,
+    },
+    Status {'
 
-# Step 5: Add command handler in main.rs
+# Step 5: Add the dispatch arm the same way (anchor = an existing arm)
 gnawtreewriter list src/main.rs --filter-type match_arm
-gnawtreewriter fuzzy-edit src/main.rs "Commands::Edit" 'Commands::Validate { file } => {
-    println!("Validating: {:?}", file);
-},' --preview
+gnawtreewriter quick-replace src/main.rs '            Commands::Status => {' '            Commands::Validate { file } => {
+                Self::handle_validate(&file)?;
+            }
+            Commands::Status => {' --preview
 ```
 
 #### Implementing a New Parser
@@ -225,10 +304,10 @@ impl ParserEngine for JavaParser {
 EOF
 
 # Step 2: Update Cargo.toml to add dependency
-gnawtreewriter fuzzy-edit Cargo.toml "tree-sitter-bash" 'tree-sitter-java = "0.23"' --preview
+gnawtreewriter quick-replace Cargo.toml 'tree-sitter-bash = "0.25.1"' 'tree-sitter-java = "0.23"' --preview
 
 # Step 3: Update parser/mod.rs to register the parser
-gnawtreewriter fuzzy-edit src/parser/mod.rs '"go" => Ok' '"java" => Ok(Box::new(java::JavaParser::new())),' --preview
+gnawtreewriter quick-replace src/parser/mod.rs '"go" => Ok' '"java" => Ok(Box::new(java::JavaParser::new())),' --preview
 ```
 
 #### Adding Tests
@@ -240,7 +319,7 @@ gnawtreewriter fuzzy-edit src/parser/mod.rs '"go" => Ok' '"java" => Ok(Box::new(
 gnawtreewriter list src/core/mod.rs --filter-type function_definition
 
 # Step 2: Add test module
-gnawtreewriter fuzzy-edit src/core/mod.rs "#[cfg(test)]" '
+gnawtreewriter quick-replace src/core/mod.rs "#[cfg(test)]" '
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,16 +341,17 @@ mod tests {
 gnawtreewriter list README.md --filter-type heading
 
 # Step 2: Find the CLI Commands section
-gnawtreewriter find README.md --content "## CLI Commands"
+gnawtreewriter search README.md "## CLI Commands"
 
-# Step 3: Add documentation for the new command
-gnawtreewriter fuzzy-edit README.md "## CLI Commands" '
+# Step 3: Insert documentation for the new command AFTER the heading
+# (quick-insert adds after matching lines; --unique inserts only at the first match)
+gnawtreewriter quick-insert README.md --after "## CLI Commands" '
 ### validate
 Check file syntax without making changes.
 
 ```bash
 gnawtreewriter validate <file_path>
-```' --preview
+```' --unique --preview
 ```
 
 #### Batch Multi-File Operations
@@ -331,13 +411,13 @@ gnawtreewriter undo --steps 3
 **Scenario**: Make a quick edit to a single file with minimal overhead
 
 ```bash
-# Node-edit mode (AST-based)
-gnawtreewriter quick app.py --node "0.1.0" --content "def new_function():" --preview
-gnawtreewriter quick app.py --node "0.1.0" --content "def new_function():"
+# Node-edit mode (AST-based): edit node at path — preview first, then apply
+gnawtreewriter edit app.py "0.1.0" 'def new_function():' --preview
+gnawtreewriter edit app.py "0.1.0" 'def new_function():'
 
-# Find/replace mode (text-based)
-gnawtreewriter quick app.py --find "old_function" --replace "new_function" --preview
-gnawtreewriter quick app.py --find "old_function" --replace "new_function"
+# Find/replace mode (text-based): replaces ALL occurrences — preview first, then apply
+gnawtreewriter quick-replace app.py 'old_function' 'new_function' --preview
+gnawtreewriter quick-replace app.py 'old_function' 'new_function'
 ```
 
 **Key Benefits for AI Agents:**
@@ -486,10 +566,10 @@ fn parse_file(path: &Path) -> TreeNode {
 ```bash
 # Step 1: Analyze the find command structure
 gnawtreewriter analyze src/cli.rs
-gnawtreewriter find src/cli.rs --content "Commands::Find"
+gnawtreewriter search src/cli.rs "Commands::Find"
 
 # Step 2: Add fuzzy command to enum
-gnawtreewriter fuzzy-edit src/cli.rs "Find" 'Fuzzy { file: PathBuf, query: String }' --preview
+gnawtreewriter quick-replace src/cli.rs "Find" 'Fuzzy { file: PathBuf, query: String }' --preview
 
 # Step 3: Implement fuzzy matching in core
 # Create src/core/fuzzy.rs with fuzzy search logic
@@ -503,10 +583,10 @@ gnawtreewriter fuzzy-edit src/cli.rs "Find" 'Fuzzy { file: PathBuf, query: Strin
 ```bash
 # Step 1: Find error handling code
 gnawtreewriter list src/core/mod.rs --filter-type function_definition
-gnawtreewriter find src/core/mod.rs --content "map_err"
+gnawtreewriter search src/core/mod.rs "map_err"
 
 # Step 2: Improve error message
-gnawtreewriter fuzzy-edit src/core/mod.rs "map_err" '.map_err(|e| {
+gnawtreewriter quick-replace src/core/mod.rs "map_err" '.map_err(|e| {
     anyhow::anyhow!(
         "Failed to parse '{}': {}. Tip: Check file syntax with `gnawtreewriter validate`",
         path.display(),
@@ -912,7 +992,7 @@ Ensure these are always in sync:
 - **Gemini**: Designed the session management architecture
 - **Claude**: Improved error handling and added comprehensive tests
 - **GLM-4.7**: Implemented multiple parser engines and CLI commands
-- **Raptor Mini**: Provided critical UX feedback that improved the fuzzy-edit workflow
+- **Raptor Mini**: Provided critical UX feedback that improved the quick-replace workflow
 
 These contributions demonstrate that AI agents, when used appropriately and following best practices, can make meaningful contributions to complex software projects.
 
