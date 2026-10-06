@@ -2,7 +2,7 @@
 use crate::core::LabelManager;
 use anyhow::Result;
 #[cfg(feature = "modernbert")]
-use candle_core::{DType, Device, Tensor};
+use candle_core::{DType, Device, IndexOp, Tensor};
 #[cfg(feature = "modernbert")]
 use candle_nn::{self, VarBuilder};
 #[cfg(feature = "modernbert")]
@@ -352,6 +352,92 @@ impl ModernBertModel {
         }
     }
 
+    /// Batched BGE document embedding: same greedy-window batching as
+    /// the MLM path (B x max_len^2 attention budget, order-preserving),
+    /// then CLS pooling + L2 normalization per row. Padding is masked
+    /// out of the attention, so results match the single-text path to
+    /// float precision.
+    fn bge_embed_batched(&self, model: &BertModel, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        // Measured on this repo: window padding LOSES on GPU (36 s vs
+        // 20 s for sequential true-length forwards) — run per-text there.
+        if matches!(self.device, Device::Cuda(_)) {
+            return texts
+                .iter()
+                .map(|t| Ok(self.get_embedding(t)?.to_vec1()?))
+                .collect();
+        }
+        const EMBED_BATCH: usize = 16;
+        const MAX_B_T2: usize = 4_194_304; // 2^22, same budget as MLM path
+                                           // A text longer than this runs ALONE: a window padded to T=512
+                                           // with B=16 materializes a [16, 12, 512, 512] attention tensor
+                                           // (~200 MB) that thrashes CPU caches — measured far slower than
+                                           // per-text forwards. Short texts (the common case) still batch.
+        const LONG_TEXT_TOKENS: usize = 256;
+        let mut out: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
+        let encodings = texts
+            .iter()
+            .map(|t| self.tokenizer.encode(*t, true).map_err(anyhow::Error::msg))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut i = 0;
+        while i < encodings.len() {
+            let mut j = i;
+            let mut max_len = 1usize;
+            while j < encodings.len() {
+                let len = encodings[j].get_ids().len();
+                if len > LONG_TEXT_TOKENS && j > i {
+                    // Long text: close the current window here; it will
+                    // become its own B=1 window on the next iteration.
+                    break;
+                }
+                let new_max = max_len.max(len);
+                let n = j - i + 1;
+                if n > 1 && (n * new_max * new_max > MAX_B_T2 || new_max > LONG_TEXT_TOKENS) {
+                    // Never mix a long text into a multi-row window.
+                    break;
+                }
+                if n >= EMBED_BATCH {
+                    break;
+                }
+                max_len = new_max;
+                j += 1;
+            }
+
+            let batch = &encodings[i..j];
+            if batch.len() == 1 && batch[0].get_ids().len() > LONG_TEXT_TOKENS {
+                // Long text: true-length forward, no window padding.
+                let single = self.bge_embed(model, texts[i], false)?;
+                out.push(single.to_vec1()?);
+                i = j;
+                continue;
+            }
+            let mut flat_ids: Vec<i64> = Vec::with_capacity(batch.len() * max_len);
+            let mut flat_mask: Vec<i64> = Vec::with_capacity(batch.len() * max_len);
+            for enc in batch {
+                let ids = enc.get_ids();
+                flat_ids.extend(ids.iter().map(|&id| id as i64));
+                flat_mask.extend(std::iter::repeat_n(1i64, ids.len()));
+                let pad = max_len - ids.len();
+                flat_ids.extend(std::iter::repeat_n(0i64, pad));
+                flat_mask.extend(std::iter::repeat_n(0i64, pad));
+            }
+            let input_ids = Tensor::from_vec(flat_ids, (batch.len(), max_len), &self.device)?;
+            let mask = Tensor::from_vec(flat_mask, (batch.len(), max_len), &self.device)?;
+            let token_type_ids = input_ids.zeros_like()?;
+            let sequence = model.forward(&input_ids, &token_type_ids, Some(&mask))?; // [B, T, H]
+
+            // CLS pooling: first token of every row -> [B, H], then
+            // L2-normalize (the BGE model card contract).
+            let cls = sequence.i((.., 0))?; // [B, H]
+            let norm = cls.sqr()?.sum(1)?.sqrt()?.unsqueeze(1)?; // [B, 1]
+            let normalized = cls.broadcast_div(&norm)?;
+            out.extend(normalized.to_vec2::<f32>()?);
+
+            i = j;
+        }
+        Ok(out)
+    }
+
     /// BGE embed per model card: CLS pooling + L2 normalization;
     /// queries get the retrieval prefix, passages are embedded raw.
     fn bge_embed(&self, model: &BertModel, text: &str, is_query: bool) -> Result<Tensor> {
@@ -381,14 +467,8 @@ impl ModernBertModel {
     /// indexing hot path (one forward PER NODE) into one forward per 16
     /// nodes; a single row reduces exactly to get_embedding.
     pub fn get_embeddings(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        if matches!(self.backbone, EmbeddingBackbone::Bge(_)) {
-            // Correctness-first: BGE via the single-text path (CLS +
-            // normalize). Indexing is a few times slower than the MLM
-            // batching, but the embeddings actually work for retrieval.
-            return texts
-                .iter()
-                .map(|t| Ok(self.get_embedding(t)?.to_vec1()?))
-                .collect();
+        if let EmbeddingBackbone::Bge(model) = &self.backbone {
+            return self.bge_embed_batched(model, texts);
         }
         const EMBED_BATCH: usize = 16;
         // Attention-score budget per forward: B * max_len^2. A flat padded

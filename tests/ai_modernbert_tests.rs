@@ -111,3 +111,74 @@ fn batch_embeddings_match_singles() -> Result<()> {
     }
     Ok(())
 }
+
+/// BGE twin of `batch_embeddings_match_singles`: the batched document
+/// path (windowed padding, attention-masked) must match the sequential
+/// single-text path (CLS pooling + L2 norm) to float precision. Ragged
+/// lengths included ("x" forces heavy padding on its row).
+///
+/// `#[ignore]`: heavy BGE forwards in debug mode — run explicitly:
+///   cargo test --test ai_modernbert_tests -- --ignored --nocapture
+#[cfg(feature = "modernbert")]
+#[test]
+#[ignore = "heavy: debug BGE forwards; run when touching bge_embed_batched"]
+fn bge_batch_embeddings_match_singles() -> Result<()> {
+    let project_root = std::env::current_dir()?;
+    if !project_root
+        .join(".gnawtreewriter_ai/models/bge-base/model.safetensors")
+        .exists()
+    {
+        eprintln!("skipping BGE batch test: bge-base model not installed");
+        return Ok(());
+    }
+    let manager = AiManager::new(&project_root)?;
+    let model = manager.load_model(
+        gnawtreewriter::llm::AiModel::Bge,
+        gnawtreewriter::llm::DeviceType::Cpu,
+    )?;
+
+    let mut texts: Vec<String> = vec![
+        "fn undo_last_transaction() { /* revert */ }".to_string(),
+        "pub struct SemanticIndex { entries: Vec<NodeEmbedding> }".to_string(),
+        "x".to_string(), // deliberately tiny — heavy padding on its row
+        "use std::collections::HashMap;".to_string(),
+    ];
+    for i in 0..20 {
+        texts.push(format!(
+            "impl Handler{i} {{ fn handle(&self, x: u32) -> u32 {{ x.saturating_add({i}) }} }}"
+        ));
+    }
+    let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+
+    let t0 = std::time::Instant::now();
+    let mut singles: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
+    for text in &texts {
+        singles.push(model.get_embedding(text)?.to_vec1()?);
+    }
+    let sequential = t0.elapsed();
+
+    let t1 = std::time::Instant::now();
+    let batch = model.get_embeddings(&refs)?;
+    let batched = t1.elapsed();
+    eprintln!(
+        "timing: {} texts — sequential {:?} vs batched {:?} ({:.1}x)",
+        texts.len(),
+        sequential,
+        batched,
+        sequential.as_secs_f64() / batched.as_secs_f64().max(1e-9)
+    );
+
+    assert_eq!(batch.len(), texts.len(), "one vector per input, in order");
+    for (i, single) in singles.iter().enumerate() {
+        assert_eq!(batch[i].len(), single.len(), "row {i} dimension");
+        let dot: f32 = batch[i].iter().zip(single).map(|(a, b)| a * b).sum();
+        let na: f32 = batch[i].iter().map(|a| a * a).sum::<f32>().sqrt();
+        let nb: f32 = single.iter().map(|b| b * b).sum::<f32>().sqrt();
+        let cos = dot / (na * nb);
+        assert!(
+            cos > 0.999,
+            "batch row {i} diverged from sequential BGE embedding: cos={cos}"
+        );
+    }
+    Ok(())
+}
