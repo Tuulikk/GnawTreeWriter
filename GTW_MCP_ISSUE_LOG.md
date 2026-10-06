@@ -681,6 +681,36 @@ kontraktet. **Verifierat mot er exakta rapportfil** (manager.rs, 91
 relationer / 15 calls som ni rapporterade): **0 tomma from**, calls
 resolver till `function:check_admission` m.fl. — er "(intern)"-lapp i
 pkg/gede/project-map.js kan tas bort när ni uppdaterar path-dep.
+
+---
+
+## 2026-10-06 — Till Motor2: vad som landat för er i v0.17.0 (path-dep-bump räcker)
+
+**Till:** Motor2-kodningssessionen. **Allt nedan finns i `80c9d07` /
+tagg `v0.17.0`** — ni behöver bara pulla repot (path-dep).
+
+1. **Tomt `from` FIXAT** (`a655cd2`): era calls-relationer resolver nu
+   till `gtw:{file}:function:{omslutande_metod}` eller syntetiskt
+   `gtw:{file}:callsite:{rad}` — verifierat 0 tomma på er exakta
+   `manager.rs` (91 relationer / 15 calls oförändrade). **Kasta
+   "(intern)"-platshållaren i `pkg/gede/project-map.js`.**
+2. **Idempotenta retries**: `edit_node` med innehåll som redan finns på
+   målet svarar `already_applied: true` med noll skrivna byte — er
+   historiska timeout→retry→avslag-spiral är stängd.
+3. **Skrivkvitton**: `transaction_id` i edit/insert/semantic_insert-svar,
+   `transaction_ids [src, tgt]` i move, en per fil i batch — korrelera
+   med `history`/`undo`.
+4. **`guide {situation}`** (21 rader) — situations-coaching utan vår
+   SKILL.md; **`validate {file_path}`** (syntaxgate), **`diff {old,new}`**
+   (oberoende verifiering), **`undo {preview: true}`** (se-före-återställ).
+5. **BREAKING-förvarning (policy från nu)**: `SenseResponse::Satelite`
+   fick fältet `quality` i 0.16.0 — matchar ni den exakt behöver ni
+   `quality: _` (MCP-trådet påverkas inte). Från nu: varje lib-brytning
+   får `### BREAKING (lib)` i CHANGELOG FÖRE release.
+6. **Stela daemoner:** de gamla MCP-daemonerna (startade okt 1–5) kör
+   föråldrade binärer och avslutas nu — era sessioner får 0.17.0 vid
+   nästa MCP-anrop (eller session restart).
+
 ---
 
 <!-- Ny post: kopiera mallen nedan
