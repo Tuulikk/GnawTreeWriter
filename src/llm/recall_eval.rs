@@ -10,6 +10,7 @@
 //! (case-insensitive).
 
 use crate::core::find_project_root;
+use crate::llm::semantic_index::{rerank_satellite, NodeEmbedding};
 use crate::llm::{indexing_device, AiManager, AiModel, SemanticIndexManager};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -27,18 +28,30 @@ pub struct RecallCase {
 #[derive(Debug, Serialize)]
 pub struct CaseResult {
     pub query: String,
-    /// 1-based rank of the expected hit in top-k; None = miss.
+    /// Rank in the RAW cosine top-k (model diagnostic); None = miss.
     pub hit_at_rank: Option<usize>,
+    /// Rank via the sense pipeline — wide cosine window + rerank
+    /// (lexical signals, decl/impl priors, per-file diversity), i.e.
+    /// what `gnawtreewriter sense` actually serves.
+    pub hit_at_rank_pipeline: Option<usize>,
     pub top_cosine: f32,
+    /// Adjusted (post-rerank) score of the top pipeline hit.
+    pub top_adjusted: Option<f32>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct RecallReport {
     pub cases: usize,
+    /// Hits via the sense pipeline (what users get).
     pub hits: usize,
     pub recall_at_1: f64,
     pub recall_at_k: f64,
     pub mrr: f64,
+    /// Raw-cosine diagnostics (the embedding model alone).
+    pub raw_hits: usize,
+    pub raw_recall_at_1: f64,
+    pub raw_recall_at_k: f64,
+    pub raw_mrr: f64,
     pub mean_embed_ms: f64,
     pub mean_search_ms: f64,
     pub k: usize,
@@ -80,6 +93,7 @@ pub fn run_recall_eval(eval_path: &Path, k: usize, json_out: bool) -> Result<()>
     let mut sum_embed_ms = 0.0f64;
     let mut sum_search_ms = 0.0f64;
     let mut reciprocal_sum = 0.0f64;
+    let mut raw_reciprocal_sum = 0.0f64;
 
     for case in &cases {
         let t0 = std::time::Instant::now();
@@ -93,37 +107,58 @@ pub fn run_recall_eval(eval_path: &Path, k: usize, json_out: bool) -> Result<()>
         sum_embed_ms += embed_ms;
         sum_search_ms += search_ms;
 
-        let hit_at_rank = hits
-            .iter()
-            .position(|(e, _)| {
-                e.file_path.ends_with(&case.expect_file)
-                    && case
-                        .expect_preview
-                        .as_deref()
-                        .map(|p| e.content_preview.to_lowercase().contains(&p.to_lowercase()))
-                        .unwrap_or(true)
-            })
-            .map(|i| i + 1);
+        // The wide window + rerank the sense pipeline actually serves
+        // (same shape as gnaw_sense: 2000 candidates, threshold 0.1).
+        let wide = index.search_with_threshold(&query_vector, 2000, 0.1);
+        let reranked = rerank_satellite(&case.query, wide, k);
 
-        if let Some(rank) = hit_at_rank {
+        let is_hit = |e: &NodeEmbedding| {
+            e.file_path.ends_with(&case.expect_file)
+                && case
+                    .expect_preview
+                    .as_deref()
+                    .map(|p| e.content_preview.to_lowercase().contains(&p.to_lowercase()))
+                    .unwrap_or(true)
+        };
+        let hit_at_rank = hits.iter().position(|(e, _)| is_hit(e)).map(|i| i + 1);
+        let hit_at_rank_pipeline = reranked.iter().position(|h| is_hit(h.entry)).map(|i| i + 1);
+
+        if let Some(rank) = hit_at_rank_pipeline {
             reciprocal_sum += 1.0 / rank as f64;
+        }
+        if let Some(rank) = hit_at_rank {
+            raw_reciprocal_sum += 1.0 / rank as f64;
         }
 
         per_case.push(CaseResult {
             query: case.query.clone(),
             hit_at_rank,
+            hit_at_rank_pipeline,
             top_cosine: hits.first().map(|(_, s)| *s).unwrap_or(0.0),
+            top_adjusted: reranked.first().map(|h| h.adjusted),
         });
     }
 
     let n = cases.len() as f64;
-    let hits = per_case.iter().filter(|r| r.hit_at_rank.is_some()).count();
+    let hits = per_case
+        .iter()
+        .filter(|r| r.hit_at_rank_pipeline.is_some())
+        .count();
+    let raw_hits = per_case.iter().filter(|r| r.hit_at_rank.is_some()).count();
     let report = RecallReport {
         cases: cases.len(),
         hits,
-        recall_at_1: per_case.iter().filter(|r| r.hit_at_rank == Some(1)).count() as f64 / n,
+        recall_at_1: per_case
+            .iter()
+            .filter(|r| r.hit_at_rank_pipeline == Some(1))
+            .count() as f64
+            / n,
         recall_at_k: hits as f64 / n,
         mrr: reciprocal_sum / n,
+        raw_hits,
+        raw_recall_at_1: per_case.iter().filter(|r| r.hit_at_rank == Some(1)).count() as f64 / n,
+        raw_recall_at_k: raw_hits as f64 / n,
+        raw_mrr: raw_reciprocal_sum / n,
         mean_embed_ms: sum_embed_ms / n,
         mean_search_ms: sum_search_ms / n,
         k,
@@ -140,11 +175,18 @@ pub fn run_recall_eval(eval_path: &Path, k: usize, json_out: bool) -> Result<()>
             index.entries.len()
         );
         println!(
-            "  recall@1: {:5.1}%   recall@{}: {:5.1}%   MRR: {:.3}",
+            "  pipeline  recall@1: {:5.1}%   recall@{}: {:5.1}%   MRR: {:.3}",
             report.recall_at_1 * 100.0,
             report.k,
             report.recall_at_k * 100.0,
             report.mrr
+        );
+        println!(
+            "  raw cos   recall@1: {:5.1}%   recall@{}: {:5.1}%   MRR: {:.3}",
+            report.raw_recall_at_1 * 100.0,
+            report.k,
+            report.raw_recall_at_k * 100.0,
+            report.raw_mrr
         );
         println!(
             "  mean embed: {:.0} ms   mean search: {:.1} ms",
@@ -152,12 +194,16 @@ pub fn run_recall_eval(eval_path: &Path, k: usize, json_out: bool) -> Result<()>
         );
         println!();
         for r in &report.per_case {
-            let status = match r.hit_at_rank {
+            let pipe = match r.hit_at_rank_pipeline {
                 Some(1) => "hit (1)".to_string(),
                 Some(rank) => format!("hit ({rank})"),
                 None => "MISS    ".to_string(),
             };
-            println!("  {} cos={:.2}  {}", status, r.top_cosine, r.query);
+            let raw = match r.hit_at_rank {
+                Some(rank) => format!("raw({rank})"),
+                None => "raw(-)  ".to_string(),
+            };
+            println!("  {} {} cos={:.2}  {}", pipe, raw, r.top_cosine, r.query);
         }
     }
     Ok(())
