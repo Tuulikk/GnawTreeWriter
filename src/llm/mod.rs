@@ -1,6 +1,7 @@
 pub mod ai_manager;
 pub mod batch;
 pub mod gnaw_sense;
+pub mod impact_analyzer;
 pub mod llm_integration;
 #[cfg(feature = "mamba")]
 pub mod pipeline;
@@ -14,6 +15,7 @@ pub mod semantic_index;
 pub use ai_manager::*;
 pub use batch::*;
 pub use gnaw_sense::*;
+pub use impact_analyzer::*;
 pub use llm_integration::*;
 #[cfg(feature = "modernbert")]
 pub use project_indexer::*;

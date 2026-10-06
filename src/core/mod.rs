@@ -74,6 +74,10 @@ pub struct GnawTreeWriter {
     /// Structured rejection verdict (Fas 5.1). Set when edit() rejects;
     /// None while the last edit succeeded.
     last_verdict: Option<serde_json::Value>,
+    /// Fas 4: impact report when an edit changed a symbol signature and
+    /// the knowledge graph has callers. None otherwise (omitted, not an
+    /// error — missing index is normal).
+    last_impact: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -134,6 +138,7 @@ impl GnawTreeWriter {
             last_transaction_id: None,
             last_receipt: None,
             last_verdict: None,
+            last_impact: None,
         })
     }
 
@@ -165,6 +170,7 @@ impl GnawTreeWriter {
                 last_transaction_id: None,
                 last_receipt: None,
                 last_verdict: None,
+                last_impact: None,
             },
             warning,
         ))
@@ -210,6 +216,13 @@ impl GnawTreeWriter {
             "findings": findings,
             "suggestions": suggestions,
         }));
+    }
+
+    /// Fas 4: impact report for the last edit (changed signature with
+    /// known callers), or None when the edit did not change a signature,
+    /// was rejected, or the index is missing.
+    pub fn last_edit_impact(&self) -> Option<&serde_json::Value> {
+        self.last_impact.as_ref()
     }
 
     pub(crate) fn create_backup(&mut self) -> Result<PathBuf> {
@@ -263,6 +276,7 @@ impl GnawTreeWriter {
         let before_hash = calculate_content_hash(&self.source_code);
         let pre_edit_source = self.source_code.clone();
         self.last_verdict = None;
+        self.last_impact = None;
 
         let modified_code = match &operation {
             EditOperation::Edit { node_path, content } => {
@@ -331,6 +345,37 @@ impl GnawTreeWriter {
                     .and_then(|e| e.to_str())
                     .unwrap_or("");
                 let report = guardian.audit_edit_with_language(resolved, content, ext);
+
+                // Fas 4: signature-aware impact via the knowledge graph.
+                // Missing index ⇒ omit the field entirely, never an error.
+                // (Runs before set_verdict: resolved borrows self, so it
+                // must not be used after the mutable verdict write.)
+                if report
+                    .deltas
+                    .iter()
+                    .any(|d| matches!(d.kind, crate::core::edit_delta::DeltaKind::SignatureChange))
+                {
+                    if let Some(name) = resolved.get_name() {
+                        let root = crate::core::find_project_root(Path::new(&self.file_path));
+                        let analyzer = crate::llm::ImpactAnalyzer::new_with_root(&root);
+                        if let Ok(ir) = analyzer.analyze_impact(&name, &self.file_path) {
+                            let mut sites = Vec::new();
+                            for af in &ir.affected_files {
+                                for cp in &af.call_paths {
+                                    sites.push(format!("{}:{}", af.file_path, cp));
+                                }
+                            }
+                            let callers = sites.len();
+                            if callers > 0 {
+                                self.last_impact = Some(serde_json::json!({
+                                    "symbol": name,
+                                    "callers": callers,
+                                    "sites": sites,
+                                }));
+                            }
+                        }
+                    }
+                }
 
                 // Fas 5.1: structured verdict for the rejection path.
                 let level_str = match report.level {
@@ -1212,5 +1257,65 @@ mod tests {
             "lone operator change must not block: {:?}",
             result.err()
         );
+    }
+
+    /// Fas 4: a signature change reports impacted call sites from the
+    /// knowledge graph. Hermetic: tempdir project with .git marker.
+    #[test]
+    fn signature_change_reports_impact_via_knowledge_graph() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+        let def_path = dir.path().join("lib.rs");
+        let call_path = dir.path().join("caller.rs");
+        std::fs::write(&def_path, "fn target(alpha: u32) -> u32 {\n    alpha\n}\n").unwrap();
+        std::fs::write(&call_path, "fn caller() -> u32 {\n    target(1)\n}\n").unwrap();
+
+        // Build the knowledge graph (saved under .gnawtreewriter_ai/graph/).
+        let mut indexer = crate::llm::RelationalIndexer::new(dir.path());
+        indexer.index_directory(dir.path()).unwrap();
+
+        let mut gtw = GnawTreeWriter::new(def_path.to_str().unwrap()).unwrap();
+        let result = gtw.edit(
+            EditOperation::Edit {
+                node_path: "@fn:target".to_string(),
+                content: "fn target(alpha: u32, beta: u32) -> u32 {\n    alpha + beta\n}\n"
+                    .to_string(),
+            },
+            false,
+        );
+        assert!(
+            result.is_ok(),
+            "signature widening must pass: {:?}",
+            result.err()
+        );
+
+        let impact = gtw
+            .last_edit_impact()
+            .expect("signature change with indexed caller must carry impact");
+        assert_eq!(impact["callers"], 1);
+        let site = impact["sites"][0].as_str().unwrap();
+        assert!(
+            site.contains("caller.rs"),
+            "site must name the caller file: {}",
+            site
+        );
+    }
+
+    /// Fas 4: edits that do not change a signature must not carry impact.
+    #[test]
+    fn no_signature_change_no_impact_field() {
+        let code = "fn f(a: usize) -> usize {\n    a\n}\n";
+        let (_dir, path) = temp_rust_file(code);
+        let mut gtw = GnawTreeWriter::new(&path).unwrap();
+        gtw.edit(
+            EditOperation::Edit {
+                node_path: "@fn:f".to_string(),
+                content: "fn f(a: usize) -> usize {\n    a + 0\n}\n".to_string(),
+            },
+            false,
+        )
+        .unwrap();
+        assert!(gtw.last_edit_impact().is_none());
     }
 }

@@ -15,6 +15,11 @@ pub struct IntegrityReport {
     pub level: IntegrityLevel,
     pub score: f32, // 0.0 (total destruction) to 1.0 (perfectly safe)
     pub messages: Vec<String>,
+    /// Fas 4 (docs/GUARDIAN_V2_PLAN.md): the structural deltas behind this
+    /// report (empty for audit_edit without a known language). Skipped in
+    /// serde — EditDelta has no Deserialize and this is runtime info.
+    #[serde(skip)]
+    pub deltas: Vec<crate::core::edit_delta::EditDelta>,
 }
 
 pub struct GuardianEngine;
@@ -85,6 +90,7 @@ impl GuardianEngine {
 
         // 4. Structural deltas (Fas 1): parse the new node content and
         // compare trees. Penalties: error -0.35, warning -0.15, info -0.05.
+        let mut report_deltas: Vec<crate::core::edit_delta::EditDelta> = Vec::new();
         if !language.is_empty() {
             if let Ok(parser) = crate::parser::get_parser_for_language(language) {
                 if let Ok(new_tree) = parser.parse(new_content) {
@@ -106,7 +112,8 @@ impl GuardianEngine {
                                 | crate::core::edit_delta::DeltaKind::ErrorHandlingRemoved { .. }
                         )
                     });
-                    for d in deltas {
+                    report_deltas = deltas;
+                    for d in &report_deltas {
                         let effective = if context_broken
                             && matches!(
                                 d.kind,
@@ -121,7 +128,7 @@ impl GuardianEngine {
                             Severity::Warning => 0.15,
                             Severity::Info => 0.05,
                         };
-                        messages.push(d.message);
+                        messages.push(d.message.clone());
                     }
                 }
             }
@@ -143,6 +150,7 @@ impl GuardianEngine {
             level,
             score,
             messages,
+            deltas: report_deltas,
         }
     }
 

@@ -1238,6 +1238,16 @@ pub mod mcp_server {
         }
         v
     }
+
+    /// Fas 4: attach the impact report to a successful edit response —
+    /// only when there IS impact data (signature change with indexed
+    /// callers). Missing index ⇒ field omitted, never null noise.
+    fn attach_impact(mut result: Value, w: &GnawTreeWriter) -> Value {
+        if let (Some(obj), Some(impact)) = (result.as_object_mut(), w.last_edit_impact()) {
+            obj.insert("impact".to_string(), impact.clone());
+        }
+        result
+    }
     fn tool_success(msg: String, data: Option<Value>) -> Value {
         let mut res = json!({"content": [{ "type": "text", "text": msg }]});
         if let Some(d) = data {
@@ -3323,15 +3333,18 @@ or list_nodes for a flat index of this file.",
                 bump_duplex_metric(&state.project_root, "validated");
                 bump_duplex_metric(&state.project_root, "applied");
                 let pulse = generate_pulse(state, file_path, node_path);
-                tool_success_with_pulse(
-                    format!("Node edited.\nDiff:\n{}", diff),
-                    Some(json!({
-                        "diff": diff,
-                        "transaction_id": w.last_transaction_id(),
-                        "verified": w.last_edit_receipt().map(|r| r.verified).unwrap_or(false),
-                        "bytes_changed": w.last_edit_receipt().map(|r| r.bytes_changed).unwrap_or(0)
-                    })),
-                    pulse,
+                attach_impact(
+                    tool_success_with_pulse(
+                        format!("Node edited.\nDiff:\n{}", diff),
+                        Some(json!({
+                            "diff": diff,
+                            "transaction_id": w.last_transaction_id(),
+                            "verified": w.last_edit_receipt().map(|r| r.verified).unwrap_or(false),
+                            "bytes_changed": w.last_edit_receipt().map(|r| r.bytes_changed).unwrap_or(0)
+                        })),
+                        pulse,
+                    ),
+                    &w,
                 )
             }
             Err(e) => open_error(file_path, &e),
@@ -3370,15 +3383,18 @@ or list_nodes for a flat index of this file.",
                 bump_duplex_metric(&state.project_root, "validated");
                 bump_duplex_metric(&state.project_root, "applied");
                 let pulse = generate_pulse(state, file_path, parent_path); // Pulse for parent
-                tool_success_with_pulse(
-                    format!("Content inserted.\nDiff:\n{}", diff),
-                    Some(json!({
-                        "diff": diff,
-                        "transaction_id": w.last_transaction_id(),
-                        "verified": w.last_edit_receipt().map(|r| r.verified).unwrap_or(false),
-                        "bytes_changed": w.last_edit_receipt().map(|r| r.bytes_changed).unwrap_or(0)
-                    })),
-                    pulse,
+                attach_impact(
+                    tool_success_with_pulse(
+                        format!("Content inserted.\nDiff:\n{}", diff),
+                        Some(json!({
+                            "diff": diff,
+                            "transaction_id": w.last_transaction_id(),
+                            "verified": w.last_edit_receipt().map(|r| r.verified).unwrap_or(false),
+                            "bytes_changed": w.last_edit_receipt().map(|r| r.bytes_changed).unwrap_or(0)
+                        })),
+                        pulse,
+                    ),
+                    &w,
                 )
             }
             Err(e) => open_error(file_path, &e),

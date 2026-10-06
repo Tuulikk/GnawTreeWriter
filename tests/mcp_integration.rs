@@ -2082,3 +2082,114 @@ async fn integration_mcp_edit_rejection_carries_edit_verdict(
     server_handle.await?;
     Ok(())
 }
+
+/// Fas 4 contract: a signature change on an indexed project carries the
+/// impacted call sites in the MCP success response (`impact`); a
+/// body-only edit omits the field entirely.
+#[tokio::test]
+async fn integration_mcp_edit_reports_impact_on_signature_change(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, rx) = oneshot::channel::<()>();
+    let token = Some("secret".to_string());
+    let server_handle = tokio::spawn(async move {
+        let shutdown_fut = async move {
+            let _ = rx.await;
+        };
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
+            .await
+            .unwrap();
+    });
+    let url = format!("http://{}/", addr);
+    let client = Client::new();
+    let mut ready = false;
+    for _ in 0..40 {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                ready = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_connect() {
+                    sleep(Duration::from_millis(50)).await;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(ready, "server did not become ready in time");
+
+    // Hermetic indexed project: definition + caller + knowledge graph.
+    let dir = tempfile::tempdir()?;
+    std::fs::create_dir(dir.path().join(".git"))?;
+    let def_path = dir.path().join("lib.rs");
+    let call_path = dir.path().join("caller.rs");
+    std::fs::write(&def_path, "fn target(alpha: u32) -> u32 {\n    alpha\n}\n")?;
+    std::fs::write(&call_path, "fn caller() -> u32 {\n    target(1)\n}\n")?;
+    let mut indexer = gnawtreewriter::llm::RelationalIndexer::new(dir.path());
+    indexer.index_directory(dir.path())?;
+
+    let call_edit = |id: i32, content: &str| {
+        json!({
+            "jsonrpc":"2.0", "method":"tools/call", "id": id,
+            "params": {"name": "edit_node", "arguments": {
+                "file_path": def_path.to_string_lossy(),
+                "node_path": "@fn:target",
+                "content": content
+            }}
+        })
+    };
+
+    // Signature widening → impact field with the caller site.
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&call_edit(
+            11,
+            "fn target(alpha: u32, beta: u32) -> u32 {\n    alpha + beta\n}\n",
+        ))
+        .send()
+        .await?;
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").expect("success expected");
+    assert_ne!(r.get("isError"), Some(&json!(true)), "{:?}", r["content"]);
+    let impact = r.get("impact").expect("signature change must carry impact");
+    assert_eq!(impact["callers"], 1);
+    assert!(
+        impact["sites"][0]
+            .as_str()
+            .unwrap_or("")
+            .contains("caller.rs"),
+        "site must name the caller file: {impact:?}"
+    );
+
+    // Control: body-only change → impact omitted, not null.
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&call_edit(
+            12,
+            "fn target(alpha: u32, beta: u32) -> u32 {\n    alpha * beta\n}\n",
+        ))
+        .send()
+        .await?;
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").expect("success expected");
+    assert_ne!(r.get("isError"), Some(&json!(true)), "{:?}", r["content"]);
+    assert!(
+        r.get("impact").is_none(),
+        "body-only change must omit impact: {r:?}"
+    );
+
+    let _ = tx.send(());
+    server_handle.await?;
+    Ok(())
+}

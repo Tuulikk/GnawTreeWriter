@@ -214,7 +214,7 @@ läsbart. Kontraktstest i `tests/mcp_integration.rs` (mönstret finns i
 | 3 | 1 (EditDelta) | Största detektionsvinsten | Medel | ✅ 2026-10-06 (feedback inarbetad: kritiska noder + kontextmedveten severity) |
 | 4 | 2 (kontrakt) | Fångar agent-regenerering | Medel | ✅ 2026-10-06 |
 | 5 | 5.1+5.3 (enat verdict-kontrakt) | Agent-UX | Medel | ✅ 2026-10-06 |
-| 6 | 4 (impact) | Signatur-medvetenhet | Medel-stor | Sist |
+| 6 | 4 (impact) | Signatur-medvetenhet | Medel-stor | ✅ 2026-10-06 |
 
 ### Fas 3 — implementerad 2026-10-06
 
@@ -322,6 +322,37 @@ escape-fria konstruktioner (`split_whitespace()`) eller STDIN (`-`).
 - Lärdom: den tidigare `\n`-korrumperingen var bash-citatterminering
   (enkelfnutt-sträng med `'` inuti), INTE GTW-unescape — ankare med
   `\n`-sekvenser matchar filens literala backslash-n korrekt.
+
+### Fas 4 — implementerad 2026-10-06
+
+- **`ImpactAnalyzer` återupplivad**: modulen var inte ens registrerad i
+  `src/llm/mod.rs` (oreferenserad stub). Nu `pub mod impact_analyzer` +
+  re-export; `load_all_graphs` delegerar till
+  `RelationalIndexer::load_all_graphs` (läser
+  `.gnawtreewriter_ai/graph/*.json`). Tomt index ⇒ tom rapport, aldrig
+  fel. Ny `new_with_root(project_root)`-konstruktor + enhetstester.
+- **`IntegrityReport.deltas`**: rapporten bär nu med sig Fas 1-deltorna
+  (`#[serde(skip)]` — EditDelta saknar Deserialize). **BREAKING (lib)**
+  — noterad i CHANGELOG [Unreleased].
+- **Core-wiring**: i `edit()` (före verdict-blocket — `resolved` lånar
+  self, får inte användas efter `set_verdict`; E0502-lärdom) — när
+  deltorna innehåller `SignatureChange` och noden har ett namn:
+  `find_project_root` → `ImpactAnalyzer::new_with_root` →
+  `analyze_impact(namn, fil)`; `{"symbol", "callers", "sites"}` sätts i
+  `last_impact` endast när callers > 0. `last_edit_impact()`-getter,
+  nollställs vid edit-start.
+- **Svar:** `attach_impact` i MCP bifogar `impact` på edit_node/
+  insert_node-success (semantic_edit ärver via delegation); fältet
+  UTELÄMNAS när None (aldrig null-brus). CLI skriver `📊 Impact: N
+  caller(s)` + `↳ fil:nod-sökväg` per site.
+- Tester: `signature_change_reports_impact_via_knowledge_graph` +
+  `no_signature_change_no_impact_field` (core, hermetiska tempdir-
+  projekt) och `integration_mcp_edit_reports_impact_on_signature_change`
+  (MCP-kontrakt: impact på signaturändring, frånvaro vid body-only).
+- Kända begränsningar: `to_file`-upplösning tar första matchen
+  (relational_index), symbols-namn tas från nodens `get_name()` (nya
+  symboler utan index ger ingen impact), batch går fortfarande via
+  `Batch::apply()` utan verdict/impact.
 
 ## Acceptanskriterier (Fas 1)
 

@@ -1,3 +1,38 @@
+## [Unreleased]
+
+### BREAKING (lib)
+- `IntegrityReport` (`src/core/guardian.rs`) gained a field
+  `deltas: Vec<EditDelta>` (`#[serde(skip)]`). Struct-literal
+  construction of `IntegrityReport` outside the crate breaks — build
+  reports via `GuardianEngine::audit_edit[_with_language]` instead.
+  (Guardian v2, docs/GUARDIAN_V2_PLAN.md Fas 4.)
+
+### Added — Guardian v2 (docs/GUARDIAN_V2_PLAN.md, Fas 0–4 + 5.1–5.3)
+- **Structural deltas (Fas 1)**: `EditDelta` diff of old/new node trees
+  detects operator inversion, dropped conditions, lost error handling
+  and signature changes; context-aware severity (lone operator change
+  stays a warning, contract-broken context escalates to error).
+- **Invariant contracts (Fas 2)**: text-level contract of the old node
+  (guards, error handling, asserts, unwrap-freedom, doc lines) must not
+  be lost entirely — catches agent-style full regenerations.
+- **No-op guard + EditReceipt (Fas 3)**: identical-content edits
+  rejected loudly; post-write disk verification; `verified` +
+  `bytes_changed` in MCP edit/insert responses and CLI output.
+- **Rule fixes + healer hints in rejections (5.2)**: blocks name
+  `[rule_id:line]` and the rule's `fix:` suggestion; healer failures
+  named explicitly.
+- **Structured `edit_verdict` (5.1+5.3)**: all four rejection paths
+  record `{level, score, findings, suggestions}`; MCP
+  `edit_node`/`insert_node` (and `semantic_edit` via delegation) attach
+  it to `E_EDIT_REJECTED` responses. Contract test included.
+- **Impact report (Fas 4)**: signature-changing edits carry
+  `impact: {symbol, callers, sites}` in MCP responses and a `📊 Impact`
+  CLI line, sourced from the knowledge graph
+  (`.gnawtreewriter_ai/graph/`). Missing index ⇒ field omitted, never
+  an error. `ImpactAnalyzer::load_all_graphs` implemented (was a
+  placeholder) and `impact_analyzer` registered in `llm` (was
+  unregistered).
+
 ## [0.17.0] - 2026-10-05
 
 ### Added — Phase 10: Agent Confidence & Motivation (trygghet + maning)
