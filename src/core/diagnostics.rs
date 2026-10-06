@@ -521,6 +521,68 @@ impl DoctorReport {
             }
         }
     }
+
+    /// Fas 4.2 step 1: knowledge-graph resolution quality — how much of
+    /// the call graph is unambiguously resolvable. This is the trust
+    /// level of impact reports; surfaced so agents and humans can see
+    /// when to treat caller counts as conservative.
+    pub fn check_knowledge_graph(&mut self, project_root: &std::path::Path) {
+        let indexer = crate::llm::RelationalIndexer::new(project_root);
+        match indexer.resolution_stats() {
+            Ok(stats) if stats.calls_total == 0 => {
+                self.record_check(DoctorCheck {
+                    category: "knowledge_graph".to_string(),
+                    name: "resolution".to_string(),
+                    status: "pass".to_string(),
+                    message: "No call relations indexed yet — build the graph with index_relations or ordinary edits. Impact reports will appear as signatures change.".to_string(),
+                    detail: None,
+                });
+            }
+            Ok(stats) => {
+                let pct = if stats.calls_total > 0 {
+                    (stats.calls_resolved as f64 / stats.calls_total as f64 * 100.0) as u64
+                } else {
+                    0
+                };
+                let status = if pct >= 60 { "pass" } else { "warn" };
+                self.record_check(DoctorCheck {
+                    category: "knowledge_graph".to_string(),
+                    name: "resolution".to_string(),
+                    status: status.to_string(),
+                    message: format!(
+                        "{}/{} call relations unambiguously resolved ({}%). {} ambiguous symbol name(s){}.",
+                        stats.calls_resolved,
+                        stats.calls_total,
+                        pct,
+                        stats.ambiguous_symbols,
+                        if stats.top_ambiguous.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                "; top: {}",
+                                stats
+                                    .top_ambiguous
+                                    .iter()
+                                    .map(|a| a.name.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )
+                        }
+                    ),
+                    detail: Some(serde_json::to_string(&stats).unwrap_or_default()),
+                });
+            }
+            Err(e) => {
+                self.record_check(DoctorCheck {
+                    category: "knowledge_graph".to_string(),
+                    name: "resolution".to_string(),
+                    status: "warn".to_string(),
+                    message: format!("Could not read knowledge graph: {}", e),
+                    detail: None,
+                });
+            }
+        }
+    }
 }
 
 // ---- Helpers ----
@@ -675,5 +737,6 @@ pub fn run_full_doctor(project_root: &std::path::Path) -> DoctorReport {
 
     report.check_backups(project_root);
     report.check_transaction_log(project_root);
+    report.check_knowledge_graph(project_root);
     report
 }

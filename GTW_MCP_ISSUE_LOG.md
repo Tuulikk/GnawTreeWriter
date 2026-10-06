@@ -713,6 +713,35 @@ tagg `v0.17.0`** — ni behöver bara pulla repot (path-dep).
 
 ---
 
+## 2026-10-06 — `gnawtreewriter undo` hängde (timeout 60 s, ingen effekt)
+**Kontext:** Efter en felplacerad quick-replace i `src/core/diagnostics.rs`
+(ankaret `}\n\nfn is_important_node_type` träffade impl-avslutet istället
+för metodplatsen — agentfel, GTW validerade korrekt) kördes
+`gnawtreewriter undo` för att återställa. Kommandot svarade inte på 60 s
+(shell-timeout) och filen var inte återställd efteråt; `history` visade den
+felaktiga transactionen fortfarande som sista post. Reparation skedde i
+stället med exakt text-uxe (python) + korrekt GTW-insert på ett unikt
+ankare (`// ---- Helpers ----`-markören).
+
+| # | Anrop | Parametrar | Resultat |
+|---|-------|------------|----------|
+| 1 | `undo --preview` | — | `error: unexpected argument '--preview'` (preview finns bara på andra kommandon — oklart API) |
+| 2 | `gnawtreewriter undo` | — | hängde > 60 s, ingen filändring, ingen utdata |
+
+**Omväg:** python-exakt-text + ny GTW-insert på unikt ankare.
+
+**Bedömning:** [x] användarfel (ankaret) — MEN punkt 2 är en verklig
+fyndkandidat: undo bör antingen slutföras på <sekunder eller rapportera
+varför den avstår. [ ] bugg (obekräftad — inte reproducerad isolerat)
+[x] svår att nå/rätta användning (`undo --preview` saknas trots att
+mönstret finns på `restore-project --preview`/`undo {preview}` i MCP)
+
+**Vägledning träffad?** nej — en undo som hänger tyst utan utdata bryter
+mot "GTW:s fel ska vara högljudda". Förslag: undo ska skriva vad den gör
+(transaktions-id, filer) och avsluta Högljuddt även när den avstår.
+
+---
+
 <!-- Ny post: kopiera mallen nedan
 ## ÅÅÅÅ-MM-DD — kort rubrik
 **Kontext:**

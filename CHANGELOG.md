@@ -43,6 +43,16 @@
   runs the full single-edit validation (NO-OP guard, Guardian, rules)
   before any write and carries the same `edit_verdict` on
   `E_BATCH_ROLLED_BACK` plus `impacts` on successful applies.
+- **Resolution observability + same-file rule (Fas 4.2, ROADMAP
+  "Symbol resolution toward LSP-grade" steps 1–2)**:
+  `RelationalIndexer::resolution_stats()` reports unique vs ambiguous
+  symbol names, call-resolution rate and top-N ambiguous names;
+  `doctor` gained a `knowledge_graph.resolution` check; impact
+  responses carry `unresolved: N` (MCP) and the CLI prints
+  `📊 Impact … (N unresolved)` so caller counts can be trusted
+  appropriately. A definition in the current file now wins for
+  bare-name calls (same-module precedence), resolving most same-name
+  ambiguity without path parsing.
 
 ## [0.17.0] - 2026-10-05
 

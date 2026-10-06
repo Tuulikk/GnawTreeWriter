@@ -724,7 +724,7 @@ Key ideas:
 - Make advanced capabilities available as opt-in add-ons so each user can choose the level of integration they want.
 - Document add-on APIs so third parties can implement safe, well-behaved integrations.
 
-See ROADMAP.md for the planned timeline and details about add-ons and MCP: `docs/ROADMAP.md` (search for \"Add-ons & LSP\").
+See ROADMAP.md for the planned timeline and details about add-ons and MCP: `ROADMAP.md` (repo root; see also "Symbol resolution toward LSP-grade").
 
 ---
 

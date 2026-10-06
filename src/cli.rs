@@ -833,10 +833,16 @@ impl Cli {
                     }
                     if let Some(impact) = writer.last_edit_impact() {
                         let sites = impact["sites"].as_array().map(|a| a.len()).unwrap_or(0);
+                        let unresolved = impact["unresolved"].as_u64().unwrap_or(0);
                         println!(
-                            "📊 Impact: {} caller(s) of changed signature {}",
+                            "📊 Impact: {} caller(s) of changed signature {}{}",
                             impact["callers"].as_u64().unwrap_or(sites as u64),
-                            impact["symbol"].as_str().unwrap_or("")
+                            impact["symbol"].as_str().unwrap_or(""),
+                            if unresolved > 0 {
+                                format!(" ({} unresolved)", unresolved)
+                            } else {
+                                String::new()
+                            }
                         );
                         for site in impact["sites"].as_array().unwrap_or(&vec![]) {
                             println!("    ↳ {}", site.as_str().unwrap_or(""));

@@ -28,6 +28,29 @@ All features in this section are and will remain **free and open source** under 
 
 ---
 
+## Symbol resolution toward LSP-grade (no external dependencies)
+
+Staged improvement of the knowledge graph's symbol resolution plus the
+observability to see whether each step actually helped. Principle:
+tree-sitter + our own indexer only — nothing external. Every step ships
+independently; step 1 makes each later win measurable.
+
+| # | Step | Status |
+|---|------|--------|
+| 1 | **Observability**: `RelationalIndexer::resolution_stats()` (unique vs ambiguous symbol names, call-resolution rate, top-N ambiguous names with their files); surfaced in `doctor` (`knowledge_graph.resolution` check) and as `unresolved: N` in impact responses (MCP + CLI `📊 Impact (N unresolved)`) | ✅ 2026-10-06 |
+| 2 | **Same-file rule**: a definition in the current file wins for bare-name calls, even when other files define the same name (Rust same-module scoping) — resolves most ambiguity with zero path parsing | ✅ 2026-10-06 |
+| 3 | **Import awareness**: read `use` / `from x import y` / `import {y}` per file; a bare call is matched against imported candidates — one candidate = resolved, several = stays ambiguous | ⬜ |
+| 4 | **Qualified paths**: `mod::fn(...)` calls matched against definition module paths instead of last segment only | ⬜ |
+| 5 | **Module map (`mod` tree)**: full Rust scope chain for exact resolution; removes the same-name problem in principle | ⬜ |
+
+Known trade-off (kept intentionally): unknown/ambiguous call sites stay
+counted in impact reports but are surfaced as `unresolved`, so agents
+can scale their confidence. Long-term, optional LSP add-ons (see
+AGENTS.md "Add-ons (LSP & MCP)") can provide true scope analysis via
+language servers — the two tracks complement each other.
+
+---
+
 ## Phase 8: Local LLM Command Extension 🔄 IN PROGRESS
 **Target: v0.9.x → v0.10**
 

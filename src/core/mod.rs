@@ -1033,11 +1033,17 @@ pub(crate) fn signature_impact_for(
     if callers == 0 {
         return None;
     }
-    Some(serde_json::json!({
+    let mut payload = serde_json::json!({
         "symbol": name,
         "callers": callers,
         "sites": sites,
-    }))
+    });
+    // Fas 4.2 step 1: surface how much of the count is conservative
+    // (unknown definition sites) so agents can scale their confidence.
+    if ir.unresolved_calls > 0 {
+        payload["unresolved"] = serde_json::json!(ir.unresolved_calls);
+    }
+    Some(payload)
 }
 
 #[cfg(test)]

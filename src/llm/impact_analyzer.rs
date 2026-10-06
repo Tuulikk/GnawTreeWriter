@@ -10,6 +10,10 @@ pub struct ImpactAnalyzer {
 pub struct ImpactReport {
     pub target_symbol: String,
     pub affected_files: Vec<AffectedFile>,
+    /// Callers counted with an UNKNOWN definition site (ambiguous or
+    /// unresolved). These may include same-name symbols — the caller of
+    /// an impact report should scale its confidence accordingly.
+    pub unresolved_calls: usize,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -35,6 +39,7 @@ impl ImpactAnalyzer {
     /// conservative: counted.
     pub fn analyze_impact(&self, symbol_name: &str, defined_in: &str) -> Result<ImpactReport> {
         let mut affected = std::collections::HashMap::new();
+        let mut unresolved_calls = 0usize;
 
         let graphs = self.load_all_graphs()?;
 
@@ -44,13 +49,15 @@ impl ImpactAnalyzer {
                 if relation.to_name != symbol_name || relation.relation_type != RelationType::Call {
                     continue;
                 }
-                let to_file_matches = relation
-                    .to_file
-                    .as_deref()
-                    .map(|f| f == defined_in)
-                    .unwrap_or(true);
-                if to_file_matches {
-                    node_paths.push(relation.from_path.clone());
+                match relation.to_file.as_deref() {
+                    Some(f) if f != defined_in => continue, // same-name symbol elsewhere
+                    Some(_) => node_paths.push(relation.from_path.clone()),
+                    None => {
+                        // Unknown/ambiguous site: count conservatively and
+                        // surface it as unresolved (Fas 4.2 step 1).
+                        unresolved_calls += 1;
+                        node_paths.push(relation.from_path.clone());
+                    }
                 }
             }
 
@@ -68,6 +75,7 @@ impl ImpactAnalyzer {
                     call_paths: paths,
                 })
                 .collect(),
+            unresolved_calls,
         })
     }
 
@@ -147,6 +155,7 @@ mod tests {
         let report = analyzer.analyze_impact("dup", "src/a.rs").unwrap();
         assert_eq!(report.affected_files.len(), 1);
         assert_eq!(report.affected_files[0].call_paths, vec!["0.1"]);
+        assert_eq!(report.unresolved_calls, 1, "None site counts as unresolved");
     }
 
     #[test]
