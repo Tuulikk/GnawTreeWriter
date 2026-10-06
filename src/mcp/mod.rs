@@ -2611,25 +2611,52 @@ or list_nodes for a flat index of this file.",
                     ),
                     None,
                 ),
-                Err(e) => tool_error(format!("Preview failed (nothing written): {}", e)),
+                Err(e) => match batch.last_verdict.borrow().clone() {
+                    Some(v) => tool_error_with_data(
+                        format!("Preview failed (nothing written): {}", e),
+                        "E_EDIT_REJECTED",
+                        json!({"edit_verdict": v}),
+                    ),
+                    None => tool_error(format!("Preview failed (nothing written): {}", e)),
+                },
             }
         } else {
             match batch.apply() {
-                    Ok(()) => tool_success(
-                        format!(
-                            "Batch applied atomically: {} operation(s) in transaction(s) {} — undo with the `undo` tool if the result is wrong.",
-                            batch.operations.len(),
-                            batch.transaction_ids.borrow().join(", ")
+                    Ok(()) => {
+                        let mut data =
+                            json!({"transaction_ids": batch.transaction_ids.borrow().clone()});
+                        let impacts = batch.impacts.borrow().clone();
+                        if !impacts.is_empty() {
+                            if let Some(obj) = data.as_object_mut() {
+                                obj.insert("impacts".to_string(), json!(impacts));
+                            }
+                        }
+                        tool_success(
+                            format!(
+                                "Batch applied atomically: {} operation(s) in transaction(s) {} — undo with the `undo` tool if the result is wrong.",
+                                batch.operations.len(),
+                                batch.transaction_ids.borrow().join(", ")
+                            ),
+                            Some(data),
+                        )
+                    }
+                    Err(e) => match batch.last_verdict.borrow().clone() {
+                        Some(v) => tool_error_with_data(
+                            format!(
+                                "Batch failed and was rolled back: {}. Fix the operations in {} and re-run, or run with preview=true first.",
+                                e, file
+                            ),
+                            "E_BATCH_ROLLED_BACK",
+                            json!({"edit_verdict": v}),
                         ),
-                        Some(json!({"transaction_ids": batch.transaction_ids.borrow().clone()})),
-                    ),
-                    Err(e) => tool_error_code(
-                        format!(
-                            "Batch failed and was rolled back: {}. Fix the operations in {} and re-run, or run with preview=true first.",
-                            e, file
+                        None => tool_error_code(
+                            format!(
+                                "Batch failed and was rolled back: {}. Fix the operations in {} and re-run, or run with preview=true first.",
+                                e, file
+                            ),
+                            "E_BATCH_ROLLED_BACK",
                         ),
-                        "E_BATCH_ROLLED_BACK",
-                    ),
+                    },
                 }
         }
     }

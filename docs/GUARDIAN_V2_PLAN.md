@@ -349,10 +349,39 @@ escape-fria konstruktioner (`split_whitespace()`) eller STDIN (`-`).
   `no_signature_change_no_impact_field` (core, hermetiska tempdir-
   projekt) och `integration_mcp_edit_reports_impact_on_signature_change`
   (MCP-kontrakt: impact på signaturändring, frånvaro vid body-only).
-- Kända begränsningar: `to_file`-upplösning tar första matchen
-  (relational_index), symbols-namn tas från nodens `get_name()` (nya
-  symboler utan index ger ingen impact), batch går fortfarande via
-  `Batch::apply()` utan verdict/impact.
+- Kända begränsningar (ÅTGÄRDADE 2026-10-06, se Fas 4.1 nedan):
+  `to_file`-upplösning, batch utan verdict/impact. Kvarvarande: nya
+  symboler har inga indexerade anropare per definition (impact är
+  meningslöst för dem) och same-name-symboler kan inte skiljas åt utan
+  scope-analys — indexet markerar dem som tvetydiga (`to_file: None`)
+  och impact räknar konservativt.
+
+### Fas 4.1 — begränsningsfixar, implementerad 2026-10-06
+
+- **Ärlig `to_file`-upplösning** (`relational_index.rs`): Some(fil)
+  endast när EXAKT en fil definierar namnet; tvetydigt/okänt blir None
+  istället för första-matchen-gissning.
+- **`defined_in`-filter i `analyze_impact`** (parametern var tidigare
+  oanvänd `_defined_in`): anropare med känt definitionssajt OLIKA från
+  målfilen exkluderas (same-name-symbol annanstans); None räknas
+  konservativt. Tester: `ambiguous_definition_sites_stay_conservative`,
+  `callers_of_same_name_symbol_elsewhere_excluded`.
+- **Batch-paritet (5.1/5.3/4)**: `Batch.preview()` kör nu samma
+  validering som single-edit-pipelinen — NO-OP-guard, Guardian (Edit-
+  opar), RULES GUARDIAN på simulerat resultat (alla opar), syntax —
+  före NÅGON skrivning (atomiciteten bevarad). Nya fält
+  `last_verdict`/`impacts` (RefCell, samma mönster som
+  `transaction_ids`); MCP `batch` bifogar `edit_verdict` på
+  `E_BATCH_ROLLED_BACK` och preview-avvisanden, `impacts` på lyckade
+  apply. Tester: `batch_rejection_carries_edit_verdict`,
+  `batch_signature_change_collects_impact`,
+  `integration_mcp_batch_rejection_carries_edit_verdict`.
+- **Delade helpers**: `core::verdict_json` (kanonisk verdict-form) och
+  `core::signature_impact_for` (impact ur deltas + graf) — single-edit
+  och batch kan inte divergera.
+- **BREAKING (lib)**: `Batch` gained `last_verdict`/`impacts` fields —
+  struct-literal-konstruktion utanför cratet bryts (CHANGELOG
+  [Unreleased]).
 
 ## Acceptanskriterier (Fas 1)
 

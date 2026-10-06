@@ -29,21 +29,27 @@ impl ImpactAnalyzer {
         Self::new(RelationalIndexer::new(project_root))
     }
 
-    /// Find all files and nodes that call a specific symbol defined in a file
-    pub fn analyze_impact(&self, symbol_name: &str, _defined_in: &str) -> Result<ImpactReport> {
+    /// Find all files and nodes that call a specific symbol defined in a file.
+    /// Callers whose definition site is known and DIFFERENT are a same-name
+    /// symbol elsewhere — excluded. Unknown sites (None, ambiguous) stay
+    /// conservative: counted.
+    pub fn analyze_impact(&self, symbol_name: &str, defined_in: &str) -> Result<ImpactReport> {
         let mut affected = std::collections::HashMap::new();
 
-        // In a real implementation, we would search the entire index.
-        // For now, we search the files that the indexer has currently loaded in its symbol table.
-        // (This will be improved as we implement the project-wide crawler)
-
-        // For this version, let's look through all saved graph files
         let graphs = self.load_all_graphs()?;
 
         for graph in graphs {
             let mut node_paths = Vec::new();
             for relation in &graph.relations {
-                if relation.to_name == symbol_name && relation.relation_type == RelationType::Call {
+                if relation.to_name != symbol_name || relation.relation_type != RelationType::Call {
+                    continue;
+                }
+                let to_file_matches = relation
+                    .to_file
+                    .as_deref()
+                    .map(|f| f == defined_in)
+                    .unwrap_or(true);
+                if to_file_matches {
                     node_paths.push(relation.from_path.clone());
                 }
             }
@@ -113,6 +119,59 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let analyzer = ImpactAnalyzer::new(RelationalIndexer::new(dir.path()));
         let report = analyzer.analyze_impact("ghost", "src/a.rs").unwrap();
+        assert!(report.affected_files.is_empty());
+    }
+
+    #[test]
+    fn ambiguous_definition_sites_stay_conservative() {
+        // to_file None (ambiguous/unknown) still counts — same-name
+        // symbols can not be told apart without scope analysis.
+        let dir = tempfile::tempdir().unwrap();
+        let indexer = RelationalIndexer::new(dir.path());
+        let mut relations = HashSet::new();
+        relations.insert(Relation {
+            from_file: "src/b.rs".to_string(),
+            from_path: "0.1".to_string(),
+            to_file: None,
+            to_name: "dup".to_string(),
+            relation_type: RelationType::Call,
+        });
+        indexer
+            .save_graph(&crate::llm::relational_index::FileGraph {
+                file_path: "src/b.rs".to_string(),
+                relations,
+                definitions: HashMap::new(),
+            })
+            .unwrap();
+        let analyzer = ImpactAnalyzer::new(RelationalIndexer::new(dir.path()));
+        let report = analyzer.analyze_impact("dup", "src/a.rs").unwrap();
+        assert_eq!(report.affected_files.len(), 1);
+        assert_eq!(report.affected_files[0].call_paths, vec!["0.1"]);
+    }
+
+    #[test]
+    fn callers_of_same_name_symbol_elsewhere_excluded() {
+        // A caller whose definition site is known and DIFFERENT is a
+        // same-name symbol elsewhere — not our target.
+        let dir = tempfile::tempdir().unwrap();
+        let indexer = RelationalIndexer::new(dir.path());
+        let mut relations = HashSet::new();
+        relations.insert(Relation {
+            from_file: "src/b.rs".to_string(),
+            from_path: "0.1".to_string(),
+            to_file: Some("src/other.rs".to_string()),
+            to_name: "target".to_string(),
+            relation_type: RelationType::Call,
+        });
+        indexer
+            .save_graph(&crate::llm::relational_index::FileGraph {
+                file_path: "src/b.rs".to_string(),
+                relations,
+                definitions: HashMap::new(),
+            })
+            .unwrap();
+        let analyzer = ImpactAnalyzer::new(RelationalIndexer::new(dir.path()));
+        let report = analyzer.analyze_impact("target", "src/a.rs").unwrap();
         assert!(report.affected_files.is_empty());
     }
 

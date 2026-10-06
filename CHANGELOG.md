@@ -6,6 +6,10 @@
   construction of `IntegrityReport` outside the crate breaks — build
   reports via `GuardianEngine::audit_edit[_with_language]` instead.
   (Guardian v2, docs/GUARDIAN_V2_PLAN.md Fas 4.)
+- `Batch` (`src/core/batch.rs`) gained fields `last_verdict:
+  RefCell<Option<Value>>` and `impacts: RefCell<Vec<Value>>`
+  (`#[serde(skip)]`). Struct-literal construction breaks; prefer
+  `Batch::new`/`from_json`/`with_file`. (Fas 4.1 batch parity.)
 
 ### Added — Guardian v2 (docs/GUARDIAN_V2_PLAN.md, Fas 0–4 + 5.1–5.3)
 - **Structural deltas (Fas 1)**: `EditDelta` diff of old/new node trees
@@ -32,6 +36,13 @@
   an error. `ImpactAnalyzer::load_all_graphs` implemented (was a
   placeholder) and `impact_analyzer` registered in `llm` (was
   unregistered).
+- **Limitation fixes (Fas 4.1)**: honest `to_file` resolution in the
+  relational index (Some(file) only when unambiguous — no more
+  first-match guess); `analyze_impact` uses its `defined_in` parameter
+  to exclude callers of same-name symbols defined elsewhere; batch
+  runs the full single-edit validation (NO-OP guard, Guardian, rules)
+  before any write and carries the same `edit_verdict` on
+  `E_BATCH_ROLLED_BACK` plus `impacts` on successful applies.
 
 ## [0.17.0] - 2026-10-05
 

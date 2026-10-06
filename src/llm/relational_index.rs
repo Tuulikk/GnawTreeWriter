@@ -106,12 +106,14 @@ impl RelationalIndexer {
     fn extract_relations(&self, node: &TreeNode, current_file: &str, acc: &mut HashSet<Relation>) {
         if node.node_type.contains("call") || node.node_type.contains("usage") {
             if let Some(name) = node.get_name() {
-                // Check if we know where this is defined
-                let to_file = self
-                    .symbol_table
-                    .get(&name)
-                    .and_then(|files| files.first()) // Simplified: take first match
-                    .cloned();
+                // Resolve the definition site honestly: Some(file) only when
+                // exactly one file defines the name. Ambiguous (same name in
+                // several files) or unknown stays None instead of guessing a
+                // first match (Fas 4 limitation fix).
+                let to_file = match self.symbol_table.get(&name) {
+                    Some(files) if files.len() == 1 => files.first().cloned(),
+                    _ => None,
+                };
 
                 acc.insert(Relation {
                     from_file: current_file.to_string(),

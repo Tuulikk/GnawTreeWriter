@@ -83,6 +83,15 @@ pub struct Batch {
     /// apply(&self) source-compatible for lib consumers.
     #[serde(skip)]
     pub transaction_ids: std::cell::RefCell<Vec<String>>,
+    /// Fas 5.1/5.3 parity: structured verdict behind the last batch
+    /// rejection (guardian/rules/no-op during preview validation). Same
+    /// edit_verdict contract as single edits.
+    #[serde(skip)]
+    pub last_verdict: std::cell::RefCell<Option<serde_json::Value>>,
+    /// Fas 4 parity: impact reports for signature-changing ops (in op
+    /// order), attached to successful applies.
+    #[serde(skip)]
+    pub impacts: std::cell::RefCell<Vec<serde_json::Value>>,
     pub description: Option<String>,
     pub operations: Vec<BatchOp>,
 }
@@ -124,6 +133,8 @@ impl Batch {
             description: None,
             operations: batch_ops,
             transaction_ids: std::cell::RefCell::new(Vec::new()),
+            last_verdict: std::cell::RefCell::new(None),
+            impacts: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -140,11 +151,17 @@ impl Batch {
             description: bf.description,
             operations: bf.operations,
             transaction_ids: std::cell::RefCell::new(Vec::new()),
+            last_verdict: std::cell::RefCell::new(None),
+            impacts: std::cell::RefCell::new(Vec::new()),
         })
     }
 
     /// Preview: validate and return diffs per file (no writes)
     pub fn preview(&self) -> Result<Vec<FileDiff>> {
+        // Fresh verdict/impact state per validation run (Fas 4/5.1 parity).
+        *self.last_verdict.borrow_mut() = None;
+        self.impacts.borrow_mut().clear();
+
         // Group ops by file in the given order
         let mut per_file: HashMap<String, Vec<&BatchOp>> = HashMap::new();
         for op in &self.operations {
@@ -188,10 +205,121 @@ impl Batch {
                     },
                 };
 
+                // Fas 4/5.1 parity: run the same validation the single-edit
+                // pipeline uses — NO-OP guard, Guardian — and record
+                // verdicts/impacts on the batch (RefCell, &self-friendly).
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if let BatchOp::Edit {
+                    path: node_query,
+                    content,
+                    ..
+                } = op
+                {
+                    if let Some(resolved) = writer.resolve_path(node_query.as_str()) {
+                        if resolved.content == content.as_str() {
+                            *self.last_verdict.borrow_mut() = Some(crate::core::verdict_json(
+                                "notice",
+                                1.0,
+                                vec![serde_json::json!({
+                                    "rule": "no_op",
+                                    "severity": "warning",
+                                    "message": "batch op was a NO-OP (0 bytes would change)"
+                                })],
+                                vec!["Remove the redundant operation from the batch spec"
+                                    .to_string()],
+                            ));
+                            anyhow::bail!(
+                                "NO-OP in batch: op for node {} in {} is identical to current content. Nothing was written.",
+                                node_query, file
+                            );
+                        }
+                        let report = crate::core::guardian::GuardianEngine::new()
+                            .audit_edit_with_language(resolved, content, ext);
+                        match report.level {
+                            crate::core::guardian::IntegrityLevel::Critical => {
+                                let findings: Vec<serde_json::Value> = report
+                                    .messages
+                                    .iter()
+                                    .map(|m| {
+                                        serde_json::json!({
+                                            "rule": "structural_delta",
+                                            "severity": "error",
+                                            "message": m
+                                        })
+                                    })
+                                    .collect();
+                                *self.last_verdict.borrow_mut() = Some(crate::core::verdict_json(
+                                    "critical",
+                                    report.score,
+                                    findings,
+                                    vec![
+                                        "Inspect the target with read_node before retrying".to_string(),
+                                        "Batch ops have no force flag — remove or soften the operation".to_string(),
+                                    ],
+                                ));
+                                anyhow::bail!(
+                                    "GUARDIAN BLOCK in batch for {} {}: {}. Nothing was written.",
+                                    file,
+                                    node_query,
+                                    report.messages.join(", ")
+                                );
+                            }
+                            crate::core::guardian::IntegrityLevel::Warning => {
+                                eprintln!(
+                                    "⚠️  GUARDIAN WARNING in batch for {} {}: {}",
+                                    file,
+                                    node_query,
+                                    report.messages.join(", ")
+                                );
+                            }
+                            crate::core::guardian::IntegrityLevel::Notice => {
+                                eprintln!("ℹ️  Guardian Note (batch): minor structural reduction.");
+                            }
+                            _ => {}
+                        }
+                        if let Some(impact) = crate::core::signature_impact_for(
+                            file.as_str(),
+                            resolved,
+                            &report.deltas,
+                        ) {
+                            self.impacts.borrow_mut().push(impact);
+                        }
+                    }
+                }
+
                 // Preview change
                 let modified = writer
                     .preview_edit(edit_op.clone())
-                    .with_context(|| format!("Preview failed for file '{}' op '{:?}'", file, op))?;
+                    .with_context(|| format!("Preview failed for file {} op {:?}", file, op))?;
+
+                // RULES GUARDIAN on the simulated result (all op types).
+                let (findings, _skipped, has_error) =
+                    crate::core::rules::check_code_with_builtin(&modified, ext);
+                if has_error {
+                    let error_findings: Vec<serde_json::Value> = findings
+                        .iter()
+                        .filter(|f| f.severity == crate::core::rules::Severity::Error)
+                        .map(|f| {
+                            serde_json::json!({
+                                "rule": f.rule_id,
+                                "severity": "error",
+                                "message": f.message,
+                                "fix": crate::core::rules::fix_for_finding(f)
+                            })
+                        })
+                        .collect();
+                    *self.last_verdict.borrow_mut() = Some(crate::core::verdict_json(
+                        "critical",
+                        0.0,
+                        error_findings,
+                        vec!["Rule fixes can be applied via `lint --fix` (preview first)"
+                            .to_string()],
+                    ));
+                    anyhow::bail!(
+                        "RULES GUARDIAN BLOCK in batch for {}: edit would introduce rule violations. Nothing was written.",
+                        file
+                    );
+                }
 
                 // Validate by trying to parse with same parser
                 let parser = get_parser(path)
@@ -365,6 +493,8 @@ mod tests {
         let batch = Batch {
             description: Some("Simple test".into()),
             transaction_ids: std::cell::RefCell::new(Vec::new()),
+            last_verdict: std::cell::RefCell::new(None),
+            impacts: std::cell::RefCell::new(Vec::new()),
             operations: vec![
                 BatchOp::Edit {
                     file: p1.to_string_lossy().to_string(),
@@ -409,6 +539,8 @@ mod tests {
         let batch = Batch {
             description: Some("Fail test".into()),
             transaction_ids: std::cell::RefCell::new(Vec::new()),
+            last_verdict: std::cell::RefCell::new(None),
+            impacts: std::cell::RefCell::new(Vec::new()),
             operations: vec![BatchOp::Edit {
                 file: p1.to_string_lossy().to_string(),
                 path: "0".to_string(),
@@ -421,6 +553,85 @@ mod tests {
         batch.apply()?;
         let a = fs::read_to_string(&p1)?;
         assert!(a.starts_with("still ok"));
+        Ok(())
+    }
+
+    /// Fas 5.1 parity: a guardian-blocking batch op fails the whole batch
+    /// and leaves the same structured verdict as a single edit.
+    #[test]
+    fn batch_rejection_carries_edit_verdict() -> Result<()> {
+        let tmp = tempdir()?;
+        let p = tmp.path().join("g.rs");
+        let guarded = "fn get(items: &[u8], i: usize) -> u8 {\n    if i < items.len() {\n        items[i]\n    } else {\n        0\n    }\n}\n";
+        fs::write(&p, guarded)?;
+
+        let batch = Batch {
+            description: Some("drop guard".into()),
+            transaction_ids: std::cell::RefCell::new(Vec::new()),
+            last_verdict: std::cell::RefCell::new(None),
+            impacts: std::cell::RefCell::new(Vec::new()),
+            operations: vec![BatchOp::Edit {
+                file: p.to_string_lossy().to_string(),
+                path: "@fn:get".to_string(),
+                content: "fn get(items: &[u8], i: usize) -> u8 {\n    items[i]\n}\n".to_string(),
+            }],
+        };
+
+        let err = batch
+            .apply()
+            .expect_err("guard-dropping batch must be rejected");
+        assert!(err.to_string().contains("GUARDIAN BLOCK"), "got: {}", err);
+        let verdict = batch.last_verdict.borrow().clone().expect("verdict set");
+        assert_eq!(verdict["level"], "critical");
+        assert!(
+            !verdict["findings"].as_array().unwrap().is_empty(),
+            "findings present: {verdict:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(&p)?,
+            guarded,
+            "rejected batch must not touch the file"
+        );
+        Ok(())
+    }
+
+    /// Fas 4 parity: a signature-changing batch op collects impact from
+    /// the knowledge graph on success.
+    #[test]
+    fn batch_signature_change_collects_impact() -> Result<()> {
+        let tmp = tempdir()?;
+        std::fs::create_dir(tmp.path().join(".git"))?;
+        let def = tmp.path().join("lib.rs");
+        let caller = tmp.path().join("caller.rs");
+        fs::write(&def, "fn target(alpha: u32) -> u32 {\n    alpha\n}\n")?;
+        fs::write(&caller, "fn caller() -> u32 {\n    target(1)\n}\n")?;
+        let mut indexer = crate::llm::RelationalIndexer::new(tmp.path());
+        indexer.index_directory(tmp.path())?;
+
+        let batch = Batch {
+            description: Some("widen signature".into()),
+            transaction_ids: std::cell::RefCell::new(Vec::new()),
+            last_verdict: std::cell::RefCell::new(None),
+            impacts: std::cell::RefCell::new(Vec::new()),
+            operations: vec![BatchOp::Edit {
+                file: def.to_string_lossy().to_string(),
+                path: "@fn:target".to_string(),
+                content: "fn target(alpha: u32, beta: u32) -> u32 {\n    alpha + beta\n}\n"
+                    .to_string(),
+            }],
+        };
+
+        batch.apply()?;
+        let impacts = batch.impacts.borrow().clone();
+        assert_eq!(impacts.len(), 1, "one impact expected: {impacts:?}");
+        assert_eq!(impacts[0]["callers"], 1);
+        assert!(
+            impacts[0]["sites"][0]
+                .as_str()
+                .unwrap_or("")
+                .contains("caller.rs"),
+            "site names the caller: {impacts:?}"
+        );
         Ok(())
     }
 }

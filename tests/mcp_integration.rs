@@ -2193,3 +2193,99 @@ async fn integration_mcp_edit_reports_impact_on_signature_change(
     server_handle.await?;
     Ok(())
 }
+
+/// Fas 5.1/5.3 parity for batch: a guardian-blocking batch op returns
+/// E_BATCH_ROLLED_BACK with the structured edit_verdict, and the file
+/// is untouched (rejection happens in validation, before any write).
+#[tokio::test]
+async fn integration_mcp_batch_rejection_carries_edit_verdict(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, rx) = oneshot::channel::<()>();
+    let token = Some("secret".to_string());
+    let server_handle = tokio::spawn(async move {
+        let shutdown_fut = async move {
+            let _ = rx.await;
+        };
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
+            .await
+            .unwrap();
+    });
+    let url = format!("http://{}/", addr);
+    let client = Client::new();
+    let mut ready = false;
+    for _ in 0..40 {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                ready = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_connect() {
+                    sleep(Duration::from_millis(50)).await;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(ready, "server did not become ready in time");
+
+    let dir = tempfile::tempdir()?;
+    std::fs::create_dir(dir.path().join(".git"))?;
+    let target = dir.path().join("g.rs");
+    let guarded = "fn get(items: &[u8], i: usize) -> u8 {\n    if i < items.len() {\n        items[i]\n    } else {\n        0\n    }\n}\n";
+    std::fs::write(&target, guarded)?;
+    let spec_path = dir.path().join("batch.json");
+    std::fs::write(
+        &spec_path,
+        json!({
+            "description": "drop guard",
+            "operations": [
+                {
+                    "type": "edit",
+                    "file": target.to_string_lossy(),
+                    "path": "@fn:get",
+                    "content": "fn get(items: &[u8], i: usize) -> u8 {\n    items[i]\n}\n"
+                }
+            ]
+        })
+        .to_string(),
+    )?;
+
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&json!({
+            "jsonrpc":"2.0", "method":"tools/call", "id": 21,
+            "params": {"name": "batch", "arguments": {"file": spec_path.to_string_lossy()}}
+        }))
+        .send()
+        .await?;
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").expect("tool-level errors are results");
+    assert_eq!(r.get("isError"), Some(&json!(true)), "{:?}", r["content"]);
+    assert_eq!(r["code"], json!("E_BATCH_ROLLED_BACK"));
+    let verdict = r
+        .get("edit_verdict")
+        .expect("batch rejection carries edit_verdict");
+    assert_eq!(verdict["level"], json!("critical"));
+    let findings = verdict["findings"].as_array().expect("findings array");
+    assert!(!findings.is_empty(), "findings present: {verdict:?}");
+    assert_eq!(
+        std::fs::read_to_string(&target)?,
+        guarded,
+        "rejected batch must not touch the file"
+    );
+
+    let _ = tx.send(());
+    server_handle.await?;
+    Ok(())
+}

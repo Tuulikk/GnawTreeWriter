@@ -210,12 +210,12 @@ impl GnawTreeWriter {
         findings: Vec<serde_json::Value>,
         suggestions: Vec<String>,
     ) {
-        self.last_verdict = Some(serde_json::json!({
-            "level": level,
-            "score": score,
-            "findings": findings,
-            "suggestions": suggestions,
-        }));
+        self.last_verdict = Some(crate::core::verdict_json(
+            level,
+            score,
+            findings,
+            suggestions,
+        ));
     }
 
     /// Fas 4: impact report for the last edit (changed signature with
@@ -347,35 +347,10 @@ impl GnawTreeWriter {
                 let report = guardian.audit_edit_with_language(resolved, content, ext);
 
                 // Fas 4: signature-aware impact via the knowledge graph.
-                // Missing index ⇒ omit the field entirely, never an error.
+                // Missing index ⇒ None ⇒ field omitted, never an error.
                 // (Runs before set_verdict: resolved borrows self, so it
                 // must not be used after the mutable verdict write.)
-                if report
-                    .deltas
-                    .iter()
-                    .any(|d| matches!(d.kind, crate::core::edit_delta::DeltaKind::SignatureChange))
-                {
-                    if let Some(name) = resolved.get_name() {
-                        let root = crate::core::find_project_root(Path::new(&self.file_path));
-                        let analyzer = crate::llm::ImpactAnalyzer::new_with_root(&root);
-                        if let Ok(ir) = analyzer.analyze_impact(&name, &self.file_path) {
-                            let mut sites = Vec::new();
-                            for af in &ir.affected_files {
-                                for cp in &af.call_paths {
-                                    sites.push(format!("{}:{}", af.file_path, cp));
-                                }
-                            }
-                            let callers = sites.len();
-                            if callers > 0 {
-                                self.last_impact = Some(serde_json::json!({
-                                    "symbol": name,
-                                    "callers": callers,
-                                    "sites": sites,
-                                }));
-                            }
-                        }
-                    }
-                }
+                self.last_impact = signature_impact_for(&self.file_path, resolved, &report.deltas);
 
                 // Fas 5.1: structured verdict for the rejection path.
                 let level_str = match report.level {
@@ -1009,6 +984,60 @@ fn count_changed_bytes(before: &str, after: &str) -> usize {
         .filter(|(a, b)| a != b)
         .count()
         + before.len().abs_diff(after.len())
+}
+
+/// Canonical shape of a rejection verdict (Fas 5.1) — shared by
+/// GnawTreeWriter::set_verdict and batch validation so agents get the
+/// identical edit_verdict contract from both paths.
+pub(crate) fn verdict_json(
+    level: &str,
+    score: f32,
+    findings: Vec<serde_json::Value>,
+    suggestions: Vec<String>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "level": level,
+        "score": score,
+        "findings": findings,
+        "suggestions": suggestions,
+    })
+}
+
+/// Fas 4 shared helper: impact report when `deltas` contain a
+/// SignatureChange on a named node with indexed callers, based on the
+/// knowledge graph under the project root of `file_path`. None when the
+/// edit does not change a signature, the node is unnamed, or the index
+/// has no callers — omitted downstream, never an error.
+pub(crate) fn signature_impact_for(
+    file_path: &str,
+    resolved: &TreeNode,
+    deltas: &[crate::core::edit_delta::EditDelta],
+) -> Option<serde_json::Value> {
+    let signature_changed = deltas
+        .iter()
+        .any(|d| matches!(d.kind, crate::core::edit_delta::DeltaKind::SignatureChange));
+    if !signature_changed {
+        return None;
+    }
+    let name = resolved.get_name()?;
+    let root = find_project_root(Path::new(file_path));
+    let analyzer = crate::llm::ImpactAnalyzer::new_with_root(&root);
+    let ir = analyzer.analyze_impact(&name, file_path).ok()?;
+    let mut sites = Vec::new();
+    for af in &ir.affected_files {
+        for cp in &af.call_paths {
+            sites.push(format!("{}:{}", af.file_path, cp));
+        }
+    }
+    let callers = sites.len();
+    if callers == 0 {
+        return None;
+    }
+    Some(serde_json::json!({
+        "symbol": name,
+        "callers": callers,
+        "sites": sites,
+    }))
 }
 
 #[cfg(test)]
