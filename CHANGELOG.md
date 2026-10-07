@@ -1,13 +1,61 @@
-## [Unreleased]
+## [0.19.0] - 2026-10-07
+
+### Changed — Semantic search: three-channel reranking + richer index content
+Session arc on the 50-case eval (evals/sense_recall.json): pipeline
+recall **60/64/70/72 → 58/68/92% @ k=5/10/100**, recall@1 20 → 30%,
+MRR 0.351 → 0.437 — the pipeline now **beats raw cosine at the tail**
+(92 vs 90 @ k=100) while keeping the diverse headline agents read.
 
 ### Added
-- **Headline-zone diversification, v2**: the cap now applies to the first 5 SERVED slots only, and deferred entries lead the tail pass in fused order — nothing inside the served window is ever dropped (the first version dropped head-zone violators outright in the served path and deferred them to position ~2000 in diagnostics). Also fixes a regression where the pre-graph fused sort was lost, leaving no-adjacency queries served in raw cosine order.
-- **File module-doc suffix in embeddings**: each indexed entry appends the file's leading `//!` documentation to its embedded text — the file's own natural-language description bridges agent queries to implementation symbols ("avoid reparsing unchanged files" ↔ parse_cache.rs; "structural deltas between node trees" ↔ edit_delta.rs). Prefixing was measured and rejected: it anchors every entry to the file topic and dilutes the symbol signal (recall@5 60 → 46). Suffix: recall@100 90 → 92% (pipeline now beats raw cosine at the tail), recall@1 28 → 30%, MRR 0.437.
-- **Index preview depth 97 → 240 chars**: the embedded (and stored) preview now carries 2.5× more source context, giving the embedding model real signal instead of bare signature heads. Re-index required (`ai index`); raw cosine recall@1 rose 16% → 24% and pipeline recall@100 reached 90% on the 50-case set (7302 entries / 231 files).
-- **Headline-zone diversification in the sense reranker**: the per-file cap (MAX_PER_FILE=4) now binds only in the first 5 served slots; entries deferred there are served in the tail pass instead of dropped. Eval showed 9/12 misses @k=100 were exact symbols crowded out by their own file's better-ranked heads (raw rank 5-90). Recall: 60/68/74/84 @ k=5/10/20/100 (was 60/66/72/76; raw cosine 54/70/76/90).
-- **recall-eval diagnostics**: per-case expected_cosine_rank (model-side), expected_pipeline_rank (full reranked order, not capped at k) and top_pipeline_files (displacement audit) — separates "model never surfaced it" from "reranker pushed it out".
-- **Graph-proximity channel in the sense reranker**: `rerank_satellite_with_graphs` fuses a third reciprocal-rank channel — call-graph adjacency of the top seed files (callers + callees, BFS-best-seed order) — into the ranking. Hubs (files with >100 resolved edges, e.g. `core/mod.rs`, `cli.rs`) are excluded as seeds and neighbors: adjacency to them is topical noise. Graph JSONs store absolute paths while the semantic index stores relative ones; `graph_path_key` normalizes both from the first `src/` segment. Absent or empty graphs degrade silently to the two-channel ranking. `ai recall-eval` runs the same pipeline (incl. the graph channel). Recall (50 cases): 60/66/72/76 @ k=5/10/20/100 (two-channel: 60/66/72/74; raw cosine: 54/70/76/90).
+- **Graph-proximity channel in the sense reranker**:
+  `rerank_satellite_with_graphs` fuses a third reciprocal-rank channel —
+  call-graph adjacency of the top seed files (callers + callees,
+  BFS-best-seed order) — into the ranking. Hubs (files with >100
+  resolved edges, e.g. `core/mod.rs`, `cli.rs`) are excluded as seeds
+  and neighbors: adjacency to them is topical noise (measured: w=0.4
+  without hub exclusion cost −2 recall@5). Graph JSONs store absolute
+  paths while the semantic index stores relative ones; `graph_path_key`
+  normalizes both from the first `src/` segment (before this the
+  channel was silently inert — proven by w=3.0 changing nothing until
+  the fix, then collapsing recall to 2%: adjacency flows). Absent or
+  empty graphs degrade silently to the two-channel ranking.
+  `ai recall-eval` runs the same pipeline (incl. the graph channel).
+- **recall-eval diagnostics**: per-case `expected_cosine_rank`
+  (model-side), `expected_pipeline_rank` (full reranked order, not
+  capped at k) and `top_pipeline_files` (displacement audit) —
+  separates "the model never surfaced it" from "the reranker pushed it
+  out". This dataset drove the whole calibration.
+- **Headline-zone diversification**: the per-file cap (MAX_PER_FILE=4)
+  binds only while filling the first 5 SERVED slots; entries deferred
+  there LEAD the tail pass in fused order — nothing inside the served
+  window is ever dropped. Eval showed 9/12 misses @k=100 were exact
+  symbols crowded out by their own file's better-ranked heads (raw
+  ranks 5-90) while the pipeline already named the right FILE.
+- **Index preview depth 97 → 240 chars**: the embedded (and stored)
+  preview carries 2.5× more source context — real signal instead of
+  bare signature heads. Raw cosine recall@1 rose 16% → 24%.
+- **File module-doc suffix in embeddings**: each indexed entry appends
+  the file's leading `//!` documentation to its embedded text — the
+  file's own description bridges agent queries to implementation
+  symbols ("avoid reparsing unchanged files" ↔ parse_cache.rs;
+  "structural deltas between node trees" ↔ edit_delta.rs). Prefixing
+  was measured and rejected: it anchors every entry to the file topic
+  and dilutes the symbol signal (recall@5 60 → 46); the suffix lifts
+  recall@100 90 → 92% and recall@1 28 → 30%.
 
+### Fixed
+- The pre-graph fused sort was lost during a debug-block removal:
+  queries with no graph adjacency were served in raw cosine order
+  (lex channel + priors silently ignored). Caught by rerank unit
+  tests; eval numbers had masked it because the graph path re-sorts.
+
+### Upgrade notes
+- **Re-index after upgrading** (`gnawtreewriter ai index`, GPU build
+  recommended): preview depth and module-doc suffix change every
+  vector. `sense`/MCP signatures are backward compatible (the plain
+  `rerank_satellite` wrapper is kept).
+
+## [0.18.0] - 2026-10-06
 ## [0.18.0] - 2026-10-06
 
 ### Changed — Semantic search: real retrieval embedder (BGE)
