@@ -808,3 +808,46 @@ alla path-dep-konsumenter direkt (ingen release-grind emellan). Skrivs
 dep-höjningar i changeloggen/RELEASE_NOTES med "BREAKING för path-deps"-
 markering? (Samma mönster som 0.16.0:s ogated `sense_with`.) Önskat: en rad
 i varje release-not som rör Cargo.toml-deps.
+
+---
+
+## 2026-10-07 — index_entities/index_relations: ID-formaterna stämmer ej med doc:en, tre sanningar i samma svar (Motor2, kartan v1)
+
+**Kontext:** Motor2 byggde projekt-kartan v1 (beständig sambandsgraf).
+`index_entities` + `index_relations` per fil är zon-motorn. Vid första
+live-zonen (crates/motor2-server/src/api/map.rs) sparades kanterna med
+TRE olika id-format i SAMMA svar:
+
+| Fält | Doc (rustdoc) | Faktiskt värde |
+|---|---|---|
+| `Entity.id` | "Deterministic ID: `gtw:{file}:{type}:{name}`" | **bart namnet** (`"seed_structure"`) |
+| `Relation.from` | "`gtw:{file}:function:{name}` …" | full id MEN med **absolut path** (`gtw:/mnt/.../map.rs:function:seed_structure`) |
+| `Relation.to` | "Target entity ID (`gtw:{file}:{type}:{name}`)" | **bart namnet** (`"compute_file_zone"`) |
+
+Konsekvens: konsumenter som litar på doc:en (vi gjorde) bygger
+korsfilslänkar som aldrig träffar — src-kanterna pekar på
+`gtw:{abs}:…` medan entitetsnoderna skapas från `Entity.id` (bart
+namn). Dessutom gör abs-path:en att id:na blir maskin-specifika
+(klona repo → annat id för samma symbol).
+
+**Motor2-sidig omväg (6e14c56):** kanonisk namnrymd
+`gtw:{relpath}:{type}:{name}` — `from` rewrite via abs-prefixet, `to`
+löses mot filens egna entiteter → DB-uppslag per label (korsfil) →
+placeholder namespaced under filen. Fungerar, men v1 förlorar
+automatisk korsfilslänkning när målet ej redan indexerat.
+
+**Begäran (triage):**
+1. Bestäm ETT offentligt id-format (förslag: `gtw:{relpath}:{type}:{name}`
+   — relativ, stabil, deterministisk) och låt `Entity.id`,
+   `Relation.from` OCH `Relation.to` följa det.
+2. Uppdatera rustdoc:en (id:na i `index_entities.rs`/`index_relations.rs`
+   dokumenterar ett format koden inte producerar — §17-mönstret: dokens
+   sanning separerad från koden).
+
+**Bedömning (fylls vid triage):**
+- Använt fel? — NEJ (parametrarna är path + include_private; inga
+  format-flaggor finns).
+- Bugg? — JA (id-format-drift + inaktuell doc), påverkar alla
+  knowledge-graph-konsumenter.
+- Prioritet: medel (Motor2 kör vidare på egen normalisering; buggen
+  slår mot cross-project-konsistens).
