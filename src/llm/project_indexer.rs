@@ -69,6 +69,16 @@ impl ProjectIndexer {
                         // (16 nodes per forward instead of one per node).
                         let mut pending: Vec<(String, String, String)> = Vec::new();
                         Self::collect_pending(&tree, &mut pending);
+                        // The file's own //! description bridges agent
+                        // queries ("avoid reparsing unchanged files") to
+                        // implementation symbols (get_or_parse) — prepend it
+                        // to both the embedded text and the stored preview.
+                        let module_doc = Self::extract_module_doc(&content);
+                        if !module_doc.is_empty() {
+                            for t in pending.iter_mut() {
+                                t.2 = format!("{}\n\n{}", t.2, module_doc);
+                            }
+                        }
                         if !pending.is_empty() {
                             let texts: Vec<&str> = pending.iter().map(|t| t.2.as_str()).collect();
                             let vectors = model.get_embeddings(&texts)?;
@@ -101,6 +111,22 @@ impl ProjectIndexer {
     /// every embeddable node/chunk — embedding happens afterwards in ONE
     /// batched call per file (see ModernBertModel::get_embeddings). No
     /// model in this phase, so the walk is trivially cheap.
+    fn extract_module_doc(content: &str) -> String {
+        let mut doc = String::new();
+        for line in content.lines() {
+            let trimmed = line.trim_start();
+            if let Some(rest) = trimmed.strip_prefix("//!") {
+                doc.push_str(rest.trim());
+                doc.push(' ');
+                if doc.chars().count() >= 200 {
+                    break;
+                }
+            } else if !trimmed.is_empty() {
+                break;
+            }
+        }
+        doc.trim().to_string()
+    }
     fn collect_pending(node: &TreeNode, acc: &mut Vec<(String, String, String)>) {
         // Index functions, classes, and important definitions
         if node.node_type.contains("definition") || node.node_type.contains("item") {
