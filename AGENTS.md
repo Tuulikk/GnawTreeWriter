@@ -539,6 +539,15 @@ AI agents can contribute to several areas of the project:
 - Update CHANGELOG.md for version changes
 - Document breaking changes clearly
 
+### OpenCode-plugins (2026-10-09)
+Edits in this repo run under the Gnaw OpenCode plugins (checkpoint shadows,
+tool-guard, memory-integration). Their source lives in the sibling repo
+**`Gnaw-Software/opencode-plugins`** (deployed via symlink to
+`~/.config/opencode/plugins`) — edit plugins there, never in the config
+directory. Contract: V1 format (`export default { id, server }`), never
+named function exports (the legacy loader calls every function export as a
+plugin factory — see that repo's README.md).
+
 ### Error Handling Patterns
 ```rust
 // Preferred: Return Result
