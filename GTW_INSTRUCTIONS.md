@@ -12,7 +12,7 @@ finnas i tabellen här nedan; nya verktyg läggs till här samtidigt):
 | Redigera | `edit_node`, `insert_node`, `move_node`, `preview_edit`, `edit_ask`, `diff` | AST-validerad precision — syntax kontrolleras FÖRE skrivning; `diff` = oberoende verifiering efter skrivning |
 | Semantisk redigering | `semantic_edit`, `semantic_insert` | Beskriv VAD ska ändras, GTW hittar noden (svarar med `semantic_match`: nod + confidence + kandidater) |
 | Koordinera | `batch`, `undo` | Atomära multi-fil-transaktioner; snabb återställning |
-| Historik & status | `history`, `stats`, `doctor` | Vad ändrades nyss / hur stort är projektet / är GTW vid liv (hälsa i ett anrop) |
+| Historik & status | `history`, `stats`, `doctor` | Vad ändrades nyss / hur stort är projektet / är GTW vid liv OCH aktuell (hälsa + build/stale i ett anrop) |
 | AI-kontext | `compress`, `pack`, `curate`, `diff_since`, `save_state` | Token-medveten analys, projekt-paketering, ändringsspårning |
 | Indexera | `index_project`, `index_entities`, `index_relations` | `index_project` bygger VEKTORINDEXET som satellit-`sense` söker (start/status i bakgrund); de två andra bygger KUNSKAPSGRAFEN |
 | Lint & regler | `lint`, `add_rule` | Mönsterlintering (`fix`/`preview` för automatisering); skriv egna regler |

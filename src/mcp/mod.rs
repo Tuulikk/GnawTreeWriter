@@ -541,7 +541,7 @@ pub mod mcp_server {
             json!({
                 "name": "doctor",
                 "title": "Health check (parsers, backups, transaction log)",
-                "description": "One-call health diagnostic: smoke-tests every parser, verifies backup integrity and the transaction log, and reports whether GnawTreeWriter is alive and sane in this project. WHEN: first contact with a repo, after a crash, or when any edit/tool behaves oddly — one call instead of guessing. RETURNS: {healthy, passed, failed, warnings, total, checks[]} — unhealthy is data, not an error, and the failure details point at restore-project. Takes no arguments. Example: {}.",
+                "description": "One-call health diagnostic: smoke-tests every parser, verifies backup integrity and the transaction log, and reports whether GnawTreeWriter is alive and sane in this project. WHEN: first contact with a repo, after a crash, or when any edit/tool behaves oddly — one call instead of guessing. RETURNS: {healthy, passed, failed, warnings, total, checks[], build{git_sha, built_at, dirty, stale}} — unhealthy or stale is data, not an error; a stale build means the source is newer than this binary (rebuild via scripts/commit-build.sh + host restart). Takes no arguments. Example: {}.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
@@ -1467,7 +1467,12 @@ pub mod mcp_server {
         let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let project_root = crate::core::find_project_root(&root);
         let report = crate::core::diagnostics::run_full_doctor(&project_root);
-        let status = if report.overall_healthy {
+        // Build identity on every doctor call (user directive 2026-10-09:
+        // stale binaries must be visible on a health check — the GTW MCP
+        // binary is process-bound per opencode session, so a stale one
+        // otherwise hides until tooling behaves oddly).
+        let build = crate::version::current();
+        let mut status = if report.overall_healthy {
             format!(
                 "doctor: {} / {} checks passed ({} warnings) — GTW is healthy in this project. Checks covered: parsers, backup integrity, transaction log.",
                 report.passed, report.total_checks, report.warnings
@@ -1478,6 +1483,12 @@ pub mod mcp_server {
                 report.passed, report.total_checks, report.failed, report.warnings
             )
         };
+        if build.stale {
+            status.push_str(&format!(
+                " ⚠ BINARY STALE: running build {} ({}) is older than the current source — rebuild via scripts/commit-build.sh and restart the host to load fresh tooling.",
+                build.git_sha, build.built_at
+            ));
+        }
         tool_success(
             status,
             Some(json!({
@@ -1487,6 +1498,12 @@ pub mod mcp_server {
                 "warnings": report.warnings,
                 "total": report.total_checks,
                 "checks": report.checks,
+                "build": {
+                    "git_sha": build.git_sha,
+                    "built_at": build.built_at,
+                    "dirty": build.dirty,
+                    "stale": build.stale,
+                },
             })),
         )
     }

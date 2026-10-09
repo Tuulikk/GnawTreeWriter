@@ -107,11 +107,11 @@ fn count_word(content: &str, word: &str) -> usize {
         let before_ok = content[..i]
             .chars()
             .next_back()
-            .map_or(true, |c| !c.is_alphanumeric());
+            .is_none_or(|c| !c.is_alphanumeric());
         let after_ok = content[after..]
             .chars()
             .next()
-            .map_or(true, |c| !c.is_alphanumeric());
+            .is_none_or(|c| !c.is_alphanumeric());
         if before_ok && after_ok {
             count += 1;
         }
