@@ -786,6 +786,32 @@ meddelande/skill ha sagt i just den situationen? (GTW ska vara
 guidande: varje fel och varje situation ska peka på nästa steg)
 -->
 
+## 2026-10-09 — MCP edit_node: panik på char boundary (Motor2 main.rs, nod "8")
+**Kontext:**
+| # | Anrop | Parametrar | Resultat |
+|---|-------|------------|----------|
+| 1 | `edit_node` | file_path=gnawdriver/src/main.rs, node_path="8", content=<fn login-hantering, ~30 rader> | SERVER-PANIK: "byte index N is not a char boundary; it is inside 'ö' (bytes …)" — anropet dog, ingen E_STRICT_PARSE, ingen strukturerad fel-SVAR med nodinfo |
+**Omväg:** OpenCode Edit-tool (sträng-ersättning med unik kontext) — fungerade.
+**Bedömning:** [ ] användarfel [x] bugg
+ [ ] saknad funktion [ ] sub-funktion saknas [ ] svår att nå
+ [ ] inte hittad vid behov [ ] under förmåga
+**Analys:** felmeddelandet är själva §28.2-klassen Motor2 redan dragit
+lärdom av (5:e återkomsten i DERAS kod) — nu i GTW:s egen editväg:
+någonstans slice:as edit-node-innehåll/nodnamn på byte-index i stället
+för `chars()`. Två problem: (a) paniken själv, (b) den SIKTAS som rå
+panik i stället för ett rent E_*-fel med position + förslag.
+**Begäran (triage):**
+1. Hitta byte-slicen i edit_node-vägen (troligen preview/diff eller
+   nodnamnstrunkering) → `chars().take(N)` (§28.2-facit).
+2. Panik i edit-vägen ska fångas → strukturerat fel (E_STRICT_PARSE-
+   klass) — en agent ska kunna läsa sig till nästa steg.
+**Bedömning (fylls vid triage):**
+- Använt fel? — NEJ (node_path från analyze, giltigt innehåll med
+  svenska tecken — 'ö' i kommentartext).
+- Bugg? — JA (char-boundary-panik + opåddnad panik i edit-vägen).
+- Prioritet: medel-hög (svenska kommentarer är NORMALFALLET i dessa
+  repos; varje edit_node med å/ä/ö i fel position kan träffa den).
+
 ## Intake-rapport från Motor2 (2026-10-06): rusqlite 0.32 i c3a79ac bröt Motor2-workspace-resolutionen
 
 **Klass:** sysko-intake (Motor2 AGENTS.md §36) — inte en GTW-bugg i sig, men
