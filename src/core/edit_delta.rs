@@ -89,20 +89,31 @@ fn is_number_token(node_type: &str, content: &str) -> bool {
 }
 
 /// Word-boundary occurrence count ("try" must not match "entry").
+///
+/// Char-boundary-fix (2026-10-09, bevisad i drift via Motor2:s panik-hook):
+/// föregående loop stegar BYTE för byte och slicade `content[i..i+word.len()]`
+/// vid varje i — panik på svensk text ("end byte index 1307 is not a char
+/// boundary; it is inside 'ä'", edit_delta.rs:99, dödade GTW-editar i
+/// Motor2:s batt-kodning). `match_indices` Yieldar endast boundary-alignade
+/// träffar; gränskontrollen är char-baserad (unicode `is_alphanumeric` —
+/// ä/ö räknas som ordtecken, striktare och korrektare än gamla ASCII-byten).
 fn count_word(content: &str, word: &str) -> usize {
-    if word.is_empty() || content.len() < word.len() {
+    if word.is_empty() {
         return 0;
     }
-    let bytes = content.as_bytes();
     let mut count = 0;
-    for i in 0..=content.len() - word.len() {
-        if &content[i..i + word.len()] == word {
-            let before_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
-            let after = i + word.len();
-            let after_ok = after >= bytes.len() || !bytes[after].is_ascii_alphanumeric();
-            if before_ok && after_ok {
-                count += 1;
-            }
+    for (i, _) in content.match_indices(word) {
+        let after = i + word.len();
+        let before_ok = content[..i]
+            .chars()
+            .next_back()
+            .map_or(true, |c| !c.is_alphanumeric());
+        let after_ok = content[after..]
+            .chars()
+            .next()
+            .map_or(true, |c| !c.is_alphanumeric());
+        if before_ok && after_ok {
+            count += 1;
         }
     }
     count
@@ -555,6 +566,34 @@ mod tests {
 
     fn parse(code: &str) -> TreeNode {
         RustParser::new().parse(code).unwrap()
+    }
+
+    /// Char-boundary-regression (2026-10-09, live-bevis via Motor2:s
+    /// panik-hook): count_word på svensk text panikade i den gamla
+    /// byte-loopen ("end byte index 1307 ... inside 'ä'"). Exakt
+    /// live-scenariot: 1306 bytes prefix + 'ä' + ord att räkna.
+    #[test]
+    fn count_word_panikerar_aldrig_pa_svensk_text() {
+        // Exakt live-fall: ä vid bytes 1306..1308, gammal kod: panic vid i=1307.
+        let content = format!("{}ä om if så om if", "x".repeat(1306));
+        assert_eq!(count_word(&content, "if"), 2);
+        assert_eq!(count_word(&content, "om"), 2);
+        // Ord-avgränsning: 'ä' räknas som ordtecken (unicode) — "äif" är
+        // inte en fri "if"-träff, "så" matchar inte "å".
+        let svensk = "äif ångelpåföljd if";
+        assert_eq!(count_word(svensk, "if"), 1);
+        assert_eq!(count_word(svensk, "så"), 0);
+        // ASCII-semantiken oförändrad: word-boundary gäller. ("unwrap(x)"
+        // räknas ej — '(' följt av ordtecken är ingen fri träff, exakt som
+        // gamla koden.)
+        assert_eq!(count_word("try or entry", "try"), 1);
+        assert_eq!(count_word("entry", "try"), 0);
+        assert_eq!(count_word("unwrap(x).unwrap()", "unwrap("), 1);
+        assert_eq!(count_word("a.unwrap(); b.unwrap()", "unwrap("), 2);
+        // Emoji (4-byte) och tomma/edge-fall.
+        assert_eq!(count_word("🚀 if 🚀 if", "if"), 2);
+        assert_eq!(count_word("", "if"), 0);
+        assert_eq!(count_word("if", ""), 0);
     }
 
     #[test]

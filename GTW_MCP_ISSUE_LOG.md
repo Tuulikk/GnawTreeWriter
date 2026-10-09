@@ -877,3 +877,38 @@ automatisk korsfilslänkning när målet ej redan indexerat.
   knowledge-graph-konsumenter.
 - Prioritet: medel (Motor2 kör vidare på egen normalisering; buggen
   slår mot cross-project-konsistens).
+
+---
+
+## Issue 14 — list_nodes med filter svarar tomt / search_nodes utan paths (2026-10-09, Motor2-session)
+
+**Kategori:** bugg (sub-funktion sviker för situationen)
+
+**Situation:** strukturell diagnos inför rewrite av `gnawdriver/src/mcp.rs`
+(§35.3-ritualen: GTW-försök först). `analyze` OK (1683 tokens), men:
+- `list_nodes` med `filter: "function"` → **0 noder**
+- `list_nodes` utan filter → 184 rader **utan dot-path**
+- `search_nodes("serve_stdio")` → "Found 3 matches" **utan nod-sökvägar**
+
+Utan dot-paths kan `edit_node` inte målinriktas — omvägen blev Write av
+hela filen (tillåtet per §35.2, men förbigår GTW:s syntaxvalidering och
+shadow-checkpoints).
+
+**Reproduktion:** fil `gnawdriver/src/mcp.rs` (~280 rader Rust, en pub fn
++ en async fn + helper). Samma fil: `analyze` hittar noderna.
+
+**Begäran (triage):**
+1. `list_nodes` ska returnera dot-path i varje rad (docstringen lovar
+   "one line per node: dot-path [type] name" — ett svar utan path bryter
+   verktygets hela syfte: "the index for finding the path an edit targets").
+2. `search_nodes` ska inkludera nod-sökvägarna i svaret (idag bara antal).
+3. Om `filter` kräver exakta AST-typer ("function_item" inte "function"):
+   returnera en ledtråd i 0-svaret i stället för tyst tomma (§16: saknas
+   ska SKRIKA, inte se ut som "filen har inga funktioner").
+
+**Bedömning (fylls vid triage):**
+- Använt fel? — MÖJLIGT för filter-värdet ("function" vs "function_item"
+  testades bara implicit), men 0-svar utan ledtråd är i så fall också en
+  UX-bugg.
+- Bugg? — Sannolikt JA (paths saknas i svaren oavsett filter).
+- Prioritet: medel (omvägen fungerar men tappar validering + checkpoints).
