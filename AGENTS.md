@@ -1095,4 +1095,36 @@ All features available as MCP tools: `compress`, `pack`, `curate`
 
 ---
 
+## Språkregel — kod och JSON på engelska (övergångsregel, BINDANDE, 2026-10-09)
+
+> Användaren (2026-10-09): "kod + JSON-nycklar på engelska, bara samtal på
+> svenska" — regeln har gällt i praktiken men var aldrig nedskriven.
+
+**Övergångsregeln (bryt inte befintligt i onödan):**
+
+1. **Nytt innehåll på engelska.** Ny kod, nya identifierare, nya kommentarer,
+   nya JSON-nycklar, nya config-/API-fält, nya loggmeddelanden skrivs på
+   engelska.
+2. **Fixar som ändå görs skrivs om på engelska.** Rör du befintlig svensk
+   kod/kommentar/nyckel av annan anledning → den delen skrivs på engelska i
+   SAMMA ändring. Ingen separat språk-sweep krävs eller görs.
+3. **Nyckel-strukturer är atomära.** I en struktur av nycklar (JSON-output,
+   wire-format, event-fält, DB-kolumner) kan enskilda nycklar INTE byta
+   språk var för sig — en fix som rör en av dem kan inte bara engelska den.
+   Antingen skrivs HELA strukturen om till engelska (brytande ändring —
+   alla konsumenter uppdateras i samma ändring), eller fortsätter den på
+   svenska (då är dess nycklar frusna; NYA fält i SAMMA struktur följer
+   samma språk). Inga blandade strukturer.
+4. **ASCII i kod och JSON.** å/ä/ö (och övriga multi-byte-tecken) i
+   identifierare, JSON-nycklar och maskinläst strängdata ska ersättas med
+   ASCII när de påträffas — de är bränslet i char-boundary-panik-klassen
+   (Motor2 §28.2, sex återkomster). ASCII-text tål byte-slicing; åäö-text
+   gör inte det. Ny slice på text → char-säker klippning
+   (`chars().take()`-mönstret).
+5. **Mänsklig prosa undantas.** Samtal och dokument (planer, handover,
+   AGENTS.md) följer sessionens språk — regeln gäller kod, JSON-nycklar
+   och maskinläst data, inte mänsklig text.
+
+---
+
 *Version 2.0 - Rewritten to focus on contributing and dogfooding rather than end-user usage*
