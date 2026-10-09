@@ -912,3 +912,40 @@ shadow-checkpoints).
   UX-bugg.
 - Bugg? — Sannolikt JA (paths saknas i svaren oavsett filter).
 - Prioritet: medel (omvägen fungerar men tappar validering + checkpoints).
+
+## Issue 15 — analyze/search/list_nodes magra på STOR fil (2 515+ rader) — omväg tvingad (2026-10-10, Motor2 streaming.rs)
+
+**Kategori:** under förmåga / inte hittad vid behov.
+
+**Vad som hände:** strukturell redigering av
+`crates/motor2-server/src/streaming.rs` (2 515 rader, ~29k tokens per
+`analyze`). Tre GTW-försök enligt §35.3-ritualen:
+
+- `analyze` → svarade ENDAST "Analyzed ... (28648 tokens)" — ingen nod-lista,
+  inga dot-paths.
+- `search_nodes("fn remove_task")` → "Found 4 matches" — inga sökvägar.
+- `list_nodes(filter="fn", max_depth=2)` → "Found 13 nodes" — inga sökvägar.
+
+Utan dot-paths var `insert_node`/`edit_node` omöjliga att målinrikta;
+omväg blev Edit + Read-regioner (§35.2 — tillåtet, men utan GTW:s
+syntaxvalidering; kostade en dubblerad `}` som fångades av byggfacit).
+
+**Mönster:** identiskt med Issue 14 (gnawdriver mcp.rs, 280 rader) men på
+en fil 9× större — antyder att svaren kollapsar när nodvolymen växer, inte
+bara på vissa filer.
+
+**Begäran (triage):**
+1. `analyze` på stora filer: returnera top-nivå-noder (dot-path + typ +
+   namn) även när totalen är stor — truncera med antal + ledtråd (§16:
+   saknas ska SKRIKA), aldrig en tom bekräftelserad.
+2. `search_nodes`/`list_nodes`: dot-path i VARJE träffrad (docstringen
+   lovar det; svar utan paths bryter verktygets syfte).
+3. Med `max_depth` respekterat och fortfarande 0 rader → förklara VARFÖR
+   (filter-syntax? parse-fel? för stor fil?).
+
+**Bedömning:**
+- Använt fel? — Nej; samtliga tre anrop följde docstring-exemplen.
+- Bugg? — Sannolikt JA (stor-fils-vägen returnerar diagnostext i stället
+  för data).
+- Prioritet: HÖG — stora filer är exakt där AST-verktyget slår text-editor
+  (§35.1-beslutstabellen), och just där är det tyst.
