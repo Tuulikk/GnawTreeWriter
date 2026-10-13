@@ -365,7 +365,13 @@ fn diff_tokens_fallback(old: &TreeNode, new: &TreeNode, deltas: &mut Vec<EditDel
     if b < a {
         deltas.push(EditDelta {
             kind: DeltaKind::ConditionRemoved,
-            severity: Severity::Error,
+            // F1-kalibrering (batt 53a53545): ord-räkning av "if" är för
+            // grov för Error — den träffar kontrollflödes-omdesign, kommentarer
+            // och strängar lika gott. Legitima refaktorer (borttagna if-kedjor
+            // BY DESIGN) får inte kunna blockas på detta; varningen syns i
+            // Guardian-meddelandena. Det AST-exakta contract-lagret fångar
+            // äkta guard-bortfall.
+            severity: Severity::Warning,
             message: format!(
                 "{} condition statement(s) removed — a guard or bounds check may be gone",
                 a - b
@@ -442,7 +448,11 @@ pub fn check_contract(old: &Contract, new_content: &str) -> Vec<EditDelta> {
             kind: DeltaKind::ErrorHandlingRemoved {
                 what: "all".into(),
             },
-            severity: Severity::Error,
+            // F1-kalibrering (batt 53a53545): "all panics gone" är ofta en
+            // FÖRBÄTTRING (unwrap → unwrap_or_default räknas som bortfall av
+            // "unwrap(") — Warning, inte Error. Den exakta guard-quote-nivån
+            // nedan behåller Error som den enda hårda signalen.
+            severity: Severity::Warning,
             message: "Invariant contract: ALL error handling (unwrap/expect/try/catch) present before the edit is gone".into(),
             suggestion: Some("Restore at least the primary error path".into()),
         });
@@ -528,7 +538,12 @@ fn classify_removed(gone: &TreeNode, parent_type: &str, deltas: &mut Vec<EditDel
     if guard_like {
         deltas.push(EditDelta {
             kind: DeltaKind::ConditionRemoved,
-            severity: Severity::Error,
+            // F1-kalibrering (batt 53a53545): även AST-exakt detektering är
+            // Warning — att en if-branch försvinner är normalt i redesign och
+            // agenten har ingen force-väg förbi en GUARDIAN BLOCK (Motor2-
+            // lagret styr force). Guard-bortfall som ÄR kritiskt fångas av
+            // scoringen tillsammans med övriga deltas, inte av en enskild.
+            severity: Severity::Warning,
             message: format!(
                 "A condition operand/statement ({}) was removed — a guard or bounds check may be gone",
                 gt
