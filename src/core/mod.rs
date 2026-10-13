@@ -740,6 +740,43 @@ impl GnawTreeWriter {
         None
     }
 
+    /// F2 (batt 2026-10-13): doc-kommentarer (///) är EGNA syskon-noder i
+    /// tree-sitter-trädet — de är inte barn till funktionen de dokumenterar.
+    /// Vid replace/delete av en definition ska därför det omedelbart
+    /// föregående ///-blocket följa med i regionen, annars blir gamla doc
+    /// kvar (dubletter) när nytt innehåll bär egen doc. Returnerar 1-baserad
+    /// första raden i doc-blocket (eller nodens egen start vid inget block).
+    fn doc_block_start_line(&self, node: &TreeNode) -> usize {
+        let lines: Vec<&str> = self.source_code.lines().collect();
+        let mut first = node.start_line;
+        let mut idx = node.start_line as isize - 2;
+        while idx >= 0 {
+            let trimmed = lines.get(idx as usize).map(|l| l.trim()).unwrap_or("");
+            if trimmed.starts_with("///") {
+                first = idx as usize + 1;
+                idx -= 1;
+            } else {
+                break;
+            }
+        }
+        first
+    }
+
+    /// Identitets-eko (F3, batt 2026-10-13): numeriska paths är POSITIONER
+    /// som skiftar vid varje edit — en modell som återanvänt en gammal path
+    /// kan träffa fel nod (bevis: "11" resolve:ade till doc_comment efter en
+    /// tidigare edit, och ersatte den tyst i stället för staticen). Verktygs-
+    /// svaret ska kunna redovisa VAD som faktiskt resolve:ades: path, typ,
+    /// namn. None = path resolve:ar inte (fel-redovisningen tar vid).
+    pub fn describe_node(&self, query: &str) -> Option<(String, String, Option<String>)> {
+        let node = self.resolve_path(query)?;
+        Some((
+            node.path.clone(),
+            node.node_type.clone(),
+            node.get_name(),
+        ))
+    }
+
     fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String> {
         let node = self
             .find_node_by_path(&self.tree, node_path)
@@ -747,21 +784,33 @@ impl GnawTreeWriter {
 
         let lines: Vec<&str> = self.source_code.lines().collect();
 
+        // F2: när nytt innehåll bär egen doc ska gamla ///-blocket swallas.
+        let region_start = if new_content.trim_start().starts_with("///") {
+            self.doc_block_start_line(node)
+        } else {
+            node.start_line
+        };
+
         // If we have column information, use it for surgical precision
         if node.start_col > 0 && node.end_col > 0 {
             let mut new_lines: Vec<String> = Vec::new();
 
             // Lines before the node's start line
-            for i in 0..node.start_line - 1 {
+            for i in 0..region_start - 1 {
                 if i < lines.len() {
                     new_lines.push(lines[i].to_string());
                 }
             }
 
-            // Handle the start line (with prefix)
-            let start_line_idx = node.start_line - 1;
-            let start_line_text = lines[start_line_idx];
-            let prefix: String = start_line_text.chars().take(node.start_col - 1).collect();
+            // Handle the start line (with prefix) — endast när regionen börjar
+            // på nodens egen rad; en utvidgad region (doc-rader) är hel-rader.
+            let start_line_idx = region_start - 1;
+            let prefix: String = if region_start == node.start_line {
+                let start_line_text = lines[start_line_idx];
+                start_line_text.chars().take(node.start_col - 1).collect()
+            } else {
+                String::new()
+            };
 
             // Handle the end line (with suffix)
             let end_line_idx = node.end_line - 1;
@@ -794,8 +843,8 @@ impl GnawTreeWriter {
         } else {
             let mut new_lines: Vec<String> = Vec::new();
 
-            // Lines before the node
-            for i in 0..node.start_line - 1 {
+            // Lines before the node (F2: inklusive swalltat doc-block)
+            for i in 0..region_start - 1 {
                 if i < lines.len() {
                     new_lines.push(lines[i].to_string());
                 }
@@ -936,6 +985,10 @@ impl GnawTreeWriter {
             .find_node_by_path(&self.tree, node_path)
             .context(format!("Node not found at path: {}", node_path))?;
 
+        // OBS: doc-kommentarer ovanför målet raderas INTE här — det sköts av
+        // Motor2-sidans F2d (attached_comment_paths, motor2-gtw/src/lib.rs)
+        // som äger hela kedjan målet → bifogade kommentarer. En sanning per
+        // regel (§45): core håller ren region-logik, F2d håller kedjan.
         let lines: Vec<&str> = self.source_code.lines().collect();
         let start_idx = node.start_line - 1;
         let end_idx = node.end_line;
