@@ -428,3 +428,49 @@ fn insert_source_file_pos1_single_function_no_newline() {
         only_idx
     );
 }
+
+// ── Out-of-range position == append at top level (Motor2 GTW bridge) ──
+
+/// Regression for the cross-project contract bug (Motor2 batt 2026-10-13):
+/// Motor2's GTW bridge encodes a root "append at the end" as
+/// `position = children.len() + 1`. The arbitrary-index branch previously
+/// mapped that via `idx - 3` into the MIDDLE of a sibling, nesting new code
+/// inside the last function (real failure: inserted `fn ar_giltig` landed
+/// inside `fn fran_romartal` → E0432 "no ar_giltig in the root"). An
+/// out-of-range position must append AFTER the last top-level child.
+#[test]
+fn insert_out_of_range_position_appends_at_top_level() {
+    let (_dir, path) = rust_file_with_newline();
+    let writer = gnawtreewriter::GnawTreeWriter::new(path.to_str().unwrap()).unwrap();
+
+    // 2 top-level fns (add, main) → Motor2 sends children.len() + 1 = 3.
+    let result = writer
+        .preview_edit(EditOperation::Insert {
+            parent_path: String::new(),
+            position: 3,
+            content: "pub fn appended(s: &str) -> bool {\n    !s.is_empty()\n}".to_string(),
+        })
+        .unwrap();
+
+    let lines: Vec<&str> = result.lines().collect();
+    let new_idx = lines
+        .iter()
+        .position(|l| l.contains("fn appended"))
+        .expect("appended fn must be present");
+    let main_idx = lines.iter().position(|l| l.contains("fn main")).unwrap();
+
+    assert!(
+        new_idx > main_idx,
+        "appended fn ({}) must come AFTER fn main ({})",
+        new_idx,
+        main_idx
+    );
+    // It must NOT be nested in main's body: main's closing brace comes first.
+    let between = lines[main_idx..new_idx].join("\n");
+    assert!(
+        between.contains('}'),
+        "fn main's closing brace must precede the appended fn (nested = the bug):\n{}",
+        result
+    );
+}
+

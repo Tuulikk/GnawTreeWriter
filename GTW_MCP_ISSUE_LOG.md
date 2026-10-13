@@ -1038,3 +1038,44 @@ felmeddelandet skiljer inte på de två) eller VAD som ska göras.
 - Åtgärd: ingen kodändring erfordras. Verifiera efter omstart av hosten
   att det praktiska meddelandet är vägledande; om det fortfarande är
   kryptiskt → återöppna (sitter då djupare, ev. i candle/hf-hub-resolver).
+
+## Issue 17 — insert_node: position utanför barnantalet bäddade in kod i ett syskon (ROTORSak för Motor2-batt 2026-10-13)
+
+**Kategori:** bugg (korsprojekt-kontrakt + tyst felplacering; svaret påstod "filroten").
+
+**Situation/bevis (Motor2 batt pass 1, session d3e87f73):**
+- Motor2:s GTW-brygga (`motor2_gtw_insert_node`, `crates/motor2-gtw/src/tools.rs`)
+  kodade "append sist i filen" som `position = children.len() + 1` (25 för 24
+  toppnivå-noder) och rapporterade `insert_target: "filroten (toppnivå),
+  position 25 (sist av 24 noder)"`.
+- GTW:s `insert_node_at_path` godtyckliga index-gren (`idx - 3`) mappade 25 →
+  `children[22].end_line` och klistrade in råtexten där: den nya funktionen
+  hamnade som FÖRSTA barn inuti `fn fran_romartal` (rad 43) — inte i filroten.
+- Beviskedja: pre-insert-backup (`.gnawtreewriter_backups/
+  lib.rs_backup_20261013_112147_482.json`, 66 rader, INGEN `ar_giltig`) →
+  post-insert (71 rader, `ar_giltig` nestlad rad 43). Diffen = 5 rader insatta
+  direkt efter `pub fn fran_romartal(...) {`.
+- Facit: `cargo test` exit=101 — `E0432 no ar_giltig in the root` +
+  dead_code-varning. Batt 0/3 (fail-fast vid pass 1).
+
+**Rotorsak (dubbel):**
+1. GTW: en position utanför barnantalet gick inte till append utan via `idx-3`
+   in i ett SYSKONS mitt — tyst, utan klammer-/radmedvetenhet.
+2. Motor2: felkodning — GTW:s DOKUMENTERADE append för `source_file` ÄR
+   position 1 (`tests/insert_position.rs`); antagandet `position:1 = först`
+   var fel (kommentar i tools.rs) och drev `top+1`.
+
+**Fix (2026-10-13):**
+- GTW `insert_node_at_path`: `position > children.len()` ⇒ append efter SISTA
+  barnet (`children[len-1].end_line`); in-range `idx-3` oförändrat
+  (bakåtkompatibelt).
+- GTW regressionstest `insert_out_of_range_position_appends_at_top_level`
+  (`tests/insert_position.rs`) — bevisat: faller på gamla koden (ny fn före
+  `fn main`), passerar efter fixen.
+- Motor2 `resolve_insert_target`: rot-append ⇒ position 1 + ärlig etikett;
+  Motor2-testet korrigerat (pos 1, inte 3).
+
+**Lärdom (§14):** Motor2:s test `root_insert_without_position_appends_last`
+verifierade HJÄLPAREN (`resolve_insert_target`), aldrig den faktiska
+insertionen — kodningen var aldrig slut-till-slut-testad. Klass: enhetstest
+grönt, beteende fel (logger framgång utan effekt, §10).

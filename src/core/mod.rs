@@ -870,15 +870,22 @@ impl GnawTreeWriter {
             }
             // SUPPORT FOR ARBITRARY INDICES
             idx => {
-                // If we want to insert at a specific index relative to children
-                if idx - 3 < parent.children.len() {
-                    parent.children[idx - 3].end_line
-                } else if !parent.children.is_empty() {
-                    // If index is out of bounds but we have children, append after last child
-                    parent.children.last().unwrap().end_line
-                } else {
-                    // Fallback to inside parent (start)
+                // Documented modes are 0 (first / after opening brace),
+                // 1 (append to parent / before closing brace) and 2 (after
+                // UI properties). Larger values address a 1-based sibling
+                // slot via `idx - 3`. A position BEYOND the child count is
+                // the common "append at the end" encoding (Motor2's GTW
+                // bridge sends children.len() + 1) — it must land AFTER the
+                // LAST child. Previously `idx - 3` mapped such a value into
+                // the MIDDLE of a sibling: Motor2 batt 2026-10-13, position
+                // 25 of 24 nodes nested a new `fn` inside the last function
+                // (E0432 "no ar_giltig in the root").
+                if parent.children.is_empty() {
                     parent.start_line
+                } else if idx > parent.children.len() {
+                    parent.children[parent.children.len() - 1].end_line
+                } else {
+                    parent.children[idx - 3].end_line
                 }
             }
         };
