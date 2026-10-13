@@ -1356,21 +1356,66 @@ pub mod mcp_server {
             Ok((w, warning)) => {
                 let source = w.get_source();
                 let tokens = crate::core::token_count::estimate_code_tokens(source);
-                let mut tree_json = serde_json::to_value(w.analyze()).unwrap_or(json!(null));
+                let tree = w.analyze();
+                let note = match &warning {
+                    Some(wn) => format!(
+                        " [PARTIAL PARSE: syntax error at line {}, col {} — results may be incomplete; editors still refuse this file strictly]",
+                        wn.line, wn.column
+                    ),
+                    None => String::new(),
+                };
+                // Compact outline in the TEXT part: dot-path + type + name
+                // for the first nodes up to depth 3 (Issue 15: large files
+                // previously answered with ONLY the header — the tree lived
+                // in the payload, which text-only rendering drops; §16: no
+                // naked confirmation line).
+                const OUTLINE_CAP: usize = 60;
+                const OUTLINE_DEPTH: usize = 3;
+                fn outline(n: &crate::parser::TreeNode, depth: usize, out: &mut Vec<String>) {
+                    if out.len() >= OUTLINE_CAP {
+                        return;
+                    }
+                    if depth > 0 {
+                        let name = n.get_name().unwrap_or_default();
+                        out.push(format!(
+                            "{}{} [{}] {}",
+                            "  ".repeat(depth - 1),
+                            n.path,
+                            n.node_type,
+                            name
+                        ));
+                    }
+                    if depth < OUTLINE_DEPTH {
+                        for c in &n.children {
+                            outline(c, depth + 1, out);
+                        }
+                    }
+                }
+                let mut lines = Vec::new();
+                outline(&tree, 0, &mut lines);
+                let mut text = format!(
+                    "Analyzed {} ({} tokens){} — outline (first {} nodes to depth {}; full tree in payload \"data\", flat index via list_nodes):",
+                    file_path,
+                    tokens,
+                    note.as_str(),
+                    lines.len(),
+                    OUTLINE_DEPTH
+                );
+                for l in &lines {
+                    text.push('\n');
+                    text.push_str(l);
+                }
+                let mut tree_json = serde_json::to_value(tree).unwrap_or(json!(null));
                 if let Some(obj) = tree_json.as_object_mut() {
                     obj.insert("estimated_tokens".to_string(), json!(tokens));
                 }
-                let note = match &warning {
-                    Some(wn) => format!(" ⚠ PARTIAL PARSE: syntax error at line {}, col {} — results may be incomplete; editors still refuse this file strictly", wn.line, wn.column),
-                    None => String::new(),
-                };
                 if let (Some(obj), Some(wn)) = (tree_json.as_object_mut(), &warning) {
                     obj.insert(
                         "syntax_warning".to_string(),
                         json!({"line": wn.line, "column": wn.column, "message": wn.message}),
                     );
                 }
-                json!({"content": [{ "type": "text", "text": format!("Analyzed {} ({} tokens){}", file_path, tokens, note)}], "data": tree_json})
+                json!({"content": [{ "type": "text", "text": text }], "data": tree_json})
             }
             Err(e) => tool_error_code(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e), "E_FILE_NOT_FOUND"),
         }
@@ -1435,9 +1480,37 @@ pub mod mcp_server {
                     effective_max_depth,
                 );
 
+                // Text part carries the listing itself: clients that render
+                // (or truncate) only content[0].text still get actionable
+                // dot-paths. Payload keeps the full structured list.
+                // (Issues 14/15: "Found N nodes" alone forced Edit-based
+                // workarounds because no path was visible anywhere.)
+                const TEXT_LINES: usize = 100;
                 let mut msg = format!("Found {} nodes", nodes.len());
                 if nodes.len() >= 1000 {
                     msg.push_str(" (limit reached)");
+                }
+                for n in nodes.iter().take(TEXT_LINES) {
+                    msg.push_str(&format!(
+                        "\n{} [{}] {}",
+                        n.get("path").and_then(Value::as_str).unwrap_or("?"),
+                        n.get("type").and_then(Value::as_str).unwrap_or("?"),
+                        n.get("name").and_then(Value::as_str).unwrap_or("")
+                    ));
+                }
+                if nodes.len() > TEXT_LINES {
+                    msg.push_str(&format!(
+                        "\n... +{} more lines (payload \"nodes\" has the full list; narrow with filter/max_depth)",
+                        nodes.len() - TEXT_LINES
+                    ));
+                }
+                if let Some(f) = filter {
+                    if nodes.is_empty() {
+                        msg.push_str(&format!(
+                            "\nNo nodes matched filter {:?} — the filter compares against EXACT AST node types (e.g. \"function_item\", \"struct_item\", \"impl_item\"), not keywords like \"fn\" or \"function\". List without filter first to see this file's actual types.",
+                            f
+                        ));
+                    }
                 }
                 let mut payload = json!({"nodes": nodes});
                 if let Some(wn) = &warning {
@@ -2841,9 +2914,27 @@ or list_nodes for a flat index of this file.",
                     }
                 }
                 find(w.analyze(), &mut m, pattern);
-                let mut msg = format!("Found {} matches", m.len());
+                // Match lines in the TEXT part (Issue 14: "Found N matches"
+                // without paths left edit_node without targets; payload keeps
+                // the full structured list).
+                const TEXT_MATCH_LINES: usize = 50;
+                let mut msg = format!("Found {} matches for \"{}\"", m.len(), pattern);
                 if m.len() >= 500 {
                     msg.push_str(" (limit reached)");
+                }
+                for n in m.iter().take(TEXT_MATCH_LINES) {
+                    msg.push_str(&format!(
+                        "\n{} [{}] {}",
+                        n.get("path").and_then(Value::as_str).unwrap_or("?"),
+                        n.get("type").and_then(Value::as_str).unwrap_or("?"),
+                        n.get("name").and_then(Value::as_str).unwrap_or("")
+                    ));
+                }
+                if m.len() > TEXT_MATCH_LINES {
+                    msg.push_str(&format!(
+                        "\n... +{} more (payload \"matches\" has the full list; narrow the pattern)",
+                        m.len() - TEXT_MATCH_LINES
+                    ));
                 }
                 let mut payload = json!({"matches": m});
                 if let Some(wn) = &warning {
@@ -3552,5 +3643,102 @@ or list_nodes for a flat index of this file.",
             .await?;
         eprintln!("✓ Server ready");
         Ok(())
+    }
+
+    /// Regression tests for Issues 14/15 (GTW_MCP_ISSUE_LOG.md): the TEXT
+    /// part of list_nodes/search_nodes/analyze must carry dot-paths —
+    /// clients that render (or truncate) only content[0].text previously
+    /// saw bare "Found N ..." headers and could not target edit_node.
+    #[cfg(test)]
+    mod read_path_tests {
+        use super::*;
+
+        fn sample_file(dir: &std::path::Path) -> std::path::PathBuf {
+            let path = dir.join("sample.rs");
+            std::fs::write(
+                &path,
+                "fn alpha() -> u32 { 1 }\n\nfn beta(x: u32) -> u32 { x + 1 }\n\nstruct Gamma { x: u32 }\n",
+            )
+            .unwrap();
+            path
+        }
+
+        fn text_of(result: &Value) -> String {
+            result["content"][0]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        }
+
+        #[test]
+        fn list_nodes_text_carries_dot_paths() {
+            let dir = tempfile::tempdir().unwrap();
+            let fp = sample_file(dir.path());
+            let state = Arc::new(AppState::new(None, dir.path().to_path_buf()));
+            let result = handle_list_nodes(state, fp.to_str().unwrap(), None, Some(3), false);
+            let text = text_of(&result);
+            assert!(text.starts_with("Found "), "header missing: {}", text);
+            assert!(
+                text.contains("0 [function_item] alpha"),
+                "function dot-path line missing: {}",
+                text
+            );
+            // Payload still carries the full structured list.
+            assert!(result["nodes"].is_array());
+        }
+
+        #[test]
+        fn list_nodes_bad_filter_gets_ast_type_hint() {
+            let dir = tempfile::tempdir().unwrap();
+            let fp = sample_file(dir.path());
+            let state = Arc::new(AppState::new(None, dir.path().to_path_buf()));
+            let result =
+                handle_list_nodes(state, fp.to_str().unwrap(), Some("function"), Some(3), false);
+            let text = text_of(&result);
+            assert!(
+                text.contains("EXACT AST node types"),
+                "0-filter hint missing: {}",
+                text
+            );
+        }
+
+        #[test]
+        fn search_nodes_text_carries_dot_paths() {
+            let dir = tempfile::tempdir().unwrap();
+            let fp = sample_file(dir.path());
+            let result = handle_search_nodes(fp.to_str().unwrap(), "alpha");
+            let text = text_of(&result);
+            assert!(
+                text.contains("Found ") && text.contains("["),
+                "match lines with [type] missing: {}",
+                text
+            );
+            assert!(
+                text.contains("[function_item] alpha"),
+                "matching function's dot-path line missing: {}",
+                text
+            );
+            assert!(result["matches"].is_array());
+        }
+
+        #[test]
+        fn analyze_text_carries_outline_with_dot_paths() {
+            let dir = tempfile::tempdir().unwrap();
+            let fp = sample_file(dir.path());
+            let result = handle_analyze(fp.to_str().unwrap());
+            let text = text_of(&result);
+            assert!(
+                text.contains("outline (first"),
+                "outline header missing: {}",
+                text
+            );
+            assert!(
+                text.contains("0 [function_item] alpha"),
+                "function outline line with dot-path missing: {}",
+                text
+            );
+            assert!(result["data"].is_object());
+            assert!(result["data"]["estimated_tokens"].is_u64());
+        }
     }
 }

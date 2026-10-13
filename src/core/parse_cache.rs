@@ -93,6 +93,7 @@ mod tests {
         // Second call should hit cache (same data)
         let (source2, tree2) = cache.get_or_parse(path.to_str().unwrap()).unwrap();
         assert_eq!(source, source2);
+        assert_eq!(tree.node_type, tree2.node_type);
         assert_eq!(cache.len(), 1);
     }
 

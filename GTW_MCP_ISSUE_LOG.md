@@ -913,6 +913,23 @@ shadow-checkpoints).
 - Bugg? — Sannolikt JA (paths saknas i svaren oavsett filter).
 - Prioritet: medel (omvägen fungerar men tappar validering + checkpoints).
 
+**Triage 2026-10-13 (Motor2-session, fixad i källkod):**
+- Reproducerat live på den frusna MCP-binären: `list_nodes(filter="function")`
+  på `src/mcp/mod.rs` (3 556 rader) → "Found 0 nodes" utan ledtråd; utan
+  filter → "Found 9 nodes" med paths ENDAST i payload-JSON (text-only-
+  rendering tappar dem). Symptomet bekräftat ordagrant.
+- Rot: text-delen (`content[0].text`) byggdes med enbart en räknar-header;
+  payloaden hade paths men nådde inte läsaren.
+- Fix: text-delen bär nu en rad per nod, `dot-path [type] name`
+  (tak 100 rader i list_nodes, 50 i search_nodes, därefter "+N more" med
+  hänvisning till payloaden); 0-filter-svar får ledtråd om att filtret
+  matchar EXAKTA AST-typer ("function_item", inte "function"). Payloaderna
+  oförändrade (strukturerade konsumenter opåverkade).
+- Regressionstester: `mcp::mcp_server::read_path_tests` (4) — asserterar
+  att texten faktiskt bär `[function_item]`-rader och filter-ledtråden.
+- Status: fixad i källkod; når en session först efter omstart av hosten
+  (MCP-binären är binärfäst per session).
+
 ## Issue 15 — analyze/search/list_nodes magra på STOR fil (2 515+ rader) — omväg tvingad (2026-10-10, Motor2 streaming.rs)
 
 **Kategori:** under förmåga / inte hittad vid behov.
@@ -949,3 +966,75 @@ bara på vissa filer.
   för data).
 - Prioritet: HÖG — stora filer är exakt där AST-verktyget slår text-editor
   (§35.1-beslutstabellen), och just där är det tyst.
+
+**Triage 2026-10-13 (Motor2-session, fixad i källkod):**
+- Rot: identisk med Issue 14 — `handle_analyze` satte bara headern
+  "Analyzed <fil> (<tokens> tokens)" i texten; hela trädet låg i payloaden
+  (som text-renderande klienter tappar). Storleken gjorde bara symptomet
+  värre (klient-trunkering klippte payloaden).
+- Fix: `handle_analyze` bygger nu en kompakt outline i TEXT-delen —
+  `dot-path [type] name` för de första noderna till djup 3 (tak 60 rader),
+  med totalräkning i headern och hänvisning till `list_nodes` för flat
+  index + payloaden för hela trädet. Trädet serialiseras EN gång (tidigare
+  anropades `analyze()` två gånger på stora filer).
+- Bieffekt-fix: varning i `src/core/parse_cache.rs` (unused `tree2`) åtgärdad
+  genom att assertera cache-träffens nodtyp (§2: varningar är fel).
+- Status: fixad i källkod; kräver omstart av hosten för att nå sessioner.
+
+## Issue 16 — sense (satellit) svarar "Failed to resolve bge-base config" i stället för vägledning (2026-10-13, Motor2-session)
+
+**Kategori:** sub-funktion saknas för situationen / oärligt felmeddelande (§16-klassen).
+
+**Situation:** satellit-sense (utan `file_path`) i Motor2-sessionen —
+behov: "var sitter X?" utan känd fil (§35.1-diagnoskedjan, steg 2;
+GTW-försök först enligt §35.3-ritualen).
+
+| Anrop | Parametrar | Resultat |
+|---|---|---|
+| `sense` | query (utan file_path — projekt-scope) | **error: "Failed to resolve bge-base config"** |
+
+**Förväntat (enligt verktygets egen beskrivning):** ett tomt/riktat svar
+som pekar på åtgärden — "Saknas satellit-indexet? `index_project
+{"action":"start"}` … meddelandet från tomt sense pekar på samma" — eller
+explicit "modellen saknas, kör `ai setup`".
+
+**Faktiskt:** kryptisk config-fel som inte säger VAD som saknas (bge-base-
+modellen ej installerad i miljön och/eller projekt-indexet aldrig byggt —
+felmeddelandet skiljer inte på de två) eller VAD som ska göras.
+
+**Omväg som användes:** grep + read (§35.2 tillåtet; men satellit-kanalen
+är tyst död i miljön utan att namnge orsak eller bot).
+
+**Begäran (triage):**
+1. I frånvaro av bge-base-modellen: sense ska svara med ett meddelande
+   som namnger ROTEN ("modellen saknas: `.gnawtreewriter_ai/models/
+   bge-base/` — kör `ai setup`") i stället för "Failed to resolve …
+   config" (§16: saknas ska SKRIKA med nästa steg).
+2. I frånvaro av byggt projekt-index: samma princip — peka på
+   `index_project`, skilj fallet från modell-saknas.
+3. Överväg auto-init: sense-kall utan modell kan trigga nedladdning
+   (eller åtminstone erbjuda den i svaret).
+
+**Bedömning (fylls vid triage):**
+- Använt fel? — Möjligen delvis (modellen/indexet aldrig satt upp i
+  denna miljö), men felmeddelandet förråder varken orsak eller bot.
+- Bugg? — JA (felmeddelandet bryter mot verktygets egen docstring som
+  lovar vägledande svar när satellit-indexet saknas).
+- Prioritet: medel (omvägen fungerar, men hela semantik-kanalen är
+  oanvändbar i nya miljöer utan diagnos).
+
+**Triage 2026-10-13 (Motor2-session, redan fixad i källkod — binär-fråga):**
+- Rotorsak: strängen "Failed to resolve bge-base config" finns INTE i
+  nuvarande källkod. Felet kom från den frusna äldre daemon-binären.
+- Nuvarande källkod har redan vägledande vägar (verifierat i koden):
+  1. `sense_broker()`-init misslyckas → `E_MODEL_UNAVAILABLE` + "run
+     `gnawtreewriter ai setup` to fetch models (ai status shows what is
+     installed), then retry" (mcp/mod.rs).
+  2. `load_model` (llm/ai_manager.rs) namnger den saknade filen exakt
+     ("Missing config/tokenizer/weights: <path>").
+  3. Tom satellit-matchning → pekar på `index_project` / `ai index`.
+  4. `sense_with`-fel → "sense failed: {e} — `gnawtreewriter ai status`
+     checks the model; on repeat fall back to search_nodes/grep and log it".
+- Åtgärd: ingen kodändring erfordras. Verifiera efter omstart av hosten
+  att det praktiska meddelandet är vägledande; om det fortfarande är
+  kryptiskt → återöppna (sitter då djupare, ev. i candle/hf-hub-resolver).
