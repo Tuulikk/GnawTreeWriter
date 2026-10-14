@@ -992,6 +992,16 @@ impl GnawTreeWriter {
         let lines: Vec<&str> = self.source_code.lines().collect();
         let start_idx = node.start_line - 1;
         let end_idx = node.end_line;
+        // Vakt (Motor2-batt 2026-10-14, panic mod.rs:998): en nod-path från
+        // en STALE tree (filen har krympt sedan skeleton/analyze) panikade
+        // med byte/rad-slice out of range — ärligt fel i stället: tvinga
+        // fram re-analyze, korrumpiera aldrig källan.
+        if start_idx >= lines.len() || end_idx > lines.len() {
+            anyhow::bail!(
+                "Node range ({}-{}) is out of bounds for the current source ({} lines) — the tree is stale; re-run analyze/list_nodes to get fresh node paths",
+                node.start_line, node.end_line, lines.len()
+            );
+        }
 
         let new_lines: Vec<_> = lines[..start_idx]
             .iter()
@@ -1412,5 +1422,40 @@ mod tests {
         )
         .unwrap();
         assert!(gtw.last_edit_impact().is_none());
+    }
+
+    /// Regression (Motor2-batt 2026-10-14, panic core/mod.rs:998): delete
+    /// med en nod vars radnummer ligger utanför filens NUVARANDE längd
+    /// (stale tree: källan krympt utan re-parse) panikade med slice out of
+    /// range — ska vara ett ärligt fel som tvingar re-analyze, aldrig en
+    /// panic som dödar turen.
+    #[test]
+    fn delete_with_stale_node_range_is_an_error_not_a_panic() {
+        let (_dir, path_str) = temp_rust_file(concat!(
+            "fn first() {}\n",
+            "fn second() {}\n",
+            "fn third() {}\n",
+            "fn fourth() {}\n",
+            "fn fifth() {}\n",
+            "fn sixth() {}\n",
+            "fn seventh() {}\n",
+        ));
+        let mut gtw = GnawTreeWriter::new(&path_str).unwrap();
+        // STALE-simulering: källan krymper till 1 rad UTAN re-parse —
+        // trädet har fortfarande noder med start_line 2..7 (bortom filen).
+        gtw.source_code = "fn only() {}\n".to_string();
+        // Någon nod med range utanför den nya källan (t.ex. "1.0" i trädet
+        // pekar på rad 2+ som inte längre finns).
+        let result = gtw.delete_node_at_path("1.0");
+        assert!(
+            result.is_err(),
+            "range utanför filen ska vara ett FEL, inte panic"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("stale"),
+            "felet ska namge stale-tree + re-analyze-vägen: {}",
+            msg
+        );
     }
 }
