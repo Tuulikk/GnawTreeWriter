@@ -1121,3 +1121,34 @@ provenance (nästa tur ärver skyldigheten synligt).
 import ... men detta är bara varning?" → "förmåga skulle delvis kunna
 läggas till i gtw?") + batt-bevis 1791963425 (session 9a7b1713, rev
 905cefc): 5 Accept-edits, E0432 kvar, ingen testkörning innan leverans.
+
+## 2026-10-14 (II) — PANIC FIXAD: delete på stale tree (byte/rad-slice klassen, Motor2-relä)
+
+**Bugg** (panik, §28.2-klassen — 8:e återkomsten i släkten): Motor2-batt
+1791979346 (session 1d694d17, Motor2 rev 0e9ecba) — `PANIC på
+src/core/mod.rs:998:25: range start index 6 out of range for slice of
+length 5` → Motor2:s streaming-task dog, turen aborterad
+("Tur panik — avbruten av panic").
+
+**Rotorsak:** `delete_node_at_path` tog `lines[..start_idx]` på en nod
+med `start_line` BEYOND filens nuvarande rader — en STALE tree: källan
+har krympt (edit/radering) sedan skeleton/analyze, modellen (eller
+cachen) höll gamla nod-paths. Trädet och källan divergerade tyst.
+
+**Fix (commit i detta repo, samma dag):**
+- `delete_node_at_path`: vakt FÖRE slicen — `start_idx >= lines.len() ||
+  end_idx > lines.len()` → ärligt anyhow-fel: "Node range (X-Y) is out
+  of bounds for the current source (N lines) — the tree is stale;
+  re-run analyze/list_nodes to get fresh node paths".
+- Regressionstest `delete_with_stale_node_range_is_an_error_not_a_panic`
+  (stale-simulering: källan krymper utan re-parse; testet vore PANIC på
+  gammal kod). 245 tester gröna.
+
+**Kvarvarande (notera, inte fixat här):** samma stale-slice-mönster KAN
+sitta i syskon-funktioner som slicar på node.start_line/end_line
+(insert-varianten tog redan append-vakten 2026-10-13). En sweep av alla
+`lines[..`-slicer mot `lines.len()` är inköpslistan nästa GTW-pass.
+
+**Varifrån:** Motor2-batt (användarens "fortsätt"-kedja, P5-passet) —
+7 panic-träffar i test-loggen räknade samma panik (hook + task-abort +
+poster).
