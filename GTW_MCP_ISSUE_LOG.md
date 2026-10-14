@@ -1079,3 +1079,45 @@ felmeddelandet skiljer inte på de två) eller VAD som ska göras.
 verifierade HJÄLPAREN (`resolve_insert_target`), aldrig den faktiska
 insertionen — kodningen var aldrig slut-till-slut-testad. Klass: enhetstest
 grönt, beteende fel (logger framgång utan effekt, §10).
+
+## 2026-10-14 — FÖRSLAG: symbol-existens-varning före skrivning (Motor2-relä, användarens initiativ)
+
+**Saknad funktion** (taxonomi: sub-funktion saknas för situationen).
+
+**Situationen:** Motor2:s kodnings-batts visar huvudfelklassen "gör-men-fel-ställe":
+modellen redigerar flitigt (5-6 GTW-edits) men med påhittade/fel-namngivna
+symboler — `romartal::ar_giltig` som lib:en aldrig exporterat (E0432), symbol
+utanför scope (E0425). Felkoden syns först vid NÄSTA build; modellen fick
+aldrig facitet och gissade vidare. GTW ser bara syntax — men stor del av
+klassen går att fånga heuristiskt UTAN full namnupplösning.
+
+**Förslag: symbol-existens-lint i `edit_node`/`insert_node`/`validate`-svaret**
+
+1. Efter en lyckad edit: plocka refererade identifierare och sökvägar
+   (`modul::symbol`, `crate::modul::symbol`) ur den editerade noden.
+2. Kolla mot tre källor:
+   a. samma fils definitioner (fn/struct/enum/const/mod)
+   b. filens `use`-importer
+   c. entitets-indexet (`index_entities`/kunskapsgrafen — finns redan)
+3. Saknas symbolen → **WARNING (icke-blockerande)** i verktygssvaret med
+   fuzzy-förslag: "`ar_giltig` refereras men finns inte i index (närmast:
+   `is_valid`)". GTW:s befintliga fuzzy-sökning som byggsten.
+4. Import-existens: `use crate::x::y;` där `x` saknas i indexet → varna
+   före build.
+
+**Formkontrakt:** WARNING, aldrig block — typer/traits/macros/generiska
+parametrar ger falska positiva, och flödet får inte strypas. Kompilatorn
+förblir sanningen (Motor2 §28); GTW-lagret är före-skärmen: billig varning
+i SAMMA anrop som editen, i stället för att vänta på nästa build.
+
+**Motor2-sidan (motparten, planerad — Motor2-ROADMAP "EDIT-KVALITETSKEDJAN"):**
+varningarna hamnar i tool-spåret; Motor2:s CompletionVerifier nekar ett
+task_complete-claim en gång om varningar lämnats oadresserade (ingen
+re-edit/build/läsning efter) — enforcement via verifieraren, inte via
+modellens lydnad. Öppna varningar vid leverans → Kanban-item med
+provenance (nästa tur ärver skyldigheten synligt).
+
+**Varifrån:** användaren 2026-10-14 ("gtw varnar för saker som saknad
+import ... men detta är bara varning?" → "förmåga skulle delvis kunna
+läggas till i gtw?") + batt-bevis 1791963425 (session 9a7b1713, rev
+905cefc): 5 Accept-edits, E0432 kvar, ingen testkörning innan leverans.
