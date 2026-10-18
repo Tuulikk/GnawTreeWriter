@@ -1152,3 +1152,28 @@ sitta i syskon-funktioner som slicar på node.start_line/end_line
 **Varifrån:** Motor2-batt (användarens "fortsätt"-kedja, P5-passet) —
 7 panic-träffar i test-loggen räknade samma panik (hook + task-abort +
 poster).
+
+## 2026-10-18 — `search_semantic`: Missing config (bge-base-modellen ej installerad)
+
+**Klass:** saknad funktion/under-funktion saknas för situationen.
+
+**Symptom:** `search_semantic` svarar
+`Semantic search failed: Missing config: "/home/tuulikk/.gnawtreewriter_ai/models/bge-base/config.json" — check the local model with 'gnawtreewriter ai status'`
+i en nystartad opencode-session (Motor2-passet, H2.0-kvällen). Samma fel
+förekommer säkert i alla sessioner utan bge-base lokalt.
+
+**Påverkan:** semantic-sökningen (diagnoskedjans steg 2, §35.1-tabellen
+"Var sitter X?") är oanvändbar → omväg till grep (exakt sträng fanns, så
+billigt här) — men för "hur görs X?"-frågor utan exakt sträng står
+agenten helt utan semantisk väg. `sense`/satellit kan drabbas samma väg.
+
+**Önskad vägledning träffad?** Delvis: felmeddelandet ÄR ärligt (namnger
+saknad modell + `ai status`), men det finns ingen tydlig
+installations-väg beskriven ("check the local model" → HOW?). Antingen
+(a) dokumentera install-kommandot i felmeddelandet, eller (b) låt
+`search_semantic` degradera med ett tydligt svar istället för en error
+(t.ex. "semantic index saknas — kör index_project; faller tillbaka till
+search_nodes"). (b) föredras — verktyget ska aldrig vara helt borta.
+
+**Varifrån:** Motor2 H2.0-passet 2026-10-18 (append-only-minnen), GTW
+anropades enligt §35.3-ritualen, ett försök → grep-omväg enligt §35.2.
