@@ -1184,3 +1184,33 @@ anropades enligt §35.3-ritualen, ett försök → grep-omväg enligt §35.2.
 Kvarstår oförändrad; frågan "vad krävs för att bge-base installeras
 lokal" är fortfarande obesvarad i felmeddelandet. Träffräkning för
 denna klass: **2 sessioner**.
+
+## 2026-10-19 — edit NO-OP returneras som Err (claim-guard) mäts som misslyckad tool-call i konsument-metering (Motor2-relä)
+
+**Klass:** kontrakt-design (vilken kanal en medveten NO-OP använder).
+
+**Symptom:** Motor2s sliding-marathon pass 5 (session 220c225d) —
+agenten editerade marker-answer.txt med innehåll som redan var korrekt
+(från pass 4) → GTW edit_node svarade Err("NO-OP: new content is
+identical…") → Motor2s gtw-verktyg mappade till success=false →
+tool_calls-rad success=0 med v=Accept → organ-mätaren ("missfall =
+success 0 utan vakt-stämpel") dömde editing-gruppen RÖTT fast ALLA
+disk-facit var gröna och turen levererade.
+
+**Kontrakt-analys:** NO-OP-guardet är RIKTIGT (tvinga agenten att
+verifiera avsikten — inte påstå en edit som ändrar 0 bytes). Men Err
+gör att VARJE konsument-metering med "Err = misslyckad tool-call"
+missuppfattar en ärlig notice som missfall. Förväntat kontrakt: edit
+returnerar Ok med applied=false + no_op-flagga; Guardian-block får
+vara Err.
+
+**Önskad vägledning:** ändra GTW edit-kontraktet (NO-OP = Ok-resultat
+med applied=false/no_op-flagga) eller dokumentera i edit_node-
+beskrivningen hur konsumenter skiljer notice-Err från missfall-Err.
+Motor2-fakta: vår wrapper (motor2-gtw tools.rs) mappar NO-OP-Err →
+success=true med "no_op": true — LAPP som rivs när GTW-kontraktet
+ändras (§36-regeln).
+
+**Varifrån:** Motor2 sliding-marathon-passet 2026-10-19 (mätning-
+facit, syko-relationship via path-dep; record i GTW_MCP_ISSUE_LOG
+enl behandla ändamålet).
