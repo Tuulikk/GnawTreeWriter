@@ -1177,3 +1177,10 @@ search_nodes"). (b) föredras — verktyget ska aldrig vara helt borta.
 
 **Varifrån:** Motor2 H2.0-passet 2026-10-18 (append-only-minnen), GTW
 anropades enligt §35.3-ritualen, ett försök → grep-omväg enligt §35.2.
+
+**Uppföljning 2026-10-19 (Motor2 H3-sliding-passet):** SAME fel igen —
+`search_semantic` i en ny session ("sliding prune counter-var sitter?")
+→ samma Missing-config-svar → grep-omväg (precis sträng fanns: "sliding").
+Kvarstår oförändrad; frågan "vad krävs för att bge-base installeras
+lokal" är fortfarande obesvarad i felmeddelandet. Träffräkning för
+denna klass: **2 sessioner**.
