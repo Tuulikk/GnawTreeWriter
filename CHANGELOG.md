@@ -1,3 +1,29 @@
+## [0.20.0] - 2026-10-21
+
+### Added — Batch `insert_text`: anchored text splices with the same guards
+Batch operations gain a fourth op type, born from a real consumer need
+(Motor2 §37.4 test-coverage work): 20 identical one-line inserts across
+test functions in a ~7 000-line file were previously impossible to do
+atomically — node-path inserts (`{"type": "insert"}`) need parent paths
+that are impractical to obtain at that file size.
+
+```json
+{"type": "insert_text", "file": "a.rs", "anchor": "async fn foo() {",
+ "position": "after", "content": "\n    let _guard = ...;"}
+```
+
+Semantics: the anchor must occur **exactly once** — 0 matches and 2+
+matches are hard errors naming the occurrence count (a silent
+wrong-spot edit is the failure mode this op refuses). `content` is
+spliced raw (include your own `\n`). The spliced result passes the
+same rules guardian + syntax validation as every op, so broken code is
+rejected before any write; a failed batch touches nothing. Splice
+offsets are match start/end — always char boundaries, so multibyte
+anchors (å/ä/ö, emoji) are safe by construction. `insert_text` ops mix
+freely with node ops in one batch (applied in spec order). 8 new unit
+tests cover after/before splices, not-found, ambiguous, empty-content,
+syntax-guard rejection, multibyte safety and batch atomicity.
+
 ## [0.19.0] - 2026-10-07
 
 ### Changed — Semantic search: three-channel reranking + richer index content

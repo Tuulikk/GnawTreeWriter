@@ -911,7 +911,7 @@ pub mod mcp_server {
             json!({
                 "name": "batch",
                 "title": "Apply batch operations atomically",
-                "description": "Apply a batch of AST edit operations from a batch JSON file atomically: every operation validates in-memory before any write, and any failure rolls back the whole batch. Use this for coordinated multi-file changes INSTEAD of several edit_node calls — one transaction, one preview, one undo, one transaction-log entry. Batch JSON format: {\"description\": str, \"operations\": [{\"type\": \"edit\"|\"insert\"|\"delete\", \"file\": str, ...}]} — see BATCH_USAGE.md. With preview=true returns the unified diff and writes nothing.",
+                "description": "Apply a batch of AST edit operations from a batch JSON file atomically: every operation validates in-memory before any write, and any failure rolls back the whole batch. Use this for coordinated multi-file changes INSTEAD of several edit_node calls — one transaction, one preview, one undo, one transaction-log entry. Batch JSON format: {\"description\": str, \"operations\": [{\"type\": \"edit\"|\"insert\"|\"delete\"|\"insert_text\", \"file\": str, ...}]} — \"edit\"/\"insert\"/\"delete\" target AST node paths; \"insert_text\" splices raw content before/after a UNIQUE text anchor (0 or 2+ matches are errors; result is syntax-validated like every op) — ideal for mechanical coverage-style line inserts across many tests. See BATCH_USAGE.md. With preview=true returns the unified diff and writes nothing.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

@@ -40,10 +40,30 @@ pub enum BatchOp {
         position: usize,
         content: String,
     },
+    /// Text-anchored insert: splice `content` immediately before/after the
+    /// UNIQUE occurrence of `anchor` in the current source. 0 matches and
+    /// 2+ matches are both hard errors — a silent wrong-spot edit is the
+    /// failure mode this op refuses to have. The spliced result goes
+    /// through the same rules + syntax validation as node ops.
+    #[serde(rename = "insert_text")]
+    InsertText {
+        file: String,
+        anchor: String,
+        position: AnchorPosition,
+        content: String,
+    },
     Delete {
         file: String,
         path: String,
     },
+}
+
+/// Where an `insert_text` op places `content` relative to the anchor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AnchorPosition {
+    Before,
+    After,
 }
 
 /// Individual edit operation for batch processing
@@ -168,6 +188,7 @@ impl Batch {
             match op {
                 BatchOp::Edit { file, .. }
                 | BatchOp::Insert { file, .. }
+                | BatchOp::InsertText { file, .. }
                 | BatchOp::Delete { file, .. } => {
                     per_file.entry(file.clone()).or_default().push(op);
                 }
@@ -186,23 +207,26 @@ impl Batch {
             // Apply ops sequentially in memory
             for op in ops {
                 let edit_op = match op {
-                    BatchOp::Edit { path, content, .. } => EditOperation::Edit {
+                    BatchOp::Edit { path, content, .. } => Some(EditOperation::Edit {
                         node_path: path.clone(),
                         content: content.clone(),
-                    },
+                    }),
                     BatchOp::Insert {
                         parent_path,
                         position,
                         content,
                         ..
-                    } => EditOperation::Insert {
+                    } => Some(EditOperation::Insert {
                         parent_path: parent_path.clone(),
                         position: *position,
                         content: content.clone(),
-                    },
-                    BatchOp::Delete { path, .. } => EditOperation::Delete {
+                    }),
+                    BatchOp::Delete { path, .. } => Some(EditOperation::Delete {
                         node_path: path.clone(),
-                    },
+                    }),
+                    // Text-anchored ops bypass node targeting; the modified
+                    // source is computed directly in the preview step below.
+                    BatchOp::InsertText { .. } => None,
                 };
 
                 // Fas 4/5.1 parity: run the same validation the single-edit
@@ -287,10 +311,29 @@ impl Batch {
                     }
                 }
 
-                // Preview change
-                let modified = writer
-                    .preview_edit(edit_op.clone())
-                    .with_context(|| format!("Preview failed for file {} op {:?}", file, op))?;
+                // Preview change — node ops go through preview_edit; the
+                // text-anchored insert computes its splice directly and
+                // then shares the same rules + syntax validation below.
+                let modified = match edit_op {
+                    Some(eop) => writer
+                        .preview_edit(eop)
+                        .with_context(|| format!("Preview failed for file {} op {:?}", file, op))?,
+                    None => match op {
+                        BatchOp::InsertText {
+                            anchor,
+                            position,
+                            content,
+                            ..
+                        } => insert_text_splice(
+                            writer.source_code.as_str(),
+                            anchor,
+                            *position,
+                            content,
+                        )
+                        .with_context(|| format!("insert_text failed for file {}", file))?,
+                        _ => unreachable!("every non-insert_text op maps to an EditOperation"),
+                    },
+                };
 
                 // RULES GUARDIAN on the simulated result (all op types).
                 let (findings, _skipped, has_error) =
@@ -451,6 +494,47 @@ impl Batch {
             out.push('\n');
         }
         Ok(out)
+    }
+}
+
+/// Compute the spliced source for an `insert_text` op: the anchor must
+/// occur EXACTLY once in `src`; `content` is inserted raw before/after
+/// the match. Splice offsets are the match start/end — always char
+/// boundaries, so multibyte (å/ä/ö, emoji) anchors are safe by
+/// construction (the byte-slicing panic class cannot trigger here).
+fn insert_text_splice(
+    src: &str,
+    anchor: &str,
+    position: AnchorPosition,
+    content: &str,
+) -> Result<String> {
+    if anchor.is_empty() {
+        anyhow::bail!("insert_text anchor is empty — it would match at every position");
+    }
+    if content.is_empty() {
+        anyhow::bail!("insert_text content is empty — a silent no-op is rejected");
+    }
+    let count = src.matches(anchor).count();
+    match (src.find(anchor), count) {
+        (None, _) => anyhow::bail!("insert_text anchor not found (0 occurrences): {:?}", anchor),
+        (Some(_), n) if n > 1 => anyhow::bail!(
+            "insert_text anchor is ambiguous: {} occurrences of {:?} found (need exactly 1)",
+            n,
+            anchor
+        ),
+        (Some(start), 1) => {
+            let end = start + anchor.len();
+            let at = match position {
+                AnchorPosition::Before => start,
+                AnchorPosition::After => end,
+            };
+            let mut out = String::with_capacity(src.len() + content.len());
+            out.push_str(&src[..at]);
+            out.push_str(content);
+            out.push_str(&src[at..]);
+            Ok(out)
+        }
+        (_, _) => unreachable!("find and matches count cannot disagree"),
     }
 }
 
@@ -631,6 +715,175 @@ mod tests {
                 .unwrap_or("")
                 .contains("caller.rs"),
             "site names the caller: {impacts:?}"
+        );
+        Ok(())
+    }
+
+    // ── insert_text: text-anchored splices (2026-10-21, Motor2 §37.4 need) ──
+
+    fn insert_text_batch(file: &Path, anchor: &str, position: AnchorPosition, content: &str) -> Batch {
+        Batch {
+            description: Some("insert_text test".into()),
+            transaction_ids: std::cell::RefCell::new(Vec::new()),
+            last_verdict: std::cell::RefCell::new(None),
+            impacts: std::cell::RefCell::new(Vec::new()),
+            operations: vec![BatchOp::InsertText {
+                file: file.to_string_lossy().to_string(),
+                anchor: anchor.to_string(),
+                position,
+                content: content.to_string(),
+            }],
+        }
+    }
+
+    #[test]
+    fn insert_text_after_unique_anchor() -> Result<()> {
+        let tmp = tempdir()?;
+        let p = tmp.path().join("t.txt");
+        fs::write(&p, "line one\nline two\n")?;
+
+        insert_text_batch(&p, "line one\n", AnchorPosition::After, "inserted\n")
+            .apply()?;
+        assert_eq!(
+            fs::read_to_string(&p)?,
+            "line one\ninserted\nline two\n",
+            "content lands directly after the anchor"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn insert_text_before_unique_anchor() -> Result<()> {
+        let tmp = tempdir()?;
+        let p = tmp.path().join("t.txt");
+        fs::write(&p, "alpha\nbeta\n")?;
+
+        insert_text_batch(&p, "beta", AnchorPosition::Before, "gamma\n")
+            .apply()?;
+        assert_eq!(
+            fs::read_to_string(&p)?,
+            "alpha\ngamma\nbeta\n",
+            "content lands directly before the anchor"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn insert_text_anchor_not_found_leaves_file_untouched() -> Result<()> {
+        let tmp = tempdir()?;
+        let p = tmp.path().join("t.txt");
+        fs::write(&p, "stable\n")?;
+
+        let result = insert_text_batch(&p, "missing-anchor", AnchorPosition::After, "x\n").apply();
+        assert!(result.is_err(), "0 occurrences must be a hard error");
+        assert_eq!(
+            fs::read_to_string(&p)?,
+            "stable\n",
+            "failed batch must not touch the file"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn insert_text_ambiguous_anchor_is_rejected() -> Result<()> {
+        let tmp = tempdir()?;
+        let p = tmp.path().join("t.txt");
+        fs::write(&p, "dup\nmid\ndup\n")?;
+
+        let result = insert_text_batch(&p, "dup", AnchorPosition::After, "x\n").apply();
+        let err = format!("{:#}", result.expect_err("2 occurrences must fail"));
+        assert!(
+            err.contains("2 occurrences"),
+            "error must name the occurrence count: {err}"
+        );
+        assert_eq!(
+            fs::read_to_string(&p)?,
+            "dup\nmid\ndup\n",
+            "ambiguous batch must not touch the file"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn insert_text_empty_content_is_rejected() -> Result<()> {
+        let tmp = tempdir()?;
+        let p = tmp.path().join("t.txt");
+        fs::write(&p, "anchor\n")?;
+
+        let result = insert_text_batch(&p, "anchor", AnchorPosition::After, "").apply();
+        assert!(result.is_err(), "empty content is a silent no-op — reject");
+        Ok(())
+    }
+
+    #[test]
+    fn insert_text_result_is_syntax_validated() -> Result<()> {
+        let tmp = tempdir()?;
+        let p = tmp.path().join("t.rs");
+        fs::write(&p, "fn ok() {}\n")?;
+
+        let result = insert_text_batch(&p, "fn ok() {}", AnchorPosition::After, "\nlet broken = ;\n")
+            .apply();
+        assert!(
+            result.is_err(),
+            "inserting syntactically broken Rust must fail the parse guard"
+        );
+        assert_eq!(
+            fs::read_to_string(&p)?,
+            "fn ok() {}\n",
+            "rejected batch must not touch the file"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn insert_text_multibyte_anchor_is_safe() -> Result<()> {
+        let tmp = tempdir()?;
+        let p = tmp.path().join("t.txt");
+        fs::write(&p, "Åäö rubrik\nunder\n")?;
+
+        insert_text_batch(&p, "Åäö rubrik", AnchorPosition::After, " — tillägg")
+            .apply()?;
+        let after = fs::read_to_string(&p)?;
+        assert_eq!(
+            after, "Åäö rubrik — tillägg\nunder\n",
+            "multibyte anchors splice at char boundaries — no panics, no torn characters"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn insert_text_atomic_with_failing_sibling_op() -> Result<()> {
+        let tmp = tempdir()?;
+        let p1 = tmp.path().join("a.txt");
+        let p2 = tmp.path().join("b.txt");
+        fs::write(&p1, "good file\n")?;
+        fs::write(&p2, "bad file\n")?;
+
+        let batch = Batch {
+            description: Some("atomicity".into()),
+            transaction_ids: std::cell::RefCell::new(Vec::new()),
+            last_verdict: std::cell::RefCell::new(None),
+            impacts: std::cell::RefCell::new(Vec::new()),
+            operations: vec![
+                BatchOp::InsertText {
+                    file: p1.to_string_lossy().to_string(),
+                    anchor: "good file".into(),
+                    position: AnchorPosition::After,
+                    content: " + insert".into(),
+                },
+                BatchOp::InsertText {
+                    file: p2.to_string_lossy().to_string(),
+                    anchor: "does-not-exist".into(),
+                    position: AnchorPosition::After,
+                    content: "x".into(),
+                },
+            ],
+        };
+        assert!(batch.apply().is_err(), "second op fails the whole batch");
+        assert_eq!(
+            fs::read_to_string(&p1)?,
+            "good file\n",
+            "preview-stage failure writes NOTHING — not even the valid op"
         );
         Ok(())
     }

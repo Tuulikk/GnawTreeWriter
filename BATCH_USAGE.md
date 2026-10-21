@@ -48,10 +48,37 @@ gnawtreewriter diff-to-batch <diff_file> [--output <batch.json>] [--preview]
       "file": "file2.txt",
       "path": "0",
       "content": "Other content"
+    },
+    {
+      "type": "insert_text",
+      "file": "file3.rs",
+      "anchor": "async fn setup() {",
+      "position": "after",
+      "content": "\n    let _guard = test_slot().await;"
     }
   ]
 }
 ```
+
+### insert_text — anchored text splices
+
+`insert_text` targets TEXT, not node paths: it finds the UNIQUE
+occurrence of `anchor` in the file's current source and splices
+`content` raw immediately `before` or `after` it.
+
+- **Unique-anchor contract:** 0 occurrences and 2+ occurrences are
+  both hard errors (the 2+ error names the count). The op refuses the
+  silent wrong-spot edit by design.
+- **Raw splice:** content is inserted verbatim — include your own
+  `\n` when you want the insert on its own line.
+- **Same guards as every op:** the spliced result goes through the
+  rules guardian and syntax validation; a parse failure rejects the
+  whole batch before any write.
+- **Multibyte-safe:** splice points are the match start/end — always
+  char boundaries, so å/ä/ö and emoji anchors cannot panic.
+- **Mixable:** `insert_text` ops combine freely with `edit`/`insert`/
+  `delete` ops on the same or other files; operations apply in spec
+  order and preview shows the combined diff.
 
 Usage:
 ```bash
