@@ -1214,3 +1214,31 @@ success=true med "no_op": true — LAPP som rivs när GTW-kontraktet
 **Varifrån:** Motor2 sliding-marathon-passet 2026-10-19 (mätning-
 facit, syko-relationship via path-dep; record i GTW_MCP_ISSUE_LOG
 enl behandla ändamålet).
+
+## 2026-10-21 — batch saknar förankrad text-insert: 20 enrads-inserts i 7k-raders fil krävde Edit-omväg (Motor2-relä)
+
+**Klass:** saknad sub-funktion för situationen (batch-insert utan
+node-sökvägar).
+
+**Symptom:** Motor2 §37.4-köjusteringen — 20 process-tester i
+crates/motor2-llama/src/model_runtime.rs (~7 000 rader) skulle få en
+identisk `let _slot = …`-rad som första sats. GTW batch (v0.3.2-dok,
+BATCH_USAGE.md) stödjer bara node-path-"edit"-operationer: inga
+"insert"-operationer, inga text-ankare. Att hämta 20 node-sökvägar
+ur en fil i get_skeletons kända storlekssvacka är högrisk; text-
+Edit-verktyget med unika tvåraders-ankare (fn-namn + unik första
+sats) + post-hoc grep-räkning (32/32 fasit) gjorde jobbet i 4 grupper.
+
+**Kontrakt-analys:** situationen "många identiska enrads-inserts på
+unika text-ankare, ETT stort fält" är vanlig i testtäckningsarbete.
+Batchens atomicitet (allt-eller-inget + en undo) vore precis rätt —
+men är onåbar utan node-sökvägar, som är dyra/otillförlitliga i
+stora filer.
+
+**Önskad vägledning:** batch-operation "insert" med text-ankare
+(find/replace-form: anchor + position before/after), eller quick-mode
+med multi-op per fil. Då blir testtäcknings-batchar atomära i stället
+för 4 sekventiella Edit-grupper med manuell räkne-verifiering.
+
+**Varifrån:** Motor2 köjusteringen 2026-10-21 (§35.2-loggning; omvägen
+var tillåten och facit-verifierad, men nästa agent ska slippa valet).
