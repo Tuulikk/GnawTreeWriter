@@ -1252,3 +1252,31 @@ antal), raw splice, samma rules+syntax-guards som node-ops,
 multibyte-säkra splice-punkter, blandbar med node-ops. 8 enhetstester
 + E2E via CLI. 0.20.0, commit 882abe8. Ovägen (Edit-grupper) behövs
 ej längre för denna situation.
+
+---
+
+## sense (satellit) nekar med saknad bge-config — degradera eller peka tydligare (2026-10-23, Motor2-session)
+
+**Situation:** strukturell fråga ("var loggas skip_unload?") → ritualen
+(§35.3): ett GTW-försök först. `sense` svarade:
+
+> sense failed: Missing config:
+> "/home/tuulikk/.gnawtreewriter_ai/models/bge-base/config.json" —
+> `gnawtreewriter ai status` checks the model; on repeat fall back to
+> search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md
+
+**Klass:** saknad funktion för situationen (satellit-indexet ej byggt /
+modell-config saknas i denna miljö) — sense är totalt onåbar, inte
+försämrad. Felmeddelandet ÄR vägledande (namnger check-kommandot +
+fallbacken) — vägledningen träffade, omvägen (grep) gjorde jobbet.
+
+**Önskad vägledning:** två förbättringar: (1) `sense` skulle i detta
+läge kunna degradera till lexikal `search_nodes` AUTOMATISKT med en
+ärlig notis ("satellit ej byggd — lexikalisk träff") i stället för hard
+error — agenten slipper omvägs-steget och svaret är ärligt märkt (§16.1);
+(2) `doctor` bör rapportera "sense ej användbar: bge-config saknas — kör
+index_project" så tillståndet syns på EN körning i stället för vid första
+sense-anropet.
+
+**Varifrån:** Motor2-sessionen 2026-10-23 (skip_unload-grävningen;
+§35.2-loggning).
