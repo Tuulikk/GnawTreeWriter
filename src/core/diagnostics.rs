@@ -583,6 +583,56 @@ impl DoctorReport {
             }
         }
     }
+
+    /// Stale-binary check (the dogfooding case): when doctor runs inside
+    /// the gnawtreewriter repo itself, compare the RUNNING binary against
+    /// the repo's Cargo.toml. A binary older than the repo means released
+    /// fixes exist that are NOT executing — the 2026-10-28 incident had a
+    /// 2026-10-09 edit_delta.rs fix hidden behind a stale 0.18.0 install
+    /// for three weeks, and the panic's file:line pointed straight into
+    /// the comment documenting its own fix.
+    ///
+    /// Outside the gnawtreewriter repo this is a no-op: freshness vs this
+    /// repo says nothing about other projects.
+    pub fn check_binary_freshness(&mut self, project_root: &std::path::Path) {
+        let Ok(text) = std::fs::read_to_string(project_root.join("Cargo.toml")) else {
+            return;
+        };
+        if !is_gnawtreewriter_manifest(&text) {
+            return;
+        }
+        let Some(repo_version) = cargo_toml_version(&text) else {
+            return;
+        };
+        let binary_version = env!("CARGO_PKG_VERSION");
+        let installed = installed_binary_date();
+        match compare_version_triples(binary_version, &repo_version) {
+            std::cmp::Ordering::Less => self.warn(
+                "binary",
+                "freshness",
+                &format!(
+                    "STALE BINARY: running {binary_version} (installed {installed}) but this repo \
+                     builds {repo_version}. Fixes in source are NOT what executes. Redeploy: \
+                     scripts/build-gpu.sh (CUDA) or cargo install --path . (CPU), then reconnect MCP."
+                ),
+            ),
+            std::cmp::Ordering::Equal => self.pass(
+                "binary",
+                "freshness",
+                &format!("binary matches repo ({binary_version}, installed {installed})"),
+            ),
+            // Newer-than-repo is the normal dev-build state (built from a
+            // dirty tree or an uncommitted bump) — informational, not a nag.
+            std::cmp::Ordering::Greater => self.pass(
+                "binary",
+                "freshness",
+                &format!(
+                    "dev build ahead of repo: running {binary_version} (installed {installed}), \
+                     repo at {repo_version} — commit + release to sync"
+                ),
+            ),
+        }
+    }
 }
 
 // ---- Helpers ----
@@ -686,6 +736,83 @@ fn is_important_node_type(ntype: String) -> bool {
     important.iter().any(|&i| ntype == i)
 }
 
+/// True if the manifest is the gnawtreewriter package itself (the check
+/// is scoped to the [package] section so a stray dependency named alike
+/// cannot false-positive).
+fn is_gnawtreewriter_manifest(text: &str) -> bool {
+    text.lines()
+        .skip_while(|l| l.trim() != "[package]")
+        .take_while(|l| !l.trim_start().starts_with('[') || l.trim() == "[package]")
+        .any(|l| {
+            let t = l.trim_start();
+            t.starts_with("name") && t.contains("\"gnawtreewriter\"")
+        })
+}
+
+/// The `version = "X.Y.Z"` value from the [package] section.
+fn cargo_toml_version(text: &str) -> Option<String> {
+    let mut in_package = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[package]" {
+            in_package = true;
+            continue;
+        }
+        if in_package && trimmed.starts_with('[') {
+            break;
+        }
+        if in_package {
+            if let Some(rest) = trimmed.strip_prefix("version") {
+                let rest = rest.trim_start().strip_prefix('=')?.trim();
+                let val = rest.trim_matches('"');
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Numeric triple comparison of "major.minor.patch". Pre-release/build
+/// suffixes after '-'/'+' are ignored (0.21.0-beta == 0.21.0): this check
+/// only needs release-level staleness, not semver ordering subtleties.
+fn compare_version_triples(a: &str, b: &str) -> std::cmp::Ordering {
+    fn triple(v: &str) -> Vec<u64> {
+        v.split(['-', '+'])
+            .next()
+            .unwrap_or("")
+            .split('.')
+            .map(|p| p.parse::<u64>().unwrap_or(0))
+            .collect()
+    }
+    let (a, b) = (triple(a), triple(b));
+    for i in 0..3 {
+        let av = a.get(i).copied().unwrap_or(0);
+        let bv = b.get(i).copied().unwrap_or(0);
+        match av.cmp(&bv) {
+            std::cmp::Ordering::Equal => continue,
+            other => return other,
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
+/// Install/build date of the RUNNING binary: cargo writes a fresh file on
+/// install/rebuild, so the executable's mtime is the deploy date.
+fn installed_binary_date() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.metadata().ok())
+        .and_then(|m| m.modified().ok())
+        .map(|t| {
+            chrono::DateTime::<chrono::Utc>::from(t)
+                .format("%Y-%m-%d")
+                .to_string()
+        })
+        .unwrap_or_else(|| "unknown date".to_string())
+}
+
 pub fn run_full_doctor(project_root: &std::path::Path) -> DoctorReport {
     let mut report = DoctorReport::new();
 
@@ -738,5 +865,113 @@ pub fn run_full_doctor(project_root: &std::path::Path) -> DoctorReport {
     report.check_backups(project_root);
     report.check_transaction_log(project_root);
     report.check_knowledge_graph(project_root);
+    report.check_binary_freshness(project_root);
     report
+}
+
+#[cfg(test)]
+mod binary_freshness_tests {
+    use super::*;
+
+    #[test]
+    fn version_comparison_is_numeric_not_lexicographic() {
+        assert_eq!(
+            compare_version_triples("0.18.0", "0.20.0"),
+            std::cmp::Ordering::Less
+        );
+        // The trap that motivates a numeric parse: "0.9" > "0.10" as text.
+        assert_eq!(
+            compare_version_triples("0.9.8", "0.10.0"),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            compare_version_triples("0.20.0", "0.20.0"),
+            std::cmp::Ordering::Equal
+        );
+        assert_eq!(
+            compare_version_triples("1.0.0", "0.99.0"),
+            std::cmp::Ordering::Greater
+        );
+    }
+
+    #[test]
+    fn version_suffixes_are_ignored() {
+        assert_eq!(
+            compare_version_triples("0.21.0-beta.1", "0.21.0"),
+            std::cmp::Ordering::Equal
+        );
+        assert_eq!(
+            compare_version_triples("0.21.0+build.7", "0.21.0"),
+            std::cmp::Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn cargo_toml_version_reads_package_section_only() {
+        let manifest = "[package]\nname = \"gnawtreewriter\"\nversion = \"0.20.0\"\n\
+                        [dependencies]\nchrono = { version = \"0.4\" }\n";
+        assert_eq!(
+            cargo_toml_version(manifest).as_deref(),
+            Some("0.20.0"),
+            "must not pick up versions from later sections"
+        );
+        assert_eq!(cargo_toml_version("[package]\nname = \"x\"\n"), None);
+    }
+
+    #[test]
+    fn staleness_inside_gtw_repo_warns_with_redeploy_hint() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"gnawtreewriter\"\nversion = \"99.0.0\"\n",
+        )
+        .unwrap();
+        let mut report = DoctorReport::new();
+        report.check_binary_freshness(dir.path());
+        assert_eq!(report.total_checks, 1);
+        assert_eq!(report.warnings, 1);
+        let check = &report.checks[0];
+        assert_eq!(check.category, "binary");
+        assert!(check.message.contains("STALE BINARY"), "{}", check.message);
+        assert!(
+            check.message.contains("build-gpu.sh"),
+            "must name the redeploy path: {}",
+            check.message
+        );
+    }
+
+    #[test]
+    fn older_repo_version_passes_as_dev_build() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"gnawtreewriter\"\nversion = \"0.0.1\"\n",
+        )
+        .unwrap();
+        let mut report = DoctorReport::new();
+        report.check_binary_freshness(dir.path());
+        assert_eq!(report.total_checks, 1);
+        assert_eq!(report.warnings, 0);
+        assert!(report.checks[0].message.contains("dev build"));
+    }
+
+    #[test]
+    fn other_projects_and_non_cargo_dirs_are_skipped() {
+        // A foreign package (even one named similarly in a dependency) is
+        // not the gnawtreewriter repo — no check, no noise in its doctor.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"some-other-tool\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        let mut report = DoctorReport::new();
+        report.check_binary_freshness(dir.path());
+        assert_eq!(report.total_checks, 0);
+
+        let empty = tempfile::tempdir().unwrap();
+        let mut report2 = DoctorReport::new();
+        report2.check_binary_freshness(empty.path());
+        assert_eq!(report2.total_checks, 0);
+    }
 }

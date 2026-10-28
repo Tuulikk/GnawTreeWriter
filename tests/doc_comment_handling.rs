@@ -67,7 +67,7 @@ fn edit_without_own_doc_keeps_the_old_doc_block() {
 #[test]
 fn delete_leaves_doc_to_the_caller_layer() {
     // Kontrakt (§45, en sanning per regel): core-radering tar ENDAST noden —
-    /// doc-blocket ovanför ägs av Motor2:s F2d-kedja (attached_comment_paths).
+    // doc-blocket ovanför ägs av Motor2:s F2d-kedja (attached_comment_paths).
     // Detta test låser kontraktet så ingen "hjälpsam" fix skapar dubbel ägarskap.
     let dir = temp_dir();
     let path = make_file(dir.path(), "lib.rs", SRC);
