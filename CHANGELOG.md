@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Fixed
+- **git-status parser hardened against char-boundary panics** (`src/mcp/mod.rs`): the porcelain status line is sliced via `str::get` instead of raw byte ranges — a changed git output format now degrades to a skipped line instead of a panic.
+- **Regression test for multibyte edits** (`tests/edit_multibyte_regression.rs`): edit_node on a JS file with å/ä/ö comments and emoji in template literals must succeed — locks the 0.9.8 UTF-8-audit contract onto the edit write path. (The panics seen 2026-10-28 came from a stale 0.18.0 binary predating that fix, not from current source; see `GTW_MCP_ISSUE_LOG.md`.)
+
 ## [0.20.0] - 2026-10-21
 
 ### Added — Batch `insert_text`: anchored text splices with the same guards

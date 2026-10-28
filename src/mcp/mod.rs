@@ -1946,8 +1946,14 @@ or list_nodes for a flat index of this file.",
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 for line in stdout.lines() {
                     if line.len() >= 3 {
-                        let status_code = &line[..2];
-                        let path = line[3..].trim();
+                        // Porcelain XY codes are ASCII by git's contract, but
+                        // slice via get() so a changed format degrades to a
+                        // skipped line instead of a char-boundary panic
+                        // (multibyte paths follow the code columns).
+                        let (Some(status_code), Some(rest)) = (line.get(..2), line.get(3..)) else {
+                            continue;
+                        };
+                        let path = rest.trim();
                         let status = if status_code.starts_with('M') || status_code.ends_with('M') {
                             "modified"
                         } else if status_code.starts_with('A') || status_code.starts_with('?') {

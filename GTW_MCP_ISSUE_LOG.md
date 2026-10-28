@@ -1280,3 +1280,55 @@ sense-anropet.
 
 **Varifrån:** Motor2-sessionen 2026-10-23 (skip_unload-grävningen;
 §35.2-loggning).
+
+---
+
+## edit_node panikerar (char boundary) på icke-ASCII-fil — byte-offset i splice (2026-10-28, GTW-session)
+
+**Situation:** `edit_node {"file_path": "../opencode-plugins/tool-guard.js",
+"node_path": "34", "content": <35 rader JS med ASCII + em-dash + emoji>}`.
+Filen innehåller svenska kommentarer (å/ä/ö) och 🛑 i strängliteraler.
+Svaret, IDENTISKT vid två försök (andra försöket med helt ASCII-renad
+ny-node-text):
+
+> MCP tool "edit_node" on server "gnawtreewriter" failed: Internal error
+> (handler panicked): task 51/56 panicked with message "end byte index 80
+> is not a char boundary; it is inside 'ä' (bytes 79..81 of string)"
+
+**Klass:** bugg. Paniken är beroende av FILENS befintliga icke-ASCII-bytes
+(samma index 80 båda gångerna trots olika content → offset räknas på
+gammal text, splicen skär i mitten av ett multibyte-tecken). Inga bytes
+skrevs (`git diff` rent) — fail-loud är korrekt, men edit_node är därmed
+oanvändbar på filer med å/ä/ö/emoji i närvarande byggnad.
+
+**Omväg:** OpenCode edit-verktyget (exakt oldString-ankare) — lyckades
+direkt. Detta var den planerade fallbacken enligt AGENTS.md
+("AST edit failed twice with corrected input → fall back to text tools").
+
+**UPPLÖST 2026-10-28 (samma dag): INTE en kod-bugg i aktuell källkod —
+en stale binär.** Rotorsakskedjan:
+
+1. `edit_delta.rs:99` (count_word) panikerade BYTE-stegande på svensk text.
+2. Fixen landade i källkoden **2026-10-09** (doc-kommentaren på samma rad
+   dokumenterar den — "dödade GTW-editar i Motor2:s batt-kodning").
+3. Men den installerade binären (`~/.cargo/libexec/gnawtreewriter`) var
+   byggd **2026-10-07 04:28** = 0.18.0, FÖRE fixen — och blev aldrig
+   uppdaterad genom 0.19.0/0.20.0. Alla MCP-daemoner (och CLI) körde
+   0.18.0 i tre veckor.
+4. Bevis på ny binär (0.20.0 CUDA, build-gpu.sh): doctor 25/25, och den
+   EXAKTA editen (nod 34 i tool-guard.js, samma innehåll) applikas rent:
+   "✓ applied & verified on disk (bytes changed: 3460)".
+5. Regressionstest tillagt: `tests/edit_multibyte_regression.rs` (edit
+   på JS-fil med å/ä/ö-kommentarer + emoji i template literals).
+6. Bonus-härdning: `mcp/mod.rs` git-status-parsern slicar via `get()`
+   i stället för råa byte-intervall.
+
+**Lärdom (första-klassens AGENTS.md-lektion 3/4):** "panik i aktuell
+källkod" måste ALWAYS kollas mot DEN KÖRANDE binärens byggdatum först —
+`gnawtreewriter --version` + `ls -l ~/.cargo/libexec/gnawtreewriter`.
+Rad:kolonn i panikmeddelandet som pekar in i en kommentar = byggd från
+annan källkod än den du läser.
+
+**Varifrån:** GTW-åtgärdssessionen 2026-10-28 (Fas 1: dogfooding-editen av
+tool-guard.js i opencode-plugins-repot — exakt den edit-kategori AGENTS.md
+säger SKA gå via GTW).
