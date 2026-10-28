@@ -26,6 +26,15 @@ edit the codebase, the way it is meant to be used.
 | AST edit failed twice with corrected input | fall back to text tools |
 
 ### How to reach the tool
+- **In OpenCode 2.x (Code Mode — the primary path)**: MCP tools are reachable
+  ONLY via the `execute` tool. Discover with
+  `search({ namespace: "gnawtreewriter" })`, call with
+  `await tools.gnawtreewriter.<tool>({ ...args })` — chain the whole task
+  (analyze → read_node → edit_node) in ONE execute call. Content passes as
+  native JS strings: no shell-escaping traps on this path. Direct
+  `gnawtreewriter_*` tool calls do not exist any more (since 2026-10-15).
+  Full recipe + fallbacks: the `gnawtreewriter` skill and
+  `~/.config/opencode/instructions/gnawtreewriter.md`.
 - **In VSCode / Copilot Chat**: MCP tools prefixed `mcp_gnawtreewrite_*`
   (`edit_node`, `semantic_edit`, `insert_node`, `batch`, `preview_edit`, `compress`, `pack`, `curate`, ...).
 - **In a terminal / CLI agent**: the `gnawtreewriter` binary
