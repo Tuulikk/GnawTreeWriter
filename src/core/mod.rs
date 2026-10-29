@@ -11,6 +11,7 @@ pub mod backup;
 pub mod batch;
 pub mod blast;
 pub mod blueprint;
+pub mod code_index;
 pub mod compress;
 pub mod curator;
 pub mod diagnostics;

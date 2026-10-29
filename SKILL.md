@@ -16,7 +16,47 @@ You are an expert in using **GnawTreeWriter** for surgical, AST-based code editi
 5. **Verify, don't assume**: GTW failures are LOUD (no-match replace, unknown rule id, empty skeleton all error with guidance) — read the error, it tells you the next step
 6. **Semantic search**: prefer `sense` over `grep` when the project is indexed — then confirm with `read_node` (one cheap read beats re-searching)
 
+## 🧰 HOW TO CALL GTW (Code Mode — read this first!)
+
+OpenCode exposes MCP tools **only** through the Code Mode catalog, reached via the
+`execute` tool. Direct `gnawtreewriter_*` tool calls no longer exist (that era ended
+2026-10-15 — this is why GTW usage collapsed: agents reached for plain `edit`, which
+stayed one call away). The tools ARE there and healthy; the calling convention changed.
+
+**The recipe** — all calls below in this skill mean `await tools.gnawtreewriter.<name>({...})`
+inside one `execute` call:
+
+```js
+// optional discovery: exact names + signatures for the 37 tools
+const hits = search({ namespace: "gnawtreewriter", query: "edit" });
+
+// chain the whole task in ONE execute call — sequential awaits, one round-trip:
+const skel = await tools.gnawtreewriter.get_skeleton({ file_path: "src/cli.rs", max_depth: 2 });
+const node = await tools.gnawtreewriter.read_node({ file_path: "a.rs", node_path: "35.2.105" });
+await tools.gnawtreewriter.edit_node({ file_path: "a.rs", node_path: "35.2.105", content: "fn x() {}" });
+```
+
+- **No shell-escaping traps on this path** — content passes as native JS strings. The old
+  double-brace/STDIN advice applies ONLY to the CLI fallback below.
+- **`gnawtreewriter` namespace missing from the catalog?** The MCP server is down:
+  `opencode api get /api/mcp` to confirm, then
+  `opencode api post /api/experimental/mcp/gnawtreewriter/connect` to reconnect.
+  Reconnected tools appear in the NEXT session — until then use the CLI binary
+  (`gnawtreewriter <command>`, same tool names in CLI form), which bypasses Code Mode
+  entirely and always works.
+- **Char-boundary panic (å/ä/ö in the message)? Check the RUNNING binary's age first** —
+  `gnawtreewriter --version` + `ls -l ~/.cargo/libexec/gnawtreewriter` vs the repo
+  CHANGELOG. A stale installed binary can predate released UTF-8 fixes: on 2026-10-28
+  a 0.18.0 daemon kept a bug alive for 3 weeks after it was fixed in source (the panic's
+  file:line pointed INTO a comment that documented its own fix). Redeploy via
+  `scripts/build-gpu.sh` (CUDA setup) or `cargo install --path .`, then reconnect the
+  MCP server. Real panics in current source: fall back to the edit tool, log in
+  `GTW_MCP_ISSUE_LOG.md`, move on.
+
 ## 🧭 Situations → Tools (start here)
+
+Every MCP call = the execute recipe above: `tools.gnawtreewriter.<tool>({...})`. The CLI
+column is the fallback when the MCP namespace is missing.
 
 | Situation | Tool (MCP → CLI) | Example call |
 |---|---|---|

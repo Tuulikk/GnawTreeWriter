@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+### Added — `code-index`: project structure index generator (CLI)
+New command born from a real consumer need (Motor2 2026-10-29: a fresh
+session must answer "where is X?" without reading the codebase):
+`gnawtreewriter code-index <root> -o code-index.md --intro <file>` walks
+source files (git-aware, via the `ignore` crate), extracts named items
+(functions, structs, impl+methods, enums, traits, classes, interfaces) with
+line anchors from the tree-sitter tree, and emits a markdown (or `--json`)
+index whose header carries git rev + GTW version — staleness is visible
+instead of silent. Hand-written prose enters via `<!-- intro: dir -->`
+blocks (`--intro`), spliced under matching section headings; unpaired
+intros are flagged, never dropped silently. Lenient parsing keeps a
+localized syntax error from killing a file's index (warned honestly in the
+output). Keyword fallback matches grammar variants across languages but
+refuses to match bare keyword TOKEN kinds ("impl", "fn") — proven noise.
+5 unit tests; full Motor2 run: 2.2 s, 296 files, 5 024 items.
+See `GTW_MCP_ISSUE_LOG.md` (2026-10-29) for the gap analysis that produced it.
+
 ### Fixed
 - **git-status parser hardened against char-boundary panics** (`src/mcp/mod.rs`): the porcelain status line is sliced via `str::get` instead of raw byte ranges — a changed git output format now degrades to a skipped line instead of a panic.
 - **Regression test for multibyte edits** (`tests/edit_multibyte_regression.rs`): edit_node on a JS file with å/ä/ö comments and emoji in template literals must succeed — locks the 0.9.8 UTF-8-audit contract onto the edit write path. (The panics seen 2026-10-28 came from a stale 0.18.0 binary predating that fix, not from current source; see `GTW_MCP_ISSUE_LOG.md`.)

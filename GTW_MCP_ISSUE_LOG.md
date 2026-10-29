@@ -1332,3 +1332,37 @@ annan källkod än den du läser.
 **Varifrån:** GTW-åtgärdssessionen 2026-10-28 (Fas 1: dogfooding-editen av
 tool-guard.js i opencode-plugins-repot — exakt den edit-kategori AGENTS.md
 säger SKA gå via GTW).
+
+---
+
+## 2026-10-29 — sense saknar AI-modell + skeleton olämplig som index (Motor2, code-index-bygget)
+
+**Kontext:** Motor2-behov "färsk session ska kunna utan kodbasläsning"
+(AGENTS §50 Uppstartsrundan) → beslut: återskapa code-index.md som
+GENERERAD fil (hybrid: skeleton + handskrivna intros). GTW först enligt
+§35.3-ritualen.
+
+| # | Anrop | Parametrar | Resultat |
+|---|---|---|---|
+| 1 | `sense` (MCP) | query="turn start … StreamState", path=crates/motor2-chat/src | **Fel: Missing config: `~/.gnawtreewriter_ai/models/bge-base/config.json`** — satellit-indexet saknar sin modell; felet pekar på `gnawtreewriter ai status` |
+| 2 | `skeleton -d 2` (CLI) | ownership.rs | **Brus, ej index:** depth 2 ger kommentarsnoder utan namn (`[line_comment]` ×N); namngivna items syns först djupare |
+| 3 | `list -f function` (CLI) | ownership.rs | **0 träffar** — filtertypen matchar råa trädsitter-kinds (`function_item`), inte kategorinamn; ej upptäckbart från `--help` |
+
+**Omväg som användes:** grep för ankrar + direkt parser-användning
+(`get_parser` + `parse_lenient`) i ny modul.
+
+**Bedömning + åtgärd (stängd samma session):**
+- (1) saknad modell-config = miljöproblem, men felmeddelandet är bra (namnger
+  kontrollen). Följd: sense är inte pålitlig väg tills modellen finns —
+  loggas som miljö-åtgärd, inte kod-bugg.
+- (2)+(3) = **saknad funktion för situationen**: inget kommando ger
+  "projektstruktur + namngivna items per fil" i index-format. **FIXAD i
+  0.21.0: nytt CLI-kommando `code-index`** (`src/core/code_index.rs`) —
+  genererar tree + per-fil items (fn/struct/impl+metoder/enum/trait/class/
+  interface) med radankringar, rev-stämpel i headern, `--intro`-splice för
+  handskrivna avsnitt, lenient-parse + ärlig varningslista, keyword-fallback
+  som VÄGRAR matcha anonyma token-kinds (bevisat noise: "impl"-token).
+  5 enhetstester; full Motor2-körning 2,2 s / 296 filer / 5 024 items.
+
+**Varifrån:** Motor2-sessionen 2026-10-29 (kunskapslager-åtgärden; användaren
+godkände GTW-förmågeutbyggnad).

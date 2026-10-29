@@ -12,7 +12,7 @@ use crate::llm::{GnawSenseBroker, SemanticIndexManager, SenseResponse};
 use crate::parser::TreeNode;
 use anyhow::{Context, Result};
 use colored::Colorize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
@@ -191,6 +191,27 @@ enum Commands {
         file_path: String,
         #[arg(short, long, default_value = "2")]
         depth: usize,
+    },
+    /// Generate a project code index (tree + per-file item skeletons)
+    CodeIndex {
+        /// Project root (default: current directory)
+        #[arg(default_value = ".")]
+        path: String,
+        /// Write to file instead of stdout
+        #[arg(short, long)]
+        output: Option<String>,
+        /// Splice hand-written intro blocks (<!-- intro: dir --> ... <!-- /intro -->)
+        #[arg(long)]
+        intro: Option<String>,
+        /// Comma-separated file extensions to include
+        #[arg(long, default_value = "rs,py,ts,tsx,js,jsx,go,java,c,cpp,h,hpp,php,zig,css")]
+        extensions: String,
+        /// Truncate signatures at this character count
+        #[arg(long, default_value = "110")]
+        max_sig: usize,
+        /// Machine-readable JSON output (ignores --output)
+        #[arg(long)]
+        json: bool,
     },
     /// Compress source code by replacing function bodies with placeholders
     Compress {
@@ -1259,6 +1280,23 @@ impl Cli {
             Commands::Skeleton { file_path, depth } => {
                 Self::handle_skeleton(&file_path, depth)?;
             }
+            Commands::CodeIndex {
+                path,
+                output,
+                intro,
+                extensions,
+                max_sig,
+                json,
+            } => {
+                Self::handle_code_index(
+                    &path,
+                    output.as_deref(),
+                    intro.as_deref(),
+                    &extensions,
+                    max_sig,
+                    json,
+                )?;
+            }
             Commands::Compress {
                 file_path,
                 output,
@@ -1914,6 +1952,37 @@ Use --no-preview to write batch file"
                 println!("\n💡 [GnawTip]: To edit the first match surgically, use:");
                 println!("   gnawtreewriter edit {} {} -", file_path, path);
             }
+        }
+        Ok(())
+    }
+
+    fn handle_code_index(
+        path: &str,
+        output: Option<&str>,
+        intro: Option<&str>,
+        extensions: &str,
+        max_sig: usize,
+        json: bool,
+    ) -> Result<()> {
+        let opts = crate::core::code_index::CodeIndexOptions {
+            extensions: extensions
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            max_sig,
+            intro_file: intro.map(PathBuf::from),
+            json,
+        };
+        let doc = crate::core::code_index::generate_index(Path::new(path), &opts)?;
+        match output {
+            Some(file) => {
+                std::fs::write(file, &doc)
+                    .with_context(|| format!("writing {}", file))?;
+                let lines = doc.lines().count();
+                println!("code-index skriven: {} ({} rader)", file, lines);
+            }
+            None => println!("{}", doc),
         }
         Ok(())
     }
