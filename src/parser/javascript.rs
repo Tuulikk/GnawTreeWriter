@@ -65,10 +65,11 @@ impl JavaScriptParser {
         }
 
         let id = path.clone();
+        let (start_col, end_col) = crate::parser::char_col_pair(source, start_byte, end_byte);
 
         Ok(TreeNode {
-            start_col: 0,
-            end_col: 0,
+            start_col,
+            end_col,
             id,
             path,
             node_type,

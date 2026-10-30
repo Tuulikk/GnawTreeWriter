@@ -1366,3 +1366,50 @@ GENERERAD fil (hybrid: skeleton + handskrivna intros). GTW först enligt
 
 **Varifrån:** Motor2-sessionen 2026-10-29 (kunskapslager-åtgärden; användaren
 godkände GTW-förmågeutbyggnad).
+
+---
+
+## 2026-10-30 — edit_node korrumperar JS statement_block mid-line (Jobseeker)
+
+**Kontext:** Bugfix i Jobseekers `pkg/mods/jobs.js` (blacklist → inkorgsrefresh).
+`edit_node` på ett statement_block inuti `.then(function(){...})` — path från
+`search_nodes`, content exakt som `read_node` returnerade (med klamrar).
+
+| # | Anrop | Parametrar | Resultat |
+|---|---|---|---|
+| 1 | `edit_node` (MCP) | jobs.js, block-path i .then-callback, content `{ ... }` | **"Node edited."** — men `.then(function () {` … `})` var GONE, ersatt av bart `{ ... }` → `SyntaxError: Unexpected token '.'` |
+| 2 | `edit_node` (MCP) | jobs.js, assignment-statement, 2 statements som content | Fungerade delvis men tappade indentering + trailing newline |
+| 3 | `undo {steps:2}` (MCP) | — | ✓ Revenderade båda transaktioner korrekt (git diff tom + node --check OK) |
+| 4 | fallback `edit`-verktyget | exakta strängar | ✓ Samma ändring, syntax OK direkt |
+
+**Reproducerat isolerat (2026-10-30, /tmp/opencode/gtw_repro/repro.js):**
+minimal .then-kedja + edit_node på inner-blocket — korrumpering 1:1 MED klamrar
+OCH UTAN (testat båda shaperna). `read_node` på samma path läser RÄTT block →
+write-path respekterar inte samma nod som read-path. **Inte användarfel — verktygsbugg.**
+
+**Rot-orsak (hittad i källkoden samma session):**
+1. **20 tree-sitter-parsers** (javascript, typescript, go, java, bash, css, slint,
+   python m.fl.) satte `start_col: 0, end_col: 0` i build_tree — bara rust.rs
+   satte kolumner. Parsers utan kolumner → `edit_node_at_path` faller i
+   hel-raders-fallbacken, som vid mid-line-noder (block börjar SLUT på raden
+   `.then(function () {`, slutar BÖRJAN på raden `})`) äter exakt den kontexten.
+2. **rust.rs** satte BYTE-kolumner (`start_position().column + 1`) medan splatten
+   räknar TECKEN (`.chars().take(start_col - 1)`) — latensbugg vid å/ä/ö/emoji
+   före noden på samma rad (trolig källa till de historiska char-boundary-felen).
+
+**Omväg som användes:** undo ×2 (rättade allt, verifierat) + edit-verktyget.
+
+**Bedömning + åtgärd (stängd samma session):**
+- Verktygsbugg klass (b) — INTE fel användning (content-shape spelar ingen roll
+  när hel-raders-fallbacken äter kontexten; testats med båda shaperna).
+- **FIXAD:** `char_col_pair()` i `src/parser/mod.rs` (byte→tecken-kolumner, UTF-8-
+  säker) använd nu av ALLA tree-sitter-parsers (19 filer) inkl. rust.rs (var
+  byte-baserad). Regressionstester: `tests/edit_node_midline_block_regression.rs`
+  (JS .then-block + Rust multibyte-prefix) — gröna på fixad källkod.
+- Eftersläpning: handbyggda parsers utan tree-sitter-positioner (json, toml,
+  yaml, markdown, xml, text, generic, css, qml) använder fortfarande
+  hel-raders-fallbacken — deras noder är mest hel-rads-orienterade, men
+  mid-line-redigeringar är fortfarande farliga där. Kvar som uppgift, ej glömd.
+
+**Varifrån:** Jobseeker-sessionen 2026-10-30 (P1/P2/P3-zonbuggen; användaren
+krävde att GTW-felet fixades eller rapporterades istället för att kringgås).

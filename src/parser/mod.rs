@@ -48,6 +48,18 @@ pub struct TreeNode {
     pub children: Vec<TreeNode>,
 }
 
+/// 1-baserade TECKEN-kolumner för TreeNode (2026-10-30, GTW_MCP_ISSUE_LOG).
+/// edit_node_at_path:s splatte räknar `.chars()`, men tree-sitter-positioner
+/// är BYTE-kolumner — vid å/ä/ö/emoji före noden på samma rad divergerar de
+/// två och splatten landar fel. Konvertera byte → chars HÄR, en gång.
+pub fn char_col_pair(source: &str, start_byte: usize, end_byte: usize) -> (usize, usize) {
+    let line_start = source[..start_byte].rfind('\n').map(|p| p + 1).unwrap_or(0);
+    let start_col = source[line_start..start_byte].chars().count() + 1;
+    let end_line_start = source[..end_byte].rfind('\n').map(|p| p + 1).unwrap_or(0);
+    let end_col = source[end_line_start..end_byte].chars().count() + 1;
+    (start_col, end_col)
+}
+
 impl TreeNode {
     /// Recursively find a node by its path string.
     pub fn find_path(&self, target_path: &str) -> Option<&TreeNode> {

@@ -47,8 +47,8 @@ impl RustParser {
         let node_type = node.kind().to_string();
         let start_line = node.start_position().row + 1;
         let end_line = node.end_position().row + 1;
-        let start_col = node.start_position().column + 1;
-        let end_col = node.end_position().column + 1;
+        let (start_col, end_col) = crate::parser::char_col_pair(source, start_byte, end_byte);
+        // (end_col följer med tuple-bindingen ovan — tecken-baserad, å/ä/ö-säker.)
 
         let mut children = Vec::new();
         let mut cursor = node.walk();

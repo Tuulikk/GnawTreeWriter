@@ -18,6 +18,7 @@ refuses to match bare keyword TOKEN kinds ("impl", "fn") — proven noise.
 See `GTW_MCP_ISSUE_LOG.md` (2026-10-29) for the gap analysis that produced it.
 
 ### Fixed
+- **edit_node korrumperade inte längre mid-line-block i JS/TS/Go/Java/++ (2026-10-30)**: 20 tree-sitter-parsers satte aldrig `start_col/end_col`, så `edit_node_at_path` föll i hel-raders-ersättning — ett `statement_block` inuti `.then(function () { ... })` åt hela sin första/sista rad (`.then(`-wrappern och `})`) och bröt promise-kedjan, med tyst "Node edited."-svar. Samma pass: rust.rs byte-kolumner vs splattens tecken-räkning (å/ä/ö-divergens). Fix: `char_col_pair()` i `parser/mod.rs` — tecken-baserade kolumner för alla tree-sitter-parsers; regressionstester i `tests/edit_node_midline_block_regression.rs`.
 - **git-status parser hardened against char-boundary panics** (`src/mcp/mod.rs`): the porcelain status line is sliced via `str::get` instead of raw byte ranges — a changed git output format now degrades to a skipped line instead of a panic.
 - **Regression test for multibyte edits** (`tests/edit_multibyte_regression.rs`): edit_node on a JS file with å/ä/ö comments and emoji in template literals must succeed — locks the 0.9.8 UTF-8-audit contract onto the edit write path. (The panics seen 2026-10-28 came from a stale 0.18.0 binary predating that fix, not from current source; see `GTW_MCP_ISSUE_LOG.md`.)
 
