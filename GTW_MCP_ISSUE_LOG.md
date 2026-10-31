@@ -1413,3 +1413,103 @@ write-path respekterar inte samma nod som read-path. **Inte användarfel — ver
 
 **Varifrån:** Jobseeker-sessionen 2026-10-30 (P1/P2/P3-zonbuggen; användaren
 krävde att GTW-felet fixades eller rapporterades istället för att kringgås).
+
+---
+
+## 2026-10-31 — Triage-omgång: status på öppna poster (GTW-session, live-evidens på installerad 0.20.0)
+
+**Kontext:** Användaren frågade "finns det buggrapporter som inte är fixade?"
+och noterade att OpenCode-agenter knappt använder GTW i praktiken (code-index
++ enstaka snubblingar). Triage med live-tester i `/tmp/opencode/gtw_triage/`
+mot installerad binär (0.20.0, libexec byggd 2026-10-30). Dogfooding av
+`code-index` på detta repo lyckades: `code-index.md` (1 908 rader, git
+`7994c3a`, otrackad i git ännu).
+
+| # | Post | Test | Resultat |
+|---|---|---|---|
+| T1 | quick-insert "0 insertion(s)" (2026-10-06) | `quick-insert t1.md --after "## [Unreleased]" … --unique` | **REPRODUCERAT i 0.20.0**: "✓ QuickInsert applied: 0 insertion(s)", exit 0, 0 bytes skrivna |
+| T2 | fynd 9 root-insert in-range (2026-10-04, 9.2) | `insert t2.rs "0" 3` (fil med 5 toppnivå-fn) | **REPRODUCERAT i 0.20.0**: `fn zeta` landade INUTI `fn alpha` (rad 2) — Issue 17-fixen (out-of-range ⇒ append) täcker EJ in-range-fallet; `idx-3`-konventionen placerar in i syskons kropp, tyst. Undo ✓ (reverterade korrekt) |
+| T3 | `undo --preview` saknas i CLI (2026-10-06) | `gnawtreewriter undo --preview` | **KVARSTÅR**: "unexpected argument '--preview'" (MCP har preview, CLI inte) |
+| T4 | NO-OP-Err-kontrakt (2026-10-19) | src/core/mod.rs:302 + test :1223 | **KVARSTÅR i källkod**: edit NO-OP = `Err("NO-OP: … Nothing was written")`; testet assertar `expect_err` |
+| T5 | sense/search_semantic bge-base (10-18/10-19/10-23/10-29) | `ls ~/.gnawtreewriter_ai/models/` | **KVARSTÅR**: bara `modernbert` finns — semantik-kanalen död i nya sessioner tills modellen installeras eller degradering landar |
+| T6 | ID-format entiteter/relationer (2026-10-07) | src/core/index_entities.rs:253, index_relations.rs:306 | **DELVIS**: `Entity.id` = fullt `gtw:{file}:{type}:{name}` nu, men `Relation.to` sätts fortfarande till bara namn (`type_name`, `trait_name`) medan `from` = fullt id — "ett format"-beslutet fattas; abs/rel-path följer anroparen |
+
+**Prioritetsordning (förslag):**
+1. T2 — root-insert tyst felplacering är dataförlust-klass i agent-edits (undo räddade denna gång, men en agent som inte verifierar ser den aldrig)
+2. T1 — samma "tyst ✓"-klass som fynd #14; trivial fix (0 ska vara fel med ankarrad)
+3. T5 — sense-degradering till lexikalisk sökning + doctor-rapport (se förslaget nedan)
+4. T4 (NO-OP = Ok + `applied=false`), T3 (`undo --preview`), T6 (format-beslut)
+
+---
+
+## 2026-10-31 — FÖRSLAG (användaren): install-vänlighet + sekundära funktionsnivåer
+
+**Klass:** saknad funktion / under förmåga (två spår, användarens initiativ).
+
+Användaren 2026-10-31: "gtw hade kunnat vara vänligare att installera, samt
+haft sekundära nivåer av funktioner och stöd."
+
+**Spår 1 — Install-vänlighet.** Nuvarande smärtor: enda installationsvägen är
+`cargo install` (Fedora segfault-issue öppen sedan 2025-12-29); stale-binärer
+lever veckor i MCP-daemoner (2026-10-28-lärdomen: 0.18.0 i tre veckor);
+bge-base/setup saknar guidad väg (felmeddelandet säger "check ai status" men
+inte HUR installera); versionssträngen 0.20.0 trots nyare Unreleased-kod i
+binären gör stale-diagnos förvirrande.
+
+**Spår 2 — Sekundära funktionsnivåer (graceful degradation).** Verktyg ska
+degradera, inte dö: sense utan modell → lexikalisk `search_nodes` med ärlig
+notis (2026-10-23-önskan), `search_semantic` → fallback i stället för hard
+error (2026-10-18 (b)-varianten), `doctor` rapporterar kapabilitetsnivå, och
+`code-index` som alltid-fungerande basnivå när AI-nivån saknas. Tänkta nivåer:
+bas (parse/AST/quick-*) → struktur (index/entities/kunskapsgraf) → semantik
+(sense/modell) — varje nivå fungerar utan nästa, och varje svar namnger vilken
+nivå som svarade.
+
+**Koppling:** T5 ovan, Issue 16, 2026-10-23-posten, Fedora-issue,
+stale-binär-lärdomen 2026-10-28.
+
+**Varifrån:** GTW-triage-sessionen 2026-10-31 (användarens återkoppling efter
+genomgång av olösta rapporter).
+
+---
+
+## 2026-10-31 (II) — T1 + T2 FIXADE (samma session): root-insert syskongräns + quick-insert högljutt noll-fel
+
+**T2 FIXAD — root-insert in-range:** grenen för godtyckliga positioner i
+`insert_node_at_path` (src/core/mod.rs) använde `children[idx - 3].end_line`
+som rått insert-index. För enrads-/token-barn (roten första barns anonyma
+`fn`-token har end_line = startlinjen) landade skriften MITT i syskonets
+kropp — exakt det live-repro triagen T2 fångade (position 3 av 5 fn:er →
+inuti fn alpha). Fix: slot `idx - 3` infogar vid det adresserade syskonets
+startgräns (`start_line.saturating_sub(1)`), aldrig inuti det; out-of-range
+(> len) förblir append efter sista barnet (Issue 17-kontraktet oförändrat).
+**Obs (semantik):** slot-grenen täcker 3..=len — "before second-to-last
+child" är ej adresserbar via slot (idx > len = append). Dokumenterat i
+testkommentaren; full omkonstruktion av positionskonventionen är en egen
+fråga (design, ej bug). Regressionstester: `insert_pos3_does_not_nest_inside_first_root_fn`
++ `insert_in_range_slot_lands_between_siblings`.
+
+**T1 FIXAD — quick-insert noll-skrivning:** rotorsaken var att `--after` är
+ett REGEX: `## [Unreleased]` matchar ingen rad (`[...]` = teckenklass) — och
+0 träffar gav ändå "✓ applied: 0 insertion(s)" + en no-op-transaktion.
+Fix (src/cli.rs): 0 insertion(s) i apply-vägen = `bail!` med regex-ledtråd
+("escape metacharacters, e.g. '^## \\[Unreleased\\]$'"), noll bytes, ingen
+transaktion. Preview-läget får gärna visa "0 match(es)" (är redan ärligt).
+Regressionstest: `test_quick_insert_no_match_fails` (inkl. positivkontroll
+med escaped ankare).
+
+**Bonus under fixen:** `cargo clippy --lib -D warnings` renades —
+needless_borrow i src/mcp/mod.rs:1395 (oreleased outline-kod) rättad.
+KVARSTÅR (obelörd skuld från 9.1-noteringen, nu preciserad):
+`cargo clippy --lib --tests -- -D warnings` fallerar fortfarande i
+ovidrörda testmoduler (token_count.rs ×4+ needless_borrow/len-comparison/
+manual RangeInclusive/useless vec-mönster) — lib-koden är nu ren, test-
+modulerna inte. Ska bli en egen fixpost.
+
+**Validering:** cargo test --lib 264 gröna; insert_position 14 gröna;
+clippy --lib -D warnings ren. GTW-användning under fixen: search_nodes →
+read_node → edit_node (verifierad via git diff) + insert_node (testappend).
+Notera: GTW edit_node tappade trailing-newline på båda målfilerna och
+dubbleerde doc-kommentar + `#[test]` när funktionsnoden ersattes (attribut/
+doc sitter i egna noder utanför funktionsnoden) — kringgicks med manuell
+städning; egen loggpost bör öppnas för den klassen.
