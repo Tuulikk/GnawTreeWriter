@@ -1619,3 +1619,41 @@ positionell. Ej release-blockerande.
 
 [GTW-repo]: motor2-sessionen spårar ingen GTW-fix här — detta är loggpost
 för GTW-teamet.
+
+**Triage (GTW-teamet, 2026-10-31, live-repro på kopia av er lib.rs mot
+aktuell källkod):** er huvudclaim bekräftas med annan mekanik —
+- **A. Guardian falskt-på add-redigeringar i body-block (bugg, återgivet).**
+  Samma edit (inskjuten kommentarsrad, multibyte) BLOCKERAS med
+  "GUARDIAN BLOCK ... removes critical logic" när den skjuts in vid
+  blockets TOPP, och godtas ("Node edited.") när samma tillägg läggs
+  LÄNGST BAK. En ren-ASCII-inskjutning blockas likaså — fenomenet är
+  alltså INTE multibyte-relaterat, utan positionsbaserad parning i
+  `edit_delta::diff_walk`: ett tillägg före befintliga barn skiftar
+  parningen, och tokens-fallbacken rapporterar "Statement node removed".
+  Empiri: topp-insättning → GUARDIAN BLOCK; slut-insättning → godkänns.
+  Fixriktning: parning bör använda undersekvens-/mängdmatchning (LCS)
+  i stället för ren position.
+- **B. MCP edit_node saknar force-param (bugg/sub-funktion).** Guardian-
+  meddelandet visar "Use --force to override", men MCP-edit_node-schema
+  har bara file_path/node_path/content — CLI har `--force`, MCP-agenten
+  har INGEN väg förbi. Ett guardian false-positive blir därmed totalt
+  stopp för MCP-agenter, med odiagnostiserbart felmeddelande. Billig
+  fix: exponera force i edit_node-schema (med lämplig kilde-rabbat).
+- **C. list_nodes saknar node_path (sub-funktion).** Nuvarande schema
+  har bara file_path/filter/max_depth — parametern finns inte alls i
+  verktyget, så er scoped-listningsförväntan saknar underlag; svaret är
+  tyst root-listning (som ni såg). Fix-valet: stöd node_path i schema
+  eller dokumentera tydligt att scope inte finns (aldrig tysta
+  fallbacker).
+- **D. Er exakta feltext ("Syntax error at line 1, col 1")** gick INTE
+  att reproducera på aktuell källkod (vår edit-path svarar med
+  Guardian-blocket ovan). Feltexten kan komma från er sessions
+  binär-/revision — men degenererade felkoordinater är samtidigt känd
+  klass (Issue 15-linjen). Verifiera efter nästa GTW-uppdatering i er
+  session; återöppna posten om felet kvarstår.
+
+**Prioritet:** A + B högt (MCP-agentens primära redigeringsväg; B är
+billig). C medel.
+**Omväg för er session tills A/B är fixade:** vid add-edits, lägg
+tilläggen LÄNGST BAK i blocket (bevisat godkänt), eller kör edit via
+CLI (den har --force).
