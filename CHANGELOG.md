@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.21.0] - 2026-10-31
 
 ### Fixed — guardian false-positive on body-block additions + MCP force (IV-triagen)
 - **Additions inside body-blocks no longer misclassified as removals**:
@@ -49,6 +49,12 @@ repo pass).
   Tom logg svarar ärligt "Nothing to undo" + pekar på `history`. Regressionstest
   `test_undo_preview_writes_nothing` bevisar: preview äter inget från
   undo-stacken (riktig undo funkar därefter) och noll bytes ändras.
+
+### Polished
+- **Full fmt + clippy sweep**: `cargo fmt --check` and `cargo clippy --lib
+  --tests -- -D warnings` are both clean repo-wide now — the 9.1-era
+  test-module debt (token_count, pack, index_entities, state,
+  semantic_index, mcp outline) is closed.
 
 ## [0.20.1] - 2026-10-31
 
