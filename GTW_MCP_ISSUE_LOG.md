@@ -1657,3 +1657,20 @@ billig). C medel.
 **Omväg för er session tills A/B är fixade:** vid add-edits, lägg
 tilläggen LÄNGST BAK i blocket (bevisat godkänt), eller kör edit via
 CLI (den har --force).
+
+**STÄNGD samma session (2026-10-31):**
+- **A fixad (denna commit, edit_delta::diff_walk)**: barn matchas nu först
+  på (node_type, trimmat innehåll) — mängdpass — och kvarvarande paras
+  positionellt; äkta borttagna klassificeras fortfarande, tillägg
+  klassas som tillägg. Fyra regressionstester i guardian.rs
+  (topp-tillägg icke-removal; slut-tillägg kvar grönt; äkta
+  villkorsborttagning VAKTAS — negativ kontroll; force-path ger
+  applicering). 272 lib-tester gröna, clippy --lib ren.
+- **B fixad**: MCP `edit_node` har nu valfri `force`-parameter
+  (default false) i schema + dispatch; feltexten guidar "CLI --force,
+  MCP edit_node force:true". Via CLI/MCP force=true appliceras
+  tidigare blockerade topp-insättningar (bevisat i force-testet).
+- **C öppen** som sub-funktion (list_nodes node_path) — notera i
+  BACKLOG, ej i denna release.
+- **D osändrat** — er sessions binär verifierar vid nästa upptagning;
+  symptomet avviker/kvarstår återöppnas.
