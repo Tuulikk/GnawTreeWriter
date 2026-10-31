@@ -1541,3 +1541,81 @@ HEAD-committar (code_index.rs ×10, batch.rs ×4, doc_comment_handling.rs ×5,
 edit_node_midline_block_regression.rs, insert_position.rs m.fl. —
 samma klass som 9.1-fortsättningens "pre-existing skuld"). cli.rs är nu
 fmt-ren (per-file rustfmt). Full fmt-sweep = egen post.
+
+---
+
+## 2026-10-31 (III) — T5 FIXAD: sense/search_semantic degraderar med ärlig etikett i stället för att dö
+
+**Anrop (2026-10-18, 2026-10-19-luftning, 2026-10-23, 2026-10-29):**
+`search_semantic` + `sense` i sessioner utan bge-base svarade
+"Missing config: .../bge-base/config.json" → grep-omväg varje gång.
+
+**Varför fyra återkomster:** klassifikation 10-29 lät felet vara
+"miljöproblem" — men resultatet för agenten var samma igen varje pass:
+hörnstenen "var sitter X?" (§35.1 steg 2) TYST DÖD + kryptiskt fel. T5-lösningen (per 10-23-önskarna):
+
+1. **`lexical_degrade`** (src/core/gnaw_find.rs): post-order-vandring —
+   nodnamn eller innehållets första rad innehåller ett frågeterm;
+   "djupaste noden äger träffen", inga förfäder seedar (kontainern
+   innehåller alltid barnens text). Satellit-tak: 400 filer; char-safe
+   preview. Ärligt kontrakt: svaret MÅSTA tala om att degraderingen
+   skett — textträffar levereras, inte semantisk rangordning.
+2. **MCP `sense`** (broker-init + sense_with-fejlet) och **MCP
+   `search_semantic`** (AiManager-init, broker-init, sense-fejlet):
+   felarmarna anropar nu `sense_lexical_degrade(...)`: tool_success med
+   ärlig etikett ("Semantic channel unavailable (reason) — DEGRADED to
+   lexical text match (NO semantic ranking)"), träfflistan + fix-väg
+   (ai setup / ai index). Modelfel-pathet finns kvar i (reason)
+   (10-18-önskan (a)).
+3. **CLI `sense`**: `sense_degraded_cli` — samma kärna; GNAW_JSON sänder
+   strukturerad degraded-JSON (`"degraded": true`), human-mode ärliga
+   rader + fix-tips.
+4. **`doctor`** (10-23-önskan (2)): nytt `ai_runtime/semantic_model`-check —
+   pass när bge-base config-filer finns, warn med full vägledning när
+   inte (speglar AiManager: local först, sedan $HOME). ETT doctor-called
+   avslöjar tillståndet i stället för första sense-call.
+
+**Regressionstester ×3:** satellite namn-träffar + root/container-leak-guard
+(get_name-aliaset i source_file, se fyndet nedan), korta/nötfågor = inga
+hits (ärligt), zoom första-rad-träffar. Full svit: 268
+gröna; driver clippy --lib -D warnings ren; live-smoke BÅDA riktningar:
+temp-projekt utan modellen → degraded med träffar + fix-väg (exit 0),
+repot MED modellen → doctor "pass".
+
+**Fynd under testet:** `get_name` på source_file kan ALIASERA frågan
+(rootens namn blev "complete_task" i testmiljön) → source_file-rotvägar
+får aldrig träffa i degrade-vandringen (children äger relevansen).
+
+**Noterad skuld under smoke (doc-paritet):** sensens hjälptext pekar mot
+flaggan `--file <path>` som inte existerar — sense <QUERY> [FILE] är
+positionell. Ej release-blockerande.
+
+---
+
+## 2026-10-31 (IV) — edit_node/body-block + multibyte nekas med generisk
+"Syntax error" (Motor2, `crates/motor2-llama/src/lib.rs`)
+
+- **Anrop:** `edit_node` (node_path `115.2.44.5` — `podman_build`:s body-block,
+  ~65 statements, fil 500+ noder) ×3; `preview_edit` ×1; `list_nodes` med
+  node_path-scope ×2.
+- **Förväntat:** edit_node ersätter blocket med ny, syntaktiskt giltig Rust.
+- **Faktiskt:** `edit_node` nekas konsekvent: "Syntax error at line 1, col 1"
+  — medan `preview_edit` på EXAKT samma path + innehåll klarar. Nytt
+  innehåll med å/ä/ö i nya rader ("för extract") nekas i ALLA försök;
+  en ren-ASCII-version passerar preview men edit nekar ändå.
+- **Triage-anor:**
+  1. `edit_node` vs `preview_edit` kör OLIKA validators: preview klarar,
+     edit nekar — för HELT syntaktiskt giltigt innehåll. "line 1, col 1"
+     är en generisk/degenererad felrad (stämmer aldrig till konkret rad),
+     varav den praktiska effekten är odiagnosbar avslag.
+  2. `list_nodes` med node_path välter HELT ROTEN ("listar 330 noder" från
+     [source_file]) i stället för att scope:a till noden — tyst fallback
+     som ljuger om att (ogiltig) node_path användes.
+- **Omväg:** dedikerad Edit — 3 platta edits (body-block-insert + 2
+  containerfile-dnf-tar). §47.4 (ASCII) tillämpades på alla nya rader.
+- **Klassificering (förhands):** (b) bugg + (d) sub-funktion — edit_node
+  body-block-utbyte funkar inte i praktiken för stora block; validator-
+  felmeddelandet ljuger om VAR felet finns.
+
+[GTW-repo]: motor2-sessionen spårar ingen GTW-fix här — detta är loggpost
+för GTW-teamet.
