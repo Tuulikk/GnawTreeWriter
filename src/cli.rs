@@ -158,6 +158,9 @@ enum Commands {
     Undo {
         #[arg(short, long, default_value = "1")]
         steps: usize,
+        /// Show what would be undone — nothing is changed
+        #[arg(long)]
+        preview: bool,
     },
     /// Redo previously undone operations
     Redo {
@@ -1050,8 +1053,8 @@ impl Cli {
                     show_hint();
                 }
             }
-            Commands::Undo { steps } => {
-                Self::handle_undo(steps)?;
+            Commands::Undo { steps, preview } => {
+                Self::handle_undo(steps, preview)?;
             }
             Commands::Redo { steps } => {
                 Self::handle_redo(steps)?;
@@ -1696,10 +1699,44 @@ impl Cli {
         Ok(())
     }
 
-    fn handle_undo(steps: usize) -> Result<()> {
+    fn handle_undo(steps: usize, preview: bool) -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
         let mut undo_manager = UndoRedoManager::new(&project_root)?;
+
+        if preview {
+            // Preview before mutating — same core as the MCP undo preview
+            // (peek_undo): same stack order as undo, resolved to human
+            // details, NOTHING is reverted. CLI and MCP must not diverge.
+            let ids = undo_manager.peek_undo(steps);
+            if ids.is_empty() {
+                println!("Nothing to undo — `gnawtreewriter history` lists what is logged.");
+                return Ok(());
+            }
+            let txns = TransactionLog::load(&project_root)?
+                .get_full_history()
+                .unwrap_or_default();
+            println!(
+                "Preview: undo would revert {} operation(s) — NOTHING was changed.",
+                ids.len()
+            );
+            for id in &ids {
+                if let Some(t) = txns.iter().find(|t| &t.id == id) {
+                    let node = t.node_path.as_deref().unwrap_or("-");
+                    println!(
+                        "  - [{}] {:?} {} (node {}) — {} ({})",
+                        t.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                        t.operation,
+                        t.file_path.display(),
+                        node,
+                        t.description,
+                        t.id
+                    );
+                }
+            }
+            println!("Call again without --preview to apply.");
+            return Ok(());
+        }
 
         let results = undo_manager.undo(steps)?;
 
@@ -5952,6 +5989,48 @@ mod tests {
             1,
             "exactly one insertion expected, got: {}",
             after
+        );
+
+        std::env::set_current_dir(orig_dir)?;
+        Ok(())
+    }
+
+    /// T3 (2026-10-06 entry, fixed 2026-10-31): `undo --preview` must exist
+    /// in the CLI and must NOT change anything — same peek_undo-based core
+    /// as the MCP undo preview. CLI and MCP must not diverge.
+    #[test]
+    fn test_undo_preview_writes_nothing() -> Result<()> {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let tmp = tempdir()?;
+        let project_root = tmp.path();
+        fs::create_dir(project_root.join(".git"))?;
+
+        let orig_dir = std::env::current_dir()?;
+        std::env::set_current_dir(project_root)?;
+
+        let file_path = project_root.join("undo_preview.txt");
+        fs::write(&file_path, "hello foo world\n")?;
+
+        // A real, undoable change (backup + transaction via quick-replace).
+        Cli::handle_quick_replace(file_path.to_str().unwrap(), "foo", "bar", false, false)?;
+        let after_edit = fs::read_to_string(&file_path)?;
+        assert_eq!(after_edit, "hello bar world\n");
+
+        // Preview: must be Ok(()) and must leave the file untouched.
+        Cli::handle_undo(1, true)?;
+        assert_eq!(
+            fs::read_to_string(&file_path)?,
+            after_edit,
+            "preview must not revert or modify the file"
+        );
+
+        // The real undo (no preview) then reverts — proving the preview
+        // consumed nothing from the undo stack.
+        Cli::handle_undo(1, false)?;
+        assert_eq!(
+            fs::read_to_string(&file_path)?,
+            "hello foo world\n",
+            "real undo must still work after a preview"
         );
 
         std::env::set_current_dir(orig_dir)?;

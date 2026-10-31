@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Added
+- **`undo --preview` i CLI** (T3, från 2026-10-06-entries): se-för-återställ —
+  `gnawtreewriter undo --steps 2 --preview` listar de operationer som skulle
+  återställas (timestamp, op-slag, fil, nod-sökväg, beskrivning, txn-id) och
+  skriver NOLL bytes, via samma `peek_undo`-kärna som MCP:s `undo {preview}`.
+  Tom logg svarar ärligt "Nothing to undo" + pekar på `history`. Regressionstest
+  `test_undo_preview_writes_nothing` bevisar: preview äter inget från
+  undo-stacken (riktig undo funkar därefter) och noll bytes ändras.
+
 ## [0.20.1] - 2026-10-31
 
 ### Added — `code-index`: project structure index generator (CLI)
