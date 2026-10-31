@@ -390,7 +390,7 @@ impl GnawTreeWriter {
 
                 match report.level {
                     crate::core::guardian::IntegrityLevel::Critical => {
-                        return Err(anyhow::anyhow!("🛑 GUARDIAN BLOCK: This edit removes critical logic or structure.\nMessages: {}\nUse --force to override.", report.messages.join(", ")));
+                        return Err(anyhow::anyhow!("🛑 GUARDIAN BLOCK: This edit removes critical logic or structure.\nMessages: {}\nOverride deliberately after confirming the flagged reduction is intentional: CLI `--force`, MCP edit_node `force: true`.", report.messages.join(", ")));
                     }
                     crate::core::guardian::IntegrityLevel::Warning => {
                         eprintln!(

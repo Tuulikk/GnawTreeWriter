@@ -161,3 +161,172 @@ impl GuardianEngine {
         keywords.iter().filter(|&&k| content.contains(k)).count()
     }
 }
+
+#[cfg(test)]
+mod guardian_alignment_tests {
+    use super::{GuardianEngine, IntegrityLevel, IntegrityReport};
+    use crate::core::GnawTreeWriter;
+
+    /// 65-statement body-block with one if-condition (mirrors the Motor2
+    /// relay shape, issue log (IV) 2026-10-31). Parses the src, returns
+    /// the guardian audit of a new content built from the block's own
+    /// text via `transform`.
+    fn audit_block(transform: impl Fn(&str) -> String) -> IntegrityReport {
+        let mut src = String::new();
+        src.push_str("pub fn podman_build(slots: &[usize]) -> String {\n");
+        for i in 1..=65 {
+            src.push_str(&format!("    let s{} = render(slots, {});\n", i, i));
+            if i == 30 {
+                src.push_str("    if s30.len() > 0 {\n");
+                src.push_str("        assert!(s30.contains('3'));\n");
+                src.push_str("    }\n");
+            }
+        }
+        src.push_str("    format!(\"done: {}\", slots.len())\n}\n");
+        src.push_str("fn render(slots: &[usize], n: usize) -> String {\n");
+        src.push_str("    format!(\"slot {}\", n + slots.len())\n}\n");
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.rs");
+        std::fs::write(&path, &src).unwrap();
+        let writer = GnawTreeWriter::new(path.to_str().unwrap()).unwrap();
+        let tree = writer.analyze();
+        let f = tree
+            .children
+            .iter()
+            .find(|c| c.node_type == "function_item" && c.content.contains("podman_build"))
+            .expect("podman_build node must parse");
+        let block = f
+            .children
+            .iter()
+            .find(|c| c.node_type == "block" && c.content.contains("let s1"))
+            .expect("body block node must parse");
+
+        let new_content = transform(&block.content);
+        GuardianEngine::new().audit_edit_with_language(block, &new_content, "rust")
+    }
+
+    /// Fix contract (IV/A): ADDING a line at the TOP of a big body-block
+    /// used to shift positional pairing so the token fallback reported
+    /// the addition as removed statements -> GUARDIAN BLOCK on valid
+    /// edits. A top addition must classify as addition, not removal.
+    #[test]
+    fn body_block_top_addition_is_not_removal() {
+        let report = audit_block(|c| c.replacen("{\n", "{\n    // added marker line\n", 1));
+        let critical = matches!(report.level, IntegrityLevel::Critical);
+        let claims_removal = report.messages.iter().any(|m| m.contains("removed"));
+        assert!(
+            !(critical && claims_removal),
+            "top addition must not be classified as removal. level: {:?}, messages: {:?}, deltas: {:?}",
+            report.level,
+            report.messages,
+            report.deltas
+        );
+    }
+
+    /// The same shape it had before the fix: appending at the END passed.
+    /// Regression guard that the pairing fix does not break that either.
+    #[test]
+    fn body_block_end_addition_still_passes() {
+        let report = audit_block(|c| {
+            let cut = c.rfind('}').unwrap();
+            let mut s = String::new();
+            s.push_str(&c[..cut]);
+            s.push_str("    // trailing marker line\n");
+            s.push_str(&c[cut..]);
+            s
+        });
+        let blocked = matches!(report.level, IntegrityLevel::Critical);
+        assert!(
+            !blocked,
+            "end addition must stay clean. level: {:?}, messages: {:?}",
+            report.level, report.messages
+        );
+    }
+
+    /// Core-level bypass contract: `force` (CLI --force / MCP edit_node
+    /// force:true, both route to edit(force)) applies a top-adding edit
+    /// the guardian suspected — after the pairing fix such edits pass
+    /// WITHOUT force; force stays the deliberate last resort.
+    #[test]
+    fn force_path_applies_top_addition() {
+        let mut src = String::new();
+        src.push_str("pub fn podman_build(slots: &[usize]) -> String {\n");
+        for i in 1..=65 {
+            src.push_str(&format!("    let s{} = render(slots, {});\n", i, i));
+        }
+        src.push_str("    format!(\"done: {}\", slots.len())\n}\n");
+        src.push_str("fn render(slots: &[usize], n: usize) -> String {\n");
+        src.push_str("    format!(\"slot {}\", n + slots.len())\n}\n");
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.rs");
+        std::fs::write(&path, &src).unwrap();
+        let mut writer = GnawTreeWriter::new(path.to_str().unwrap()).unwrap();
+        let tree = writer.analyze();
+        let f = tree
+            .children
+            .iter()
+            .find(|c| c.node_type == "function_item" && c.content.contains("podman_build"))
+            .expect("podman_build node");
+        let block = f
+            .children
+            .iter()
+            .find(|c| c.node_type == "block" && c.content.contains("let s1"))
+            .expect("body block node");
+        let block_path = block.path.clone();
+        let new_content =
+            block
+                .content
+                .replacen("{\n", "{\n    // top marker added deliberately\n", 1);
+
+        writer
+            .edit(
+                crate::core::EditOperation::Edit {
+                    node_path: block_path,
+                    content: new_content,
+                },
+                true,
+            )
+            .expect("force path must apply the edit");
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains("// top marker added deliberately") && written.contains("let s65"),
+            "force edit must land intact; file: {}",
+            written
+        );
+    }
+
+    /// Negative control — the fix must NOT neuter genuine removal
+    /// detection: deleting a condition statement must still surface a
+    /// ConditionRemoved delta.
+    #[test]
+    fn genuine_condition_removal_is_still_detected() {
+        let report = audit_block(|c| {
+            let lines: Vec<&str> = c.lines().collect();
+            let start = lines
+                .iter()
+                .position(|l| l.contains("if s30.len() > 0"))
+                .expect("condition line must exist");
+            let mut s = String::new();
+            for (i, l) in lines.iter().enumerate() {
+                // surgical drop: the if-line, its inner statement, its brace
+                if i >= start && i <= start + 2 {
+                    continue;
+                }
+                s.push_str(l);
+                s.push('\n');
+            }
+            s
+        });
+        assert!(
+            report
+                .deltas
+                .iter()
+                .any(|d| matches!(d.kind, crate::core::edit_delta::DeltaKind::ConditionRemoved)),
+            "genuine condition removal must still be detected; deltas: {:?}",
+            report.deltas
+        );
+    }
+}

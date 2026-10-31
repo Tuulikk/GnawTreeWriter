@@ -417,7 +417,11 @@ pub mod mcp_server {
                         let fp = validate_arg("file_path")?;
                         let np = validate_arg("node_path")?;
                         let c = validate_arg("content")?;
-                        Ok(handle_edit_node_internal(state, fp, np, c))
+                        let force = arguments
+                            .get("force")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        Ok(handle_edit_node_internal(state, fp, np, c, force))
                     }
                     "preview_edit" => {
                         let fp = validate_arg("file_path")?;
@@ -816,7 +820,8 @@ pub mod mcp_server {
                     "properties": {
                         "file_path": { "type": "string", "description": "Path to the file" },
                         "node_path": { "type": "string", "description": "Dot-path of the node to replace" },
-                        "content": { "type": "string", "description": "New complete content for the node (validated as code before write)" }
+                        "content": { "type": "string", "description": "New complete content for the node (validated as code before write)" },
+                        "force": { "type": "boolean", "description": "Bypass a guardian critical-block ONLY after confirming the flagged reduction is intentional via read_node (default false — exists because the statement-diff can flag legit restructures)" }
                     },
                     "required": ["file_path", "node_path", "content"]
                 }
@@ -3262,7 +3267,7 @@ or list_nodes for a flat index of this file.",
                     // carries what was matched, with what confidence, and which
                     // alternatives were considered.
                     let mut result =
-                        handle_edit_node_internal(state, file_path, &best_node.path, content);
+                        handle_edit_node_internal(state, file_path, &best_node.path, content, false);
                     if let Some(obj) = result.as_object_mut() {
                         obj.insert(
                             "semantic_match".to_string(),
@@ -3514,6 +3519,7 @@ or list_nodes for a flat index of this file.",
         file_path: &str,
         node_path: &str,
         content: &str,
+        force: bool,
     ) -> Value {
         match GnawTreeWriter::new(file_path) {
             Ok(mut w) => {
@@ -3542,7 +3548,7 @@ or list_nodes for a flat index of this file.",
                     node_path: node_path.to_string(),
                     content: content.to_string(),
                 };
-                if let Err(e) = w.edit(op, false) {
+                if let Err(e) = w.edit(op, force) {
                     bump_duplex_metric(&state.project_root, "rejected");
                     return match w.last_edit_verdict() {
                         Some(v) => tool_error_with_data(

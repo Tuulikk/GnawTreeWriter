@@ -1,5 +1,27 @@
 ## [Unreleased]
 
+### Fixed — guardian false-positive on body-block additions + MCP force (IV-triagen)
+- **Additions inside body-blocks no longer misclassified as removals**:
+  the guardian's structural delta used positional child pairing — adding a
+  line at the TOP of a large block shifted every pair so the token
+  fallback reported "Statement node removed" and **GUARDIAN BLOCK'ed valid
+  edits** (Motor2 relay 2026-10-31 (IV), reproduced on a copy of their
+  3 831-line lib.rs: the same multibyte addition passed at the block END
+  and was blocked at the TOP; pure-ASCII additions were blocked too — not
+  an encoding issue). `edit_delta::diff_walk` now matches children by
+  (node_type, trimmed content) FIRST (set membership), pairs the
+  leftovers by order — genuine removals still classify (regression test
+  with a real condition deletion keeps surfacing ConditionRemoved), pure
+  additions classify as additions. Tests: `body_block_top_addition_is_not_removal`,
+  `body_block_end_addition_still_passes`, `genuine_condition_removal_is_still_detected`,
+  `force_path_applies_top_addition` (`src/core/guardian.rs`).
+- **MCP `edit_node` gains `force`** (default false): the guardian's
+  rejection text says "Use --force to override" but only the CLI could —
+  now the MCP agent has the same deliberate last resort; the rejection
+  guidance names both routes.
+- **`list_nodes` `node_path`-scope** remains OPEN (sub-function, (IV)/C):
+  no such parameter exists; silent root-listing documented in the log.
+
 ### Changed — semantic channels degrade instead of dying (T5)
 `sense`, `search_semantic` (MCP) and `sense` (CLI) no longer answer
 "Missing config: .../bge-base/config.json" (or a raw model-init failure) and

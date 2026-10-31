@@ -213,9 +213,44 @@ fn diff_walk(old: &TreeNode, new: &TreeNode, depth: usize, deltas: &mut Vec<Edit
 
     let old_kids = meaningful_children(old);
     let new_kids = meaningful_children(new);
-    let common = old_kids.len().min(new_kids.len());
 
-    for gone in old_kids.iter().skip(common) {
+    // Match by (node_type, trimmed content) FIRST — a set-membership pass
+    // so pure ADDITIONS no longer shift the positional pairing (issue-log
+    // (IV) 2026-10-31, Motor2 relay: adding a line at the TOP of a
+    // body-block paired every child off-by-one and the token fallback
+    // reported the addition as removed logic -> GUARDIAN BLOCK on valid
+    // edits; the SAME content appended at the END passed). Matched pairs
+    // are identical subtrees (diff_walk prunes them); the leftovers pair
+    // by order — genuinely changed nodes diff, genuinely removed ones
+    // classify as removed, leftover new nodes are pure additions (no
+    // classification exists — by design, additions cannot remove logic).
+    let mut new_matched = vec![false; new_kids.len()];
+    let mut old_unmatched: Vec<&TreeNode> = Vec::new();
+    for o in &old_kids {
+        let mut found = false;
+        for (j, n) in new_kids.iter().enumerate() {
+            if new_matched[j] {
+                continue;
+            }
+            if o.node_type == n.node_type && o.content.trim() == n.content.trim() {
+                new_matched[j] = true;
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            old_unmatched.push(o);
+        }
+    }
+    let mut new_unmatched: Vec<&TreeNode> = Vec::new();
+    for (j, n) in new_kids.iter().enumerate() {
+        if !new_matched[j] {
+            new_unmatched.push(n);
+        }
+    }
+
+    let common = old_unmatched.len().min(new_unmatched.len());
+    for gone in old_unmatched.iter().skip(common) {
         if is_noise(&gone.content) {
             continue;
         }
@@ -225,7 +260,7 @@ fn diff_walk(old: &TreeNode, new: &TreeNode, depth: usize, deltas: &mut Vec<Edit
         }
     }
 
-    for (o, n) in old_kids.iter().zip(new_kids.iter()) {
+    for (o, n) in old_unmatched.iter().zip(new_unmatched.iter()) {
         diff_walk(o, n, depth + 1, deltas);
         if deltas.len() >= MAX_DELTAS {
             return;
