@@ -2363,6 +2363,63 @@ Use --no-preview to write batch file"
         Ok(())
     }
 
+    /// Degraded lexical fallback for the CLI sense paths (T5): honest
+    /// labels, answers in the output mode the caller chose (GNAW_JSON
+    /// gets structured degraded JSON), nothing crashes on a missing
+    /// embedding model. Same lexical core as the MCP degrade helper.
+    #[cfg(feature = "modernbert")]
+    fn sense_degraded_cli(
+        project_root: &std::path::Path,
+        file_path: Option<&str>,
+        query: &str,
+        reason: &str,
+    ) -> Result<()> {
+        let hits = crate::core::gnaw_find::lexical_degrade(project_root, file_path, query, 5)?;
+        let json_mode = std::env::var("GNAW_JSON").is_ok();
+        if json_mode {
+            let payload = serde_json::json!({
+                "degraded": true,
+                "reason": reason,
+                "mode": "lexical",
+                "matches": hits
+                    .iter()
+                    .map(|h| {
+                        serde_json::json!({
+                            "file": h.file,
+                            "node_path": h.path,
+                            "kind": h.kind,
+                            "line": h.line,
+                            "preview": h.preview,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            });
+            println!("{}", serde_json::to_string(&payload)?);
+            return Ok(());
+        }
+        println!();
+        println!("⚠  Semantic channel unavailable ({}).", reason);
+        println!("→  DEGRADED to lexical text match (node name/first line contains the query; NO semantic ranking).");
+        if hits.is_empty() {
+            println!("   Lexical fallback found nothing resembling the query.");
+            println!("   Alternatives: `find` / `search_nodes`, or fix the channel with `gnawtreewriter ai setup`.");
+            return Ok(());
+        }
+        for (i, h) in hits.iter().enumerate() {
+            println!(
+                "  {}. {}:{} [{}] ({})",
+                i + 1,
+                h.file,
+                h.line,
+                h.path,
+                h.preview
+            );
+        }
+        println!();
+        println!("Fix: run `gnawtreewriter ai setup` (downloads missing models) — then retry for semantic ranking.");
+        Ok(())
+    }
+
     async fn handle_sense(
         query: &str,
         file_path: Option<&str>,
@@ -2421,10 +2478,30 @@ Use --no-preview to write batch file"
                 }
             }
 
-            let broker = GnawSenseBroker::new(&project_root)?;
+            let broker = match GnawSenseBroker::new(&project_root) {
+                Ok(b) => b,
+                Err(e) => {
+                    return Self::sense_degraded_cli(
+                        &project_root,
+                        file_path,
+                        query,
+                        &format!("semantic model init failed: {}", e),
+                    );
+                }
+            };
 
             println!("🧠 GnawSense is thinking about: {}...", query);
-            let response = broker.sense(query, file_path).await?;
+            let response = match broker.sense(query, file_path).await {
+                Ok(r) => r,
+                Err(e) => {
+                    return Self::sense_degraded_cli(
+                        &project_root,
+                        file_path,
+                        query,
+                        &format!("semantic query failed: {}", e),
+                    );
+                }
+            };
 
             // JSON output for agents
             if json_mode {

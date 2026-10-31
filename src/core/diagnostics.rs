@@ -522,6 +522,36 @@ impl DoctorReport {
         }
     }
 
+    /// T5 (issue log 2026-10-23): the semantic channels degrade silently
+    /// away without the bge-base model files; one doctor run should
+    /// reveal that state instead of a sense call discovering it. Mirrors
+    /// AiManager's cache resolution: project-local first, then $HOME.
+    #[cfg(feature = "modernbert")]
+    pub fn check_semantic_model(&mut self, project_root: &std::path::Path) {
+        let local = project_root.join(".gnawtreewriter_ai").join("models");
+        let cache_dir = if local.exists() && local.join("modernbert").exists() {
+            local
+        } else {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            std::path::PathBuf::from(home)
+                .join(".gnawtreewriter_ai")
+                .join("models")
+        };
+        let cfg = cache_dir.join("bge-base").join("config.json");
+        self.record_check(DoctorCheck {
+            category: "ai_runtime".to_string(),
+            name: "semantic_model".to_string(),
+            status: if cfg.is_file() { "pass" } else { "warn" }.to_string(),
+            message: if cfg.is_file() {
+                "bge-base model files present — sense/search_semantic semantic ranking available."
+                    .to_string()
+            } else {
+                "bge-base model files missing — sense/search_semantic DEGRADE to lexical text matches (named in every reply). Run `gnawtreewriter ai setup` to download; `ai status` shows what is installed.".to_string()
+            },
+            detail: None,
+        });
+    }
+
     /// Fas 4.2 step 1: knowledge-graph resolution quality — how much of
     /// the call graph is unambiguously resolvable. This is the trust
     /// level of impact reports; surfaced so agents and humans can see
@@ -865,6 +895,12 @@ pub fn run_full_doctor(project_root: &std::path::Path) -> DoctorReport {
     report.check_backups(project_root);
     report.check_transaction_log(project_root);
     report.check_knowledge_graph(project_root);
+
+    // T5: semantic-channel availability (bge-base present / degraded
+    // mode). Feature-gated: no sense exists in feature-light builds, so
+    // there is nothing to degrade or report there.
+    #[cfg(feature = "modernbert")]
+    report.check_semantic_model(project_root);
     report.check_binary_freshness(project_root);
     report
 }

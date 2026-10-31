@@ -1802,6 +1802,58 @@ or list_nodes for a flat index of this file.",
         }
     }
 
+    /// T5 degrade helper: the semantic channels (sense, search_semantic)
+    /// answered with cryptic model errors (e.g. "Missing config:
+    /// .../bge-base/config.json") when the embedding model or index was
+    /// missing — 4 repeat reports 2026-10-18..10-29. Instead: degrade to
+    /// lexical text matches with an honest DEGRADED label (no semantic
+    /// ranking), keep the fix guidance, never hide the reason.
+    fn sense_lexical_degrade(
+        root: &std::path::Path,
+        file_path: Option<&str>,
+        query: &str,
+        reason: &str,
+    ) -> Value {
+        match crate::core::gnaw_find::lexical_degrade(root, file_path, query, 5) {
+            Ok(hits) if !hits.is_empty() => {
+                let top = hits
+                    .iter()
+                    .map(|h| format!("{}:{} [{}] {}", h.line, h.path, h.kind, h.preview))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                tool_success(
+                    format!(
+                        "Semantic channel unavailable ({}) — DEGRADED to lexical text match (node name/first line contains the query; NO semantic ranking): {} hit(s) — {}. Fix the channel: `gnawtreewriter ai setup` downloads missing models, `ai index` builds the project index.",
+                        reason,
+                        hits.len(),
+                        top
+                    ),
+                    Some(json!({
+                        "degraded": true,
+                        "reason": reason,
+                        "mode": "lexical",
+                        "matches": hits
+                            .iter()
+                            .map(|h| {
+                                json!({
+                                    "file": h.file,
+                                    "node_path": h.path,
+                                    "kind": h.kind,
+                                    "line": h.line,
+                                    "preview": h.preview,
+                                })
+                            })
+                            .collect::<Vec<_>>(),
+                    })),
+                )
+            }
+            _ => tool_error(format!(
+                "Semantic channel unavailable ({}) and the lexical fallback found no text resembling the query. Fix: run `gnawtreewriter ai setup` (downloads missing models) or `gnawtreewriter ai index`; lexical alternatives: search_nodes per file, or the find/search commands.",
+                reason
+            )),
+        }
+    }
+
     async fn handle_search_semantic(
         state: Arc<AppState>,
         query: &str,
@@ -1812,12 +1864,26 @@ or list_nodes for a flat index of this file.",
         {
             let _mgr = match crate::llm::ai_manager::AiManager::new(&state.project_root) {
                 Ok(m) => m,
-                Err(e) => return tool_error_code(format!("AiManager init failed: {} — run `gnawtreewriter ai setup` to download models (ai status shows what is installed), then retry", e), "E_MODEL_UNAVAILABLE"),
+                Err(e) => {
+                    return sense_lexical_degrade(
+                        &state.project_root,
+                        file_path,
+                        query,
+                        &format!("AI subsystem init failed: {}", e),
+                    )
+                }
             };
 
             let broker = match crate::llm::GnawSenseBroker::new(&state.project_root) {
                 Ok(b) => b,
-                Err(e) => return tool_error_code(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e), "E_MODEL_UNAVAILABLE"),
+                Err(e) => {
+                    return sense_lexical_degrade(
+                        &state.project_root,
+                        file_path,
+                        query,
+                        &format!("semantic model init failed: {}", e),
+                    )
+                }
             };
 
             match broker.sense(query, file_path).await {
@@ -1836,7 +1902,9 @@ or list_nodes for a flat index of this file.",
                         .collect();
                     tool_success(
                         format!("Found {} matches for \"{}\"", results.len(), query),
-                        Some(json!({"matches": results, "query": query, "mode": "satellite", "search_quality": quality})),
+                        Some(
+                            json!({"matches": results, "query": query, "mode": "satellite", "search_quality": quality}),
+                        ),
                     )
                 }
                 Ok(crate::llm::SenseResponse::Zoom {
@@ -1862,7 +1930,12 @@ or list_nodes for a flat index of this file.",
                         ),
                     )
                 }
-                Err(e) => tool_error(format!("Semantic search failed: {} — check the local model with `gnawtreewriter ai status`; on repeat, fall back to search_nodes/grep and log the failure in GTW_MCP_ISSUE_LOG.md", e)),
+                Err(e) => sense_lexical_degrade(
+                    &state.project_root,
+                    file_path,
+                    query,
+                    &format!("semantic search failed: {}", e),
+                ),
             }
         }
         #[cfg(not(feature = "modernbert"))]
@@ -2972,7 +3045,14 @@ or list_nodes for a flat index of this file.",
             use crate::llm::SenseResponse;
             let broker = match state.sense_broker().await {
                 Ok(b) => b,
-                Err(e) => return tool_error_code(format!("Semantic model init failed: {} — run `gnawtreewriter ai setup` to fetch models (ai status shows what is installed), then retry", e), "E_MODEL_UNAVAILABLE"),
+                Err(e) => {
+                    return sense_lexical_degrade(
+                        &state.project_root,
+                        file_path,
+                        query,
+                        &format!("semantic model init failed: {}", e),
+                    )
+                }
             };
 
             match broker.sense_with(query, file_path, expand).await {
@@ -3052,7 +3132,12 @@ or list_nodes for a flat index of this file.",
                         }
                     }
                 },
-                Err(e) => tool_error(format!("sense failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md", e)),
+                Err(e) => sense_lexical_degrade(
+                    &state.project_root,
+                    file_path,
+                    query,
+                    &format!("semantic query failed: {}", e),
+                ),
             }
         }
         #[cfg(not(feature = "modernbert"))]
@@ -3698,8 +3783,13 @@ or list_nodes for a flat index of this file.",
             let dir = tempfile::tempdir().unwrap();
             let fp = sample_file(dir.path());
             let state = Arc::new(AppState::new(None, dir.path().to_path_buf()));
-            let result =
-                handle_list_nodes(state, fp.to_str().unwrap(), Some("function"), Some(3), false);
+            let result = handle_list_nodes(
+                state,
+                fp.to_str().unwrap(),
+                Some("function"),
+                Some(3),
+                false,
+            );
             let text = text_of(&result);
             assert!(
                 text.contains("EXACT AST node types"),

@@ -167,3 +167,214 @@ pub fn format_results_summary(results: &[FindResult], total: usize) -> String {
 
     output
 }
+
+/// A lexical (non-embedding) fallback hit for the semantic channels (T5).
+#[derive(Debug)]
+pub struct LexicalHit {
+    pub file: String,
+    pub path: String,
+    pub kind: String,
+    pub line: usize,
+    pub preview: String,
+}
+
+/// Tokenized query terms for the lexical degrade: lowercase, split on
+/// whitespace/punctuation, at least 3 chars (skips "to", "is", "a").
+fn lexical_terms(query: &str) -> Vec<String> {
+    query
+        .split(|c: char| c.is_whitespace() || c.is_ascii_punctuation())
+        .filter(|t| t.len() >= 3)
+        .map(|t| t.to_ascii_lowercase())
+        .collect()
+}
+
+/// Degraded search for sense/search_semantic when the embedding model or
+/// project index is missing (issue log 2026-10-18/23, T5): answers with
+/// name / first-line text matches instead of dying on a cryptic model
+/// error. HONEST by contract: these are lexical matches with NO semantic
+/// ranking — callers MUST name the degradation in their replies.
+/// `file` (zoom mode) searches one file; `None` (satellite mode) scans
+/// project source files (walk, cap 400 files, stops early at enough hits).
+pub fn lexical_degrade(
+    root: &std::path::Path,
+    file: Option<&str>,
+    query: &str,
+    max: usize,
+) -> Result<Vec<LexicalHit>> {
+    let terms = lexical_terms(query);
+    if terms.is_empty() {
+        return Ok(Vec::new());
+    }
+    let exts: Vec<&str> = vec![
+        "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "c", "cpp", "h", "hpp", "php", "zig",
+        "css", "qml",
+    ];
+    let files: Vec<std::path::PathBuf> = match file {
+        Some(f) => vec![std::path::PathBuf::from(f)],
+        None => walk_source_files_filtered(root, &exts)
+            .into_iter()
+            .take(400)
+            .collect(),
+    };
+
+    let mut hits: Vec<LexicalHit> = Vec::new();
+    let budget = max.max(1) * 4;
+    for file_path in &files {
+        if hits.len() >= budget {
+            break;
+        }
+        let path_str = file_path.to_string_lossy().to_string();
+        let Ok(writer) = GnawTreeWriter::new(&path_str) else {
+            continue;
+        };
+        let tree = writer.analyze();
+        collect_lexical(tree, &terms, &path_str, budget, &mut hits);
+    }
+    hits.truncate(max);
+    Ok(hits)
+}
+
+/// Post-order walker so the DEEPEST node owns a hit: container nodes
+/// always contain their children's text, so top-down matching would seed
+/// every hit with ancestors (the same noise a 1 121-node file root gives
+/// list_nodes). A node whose NAME matches wins outright; otherwise a node
+/// with no matching descendant may claim a hit via its FIRST content line.
+/// Returns how many hits this subtree produced.
+fn collect_lexical(
+    tree: &TreeNode,
+    terms: &[String],
+    file: &str,
+    max: usize,
+    results: &mut Vec<LexicalHit>,
+) -> usize {
+    let mut sub = 0usize;
+    for child in &tree.children {
+        sub += collect_lexical(child, terms, file, max, results);
+    }
+    if results.len() >= max {
+        return sub;
+    }
+    // Never seed the file root as a hit: children own the relevance, and
+    // source_file behavior + get_name can alias the query (found via the
+    // satellite regression test: get_name on a source_file may return
+    // its first function-s name).
+    if tree.node_type == "source_file" {
+        return sub;
+    }
+    let name_hit = tree
+        .get_name()
+        .map(|n| {
+            let n = n.to_lowercase();
+            terms.iter().any(|t| n.contains(t.as_str()))
+        })
+        .unwrap_or(false);
+    if name_hit {
+        let name = tree.get_name().unwrap_or_else(|| "unnamed".to_string());
+        results.push(LexicalHit {
+            file: file.to_string(),
+            path: tree.path.clone(),
+            kind: tree.node_type.clone(),
+            line: tree.start_line,
+            preview: format!("{} — {}", name, first_line_preview(&tree.content)),
+        });
+        return sub + 1;
+    }
+    if sub == 0 {
+        let first = first_line_preview(&tree.content).to_lowercase();
+        if !first.is_empty() && terms.iter().any(|t| first.contains(t.as_str())) {
+            results.push(LexicalHit {
+                file: file.to_string(),
+                path: tree.path.clone(),
+                kind: tree.node_type.clone(),
+                line: tree.start_line,
+                preview: first_line_preview(&tree.content),
+            });
+            return sub + 1;
+        }
+    }
+    sub
+}
+
+/// Char-safe preview (lesson: byte-slices panicked on å/ä/ö — chars().take
+/// is the pattern). Empty content yields an empty preview.
+fn first_line_preview(content: &str) -> String {
+    let first = content
+        .lines()
+        .map(|l| l.trim())
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    first.chars().take(96).collect()
+}
+
+#[cfg(test)]
+mod lexical_degrade_tests {
+    use super::*;
+
+    fn write(dir: &std::path::Path, name: &str, src: &str) -> String {
+        let p = dir.join(name);
+        std::fs::write(&p, src).unwrap();
+        p.to_string_lossy().to_string()
+    }
+
+    /// T5: satellite degrade — name hits across files, no model needed,
+    /// and container nodes must never seed hits (deepest node owns them).
+    #[test]
+    fn lexical_degrade_satellite_finds_name_hits() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "alpha.rs",
+            "fn complete_task(slot: usize) {\n    // marks the slot done\n}\n\nfn other() {}\n",
+        );
+        write(
+            dir.path(),
+            "beta.rs",
+            "fn alpha_beta() {}\nstruct unrelated_thing;\n",
+        );
+
+        let hits = lexical_degrade(dir.path(), None, "complete task", 5).unwrap();
+        assert!(
+            hits.iter()
+                .any(|h| h.file.ends_with("alpha.rs") && h.kind == "function_item"),
+            "expected complete_task as an fn hit, got: {:?}",
+            hits
+        );
+        let leaked: Vec<&LexicalHit> = hits
+            .iter()
+            .filter(|h| h.path.is_empty() || h.kind == "source_file")
+            .collect();
+        assert!(leaked.is_empty(), "root/container hit leaked: {:?}", leaked);
+    }
+
+    /// Short or noise-only queries return nothing — an empty satellite
+    /// degrade stays honest instead of pretending.
+    #[test]
+    fn lexical_degrade_short_or_empty_query_is_no_hits() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "one.rs", "fn abc() {}\n");
+        assert!(lexical_degrade(dir.path(), None, "is a", 5)
+            .unwrap()
+            .is_empty());
+        assert!(lexical_degrade(dir.path(), None, "?!", 5)
+            .unwrap()
+            .is_empty());
+    }
+
+    /// Zoom degrade: a leaf's first content line can claim the hit (e.g.
+    /// a comment that answers the query) when no name matches.
+    #[test]
+    fn lexical_degrade_zoom_hits_first_line_of_leaf() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = write(
+            dir.path(),
+            "leaf.rs",
+            "// handles graceful degradation\nfn unrelated_name() {}\n",
+        );
+        let hits = lexical_degrade(dir.path(), Some(&a), "graceful degradation", 5).unwrap();
+        assert!(
+            hits.iter().any(|h| h.file.ends_with("leaf.rs")),
+            "expected a zoom hit from first-line text, got: {:?}",
+            hits
+        );
+    }
+}

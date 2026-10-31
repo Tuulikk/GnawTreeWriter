@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+### Changed — semantic channels degrade instead of dying (T5)
+`sense`, `search_semantic` (MCP) and `sense` (CLI) no longer answer
+"Missing config: .../bge-base/config.json" (or a raw model-init failure) and
+leave the agent with nothing: when the embedding model or index is missing
+they **degrade to lexical text matches** — node name / first content line
+contains query terms, deepest node owns the hit, no ancestor noise — with an
+honest label in EVERY reply: "Semantic channel unavailable (reason) —
+DEGRADED to lexical text match (NO semantic ranking)", plus the fix path
+(`ai setup` downloads models, `ai index` builds the project index).
+`GNAW_JSON` mode returns structured degraded JSON (`"degraded": true,
+"mode": "lexical"`). `doctor` now reports the semantic-channel state in one
+run (`ai_runtime/semantic_model`: pass when bge-base files exist, warn with
+guidance when they don't — the 2026-10-23 request). Core: `lexical_degrade`
+in `src/core/gnaw_find.rs` (post-order walk, satellite capped at 400 files,
+char-safe previews); regression tests ×3 (satellite name hits + container
+leak guard, boundary queries, zoom first-line hits); full suite 268 green;
+live smoke both directions (degraded temp-project ⚠ doctor / present-model
+repo pass).
+
 ### Added
 - **`undo --preview` i CLI** (T3, från 2026-10-06-entries): se-för-återställ —
   `gnawtreewriter undo --steps 2 --preview` listar de operationer som skulle
