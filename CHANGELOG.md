@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.20.1] - 2026-10-31
 
 ### Added — `code-index`: project structure index generator (CLI)
 New command born from a real consumer need (Motor2 2026-10-29: a fresh
