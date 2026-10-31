@@ -204,7 +204,10 @@ enum Commands {
         #[arg(long)]
         intro: Option<String>,
         /// Comma-separated file extensions to include
-        #[arg(long, default_value = "rs,py,ts,tsx,js,jsx,go,java,c,cpp,h,hpp,php,zig,css")]
+        #[arg(
+            long,
+            default_value = "rs,py,ts,tsx,js,jsx,go,java,c,cpp,h,hpp,php,zig,css"
+        )]
         extensions: String,
         /// Truncate signatures at this character count
         #[arg(long, default_value = "110")]
@@ -1977,8 +1980,7 @@ Use --no-preview to write batch file"
         let doc = crate::core::code_index::generate_index(Path::new(path), &opts)?;
         match output {
             Some(file) => {
-                std::fs::write(file, &doc)
-                    .with_context(|| format!("writing {}", file))?;
+                std::fs::write(file, &doc).with_context(|| format!("writing {}", file))?;
                 let lines = doc.lines().count();
                 println!("code-index skriven: {} ({} rader)", file, lines);
             }
@@ -4485,6 +4487,13 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
             println!("\nUse without --preview to apply");
             return Ok(());
         }
+        if insertions == 0 {
+            anyhow::bail!(
+                "QuickInsert: --after /{}/ produced 0 insertions in {} — NOTHING was written (no line matched, or every match was skipped by --unique/--filter). Tip: --after is a REGULAR EXPRESSION — escape metacharacters, e.g. --after '^## \\[Unreleased\\]$'.",
+                after,
+                file
+            );
+        }
         if let Err(e) = crate::parser::get_parser(path).and_then(|p| Ok(p.parse(&modified)?)) {
             println!("Validation failed: The proposed insert would result in invalid syntax.\nError: {}\n\nChange was NOT applied.", e);
             return Ok(());
@@ -5879,6 +5888,71 @@ mod tests {
                 .expect_err("identical replacement must fail");
         assert!(format!("{:#}", err).contains("identical"));
         assert_eq!(fs::read_to_string(&file_path)?, "hello foo world");
+
+        std::env::set_current_dir(orig_dir)?;
+        Ok(())
+    }
+
+    /// Triage 2026-10-31 (T1): --after is a REGEX; an anchor that matches no
+    /// line (e.g. unescaped `## [Unreleased]` — brackets form a character
+    /// class) must FAIL loudly. Never "✓ applied: 0 insertion(s)" with zero
+    /// bytes written, and no no-op transaction.
+    #[test]
+    fn test_quick_insert_no_match_fails() -> Result<()> {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let tmp = tempdir()?;
+        let project_root = tmp.path();
+        fs::create_dir(project_root.join(".git"))?;
+
+        let orig_dir = std::env::current_dir()?;
+        std::env::set_current_dir(project_root)?;
+
+        let file_path = project_root.join("CHANGELOG.md");
+        let original = "# Changelog\n\n## [Unreleased]\n\n## [0.9.0]\n- old\n";
+        fs::write(&file_path, original)?;
+
+        let err = Cli::handle_quick_insert(
+            file_path.to_str().unwrap(),
+            "## [Unreleased]", // regex char class — matches no line in the file
+            None,
+            "### Fixed\n- new fix\n",
+            false,
+            false,
+        )
+        .expect_err("0 insertions must fail, not fake success");
+        let msg = format!("{:#}", err);
+        assert!(msg.contains("0 insertions"), "got: {}", msg);
+        assert!(msg.contains("NOTHING was written"), "got: {}", msg);
+        assert!(
+            msg.contains("REGULAR EXPRESSION"),
+            "must guide about the regex semantics, got: {}",
+            msg
+        );
+
+        // Zero bytes were written.
+        assert_eq!(fs::read_to_string(&file_path)?, original);
+
+        // Happy-path control: escaped regex anchor inserts exactly once.
+        Cli::handle_quick_insert(
+            file_path.to_str().unwrap(),
+            "^## \\[Unreleased\\]$",
+            None,
+            "### Fixed\n- new fix\n",
+            false,
+            false,
+        )?;
+        let after = fs::read_to_string(&file_path)?;
+        assert!(
+            after.contains("### Fixed"),
+            "insert must land with escaped anchor, got: {}",
+            after
+        );
+        assert_eq!(
+            after.matches("### Fixed").count(),
+            1,
+            "exactly one insertion expected, got: {}",
+            after
+        );
 
         std::env::set_current_dir(orig_dir)?;
         Ok(())

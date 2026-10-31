@@ -474,3 +474,85 @@ fn insert_out_of_range_position_appends_at_top_level() {
     );
 }
 
+// ── In-range sibling slots must land BETWEEN siblings, never inside ──
+
+/// Triage 2026-10-31 (GTW_MCP_ISSUE_LOG T2): in-range positions previously
+/// used `children[idx - 3].end_line` as a raw insert index, which landed
+/// INSIDE a sibling's body for single-line/token children (live repro:
+/// position 3 of root fns nested the new fn inside the first one). A slot
+/// must insert at the addressed sibling's start boundary.
+#[test]
+fn insert_pos3_does_not_nest_inside_first_root_fn() {
+    let dir = temp_dir();
+    let src = "fn alpha() {\n    1\n}\n\nfn beta() {\n    2\n}\n\nfn gamma() {\n    3\n}\n";
+    let path = make_file(dir.path(), "three_fns.rs", src);
+    let writer = gnawtreewriter::GnawTreeWriter::new(path.to_str().unwrap()).unwrap();
+
+    // Root children: alpha, beta, gamma. Position 3 = slot BEFORE child 0.
+    let result = writer
+        .preview_edit(EditOperation::Insert {
+            parent_path: String::new(),
+            position: 3,
+            content: "fn zeta() {}".to_string(),
+        })
+        .unwrap();
+
+    let lines: Vec<&str> = result.lines().collect();
+    let zeta_idx = lines
+        .iter()
+        .position(|l| l.contains("fn zeta"))
+        .expect("fn zeta must be present");
+    assert_eq!(
+        zeta_idx, 0,
+        "position 3 = slot before the first sibling (top of file), got:\n{}",
+        result
+    );
+    assert!(
+        lines[zeta_idx + 1].contains("fn alpha"),
+        "fn alpha must follow intact, got:\n{}",
+        result
+    );
+}
+
+#[test]
+fn insert_in_range_slot_lands_between_siblings() {
+    let dir = temp_dir();
+    // 4 root children: position 4 = slot BEFORE child 1 (beta). Note the
+    // out-of-range append rule (idx > children.len()) — the slot branch
+    // only covers 3..=len, so this file needs 4 fns for slot 1.
+    let src = "fn alpha() {\n    1\n}\n\nfn beta() {\n    2\n}\n\nfn gamma() {\n    3\n}\n\nfn delta() {\n    4\n}\n";
+    let path = make_file(dir.path(), "four_fns_slot.rs", src);
+    let writer = gnawtreewriter::GnawTreeWriter::new(path.to_str().unwrap()).unwrap();
+
+    let result = writer
+        .preview_edit(EditOperation::Insert {
+            parent_path: String::new(),
+            position: 4,
+            content: "fn middle() {}".to_string(),
+        })
+        .unwrap();
+
+    let lines: Vec<&str> = result.lines().collect();
+    let alpha_idx = lines.iter().position(|l| l.contains("fn alpha")).unwrap();
+    let middle_idx = lines
+        .iter()
+        .position(|l| l.contains("fn middle"))
+        .unwrap();
+    let beta_idx = lines.iter().position(|l| l.contains("fn beta")).unwrap();
+
+    assert!(
+        alpha_idx < middle_idx && middle_idx < beta_idx,
+        "fn middle must land BETWEEN fn alpha ({}) and fn beta ({}), got {}:\n{}",
+        alpha_idx,
+        beta_idx,
+        middle_idx,
+        result
+    );
+    // Top-level, not nested: alpha's closing brace precedes the insert.
+    let between = lines[alpha_idx..middle_idx].join("\n");
+    assert!(
+        between.contains('}'),
+        "fn alpha's closing brace must precede the inserted fn (nested = the bug):\n{}",
+        result
+    );
+}

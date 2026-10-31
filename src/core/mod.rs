@@ -771,11 +771,7 @@ impl GnawTreeWriter {
     /// namn. None = path resolve:ar inte (fel-redovisningen tar vid).
     pub fn describe_node(&self, query: &str) -> Option<(String, String, Option<String>)> {
         let node = self.resolve_path(query)?;
-        Some((
-            node.path.clone(),
-            node.node_type.clone(),
-            node.get_name(),
-        ))
+        Some((node.path.clone(), node.node_type.clone(), node.get_name()))
     }
 
     fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String> {
@@ -922,20 +918,26 @@ impl GnawTreeWriter {
             idx => {
                 // Documented modes are 0 (first / after opening brace),
                 // 1 (append to parent / before closing brace) and 2 (after
-                // UI properties). Larger values address a 1-based sibling
-                // slot via `idx - 3`. A position BEYOND the child count is
-                // the common "append at the end" encoding (Motor2's GTW
-                // bridge sends children.len() + 1) — it must land AFTER the
-                // LAST child. Previously `idx - 3` mapped such a value into
-                // the MIDDLE of a sibling: Motor2 batt 2026-10-13, position
-                // 25 of 24 nodes nested a new `fn` inside the last function
-                // (E0432 "no ar_giltig in the root").
+                // UI properties). Larger values address a sibling slot:
+                // `idx - 3` is the 0-based child to insert BEFORE, at that
+                // child's start boundary — never inside a sibling. A
+                // position BEYOND the child count is the common "append at
+                // the end" encoding (Motor2's GTW bridge sends
+                // children.len() + 1) and must land AFTER the LAST child.
+                // History: this branch previously used
+                // `children[idx - 3].end_line` as a raw insert index, which
+                // landed in the MIDDLE of a sibling for single-line or token
+                // children (anonymous `fn`/`identifier` nodes): Motor2 batt
+                // 2026-10-13, and triage 2026-10-31 (T2), where position 3
+                // of 5 root fns nested the new fn inside the first one.
                 if parent.children.is_empty() {
-                    parent.start_line
+                    parent.start_line.saturating_sub(1)
                 } else if idx > parent.children.len() {
                     parent.children[parent.children.len() - 1].end_line
                 } else {
-                    parent.children[idx - 3].end_line
+                    // start_line is 1-based, so start_line - 1 is the
+                    // 0-based insert index of the line BEFORE the sibling.
+                    parent.children[idx - 3].start_line.saturating_sub(1)
                 }
             }
         };

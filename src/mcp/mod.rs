@@ -1392,7 +1392,7 @@ pub mod mcp_server {
                     }
                 }
                 let mut lines = Vec::new();
-                outline(&tree, 0, &mut lines);
+                outline(tree, 0, &mut lines);
                 let mut text = format!(
                     "Analyzed {} ({} tokens){} — outline (first {} nodes to depth {}; full tree in payload \"data\", flat index via list_nodes):",
                     file_path,
