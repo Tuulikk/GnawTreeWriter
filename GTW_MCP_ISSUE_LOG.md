@@ -1513,3 +1513,31 @@ Notera: GTW edit_node tappade trailing-newline på båda målfilerna och
 dubbleerde doc-kommentar + `#[test]` när funktionsnoden ersattes (attribut/
 doc sitter i egna noder utanför funktionsnoden) — kringgicks med manuell
 städning; egen loggpost bör öppnas för den klassen.
+
+**T3 STÄNGD (samma session, efter v0.20.1):** `undo --preview` finns nu i
+CLI (`handle_undo(steps, preview)` i src/cli.rs) — preview-grenen använder
+samma `peek_undo`-kärna som MCP:s preview (CLI/MCP divergerar inte) och
+skriver NOLL bytes: listar operationer (timestamp/op/fil/nod/beskrivning/
+txn-id) + "Call again without --preview to apply"; tom logg → "Nothing to
+undo" + pekar på `history`. Regressionstest `test_undo_preview_writes_nothing`
+(provar preview → noll bytes → riktig undo fungerar därefter, dvs preview
+äter inget från stacken). Live-smoke på debug-binären: ✓. Under arbetet:
+fynden nedan.
+
+**NYTT FYND (samma session) — quick-replace valideringen släpper igenom
+ogiltiga attr-literals:** i en apply-kommando smög ett korrupt
+`default_value = "0.20.1"|"1"` in i `Undo`-varianten (agentfel) och
+quick-replace VALIDERINGEN godkände det (tree-sitter parse OK) — uttrycket
+kompilerar inte (clap-derive: lit-str|lit-str i attr-uttryck; rustc avvisar).
+Samma valideringsgap-klass som 2026-10-04-posterna (parse-OK ≠ giltig kod),
+nu i attribut-kontext: attr-innehåll med metatecken (`|`, `+` m.fl.) ska
+flaggas eller avvisas. Minst:
+dokumentera "tree-sitter-OK garanterar inte rustc-OK" i
+valideringsmeddelandet. Klassificering: [x] bugg (valideringsgap)
+[ ] användarfel (agentfellet är triggern, men gapet är verktygets).
+
+**Also noterat under fixen:** `cargo fmt --check` visar utbredd fmt-drift i
+HEAD-committar (code_index.rs ×10, batch.rs ×4, doc_comment_handling.rs ×5,
+edit_node_midline_block_regression.rs, insert_position.rs m.fl. —
+samma klass som 9.1-fortsättningens "pre-existing skuld"). cli.rs är nu
+fmt-ren (per-file rustfmt). Full fmt-sweep = egen post.
