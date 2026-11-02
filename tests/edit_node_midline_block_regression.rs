@@ -39,7 +39,8 @@ const JS_FILE: &str = r#"// Åäö + emoji i prefixet — kolumnräkningen ska v
 /// räcker inte — målet ligger flera nivåer ner i IIFE → funktionsuttryck →
 /// promise-kedja → funktionsuttryck → block.
 fn find_path_containing(node: &TreeNode, needle: &str, starts_with: &str) -> Option<String> {
-    let matches = node.content.contains(needle) && node.content.trim_start().starts_with(starts_with);
+    let matches =
+        node.content.contains(needle) && node.content.trim_start().starts_with(starts_with);
     if matches {
         for child in &node.children {
             if let Some(deeper) = find_path_containing(child, needle, starts_with) {
@@ -139,7 +140,10 @@ fn edit_node_on_rust_line_with_multibyte_prefix_is_exact() {
     .expect("rust-edit med multibyte-prefix ska lyckas");
 
     let out = std::fs::read_to_string(&path).unwrap();
-    assert!(out.contains("let n = 42; // ändrad"), "ny rad saknas: {out}");
+    assert!(
+        out.contains("let n = 42; // ändrad"),
+        "ny rad saknas: {out}"
+    );
     assert!(
         out.contains("let s = \"åäö\"; // ✓ behåll"),
         "grannraden med multibyte måste överleva orörd: {out}"

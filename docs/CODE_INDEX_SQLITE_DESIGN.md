@@ -1,6 +1,6 @@
 # Design: code-index SQLite store with a committed markdown projection
 
-**Status:** Accepted direction (2026-10-31) — implementation pending
+**Status:** Accepted direction (2026-10-31) · Reviewed 2026-11-02 — 13 findings resolved (see "Review 2026-11-02 — decisions") · Phase 1 in implementation
 **Origin:** User discussion, 2026-10-31 GTW session (after v0.20.1 release)
 **Scope note:** This precedes T3–T6 in the issue-log backlog; T6 (canonical
 ID format) is a *prerequisite* for Phase 3, not for Phase 1.
@@ -60,23 +60,47 @@ design forces resolving the canonical ID format (T6, issue log
 2026-10-07: `Entity.id` full format today, `Relation.to` still bare
 names). Phase 3 is blocked until that decision lands.
 
-## Schema sketch (v1)
+## Schema (v1 — as built)
 
 ```
-files(path TEXT PRIMARY KEY, hash TEXT, rev TEXT, parsed_at INTEGER)
-items(id TEXT, file TEXT, kind TEXT, name TEXT,
-      signature TEXT, line INTEGER, node_path TEXT)
-relations(from_id TEXT, to_id TEXT, kind TEXT, line INTEGER)
-intros(dir TEXT PRIMARY KEY, body TEXT)          -- hand-written blocks
-staleness_queue(file TEXT, reason TEXT, queued_at INTEGER)
+meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)
+-- generation_key, gtw_version, extractor_version, schema_version,
+-- last_refresh_rev, last_refresh_at
+
+files(path TEXT PRIMARY KEY,         -- canonical_rel_path: POSIX separators,
+      hash TEXT NOT NULL,            -- index-root relative; single walker
+      lines INTEGER NOT NULL,
+      warning TEXT,                  -- formatted last parse warning (NULL = clean)
+      parsed_at INTEGER NOT NULL)
+
+items(id INTEGER PRIMARY KEY,
+      file TEXT NOT NULL REFERENCES files(path) ON DELETE CASCADE,
+      parent_id INTEGER REFERENCES items(id) ON DELETE CASCADE,  -- NULL = top level
+      kind TEXT NOT NULL,            -- category (fn/struct/impl/...)
+      name TEXT NOT NULL,            -- identifier — consumer revalidation key
+      signature TEXT NOT NULL,       -- UNtruncated at storage (cap ~512 chars);
+      line INTEGER NOT NULL,         -- truncation to max_sig happens at render
+      node_path TEXT NOT NULL)       -- GTW dot-path, valid at indexed hash
+
+staleness_queue(file TEXT PRIMARY KEY, reason TEXT NOT NULL,
+                from_rev TEXT, queued_by TEXT, queued_at INTEGER NOT NULL)
 ```
+
+Deltas from the original sketch, per review decisions: `files.rev` dropped
+(P7); `intros` and `relations` are NOT created in v1 (intros are file-sourced,
+decision #2; relations wait for T6, decision #12); `staleness_queue` gains a
+PK and is a queue (upsert, latest event wins), not a log (decision #8);
+`meta` is new (decisions #1, #7, #9).
 
 - WAL mode; `PRAGMA user_version` drives migrations (v1 at birth).
-- Corruption recovery = delete file + full re-index; the artifact is
-  fully derivable, nothing precious lives in it.
-- `items.node_path` carries the GTW dot-path **alongside** the line
-  anchor — this closes the chain `code-index → sense → read_node →
-  edit_node` (line numbers shift on every edit; dot-paths survive).
+- `items.node_path` closes the chain `code-index → sense → read_node →
+  edit_node` — with the freshness caveat (decision #4): valid at the indexed
+  hash; consumers re-validate `name` before editing.
+- Corruption recovery = close, delete `code_index.db` **and its `-wal`/`-shm`
+  sidecars**, full re-index — surfaced as a notice in the artifact, never
+  silent (decision #3). The "fully derivable, nothing precious" claim softens
+  in Phase 3 when the knowledge graph moves in: recovery then also costs a
+  full graph re-index.
 
 ## Triggers vs runners (the "self-running" split)
 
@@ -87,13 +111,17 @@ files. The design therefore separates:
   counters (e.g. queued on `/items` writes that supersede an older
   revision).
 - **Runners (outside):** do the actual work —
-  - git hook (`post-commit`) → incremental refresh of changed files;
-  - `code-index --check` in CI / `doctor` → non-zero exit when the
-    committed markdown's header rev ≠ HEAD;
+  - git hook (`post-commit`) → incremental refresh of changed files
+    (installed via explicit command only, never silently — P4);
+  - `code-index --check` in CI / `doctor` → content-hash gate (decision #6):
+    fast tier = committed file's normalized body vs its own `body_sha256`
+    header; full tier = re-render from the checkout and byte-compare. No
+    rev-string logic.
   - optional ambient MCP daemon polling `staleness_queue` (ROADMAP
     add-on territory).
-- GTW edit responses may append to `staleness_queue` directly — a
-  precise alternative to mtime polling.
+- GTW edit responses may append to `staleness_queue` directly — a precise
+  alternative to mtime polling — under the ownership rule (decision #8):
+  the edit path may only open an EXISTING DB, never create one.
 
 ## MCP surface
 
@@ -114,20 +142,80 @@ DB is absent or corrupt. Zero-setup charm is the feature's virtue.
   (2026-10-06 §36 lesson: rusqlite 0.31→0.32 broke Motor2's workspace
   resolution mid-pass). Schema migrations must be called out in the
   CHANGELOG like any consumer-facing contract.
-- Threads/processes: single-writer discipline (GTW transaction-ish
-  behavior); readers may be any tool.
+- Threads/processes: `busy_timeout = 5000` + one retry, then degrade to the
+  direct path (P5 — the operation must succeed without the DB). Readers: any
+  tool, read-only URI recommended (`file:…?mode=ro`, decision #13); refresh
+  ends with `wal_checkpoint(TRUNCATE)` so read-only consumers see a clean
+  file (`immutable=1` only for archived copies).
+- **Merge rule (P3):** `code-index.md` is never hand-merged — take any side,
+  re-run the tool. Stated in the artifact header.
 
 ## Phased plan (proposal)
 
-1. **Phase 1** — `code-index --db` mode: schema v1, incremental
-   upsert, markdown rendered from the DB when present (direct fallback
-   otherwise).
-2. **Phase 2** — `--check` gate + MCP `code_index` tool + doctor
-   staleness check.
+1. **Phase 1** — `code-index --db` mode: schema v1, incremental upsert,
+   markdown rendered from the DB when present (direct fallback otherwise).
+   Includes the review decisions: generation-keyed cache, toplevel root
+   normalization, WAL-sidecar recovery, busy-degrade, parity tests.
+2. **Phase 2** — content-hash `--check` gate (decision #6) + MCP
+   `code_index` tool (`GTW_INSTRUCTIONS.md` parity in the same change) +
+   doctor staleness check.
 3. **Phase 3** — knowledge-graph migration into the same DB; canonical
    ID format (T6) resolved and adopted first.
 4. **Phase 4 (optional)** — trigger plumbing + runner hooks (git hook,
    staleness writer in edit responses).
+
+## Review 2026-11-02 — decisions
+
+Pre-implementation review (GTW session) found 13 issues; all resolved. The
+decisions are baked into the sections above; this list is the trace.
+
+### Cache identity — the action-key principle
+
+Reuse requires identity of everything that produced the row, not just the
+content: `generation_key = hash(schema_version + extractor_version +
+extensions)` stored in `meta`. Mismatch → warned, planned full re-upsert
+(same path as corruption recovery, but expected). Presentation options
+(`max_sig`, `--json`, `--output`) are NOT part of the key — signatures are
+stored untruncated (cap ~512) and truncated at render, which makes parity
+between the direct and DB paths a construction property. `EXTRACTOR_VERSION`
+is a manual const, bumped on any change to item extraction.
+
+### Multi-person principles (for and from git)
+
+The DB is per-clone derived state — like `.git/index` and `target/` — never
+shared; only the committed projection is shared.
+
+- **P1 Per-clone derived state** — the DB is never shared across clones.
+- **P2 One shared truth** — consumers read the committed markdown or their
+  own clone's DB, never another clone's.
+- **P3 Generated-file merge rule** — never hand-merge `code-index.md`: take
+  any side, re-run the tool.
+- **P4 Hooks are personal** — runners install via explicit command only,
+  never silently.
+- **P5 Contention degrades, never fails** — busy_timeout + one retry, then
+  the direct path; always-works holds under concurrency.
+- **P6 Verification needs no local state** — gates re-render from a
+  checkout and compare bytes; no DB required.
+- **P7 Stamps live in one place** — rev/dirty/time/version only in the
+  header and `meta`; rows carry no identity.
+
+### The 13 findings
+
+| # | Finding | Decision |
+|---|---|---|
+| 1 | Cache key = content only | Action-key generation (above) |
+| 2 | Intros: two sources of truth | The intro FILE is the only source; no `intros` table. DB caching, if ever, is keyed by file hash — cache, never source |
+| 3 | Recovery misses WAL sidecars | Recovery deletes `db` + `-wal` + `-shm`, then full re-index — surfaced as a notice in the artifact, never silent |
+| 4 | node_path stability oversold | `node_path` is valid at the indexed hash; consumers re-validate `name` via read_node before edit (generalized B1 mechanic, `GTW_RAPPORT_2026-11-01.md`) |
+| 5 | Parity asserted, not required | "DB render == direct render (modulo stamps)" is a tested invariant: markdown, JSON, and incremental identity |
+| 6 | `--check` rev-string fragile | Content-hash gate: header carries `body_sha256`; full tier re-renders + byte-compares the normalized body, fast tier checks header/body self-consistency; rev logic removed |
+| 7 | Single-writer without mechanics | `busy_timeout=5000`, one retry, then P5 degrade; `meta` written last so an aborted refresh heals on the next run |
+| 8 | queue without PK; edit-path ownership | PK on file, upsert — a queue, not a log; refresh drains it; the edit path may only open an existing DB, NEVER create one |
+| 9 | `rev` per file row | Dropped — `meta.last_refresh_rev` (P7) |
+| 10 | DB location for subdir roots | `--db` normalizes the index root to git toplevel (one clone, one DB; no-git dirs use the walked root), announced when it differs |
+| 11 | Path normalization unspecified | `canonical_rel_path()`: POSIX separators, index-root relative; one walker (the tool's own) |
+| 12 | `relations` born dead / bare names | Not created in v1. T6 constraints recorded: `items.id` must survive line shifts (not line-based), be name-qualified, handle collisions; external names → `symbols(name)` |
+| 13 | "Readers may be any tool" | Checkpoint (TRUNCATE) after refresh; consumers use `mode=ro` URIs |
 
 ## References
 

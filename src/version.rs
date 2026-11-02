@@ -36,7 +36,9 @@ pub fn current() -> BuildInfo {
     let built_epoch: u64 = option_env!("GTW_BUILT_AT")
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    let dirty = option_env!("GTW_GIT_DIRTY").map(|s| s == "true").unwrap_or(false);
+    let dirty = option_env!("GTW_GIT_DIRTY")
+        .map(|s| s == "true")
+        .unwrap_or(false);
 
     BuildInfo {
         git_sha,

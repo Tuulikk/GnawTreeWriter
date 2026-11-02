@@ -15,8 +15,7 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-changed=.git/refs");
 
-    let git_sha = run("git", &["rev-parse", "--short", "HEAD"])
-        .unwrap_or_else(|| "unknown".into());
+    let git_sha = run("git", &["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".into());
     println!("cargo:rustc-env=GTW_GIT_SHA={git_sha}");
 
     let dirty = run("git", &["status", "--porcelain"])

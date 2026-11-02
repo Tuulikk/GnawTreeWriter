@@ -721,7 +721,12 @@ mod tests {
 
     // ── insert_text: text-anchored splices (2026-10-21, Motor2 §37.4 need) ──
 
-    fn insert_text_batch(file: &Path, anchor: &str, position: AnchorPosition, content: &str) -> Batch {
+    fn insert_text_batch(
+        file: &Path,
+        anchor: &str,
+        position: AnchorPosition,
+        content: &str,
+    ) -> Batch {
         Batch {
             description: Some("insert_text test".into()),
             transaction_ids: std::cell::RefCell::new(Vec::new()),
@@ -742,8 +747,7 @@ mod tests {
         let p = tmp.path().join("t.txt");
         fs::write(&p, "line one\nline two\n")?;
 
-        insert_text_batch(&p, "line one\n", AnchorPosition::After, "inserted\n")
-            .apply()?;
+        insert_text_batch(&p, "line one\n", AnchorPosition::After, "inserted\n").apply()?;
         assert_eq!(
             fs::read_to_string(&p)?,
             "line one\ninserted\nline two\n",
@@ -758,8 +762,7 @@ mod tests {
         let p = tmp.path().join("t.txt");
         fs::write(&p, "alpha\nbeta\n")?;
 
-        insert_text_batch(&p, "beta", AnchorPosition::Before, "gamma\n")
-            .apply()?;
+        insert_text_batch(&p, "beta", AnchorPosition::Before, "gamma\n").apply()?;
         assert_eq!(
             fs::read_to_string(&p)?,
             "alpha\ngamma\nbeta\n",
@@ -821,8 +824,13 @@ mod tests {
         let p = tmp.path().join("t.rs");
         fs::write(&p, "fn ok() {}\n")?;
 
-        let result = insert_text_batch(&p, "fn ok() {}", AnchorPosition::After, "\nlet broken = ;\n")
-            .apply();
+        let result = insert_text_batch(
+            &p,
+            "fn ok() {}",
+            AnchorPosition::After,
+            "\nlet broken = ;\n",
+        )
+        .apply();
         assert!(
             result.is_err(),
             "inserting syntactically broken Rust must fail the parse guard"
@@ -841,8 +849,7 @@ mod tests {
         let p = tmp.path().join("t.txt");
         fs::write(&p, "Åäö rubrik\nunder\n")?;
 
-        insert_text_batch(&p, "Åäö rubrik", AnchorPosition::After, " — tillägg")
-            .apply()?;
+        insert_text_batch(&p, "Åäö rubrik", AnchorPosition::After, " — tillägg").apply()?;
         let after = fs::read_to_string(&p)?;
         assert_eq!(
             after, "Åäö rubrik — tillägg\nunder\n",

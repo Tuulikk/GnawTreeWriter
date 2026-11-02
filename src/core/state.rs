@@ -120,12 +120,11 @@ mod tests {
         assert!(state.file_hashes.is_empty());
 
         // Save and reload
-        let mut state = ProjectState::default();
-        state.git_head = "abc123".to_string();
-        state.last_analyzed = "2026-08-24T13:00:00Z".to_string();
-        state
-            .file_hashes
-            .insert("src/main.rs".to_string(), "hash123".to_string());
+        let state = ProjectState {
+            git_head: "abc123".to_string(),
+            last_analyzed: "2026-08-24T13:00:00Z".to_string(),
+            file_hashes: HashMap::from([("src/main.rs".to_string(), "hash123".to_string())]),
+        };
         state.save(root).unwrap();
 
         let loaded = ProjectState::load(root);

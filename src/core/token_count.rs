@@ -78,14 +78,14 @@ mod tests {
     #[test]
     fn test_count_tokens_simple() {
         let tokens = count_tokens("hello world");
-        assert!(tokens >= 1 && tokens <= 4);
+        assert!((1..=4).contains(&tokens));
     }
 
     #[test]
     fn test_count_tokens_code() {
         let code = "fn main() {\n    println!(\"hello\");\n}";
         let tokens = count_tokens(code);
-        assert!(tokens >= 5 && tokens <= 20);
+        assert!((5..=20).contains(&tokens));
     }
 
     #[test]
@@ -108,21 +108,21 @@ impl Config {
 }
 "#;
         let tokens = count_tokens(code);
-        assert!(tokens >= 20 && tokens <= 80);
+        assert!((20..=80).contains(&tokens));
     }
 
     #[test]
     fn test_count_tokens_with_comments() {
         let code = "// This is a comment about the function\nfn compute() -> i32 { 42 }";
         let tokens = count_tokens(code);
-        assert!(tokens >= 5 && tokens <= 25);
+        assert!((5..=25).contains(&tokens));
     }
 
     #[test]
     fn test_count_tokens_with_strings() {
         let code = r#"let msg = "hello world this is a string";"#;
         let tokens = count_tokens(code);
-        assert!(tokens >= 5 && tokens <= 20);
+        assert!((5..=20).contains(&tokens));
     }
 
     #[test]

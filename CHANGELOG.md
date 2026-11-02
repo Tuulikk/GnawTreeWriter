@@ -1,3 +1,38 @@
+## [Unreleased]
+
+### Added — code-index Phase 1: SQLite store (`--db`)
+- **`gnawtreewriter code-index <root> --db`** — incremental mode per
+  `docs/CODE_INDEX_SQLITE_DESIGN.md` (review 2026-11-02, decisions baked
+  in): parse only files whose content hash changed, render markdown/JSON
+  from the store. Byte parity with the direct render (modulo stamps +
+  root normalization) is a **tested invariant** (`tests/code_index_db.rs`).
+- Store: `.gnawtreewriter_ai/code_index.db` (gitignored, WAL) —
+  **schema v1** (`meta`, `files`, `items`, `staleness_queue`; migrations
+  via `PRAGMA user_version`). Schema changes will be called out here per
+  the §36 intake lesson.
+- Generation-keyed cache: `schema_version + extractor_version +
+  extensions` (population) — presentation options (`max_sig`, `--json`)
+  never invalidate. Signatures stored untruncated (cap 512), truncated at
+  render only.
+- Corruption recovery deletes `db` + `-wal` + `-shm`, rebuilds, and is
+  surfaced as a notice in the artifact — never silent.
+- `--db` normalizes the index root to git toplevel (one clone, one DB,
+  same population as the committed markdown; announced when it differs).
+- Concurrency: `busy_timeout=5000` + P5 degrade — on lock-class errors the
+  CLI falls back to the direct path with a warning instead of failing.
+- `items` rows carry `name` + GTW `node_path` — the consumer's
+  revalidation key (valid at the indexed hash only; re-validate via
+  read_node before editing).
+
+### BREAKING (lib)
+- `core::code_index::extract_items(root, max_sig)` → **`extract_items(root)`**
+  — signature truncation moved to render time.
+- `IndexItem` gains required fields **`name`** and **`node_path`**
+  (struct-literal construction sites must update; serde output gains both,
+  additive for readers).
+- `generate_index` output: header gains the P3 merge-rule line;
+  `--json` items now include `name`/`node_path`.
+
 ## [0.21.0] - 2026-10-31
 
 ### Fixed — guardian false-positive on body-block additions + MCP force (IV-triagen)

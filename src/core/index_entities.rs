@@ -758,7 +758,7 @@ impl Config {
             .iter()
             .find(|e| e.entity_type == "impl")
             .unwrap();
-        assert!(impl_entity.children.len() >= 1); // at least new()
+        assert!(!impl_entity.children.is_empty()); // at least new()
     }
 
     #[test]

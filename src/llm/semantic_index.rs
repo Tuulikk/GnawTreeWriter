@@ -849,7 +849,7 @@ mod tests {
         let a: Vec<NodeEmbedding> = (0..5)
             .map(|i| mk(&format!("a{i}"), "src/a.rs", "fn alpha() {}"))
             .collect();
-        let b = vec![
+        let b = [
             mk("b0", "src/b.rs", "fn beta() {}"),
             mk("b1", "src/b.rs", "fn gamma() {}"),
         ];

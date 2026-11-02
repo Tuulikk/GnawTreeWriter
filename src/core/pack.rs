@@ -645,7 +645,7 @@ mod tests {
             format: PackFormat::Xml,
             ..Default::default()
         };
-        let result = pack_project(&root, &options).unwrap();
+        let result = pack_project(root, &options).unwrap();
 
         // Verify the XML is parseable and contains the file element
         assert!(result.content.contains("<file path="));
@@ -671,7 +671,7 @@ mod tests {
         .unwrap();
 
         let options = PackOptions::default();
-        let result = pack_project(&root, &options).unwrap();
+        let result = pack_project(root, &options).unwrap();
 
         assert!(
             result.secrets_redacted >= 1,
@@ -703,7 +703,7 @@ mod tests {
             redact_secrets: false,
             ..Default::default()
         };
-        let result = pack_project(&root, &options).unwrap();
+        let result = pack_project(root, &options).unwrap();
 
         assert_eq!(result.secrets_redacted, 0);
         assert!(result.content.contains("AKIAIOSFODNN7QWERTYUI"));

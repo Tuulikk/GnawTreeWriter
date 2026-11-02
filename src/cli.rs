@@ -218,6 +218,11 @@ enum Commands {
         /// Machine-readable JSON output (ignores --output)
         #[arg(long)]
         json: bool,
+        /// Use the SQLite store (.gnawtreewriter_ai/code_index.db):
+        /// incremental re-parse of changed files only, rendered from the
+        /// DB (falls back to the direct path when the DB is busy)
+        #[arg(long)]
+        db: bool,
     },
     /// Compress source code by replacing function bodies with placeholders
     Compress {
@@ -1293,6 +1298,7 @@ impl Cli {
                 extensions,
                 max_sig,
                 json,
+                db,
             } => {
                 Self::handle_code_index(
                     &path,
@@ -1301,6 +1307,7 @@ impl Cli {
                     &extensions,
                     max_sig,
                     json,
+                    db,
                 )?;
             }
             Commands::Compress {
@@ -2003,6 +2010,7 @@ Use --no-preview to write batch file"
         extensions: &str,
         max_sig: usize,
         json: bool,
+        db: bool,
     ) -> Result<()> {
         let opts = crate::core::code_index::CodeIndexOptions {
             extensions: extensions
@@ -2014,7 +2022,34 @@ Use --no-preview to write batch file"
             intro_file: intro.map(PathBuf::from),
             json,
         };
-        let doc = crate::core::code_index::generate_index(Path::new(path), &opts)?;
+        let doc = if db {
+            match crate::core::code_index_db::generate_with_db(Path::new(path), &opts) {
+                Ok(run) => {
+                    let s = &run.stats;
+                    eprintln!(
+                        "code-index db: {} filer · {} parsade · {} återanvända · {} borttagna{}",
+                        s.files_total,
+                        s.files_parsed,
+                        s.files_reused,
+                        s.files_removed,
+                        if s.full_rebuild {
+                            " · helombyggnad (generation ändrad)"
+                        } else {
+                            ""
+                        }
+                    );
+                    run.doc
+                }
+                Err(e) if crate::core::code_index_db::is_busy_error(&e) => {
+                    // P5: contend, degrade — the operation must still succeed.
+                    eprintln!("varning: code-index-databasen upptagen — kör direktläget utan DB");
+                    crate::core::code_index::generate_index(Path::new(path), &opts)?
+                }
+                Err(e) => return Err(e),
+            }
+        } else {
+            crate::core::code_index::generate_index(Path::new(path), &opts)?
+        };
         match output {
             Some(file) => {
                 std::fs::write(file, &doc).with_context(|| format!("writing {}", file))?;

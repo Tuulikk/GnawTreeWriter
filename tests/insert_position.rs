@@ -534,10 +534,7 @@ fn insert_in_range_slot_lands_between_siblings() {
 
     let lines: Vec<&str> = result.lines().collect();
     let alpha_idx = lines.iter().position(|l| l.contains("fn alpha")).unwrap();
-    let middle_idx = lines
-        .iter()
-        .position(|l| l.contains("fn middle"))
-        .unwrap();
+    let middle_idx = lines.iter().position(|l| l.contains("fn middle")).unwrap();
     let beta_idx = lines.iter().position(|l| l.contains("fn beta")).unwrap();
 
     assert!(
