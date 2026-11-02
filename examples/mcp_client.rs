@@ -5,13 +5,13 @@
 //!
 //! Usage:
 //!   - List tools:
-//!       cargo run --features mcp --example mcp_client -- --url http://127.0.0.1:8080/ --token secret list
+//!     cargo run --features mcp --example mcp_client -- --url http://127.0.0.1:8080/ --token secret list
 //!   - Initialize:
-//!       cargo run --features mcp --example mcp_client -- --url http://127.0.0.1:8080/ --token secret init
+//!     cargo run --features mcp --example mcp_client -- --url http://127.0.0.1:8080/ --token secret init
 //!   - Analyze a file:
-//!       cargo run --features mcp --example mcp_client -- --url http://127.0.0.1:8080/ --token secret analyze /path/to/file.py
+//!     cargo run --features mcp --example mcp_client -- --url http://127.0.0.1:8080/ --token secret analyze /path/to/file.py
 //!   - Generic call:
-//!       cargo run --features mcp --example mcp_client -- --url http://127.0.0.1:8080/ --token secret call analyze '{"file_path":"examples/foo.py"}'
+//!     cargo run --features mcp --example mcp_client -- --url http://127.0.0.1:8080/ --token secret call analyze '{"file_path":"examples/foo.py"}'
 //!
 //! Environment variables:
 //!   - MCP_URL: Server URL (can override --url)

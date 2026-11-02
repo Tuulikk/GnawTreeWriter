@@ -223,6 +223,15 @@ enum Commands {
         /// DB (falls back to the direct path when the DB is busy)
         #[arg(long)]
         db: bool,
+        /// Content-hash gate over the committed code-index.md (default
+        /// <root>/code-index.md, override with --output): fast tier = body
+        /// vs its own Body-hash header; full tier = fresh render vs body.
+        /// DB-free by design (P6); non-zero exit on mismatch
+        #[arg(long)]
+        check: bool,
+        /// With --check: rewrite the artifact when stale instead of failing
+        #[arg(long)]
+        fix: bool,
     },
     /// Compress source code by replacing function bodies with placeholders
     Compress {
@@ -1299,16 +1308,20 @@ impl Cli {
                 max_sig,
                 json,
                 db,
+                check,
+                fix,
             } => {
-                Self::handle_code_index(
-                    &path,
-                    output.as_deref(),
-                    intro.as_deref(),
-                    &extensions,
+                let opts = crate::core::code_index::CodeIndexOptions {
+                    extensions: extensions
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect(),
                     max_sig,
+                    intro_file: intro.map(PathBuf::from),
                     json,
-                    db,
-                )?;
+                };
+                Self::handle_code_index(&path, output.as_deref(), opts, db, check, fix)?;
             }
             Commands::Compress {
                 file_path,
@@ -2006,22 +2019,41 @@ Use --no-preview to write batch file"
     fn handle_code_index(
         path: &str,
         output: Option<&str>,
-        intro: Option<&str>,
-        extensions: &str,
-        max_sig: usize,
-        json: bool,
+        opts: crate::core::code_index::CodeIndexOptions,
         db: bool,
+        check: bool,
+        fix: bool,
     ) -> Result<()> {
-        let opts = crate::core::code_index::CodeIndexOptions {
-            extensions: extensions
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect(),
-            max_sig,
-            intro_file: intro.map(PathBuf::from),
-            json,
-        };
+        if check {
+            // P6: the gate is DB-free — always the direct render.
+            let committed = output
+                .map(PathBuf::from)
+                .unwrap_or_else(|| Path::new(path).join("code-index.md"));
+            let res =
+                crate::core::code_index::check_index(Path::new(path), &committed, &opts, fix)?;
+            if res.ok {
+                println!(
+                    "✓ code-index aktuell: {} (body-hash + färsk render stämmer)",
+                    committed.display()
+                );
+                return Ok(());
+            }
+            for f in &res.failures {
+                eprintln!("✗ {f}");
+            }
+            if res.fixed {
+                println!(
+                    "→ omskriven: {} — kör --check igen för att bekräfta",
+                    committed.display()
+                );
+                return Ok(());
+            }
+            eprintln!("  hint: gnawtreewriter code-index --fix skriver om artefakten");
+            return Err(anyhow::anyhow!(
+                "code-index check failed: {}",
+                res.failures.join("; ")
+            ));
+        }
         let doc = if db {
             match crate::core::code_index_db::generate_with_db(Path::new(path), &opts) {
                 Ok(run) => {
@@ -2038,6 +2070,9 @@ Use --no-preview to write batch file"
                             ""
                         }
                     );
+                    for n in &run.notices {
+                        eprintln!("notis: {n}");
+                    }
                     run.doc
                 }
                 Err(e) if crate::core::code_index_db::is_busy_error(&e) => {

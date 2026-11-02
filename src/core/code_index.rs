@@ -333,26 +333,31 @@ pub(crate) fn render_doc(
         None => (BTreeMap::new(), Vec::new()),
     };
 
-    let mut out = String::new();
+    let mut head = String::new();
     let root_name = root
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| root.to_string_lossy().to_string());
-    out.push_str(&format!("# CODE-INDEX — {root_name}\n\n"));
-    out.push_str(&format!(
+    head.push_str(&format!("# CODE-INDEX — {root_name}\n\n"));
+    head.push_str(&format!(
         "> Genererad {} UTC · gnawtreewriter {} · git `{}`{}\n",
         chrono::Utc::now().format("%Y-%m-%d %H:%M"),
         env!("CARGO_PKG_VERSION"),
         rev,
         if dirty { " +DIRTY" } else { "" }
     ));
-    out.push_str(
+    head.push_str(
         "> Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`\n",
     );
-    out.push_str("> Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.\n> Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).\n\n");
+    head.push_str("> Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.\n> Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).\n");
+
+    // Body: everything from the first "## " section — the hash-gated part
+    // (review decision #6). Built separately so the header can carry the
+    // body's drift hash for the fast tier of the check gate.
+    let mut body = String::new();
 
     // Tree section — directories that contain included files.
-    out.push_str("## Träd\n\n```\n");
+    body.push_str("## Träd\n\n```\n");
     let mut by_dir: BTreeMap<String, Vec<&FileIndex>> = BTreeMap::new();
     for f in indexed {
         let dir = match f.path.rfind('/') {
@@ -362,64 +367,70 @@ pub(crate) fn render_doc(
         by_dir.entry(dir).or_default().push(f);
     }
     for (dir, fs) in &by_dir {
-        out.push_str(&format!("{dir}/\n"));
+        body.push_str(&format!("{dir}/\n"));
         for f in fs {
             let name = f.path.rsplit('/').next().unwrap_or(&f.path);
-            out.push_str(&format!("  {name} ({} rader)\n", f.lines));
+            body.push_str(&format!("  {name} ({} rader)\n", f.lines));
         }
     }
-    out.push_str("```\n\n");
+    body.push_str("```\n\n");
 
     // Sections per directory, intros spliced. The intro FILE is the only
     // intro source (review decision #2) — no DB copy exists to diverge.
     for (dir, fs) in &by_dir {
-        out.push_str(&format!("## {dir}/\n\n"));
+        body.push_str(&format!("## {dir}/\n\n"));
         if let Some(intro) = intros.get(dir) {
-            out.push_str(intro);
-            out.push_str("\n\n");
+            body.push_str(intro);
+            body.push_str("\n\n");
         }
         for f in fs {
             let name = f.path.rsplit('/').next().unwrap_or(&f.path);
-            out.push_str(&format!("### {name} ({} rader)\n", f.lines));
+            body.push_str(&format!("### {name} ({} rader)\n", f.lines));
             if f.items.is_empty() {
-                out.push_str("_(inga toppnivå-items)_\n");
+                body.push_str("_(inga toppnivå-items)_\n");
             }
             for item in &f.items {
-                out.push_str(&format!(
+                body.push_str(&format!(
                     "- `{}` :{}\n",
                     truncate_sig(&item.sig, opts.max_sig),
                     item.line
                 ));
                 for m in &item.methods {
-                    out.push_str(&format!(
+                    body.push_str(&format!(
                         "  - `{}` :{}\n",
                         truncate_sig(&m.sig, opts.max_sig),
                         m.line
                     ));
                 }
             }
-            out.push('\n');
+            body.push('\n');
         }
     }
 
     if !unknown_intros.is_empty() {
-        out.push_str(&format!(
+        body.push_str(&format!(
             "> ⚠ intros utan sektion (stale/typo — ingen effekt): {}\n",
             unknown_intros.join(", ")
         ));
     }
     if !warned_files.is_empty() {
-        out.push_str(&format!(
+        body.push_str(&format!(
             "> ⚠ {} fil(er) med syntaxvarning (partiell AST, items kan saknas):\n",
             warned_files.len()
         ));
         for w in warned_files {
-            out.push_str(&format!(">   - {w}\n"));
+            body.push_str(&format!(">   - {w}\n"));
         }
     }
     for n in notices {
-        out.push_str(&format!("> ⚠ {n}\n"));
+        body.push_str(&format!("> ⚠ {n}\n"));
     }
+
+    // Content-hash stamp: the body's drift hash rides in the header so
+    // `--check` can catch hand-edits without re-parsing (fast tier).
+    let mut out = head;
+    out.push_str(&format!("> Body-hash: {}\n\n", body_hash(&body)));
+    out.push_str(&body);
     Ok(out)
 }
 
@@ -482,6 +493,78 @@ pub fn generate_index(root: &Path, opts: &CodeIndexOptions) -> anyhow::Result<St
 
     let (rev, dirty) = git_facts(root);
     render_doc(&indexed, &warned_files, &rev, dirty, opts, root, &[])
+}
+
+/// Drift hash for the check gate (md5 — integrity signal, not adversarial;
+/// same hasher as the rest of the codebase).
+pub fn body_hash(body: &str) -> String {
+    format!("{:x}", md5::compute(body.as_bytes()))
+}
+
+/// Split a rendered markdown doc into (header, body) at the first section
+/// heading. The body is what the gate hashes and compares.
+fn split_header_body(doc: &str) -> Option<(&str, &str)> {
+    let idx = doc.find("\n## ")?;
+    Some((&doc[..idx + 1], &doc[idx + 1..]))
+}
+
+/// Phase 2 check verdict — failures are human-readable lines.
+pub struct CheckResult {
+    pub ok: bool,
+    pub fixed: bool,
+    pub failures: Vec<String>,
+}
+
+/// The content-hash gate (review decision #6), DB-free by construction (P6).
+/// Fast tier: the committed body vs its own Body-hash header — catches
+/// hand-edits and partial writes without parsing. Full tier: a fresh direct
+/// render vs the committed body — catches staleness. No rev-string logic.
+/// `fix` rewrites the artifact from the fresh render.
+pub fn check_index(
+    root: &Path,
+    committed: &Path,
+    opts: &CodeIndexOptions,
+    fix: bool,
+) -> anyhow::Result<CheckResult> {
+    let mut failures = Vec::new();
+    let old = std::fs::read_to_string(committed)
+        .with_context(|| format!("reading committed index {}", committed.display()))?;
+    let Some((_, old_body)) = split_header_body(&old) else {
+        anyhow::bail!(
+            "{} has no section heading — not a code-index artifact?",
+            committed.display()
+        );
+    };
+    match old
+        .lines()
+        .find_map(|l| l.strip_prefix("> Body-hash: "))
+        .map(str::trim)
+    {
+        Some(h) if h == body_hash(old_body) => {}
+        Some(_) => failures.push(
+            "body does not match its own Body-hash header — hand-edited or partially written"
+                .to_string(),
+        ),
+        None => failures
+            .push("no Body-hash header — artifact predates the gate, regenerate".to_string()),
+    }
+    // Full tier: fresh render, body vs body — stamps are never compared.
+    let fresh = generate_index(root, opts)?;
+    let (_, fresh_body) = split_header_body(&fresh).unwrap_or(("", fresh.as_str()));
+    if fresh_body != old_body {
+        failures.push("stale: committed body differs from a fresh render".to_string());
+    }
+    let mut fixed = false;
+    if !failures.is_empty() && fix {
+        std::fs::write(committed, &fresh)
+            .with_context(|| format!("writing {}", committed.display()))?;
+        fixed = true;
+    }
+    Ok(CheckResult {
+        ok: failures.is_empty(),
+        fixed,
+        failures,
+    })
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

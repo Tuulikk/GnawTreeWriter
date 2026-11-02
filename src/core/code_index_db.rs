@@ -76,8 +76,10 @@ pub struct RefreshStats {
 pub struct DbRun {
     pub doc: String,
     pub stats: RefreshStats,
-    /// Surfaced as trailing warning lines in the artifact (recovery, root
-    /// normalization) — never silent (decisions #3, #10).
+    /// stderr lines (root normalization, recovery mirror) — operational
+    /// context. The artifact body carries only content-relevant notices
+    /// (recovery), keeping the committed projection gate-stable
+    /// (decisions #3, #10).
     pub notices: Vec<String>,
 }
 
@@ -153,6 +155,55 @@ pub fn open_or_recreate(root: &Path) -> Result<(Connection, bool)> {
             Ok((conn, true))
         }
     }
+}
+
+/// Open an EXISTING store — never creates it (decision #8: only refresh
+/// may create). For query/doctor paths.
+pub fn open_existing(root: &Path) -> Result<Connection> {
+    let path = db_path(root);
+    if !path.exists() {
+        anyhow::bail!(
+            "no code-index store at {} — run `code-index --db` (refresh) first",
+            path.display()
+        );
+    }
+    let conn = Connection::open(&path)?;
+    conn.busy_timeout(Duration::from_millis(BUSY_TIMEOUT_MS))?;
+    let v: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if v > SCHEMA_VERSION {
+        anyhow::bail!(
+            "code-index DB schema v{} is newer than this binary (v{}) — upgrade gnawtreewriter",
+            v,
+            SCHEMA_VERSION
+        );
+    }
+    Ok(conn)
+}
+
+/// Doctor-facing store summary (read-only). None when no store exists.
+pub struct StoreStatus {
+    pub last_refresh_rev: Option<String>,
+    pub queued: usize,
+    pub files: usize,
+}
+
+/// Read the store status; None when there is no store. Never creates one.
+pub fn store_status(root: &Path) -> Option<StoreStatus> {
+    let conn = open_existing(root).ok()?;
+    let last_refresh_rev = meta_get(&conn, "last_refresh_rev").ok().flatten();
+    let queued = conn
+        .query_row("SELECT COUNT(*) FROM staleness_queue", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .ok()? as usize;
+    let files = conn
+        .query_row("SELECT COUNT(*) FROM files", [], |r| r.get::<_, i64>(0))
+        .ok()? as usize;
+    Some(StoreStatus {
+        last_refresh_rev,
+        queued,
+        files,
+    })
 }
 
 /// Action-key (decision #1): identity of everything that affects extraction.
@@ -438,7 +489,11 @@ pub fn render(
 /// refresh incrementally, render from the store.
 pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun> {
     let index_root = resolve_index_root(root);
+    // stderr notices: operational context (never in the artifact — the
+    // committed body must stay byte-stable for the --check gate).
     let mut notices = Vec::new();
+    // artifact notices: content-relevant events (surface in the body).
+    let mut artifact_notices = Vec::new();
     if index_root != root {
         notices.push(format!(
             "indexroten normaliserad till git-toplevel: {}",
@@ -447,13 +502,15 @@ pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun> {
     }
     let (mut conn, recovered) = open_or_recreate(&index_root)?;
     if recovered {
-        notices.push(format!(
+        let line = format!(
             "index-databasen var korrupt — ombyggd {} UTC",
             chrono::Utc::now().format("%Y-%m-%d %H:%M")
-        ));
+        );
+        artifact_notices.push(line.clone());
+        notices.push(line);
     }
     let stats = refresh(&mut conn, &index_root, opts)?;
-    let doc = render(&conn, &index_root, opts, &notices)?;
+    let doc = render(&conn, &index_root, opts, &artifact_notices)?;
     Ok(DbRun {
         doc,
         stats,

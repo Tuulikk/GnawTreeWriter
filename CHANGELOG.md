@@ -1,5 +1,29 @@
 ## [Unreleased]
 
+### Added — code-index Phase 2: content-hash gate + MCP tool + doctor
+- **`gnawtreewriter code-index <root> --check [--fix]`** — the gate from
+  review decision #6, DB-free by construction (P6): fast tier = committed
+  body vs its own `> Body-hash:` header (catches hand-edits/partial writes
+  without parsing); full tier = fresh direct render vs committed body
+  (catches staleness). No rev-string logic. Non-zero exit on failure
+  (validate-style); `--fix` rewrites the artifact and reports.
+- **MCP tool `code_index`** (`mode: refresh | query | check`): refresh =
+  incremental store refresh + markdown/stats; query = item rows from the
+  EXISTING store (`path_prefix` filter, never creates — decision #8);
+  check = the gate with optional `fix`. `GTW_INSTRUCTIONS.md` updated in
+  the same change (contract test parity).
+- **doctor**: `code_index` store check — presence, file count, staleness
+  queue depth, last-refresh rev vs HEAD (informational; the gate is
+  `--check`).
+- Markdown header now carries `> Body-hash: <md5>` over the body (the
+  part from the first `## ` section) — enables the fast tier. Artifacts
+  regenerate cleanly from either path (parity unaffected: both compute
+  the same body hash).
+- Root-normalization notice moved to **stderr only** — the artifact body
+  stays byte-stable so subdir-produced artifacts pass the gate
+  identically to toplevel-produced ones (recovery notices remain in the
+  body by design: content-relevant, cleared by the next clean render).
+
 ### Added — code-index Phase 1: SQLite store (`--db`)
 - **`gnawtreewriter code-index <root> --db`** — incremental mode per
   `docs/CODE_INDEX_SQLITE_DESIGN.md` (review 2026-11-02, decisions baked

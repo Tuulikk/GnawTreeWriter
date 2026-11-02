@@ -399,6 +399,20 @@ pub mod mcp_server {
                                 .unwrap_or(false),
                         ))
                     }
+                    "code_index" => {
+                        let mode = arguments
+                            .get("mode")
+                            .and_then(Value::as_str)
+                            .unwrap_or("query");
+                        let root = arguments.get("root").and_then(Value::as_str).unwrap_or(".");
+                        let intro = arguments.get("intro_file").and_then(Value::as_str);
+                        let prefix = arguments.get("path_prefix").and_then(Value::as_str);
+                        let fix = arguments
+                            .get("fix")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        Ok(handle_code_index_mcp(mode, root, intro, prefix, fix))
+                    }
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
                         Ok(handle_get_semantic_report(state, fp).await)
@@ -540,6 +554,22 @@ pub mod mcp_server {
                         "max_depth": { "type": "integer", "description": "Limit tree depth (fewer = shallower listing)" }
                     },
                     "required": ["file_path"]
+                }
+            }),
+            json!({
+                "name": "code_index",
+                "title": "Project code index: refresh | query | check",
+                "description": "The project structure index — per-file items (fns/structs/impls/classes) with name, signature, line and GTW node_path. WHAT: one call answers WHERE code sits and WHAT a project contains; node_path chains into read_node/edit_node (re-validate the name first — paths are valid at the indexed hash only). WHEN: orienting in an unfamiliar repo, building a map for a large refactor, or gating a deploy on index freshness. mode=refresh: incremental SQLite refresh (.gnawtreewriter_ai/code_index.db, parses only changed files) returning markdown + stats; mode=query: item rows from the existing store, filterable by path_prefix — never creates the store; mode=check: content-hash gate over the committed code-index.md (fast tier: body vs its own Body-hash header; full tier: fresh render vs body) — DB-free. RETURNS: refresh -> {stats, notices, doc}; query -> {files[{path,lines,items[{category,name,sig,line,node_path,methods}]}]}; check -> {ok, fixed, failures[]}. Example: {\"mode\": \"refresh\", \"root\": \".\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "mode": { "type": "string", "description": "refresh | query | check (default query)" },
+                        "root": { "type": "string", "description": "Project root (default .)" },
+                        "intro_file": { "type": "string", "description": "Optional intro splice file for refresh/check renders" },
+                        "path_prefix": { "type": "string", "description": "query: only paths starting with this prefix" },
+                        "fix": { "type": "boolean", "description": "check: rewrite the artifact when stale (default false)" }
+                    },
+                    "required": []
                 }
             }),
             json!({
@@ -2977,6 +3007,74 @@ or list_nodes for a flat index of this file.",
                 })),
             ),
             Err(e) => tool_error_code(format!("Failed to add rule: {} — nothing was written; fix the reported issue and retry (rules add validates first)", e), "E_RULE_REJECTED"),
+        }
+    }
+
+    /// `code_index` — the structure-index surface: refresh (incremental store),
+    /// query (items from the store) and check (content-hash gate). Query and
+    /// check never create the store (decision #8 / P6).
+    fn handle_code_index_mcp(
+        mode: &str,
+        root: &str,
+        intro: Option<&str>,
+        prefix: Option<&str>,
+        fix: bool,
+    ) -> Value {
+        use crate::core::code_index::{self as ci, CodeIndexOptions};
+        use crate::core::code_index_db;
+        let root_path = std::path::Path::new(root);
+        let mut opts = CodeIndexOptions::default();
+        if let Some(i) = intro {
+            opts.intro_file = Some(std::path::PathBuf::from(i));
+        }
+        match mode {
+            "refresh" => match code_index_db::generate_with_db(root_path, &opts) {
+                Ok(run) => json!({
+                    "mode": "refresh",
+                    "stats": {
+                        "files_total": run.stats.files_total,
+                        "files_parsed": run.stats.files_parsed,
+                        "files_reused": run.stats.files_reused,
+                        "files_removed": run.stats.files_removed,
+                        "full_rebuild": run.stats.full_rebuild
+                    },
+                    "notices": run.notices,
+                    "doc": run.doc
+                }),
+                Err(e) => tool_error(format!("code_index refresh failed: {e:#}")),
+            },
+            "query" => {
+                // The store is repo-rooted (toplevel normalization, decision #10).
+                let index_root = code_index_db::resolve_index_root(root_path);
+                match code_index_db::open_existing(&index_root) {
+                    Ok(conn) => match code_index_db::load_index(&conn) {
+                        Ok(files) => {
+                            let files: Vec<_> = files
+                                .into_iter()
+                                .filter(|f| prefix.is_none_or(|p| f.path.starts_with(p)))
+                                .collect();
+                            let count = files.len();
+                            json!({ "mode": "query", "files": files, "count": count })
+                        }
+                        Err(e) => tool_error(format!("code_index query failed: {e:#}")),
+                    },
+                    Err(e) => tool_error(format!("code_index query: {e:#}")),
+                }
+            }
+            "check" => {
+                let committed = root_path.join("code-index.md");
+                match ci::check_index(root_path, &committed, &opts, fix) {
+                    Ok(res) => json!({
+                        "mode": "check",
+                        "ok": res.ok,
+                        "fixed": res.fixed,
+                        "failures": res.failures,
+                        "artifact": committed.display().to_string()
+                    }),
+                    Err(e) => tool_error(format!("code_index check failed: {e:#}")),
+                }
+            }
+            _ => tool_error("mode must be one of: refresh | query | check".to_string()),
         }
     }
 

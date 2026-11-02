@@ -622,6 +622,45 @@ impl DoctorReport {
     /// for three weeks, and the panic's file:line pointed straight into
     /// the comment documenting its own fix.
     ///
+    /// code-index store: presence, queue depth and refresh currency.
+    /// Informational staleness (rev-hint), not a gate — the gate is
+    /// `code-index --check` (content-hash, review decision #6).
+    pub fn check_code_index_store(&mut self, project_root: &std::path::Path) {
+        match crate::core::code_index_db::store_status(project_root) {
+            None => {
+                self.record_check(DoctorCheck {
+                    category: "code_index".to_string(),
+                    name: "store".to_string(),
+                    status: "warn".to_string(),
+                    message: "No code-index store — structure queries unavailable. Optional: `gnawtreewriter code-index . --db` (or the code_index tool, mode refresh) builds it incrementally.".to_string(),
+                    detail: None,
+                });
+            }
+            Some(st) => {
+                let head = crate::core::code_index::git_facts(project_root).0;
+                let stale = st
+                    .last_refresh_rev
+                    .as_deref()
+                    .map(|r| r != head && head != "no-git")
+                    .unwrap_or(true);
+                self.record_check(DoctorCheck {
+                    category: "code_index".to_string(),
+                    name: "store".to_string(),
+                    status: if stale || st.queued > 0 { "warn" } else { "pass" }.to_string(),
+                    message: format!(
+                        "{} files indexed · staleness queue: {} · last refresh rev: {} (HEAD: {}){}",
+                        st.files,
+                        st.queued,
+                        st.last_refresh_rev.as_deref().unwrap_or("?"),
+                        head,
+                        if stale { " — STALE, rerun refresh" } else { "" }
+                    ),
+                    detail: None,
+                });
+            }
+        }
+    }
+
     /// Outside the gnawtreewriter repo this is a no-op: freshness vs this
     /// repo says nothing about other projects.
     pub fn check_binary_freshness(&mut self, project_root: &std::path::Path) {
@@ -895,6 +934,7 @@ pub fn run_full_doctor(project_root: &std::path::Path) -> DoctorReport {
     report.check_backups(project_root);
     report.check_transaction_log(project_root);
     report.check_knowledge_graph(project_root);
+    report.check_code_index_store(project_root);
 
     // T5: semantic-channel availability (bge-base present / degraded
     // mode). Feature-gated: no sense exists in feature-light builds, so

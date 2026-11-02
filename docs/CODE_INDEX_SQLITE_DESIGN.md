@@ -1,6 +1,6 @@
 # Design: code-index SQLite store with a committed markdown projection
 
-**Status:** Accepted direction (2026-10-31) · Reviewed 2026-11-02 — 13 findings resolved (see "Review 2026-11-02 — decisions") · Phase 1 in implementation
+**Status:** Accepted direction (2026-10-31) · Reviewed 2026-11-02 — 13 findings resolved (see "Review 2026-11-02 — decisions") · Phase 1 + Phase 2 implemented (gate, MCP tool, doctor); Phase 3 blocked on T6
 **Origin:** User discussion, 2026-10-31 GTW session (after v0.20.1 release)
 **Scope note:** This precedes T3–T6 in the issue-log backlog; T6 (canonical
 ID format) is a *prerequisite* for Phase 3, not for Phase 1.
@@ -152,13 +152,17 @@ DB is absent or corrupt. Zero-setup charm is the feature's virtue.
 
 ## Phased plan (proposal)
 
-1. **Phase 1** — `code-index --db` mode: schema v1, incremental upsert,
+1. **Phase 1** — ✅ `code-index --db` mode: schema v1, incremental upsert,
    markdown rendered from the DB when present (direct fallback otherwise).
    Includes the review decisions: generation-keyed cache, toplevel root
    normalization, WAL-sidecar recovery, busy-degrade, parity tests.
-2. **Phase 2** — content-hash `--check` gate (decision #6) + MCP
-   `code_index` tool (`GTW_INSTRUCTIONS.md` parity in the same change) +
-   doctor staleness check.
+2. **Phase 2** — ✅ content-hash `--check` gate (decision #6: `> Body-hash:`
+   header over the body = fast tier; fresh-render body compare = full
+   tier; `--fix` rewrites; DB-free per P6) + MCP `code_index` tool,
+   modes refresh/query/check (`GTW_INSTRUCTIONS.md` parity in the same
+   change) + doctor `code_index` store check. Deviation from the sketch:
+   the header hash is md5 (drift detection, not adversarial) — same
+   hasher as the rest of the codebase, no new dependency.
 3. **Phase 3** — knowledge-graph migration into the same DB; canonical
    ID format (T6) resolved and adopted first.
 4. **Phase 4 (optional)** — trigger plumbing + runner hooks (git hook,
