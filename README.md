@@ -2,6 +2,37 @@
 
 **AI-native tree-based code editor** - Edit code files based on AST structure levels with surgical precision, avoiding the common pitfalls of LLM-generated code.
 
+## 🚀 Version 0.21.x: Code-Index Store, Knowledge Graph & Self-Running Bits
+
+The project structure index grew into a full **structure layer** (capability ladder: bas → struktur → semantik — tools degrade and name the level that answered; `doctor` reports it).
+
+**The store**: `.gnawtreewriter_ai/code_index.db` (SQLite, gitignored) holds items, entities, relations and symbols — refreshed incrementally (only changed files re-parse), rendered to the committed `code-index.md`. Canonical entity IDs (`gtw:{path}:{type}:{name}`, qualified methods `Foo::new`), honest relation targets (`to_name` always, `to_id` when uniquely resolved), unresolved targets aggregated as symbols. The knowledge graph (impact analysis, blueprint, doctor resolution stats) reads the store — graph JSON is no longer written.
+
+**The gate**: `--check` verifies the committed `code-index.md` against a fresh render via a body content-hash (fast tier: header vs body; full tier: re-render compare) — DB-free, non-zero exit on mismatch, `--fix` rewrites.
+
+**Self-running**: edits mark the store stale (`doctor` shows the queue); `--install-hook` adds a post-commit refresh (per clone, explicit, never auto-stages).
+
+```bash
+# Incremental store refresh + markdown projection
+gnawtreewriter code-index . --db -o code-index.md
+
+# Verify the committed artifact (CI-friendly), rewrite when stale
+gnawtreewriter code-index . --check
+gnawtreewriter code-index . --check --fix
+
+# Post-commit freshness (explicit install, per clone; never stages)
+gnawtreewriter code-index . --install-hook
+
+# Store health: capability level, file count, staleness queue
+gnawtreewriter doctor
+```
+
+**MCP tool `code_index`** — one surface for the layer: `mode: refresh | query | check`, query payloads `kind: items | relations | symbols` (filtered by `path_prefix`). Relations carry `to_name` + resolved `to_id`; `node_path` chains into `read_node`/`edit_node` (valid at the indexed hash — re-validate the name first).
+
+Design + decisions: `docs/CODE_INDEX_SQLITE_DESIGN.md` (review 2026-11-02, Phases 1–4 complete). Queries also work without GTW: `sqlite3 "file:.gnawtreewriter_ai/code_index.db?mode=ro"`.
+
+---
+
 ## 🚀 Version 0.9.7: Rules Engine & LLM Augmentation
 
 **New rules engine** with semgrep-inspired AST pattern matching, expanding `lint` from a syntax checker to a real code quality tool. Rules boost the local LLM's edit capability by injecting code-pattern expertise into prompts — without changing the model.

@@ -75,11 +75,42 @@ pub struct StructuralChange {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {
     pub overall_healthy: bool,
+    /// Capability ladder (2026-10-31 proposal, spår 2): "semantik" when
+    /// the bge-base model is installed, "struktur" otherwise — bas
+    /// (parse/AST) is always present and thus the floor, never reported
+    /// as a lesser level. Tools degrade to this level and NAME it in
+    /// their responses (`level` field); nothing dies.
+    pub capability: &'static str,
+    #[serde(default)]
     pub checks: Vec<DoctorCheck>,
     pub total_checks: usize,
     pub passed: usize,
     pub failed: usize,
     pub warnings: usize,
+}
+
+/// The bge-base presence check shared by the doctor check and the
+/// capability level.
+fn semantic_model_present(project_root: &std::path::Path) -> bool {
+    let local = project_root.join(".gnawtreewriter_ai").join("models");
+    let cache_dir = if local.exists() && local.join("modernbert").exists() {
+        local
+    } else {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        std::path::PathBuf::from(home)
+            .join(".gnawtreewriter_ai")
+            .join("models")
+    };
+    cache_dir.join("bge-base").join("config.json").is_file()
+}
+
+/// The answered level of the ladder (see DoctorReport.capability).
+pub fn capability_level(project_root: &std::path::Path) -> &'static str {
+    if semantic_model_present(project_root) {
+        "semantik"
+    } else {
+        "struktur"
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -362,6 +393,7 @@ impl DoctorReport {
     pub fn new() -> Self {
         Self {
             overall_healthy: true,
+            capability: "struktur",
             checks: Vec::new(),
             total_checks: 0,
             passed: 0,
@@ -528,21 +560,12 @@ impl DoctorReport {
     /// AiManager's cache resolution: project-local first, then $HOME.
     #[cfg(feature = "modernbert")]
     pub fn check_semantic_model(&mut self, project_root: &std::path::Path) {
-        let local = project_root.join(".gnawtreewriter_ai").join("models");
-        let cache_dir = if local.exists() && local.join("modernbert").exists() {
-            local
-        } else {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            std::path::PathBuf::from(home)
-                .join(".gnawtreewriter_ai")
-                .join("models")
-        };
-        let cfg = cache_dir.join("bge-base").join("config.json");
+        let cfg = semantic_model_present(project_root);
         self.record_check(DoctorCheck {
             category: "ai_runtime".to_string(),
             name: "semantic_model".to_string(),
-            status: if cfg.is_file() { "pass" } else { "warn" }.to_string(),
-            message: if cfg.is_file() {
+            status: if cfg { "pass" } else { "warn" }.to_string(),
+            message: if cfg {
                 "bge-base model files present — sense/search_semantic semantic ranking available."
                     .to_string()
             } else {
@@ -884,6 +907,7 @@ fn installed_binary_date() -> String {
 
 pub fn run_full_doctor(project_root: &std::path::Path) -> DoctorReport {
     let mut report = DoctorReport::new();
+    report.capability = capability_level(project_root);
 
     let parser_tests = [
         ("py", "def hello(): pass"),

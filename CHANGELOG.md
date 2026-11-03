@@ -1,4 +1,22 @@
-## [Unreleased]
+## [0.22.0] - 2026-11-03
+
+### Added — capability ladder (2026-10-31 proposal, spår 2)
+- **Tools degrade, never die — and name the level that answered.**
+  Ladder: `bas` (parse/AST/edit — always) → `struktur` (code-index store
+  + knowledge graph — always when tree-sitter parses) → `semantik`
+  (bge-base ranking). sense/search_semantic responses carry a `level`
+  field (`semantik` on the model path, `struktur` on the T5 lexical
+  degrade); `doctor` reports the ladder (`capability` field + CLI line).
+  The always-works guarantee of the bas/struktur rungs is covered by the
+  no-store tests (phase3/phase4 suites).
+
+### Changed — T4: NO-OP edits are a success, not an error
+- `edit` on identical content now returns **Ok with `changed: false`**
+  (verdict notice `no_op` still set, history row "NO-OP (identical
+  content)" recorded, file untouched) — previously `Err("NO-OP: …")`.
+  Harmonizes CLI/library/batch flows with the MCP edit_node
+  idempotent-retry path that already shielded its users. Callers that
+  branched on the Err must branch on the receipt instead.
 
 ### Added — Phase 4 (core): staleness writes + post-commit hook
 - **Edits mark the store stale** (decision #8): every successful edit

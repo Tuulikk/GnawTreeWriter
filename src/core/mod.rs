@@ -285,7 +285,9 @@ impl GnawTreeWriter {
                 let resolved = self
                     .resolve_path(node_path)
                     .context(format!("Could not resolve node path: {}", node_path))?;
-                if resolved.content == *content {
+                let resolved_path = resolved.path.clone();
+                let resolved_content = resolved.content.clone();
+                if resolved_content == *content {
                     self.set_verdict(
                         "notice",
                         1.0,
@@ -299,10 +301,30 @@ impl GnawTreeWriter {
                             "Use preview_edit to inspect the target node".to_string(),
                         ],
                     );
-                    return Err(anyhow::anyhow!(
-                        "NO-OP: new content is identical to the current content of node {} (0 bytes would change). Nothing was written — verify the node path and intended change, or use preview_edit.",
-                        node_path
-                    ));
+                    // T4 (issue log 2026-10-19): a NO-OP is a successful
+                    // edit that changed nothing — Ok + changed=false, not
+                    // an Err. Callers branch on the receipt; the verdict
+                    // and the history row still tell the story. (The MCP
+                    // edit_node tool already shielded its users via the
+                    // idempotent-retry path — this harmonizes CLI,
+                    // library and batch flows with that behavior.)
+                    let transaction_id = self.transaction_log.log_transaction(
+                        OperationType::Edit,
+                        PathBuf::from(&self.file_path),
+                        Some(resolved_path.clone()),
+                        Some(resolved_content.clone()),
+                        Some(resolved_content),
+                        "NO-OP (identical content) — nothing written".to_string(),
+                        HashMap::new(),
+                    )?;
+                    self.last_transaction_id = Some(transaction_id.clone());
+                    self.last_receipt = Some(EditReceipt {
+                        transaction_id,
+                        verified: true,
+                        changed: false,
+                        bytes_changed: 0,
+                    });
+                    return Ok(());
                 }
                 self.edit_node_at_path(&resolved.path, content)?
             }
@@ -1209,10 +1231,11 @@ mod tests {
         );
     }
 
-    /// Fas 3: an edit whose content equals the node content must be
-    /// rejected loudly (finding #14 class) and write nothing.
+    /// T4 (issue log 2026-10-19): an edit whose content equals the node
+    /// content is a SUCCESSFUL no-change — Ok + changed=false, verdict
+    /// notice set, nothing written, history row recorded.
     #[test]
-    fn edit_noop_is_rejected() {
+    fn edit_noop_reports_changed_false() {
         let code = "fn small() {\n    let x = 1;\n}\n";
         let (_dir, path) = temp_rust_file(code);
         let mut gtw = GnawTreeWriter::new(&path).unwrap();
@@ -1227,16 +1250,23 @@ mod tests {
             false,
         );
 
-        let msg = format!(
-            "{}",
-            result.expect_err("identical content must be rejected as NO-OP")
+        assert!(
+            result.is_ok(),
+            "NO-OP must not be an error: {:?}",
+            result.err()
         );
-        assert!(msg.contains("NO-OP"), "expected NO-OP, got: {}", msg);
+        let receipt = gtw.last_receipt.clone().expect("receipt present");
+        assert!(!receipt.changed, "changed=false on a NO-OP");
+        assert!(receipt.verified);
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             before,
-            "file must be untouched after a NO-OP rejection"
+            "file must be untouched after a NO-OP"
         );
+        // The verdict notice still tells the story.
+        let verdict = gtw.last_edit_verdict().expect("verdict present");
+        assert_eq!(verdict["level"], "notice");
+        assert_eq!(verdict["findings"][0]["rule"], "no_op");
     }
 
     /// Fas 3: a successful edit produces a receipt proving bytes landed

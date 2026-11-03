@@ -38,6 +38,21 @@ All features available as MCP tools:
 - `compress` - Compress a file
 - `pack` - Package entire project
 - `curate` - Intelligent file selection
+- `code_index` - Structure layer: refresh (incremental SQLite store), query (`kind: items | relations | symbols`, `path_prefix` filter), check (content-hash gate over the committed code-index.md)
+
+## Capability Ladder
+
+Tools degrade, never die — and name the level that answered (`level`
+field in sense/search_semantic responses; `doctor` reports it):
+
+- **bas** — parse/AST/edit/quick-*: always available, no setup.
+- **struktur** — code-index store + knowledge graph (entities/relations/
+  symbols): always available when tree-sitter parses; the store is built
+  by `code-index --db` (refresh) and read by impact/blueprint/doctor.
+- **semantik** — sense/search_semantic with real ranking: needs the
+  bge-base model (`gnawtreewriter ai setup`) and a built index
+  (`index_project`). Missing either → those tools DEGRADE to lexical
+  matches and say so (`level: struktur`, `degraded: true`, reason named).
 
 ## Integration with AI Agents
 

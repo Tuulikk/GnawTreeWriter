@@ -1869,6 +1869,7 @@ or list_nodes for a flat index of this file.",
                         top
                     ),
                     Some(json!({
+                        "level": "struktur",
                         "degraded": true,
                         "reason": reason,
                         "mode": "lexical",
@@ -1943,7 +1944,7 @@ or list_nodes for a flat index of this file.",
                     tool_success(
                         format!("Found {} matches for \"{}\"", results.len(), query),
                         Some(
-                            json!({"matches": results, "query": query, "mode": "satellite", "search_quality": quality}),
+                            json!({"level": "semantik", "matches": results, "query": query, "mode": "satellite", "search_quality": quality}),
                         ),
                     )
                 }
@@ -1966,7 +1967,7 @@ or list_nodes for a flat index of this file.",
                     tool_success(
                         format!("Found {} nodes in {} for \"{}\"", results.len(), fp, query),
                         Some(
-                            json!({"matches": results, "query": query, "file": fp, "mode": "zoom", "impact": impact}),
+                            json!({"level": "semantik", "matches": results, "query": query, "file": fp, "mode": "zoom", "impact": impact}),
                         ),
                     )
                 }
@@ -3221,7 +3222,11 @@ or list_nodes for a flat index of this file.",
                                     top,
                                     suspect_note
                                 ),
-                                Some(json!({"matches": matches, "search_quality": quality})),
+                                Some(json!({
+                                    "level": "semantik",
+                                    "matches": matches,
+                                    "search_quality": quality
+                                })),
                             )
                         }
                     }
@@ -3253,7 +3258,11 @@ or list_nodes for a flat index of this file.",
                                     nodes.len(),
                                     top
                                 ),
-                                Some(json!({"nodes": nodes, "impact": impact})),
+                                Some(json!({
+                                    "level": "semantik",
+                                    "nodes": nodes,
+                                    "impact": impact
+                                })),
                             )
                         }
                     }

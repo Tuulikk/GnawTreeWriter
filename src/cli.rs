@@ -5514,6 +5514,10 @@ Use without --preview to apply the clone"
             "\n{}",
             "🔬 Doctor checks: parsers, backup integrity, transaction log".bold()
         );
+        println!(
+            "Nivå: {} (bas alltid; struktur = store/graf; semantik = bge-base installerad — verktyg degraderar och namnger sin nivå)",
+            report.capability
+        );
 
         // --- Print results ---
         match format {

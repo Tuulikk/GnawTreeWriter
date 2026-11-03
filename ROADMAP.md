@@ -2,6 +2,16 @@
 
 ## Overview
 
+> **Status update 2026-11-03:** the roadmap text below predates v0.10 — it
+> is kept for the long-term direction but is NOT the current plan of
+> record. Shipped since: rules engine + Duplex Loop (0.9.7-line), GnawSense,
+> MCP parity phases, the **code-index structure layer** (Phases 1–4:
+> SQLite store, content-hash gate + MCP `code_index` tool, knowledge-graph
+> consolidation, staleness queue + post-commit hook; T6 canonical IDs
+> resolved). Current plan of record: `docs/CODE_INDEX_SQLITE_DESIGN.md`
+> and `CHANGELOG.md`. LSP-grade symbol resolution and the MCP daemon
+> remain the open add-on tracks (see the design doc's trigger section).
+
 GnawTreeWriter is a tree-based code editor optimized for LLM-assisted editing. This roadmap outlines the evolution from a precise CLI tool to an intelligent agent-integrated platform.
 
 The roadmap is divided into two sections:
