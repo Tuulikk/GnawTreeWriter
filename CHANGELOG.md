@@ -1,5 +1,44 @@
 ## [Unreleased]
 
+### Added — T6 resolved: canonical IDs + honest relation targets (Phase 3 foundation)
+- **Entity IDs canonical** (`gtw:{canonical_relpath}:{type}:{name}`): paths
+  POSIX + git-toplevel-relative regardless of caller input
+  (`canonical_entity_path`); impl/trait methods **name-qualified**
+  (`Foo::new`) — the old bare `function:new` collided across impls;
+  deterministic `#N` disambiguation in line order for remaining
+  duplicates. Parse IDs with `splitn(4, ':')` — the name segment may
+  contain `::` and `#N`.
+- **`Relation.to` → `to_name` + `to_id: Option<String>`** — the honest
+  three-class target (review decision #12): `to_name` always set (bare
+  identifier or module path); `to_id` only when the target resolves
+  uniquely against the indexed entity set (same-file preferred). The old
+  doc claimed `to` was always a full entity ID — it never was (imports
+  carried module paths, calls bare names): the claim-scan class, caught
+  while landing T6.
+- **Cross-file call edges now exist**: the per-file "defined" filter hid
+  every call to another file's functions; calls are now recorded
+  unresolved and the full-index resolution pass resolves them
+  (FK-integrity prerequisite for the DB relations table).
+- **Store schema v2** (`PRAGMA user_version = 2`): `entities`,
+  `relations` (FK on `to_id` only — synthetic callsite from-ids are not
+  entity rows) and `symbols` (unresolved/external targets with
+  occurrence counts). Filled during `--db` refresh from the same parse —
+  no double parsing. MCP `code_index` query gains `kind: items |
+  relations | symbols`.
+- Dogfood on this repo: 2 464 entities, 4 464 relations (1 130
+  resolved), 969 symbols (top: String/Ok/Option — std types).
+
+### BREAKING (lib)
+- `Relation` field `to: String` → **`to_name: String` + `to_id:
+  Option<String>`** (serialized JSON shape changes; Motor2 consumers of
+  `index_relations` output must read `to_name`/`to_id`).
+- `extract_function`/`extract_entities_from_tree` signatures changed
+  (qualifier param); `find_calls_in_scope` lost its `defined` parameter.
+- Entity IDs for impl/trait methods change value (qualification) —
+  stored graphs keyed on old IDs are stale by definition.
+- Relation calls set grew: previously only same-file-defined or
+  path-qualified callees were recorded.
+
 ### Added — code-index Phase 2: content-hash gate + MCP tool + doctor
 - **`gnawtreewriter code-index <root> --check [--fix]`** — the gate from
   review decision #6, DB-free by construction (P6): fast tier = committed

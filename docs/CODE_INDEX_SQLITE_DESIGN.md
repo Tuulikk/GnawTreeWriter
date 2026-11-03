@@ -1,6 +1,6 @@
 # Design: code-index SQLite store with a committed markdown projection
 
-**Status:** Accepted direction (2026-10-31) · Reviewed 2026-11-02 — 13 findings resolved (see "Review 2026-11-02 — decisions") · Phase 1 + Phase 2 implemented (gate, MCP tool, doctor); Phase 3 blocked on T6
+**Status:** Accepted direction (2026-10-31) · Reviewed 2026-11-02 — 13 findings resolved · Phase 1 + 2 implemented · T6 resolved + Phase 3 STARTED (schema v2: entities/relations/symbols born and filled; JSON-graph deprecation pending consumer audit)
 **Origin:** User discussion, 2026-10-31 GTW session (after v0.20.1 release)
 **Scope note:** This precedes T3–T6 in the issue-log backlog; T6 (canonical
 ID format) is a *prerequisite* for Phase 3, not for Phase 1.
@@ -87,10 +87,18 @@ staleness_queue(file TEXT PRIMARY KEY, reason TEXT NOT NULL,
 ```
 
 Deltas from the original sketch, per review decisions: `files.rev` dropped
-(P7); `intros` and `relations` are NOT created in v1 (intros are file-sourced,
-decision #2; relations wait for T6, decision #12); `staleness_queue` gains a
-PK and is a queue (upsert, latest event wins), not a log (decision #8);
-`meta` is new (decisions #1, #7, #9).
+(P7); `intros` is NOT created (intros are file-sourced, decision #2);
+`staleness_queue` gains a PK and is a queue (upsert, latest event wins),
+not a log (decision #8); `meta` is new (decisions #1, #7, #9).
+
+**Schema v2 (T6 landed 2026-11-03):** `entities`, `relations` and
+`symbols` born — the knowledge-graph consolidation (Phase 3) STARTED in
+the same db, filled during refresh from the same parse. `relations`
+carries the honest split: `to_name` always, `to_id` NULLable with the
+FK on it only (synthetic callsite from-ids are not entity rows — no FK
+on `from_id`); unresolved targets aggregate into `symbols` with an
+external flag. Entities carry canonical qualified IDs
+(`Foo::new`, `#N` suffixes).
 
 - WAL mode; `PRAGMA user_version` drives migrations (v1 at birth).
 - `items.node_path` closes the chain `code-index → sense → read_node →
@@ -163,8 +171,10 @@ DB is absent or corrupt. Zero-setup charm is the feature's virtue.
    change) + doctor `code_index` store check. Deviation from the sketch:
    the header hash is md5 (drift detection, not adversarial) — same
    hasher as the rest of the codebase, no new dependency.
-3. **Phase 3** — knowledge-graph migration into the same DB; canonical
-   ID format (T6) resolved and adopted first.
+3. **Phase 3** — 🚧 STARTED (T6 landed): entities/relations/symbols tables
+   born in schema v2 and filled during refresh. REMAINING: migrate the
+   knowledge-graph JSON consumers (RelationalIndexer/impact_analyzer)
+   onto the DB tables, then deprecate `.gnawtreewriter_ai/graph/*.json`.
 4. **Phase 4 (optional)** — trigger plumbing + runner hooks (git hook,
    staleness writer in edit responses).
 
@@ -218,7 +228,7 @@ shared; only the committed projection is shared.
 | 9 | `rev` per file row | Dropped — `meta.last_refresh_rev` (P7) |
 | 10 | DB location for subdir roots | `--db` normalizes the index root to git toplevel (one clone, one DB; no-git dirs use the walked root), announced when it differs |
 | 11 | Path normalization unspecified | `canonical_rel_path()`: POSIX separators, index-root relative; one walker (the tool's own) |
-| 12 | `relations` born dead / bare names | Not created in v1. T6 constraints recorded: `items.id` must survive line shifts (not line-based), be name-qualified, handle collisions; external names → `symbols(name)` |
+| 12 | `relations` born dead / bare names | **Resolved (T6, 2026-11-03):** `relations` + `entities` + `symbols` born in schema v2 with the honest `to_name`/`to_id` split; `items.id` format decided: qualified (`Foo::new`), `#N`-disambiguated, canonical paths — survives line shifts |
 | 13 | "Readers may be any tool" | Checkpoint (TRUNCATE) after refresh; consumers use `mode=ro` URIs |
 
 ## References

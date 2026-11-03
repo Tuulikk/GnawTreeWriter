@@ -411,7 +411,11 @@ pub mod mcp_server {
                             .get("fix")
                             .and_then(Value::as_bool)
                             .unwrap_or(false);
-                        Ok(handle_code_index_mcp(mode, root, intro, prefix, fix))
+                        let kind = arguments
+                            .get("kind")
+                            .and_then(Value::as_str)
+                            .unwrap_or("items");
+                        Ok(handle_code_index_mcp(mode, root, intro, prefix, fix, kind))
                     }
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
@@ -567,6 +571,7 @@ pub mod mcp_server {
                         "root": { "type": "string", "description": "Project root (default .)" },
                         "intro_file": { "type": "string", "description": "Optional intro splice file for refresh/check renders" },
                         "path_prefix": { "type": "string", "description": "query: only paths starting with this prefix" },
+                        "kind": { "type": "string", "description": "query payload: items (default) | relations (from/to_name/to_id/type) | symbols (unresolved+external names)" },
                         "fix": { "type": "boolean", "description": "check: rewrite the artifact when stale (default false)" }
                     },
                     "required": []
@@ -3011,14 +3016,16 @@ or list_nodes for a flat index of this file.",
     }
 
     /// `code_index` — the structure-index surface: refresh (incremental store),
-    /// query (items from the store) and check (content-hash gate). Query and
-    /// check never create the store (decision #8 / P6).
+    /// query (items / relations / symbols from the store) and check
+    /// (content-hash gate). Query and check never create the store
+    /// (decision #8 / P6).
     fn handle_code_index_mcp(
         mode: &str,
         root: &str,
         intro: Option<&str>,
         prefix: Option<&str>,
         fix: bool,
+        kind: &str,
     ) -> Value {
         use crate::core::code_index::{self as ci, CodeIndexOptions};
         use crate::core::code_index_db;
@@ -3047,16 +3054,32 @@ or list_nodes for a flat index of this file.",
                 // The store is repo-rooted (toplevel normalization, decision #10).
                 let index_root = code_index_db::resolve_index_root(root_path);
                 match code_index_db::open_existing(&index_root) {
-                    Ok(conn) => match code_index_db::load_index(&conn) {
-                        Ok(files) => {
-                            let files: Vec<_> = files
-                                .into_iter()
-                                .filter(|f| prefix.is_none_or(|p| f.path.starts_with(p)))
-                                .collect();
-                            let count = files.len();
-                            json!({ "mode": "query", "files": files, "count": count })
-                        }
-                        Err(e) => tool_error(format!("code_index query failed: {e:#}")),
+                    Ok(conn) => match kind {
+                        "relations" => match code_index_db::load_relations(&conn, prefix) {
+                            Ok(rows) => json!({
+                                "mode": "query", "kind": "relations",
+                                "count": rows.len(), "relations": rows
+                            }),
+                            Err(e) => tool_error(format!("code_index query failed: {e:#}")),
+                        },
+                        "symbols" => match code_index_db::load_symbols(&conn) {
+                            Ok(rows) => json!({
+                                "mode": "query", "kind": "symbols",
+                                "count": rows.len(), "symbols": rows
+                            }),
+                            Err(e) => tool_error(format!("code_index query failed: {e:#}")),
+                        },
+                        _ => match code_index_db::load_index(&conn) {
+                            Ok(files) => {
+                                let files: Vec<_> = files
+                                    .into_iter()
+                                    .filter(|f| prefix.is_none_or(|p| f.path.starts_with(p)))
+                                    .collect();
+                                let count = files.len();
+                                json!({ "mode": "query", "kind": "items", "files": files, "count": count })
+                            }
+                            Err(e) => tool_error(format!("code_index query failed: {e:#}")),
+                        },
                     },
                     Err(e) => tool_error(format!("code_index query: {e:#}")),
                 }

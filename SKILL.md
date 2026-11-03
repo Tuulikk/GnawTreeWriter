@@ -1,6 +1,16 @@
 ---
 name: gnawtreewriter
-description: Use when the agent needs to edit code (change a function or node, batch edits, rename, undo an edit), diagnose or explore file structure (AST skeleton, analyze, list nodes), find where something is implemented (semantic search via sense/search_semantic), read a specific node, lint/fix code, check system health (doctor), or produce an AST-aware diff — in any project where GnawTreeWriter is installed. Triggers: "edit code", "where is X implemented", "file structure", "batch edit", "rename", "undo edit", "GTW", "gnawtreewriter", "ändra en funktion", "var är X implementerat", "struktur på filen", "lint", "doctor". Prefer GTW tools over plain text editing when the target is code.
+description: >-
+  Use when the agent needs to edit code (change a function or node, batch
+  edits, rename, undo an edit), diagnose or explore file structure (AST
+  skeleton, analyze, list nodes), find where something is implemented
+  (semantic search via sense/search_semantic), read a specific node,
+  lint/fix code, check system health (doctor), or produce an AST-aware
+  diff — in any project where GnawTreeWriter is installed. Triggers: "edit
+  code", "where is X implemented", "file structure", "batch edit",
+  "rename", "undo edit", "GTW", "gnawtreewriter", "ändra en funktion",
+  "var är X implementerat", "struktur på filen", "lint", "doctor". Prefer
+  GTW tools over plain text editing when the target is code.
 ---
 
 # Skill: GnawTreeWriter 🌳✨

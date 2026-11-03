@@ -1,10 +1,10 @@
 # CODE-INDEX — GnawTreeWriter
 
-> Genererad 2026-11-02 17:42 UTC · gnawtreewriter 0.21.0 · git `da3df47` +DIRTY
+> Genererad 2026-11-03 20:10 UTC · gnawtreewriter 0.21.0 · git `fbf3db3` +DIRTY
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: a1169a791ec63a75b6a6ca0ad33bc420
+> Body-hash: 10baa6055b1a194ddd5b0db50d346b7d
 
 ## Träd
 
@@ -61,7 +61,7 @@ src/core/
   blast.rs (310 rader)
   blueprint.rs (182 rader)
   code_index.rs (678 rader)
-  code_index_db.rs (537 rader)
+  code_index_db.rs (757 rader)
   compress.rs (487 rader)
   curator.rs (709 rader)
   diagnostics.rs (1053 rader)
@@ -75,8 +75,8 @@ src/core/
   gnaw_refactor.rs (369 rader)
   guardian.rs (332 rader)
   healer.rs (78 rader)
-  index_entities.rs (800 rader)
-  index_relations.rs (585 rader)
+  index_entities.rs (893 rader)
+  index_relations.rs (658 rader)
   inspect.rs (514 rader)
   label_manager.rs (90 rader)
   macro_dispatcher.rs (249 rader)
@@ -110,7 +110,7 @@ src/llm/
   relational_index.rs (506 rader)
   semantic_index.rs (1128 rader)
 src/mcp/
-  mod.rs (3944 rader)
+  mod.rs (3967 rader)
 src/parser/
   bash.rs (84 rader)
   c.rs (84 rader)
@@ -164,6 +164,7 @@ tests/
   insert_position.rs (555 rader)
   mcp_integration.rs (2291 rader)
   relational_integration.rs (55 rader)
+  t6_canonical_ids.rs (206 rader)
 ```
 
 ## ./
@@ -586,31 +587,36 @@ _(inga toppnivå-items)_
 - `pub struct CheckResult` :512
 - `pub fn check_index(` :523
 
-### code_index_db.rs (537 rader)
+### code_index_db.rs (757 rader)
 - `pub const EXTRACTOR_VERSION: &str = "1"` :30
-- `const SCHEMA_VERSION: i32 = 1` :32
+- `const SCHEMA_VERSION: i32 = 2` :32
 - `const BUSY_TIMEOUT_MS: u64 = 5000` :33
 - `const SCHEMA_V1: &str = r#"` :35
-- `pub struct RefreshStats` :67
-- `pub struct DbRun` :76
-- `pub fn db_path(root: &Path) -> PathBuf` :86
-- `pub fn resolve_index_root(root: &Path) -> PathBuf` :93
-- `fn sidecar(path: &Path, suffix: &str) -> PathBuf` :113
-- `fn open_and_migrate(path: &Path) -> Result<Connection>` :119
-- `pub fn open_or_recreate(root: &Path) -> Result<(Connection, bool)>` :141
-- `pub fn open_existing(root: &Path) -> Result<Connection>` :162
-- `pub struct StoreStatus` :184
-- `pub fn store_status(root: &Path) -> Option<StoreStatus>` :191
-- `fn generation_key(opts: &CodeIndexOptions) -> String` :212
-- `fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>>` :220
-- `fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()>` :229
-- `fn upsert_file(` :240
-- `pub fn refresh(` :295
-- `pub(crate) fn load_index(conn: &Connection) -> Result<Vec<FileIndex>>` :398
-- `fn load_warnings(conn: &Connection) -> Result<Vec<String>>` :463
-- `pub fn render(` :476
-- `pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun>` :490
-- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :523
+- `const SCHEMA_V2: &str = r#"` :72
+- `pub struct RefreshStats` :101
+- `pub struct DbRun` :110
+- `pub fn db_path(root: &Path) -> PathBuf` :120
+- `pub fn resolve_index_root(root: &Path) -> PathBuf` :127
+- `fn sidecar(path: &Path, suffix: &str) -> PathBuf` :147
+- `fn open_and_migrate(path: &Path) -> Result<Connection>` :153
+- `pub fn open_or_recreate(root: &Path) -> Result<(Connection, bool)>` :180
+- `pub fn open_existing(root: &Path) -> Result<Connection>` :201
+- `pub struct StoreStatus` :223
+- `pub fn store_status(root: &Path) -> Option<StoreStatus>` :230
+- `fn generation_key(opts: &CodeIndexOptions) -> String` :251
+- `fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>>` :259
+- `fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()>` :268
+- `fn upsert_file(` :279
+- `pub fn refresh(` :334
+- `pub(crate) fn load_index(conn: &Connection) -> Result<Vec<FileIndex>>` :460
+- `fn load_warnings(conn: &Connection) -> Result<Vec<String>>` :525
+- `pub fn render(` :538
+- `pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun>` :552
+- `fn store_entities_relations(` :587
+- `fn resolve_unresolved_in_db(conn: &Connection) -> Result<()>` :643
+- `pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :697
+- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :721
+- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :743
 
 ### compress.rs (487 rader)
 - `pub struct CompressedOutput` :12
@@ -833,39 +839,44 @@ _(inga toppnivå-items)_
   - `fn heal_brace_languages(&self, _code: &str, error: &SyntaxError) -> Option<HealingAction>` :40
   - `fn heal_python(&self, code: &str, error: &SyntaxError) -> Option<HealingAction>` :61
 
-### index_entities.rs (800 rader)
+### index_entities.rs (893 rader)
 - `pub struct Entity` :13
 - `pub struct EntityIndex` :38
 - `pub fn index_entities(file_path: &str, include_private: bool) -> Result<EntityIndex>` :52
-- `fn get_node_source(node: &TreeNode, lines: &[&str]) -> String` :163
-- `fn get_first_line(node: &TreeNode, lines: &[&str]) -> String` :169
-- `fn detect_visibility(node: &TreeNode) -> String` :178
-- `fn extract_doc_comment(node: &TreeNode, lines: &[&str]) -> Option<String>` :210
-- `fn extract_function(` :235
-- `fn extract_struct(` :266
-- `fn extract_enum(` :340
-- `fn extract_impl(` :412
-- `fn extract_trait(` :476
-- `fn extract_type_alias(` :528
-- `fn extract_const(` :558
-- `fn extract_static(` :587
-- `fn extract_module(` :616
+- `pub fn extract_entities_from_tree(` :62
+- `pub fn canonical_entity_path(file_path: &str) -> String` :76
+- `fn disambiguate_ids(entities: &mut [Entity])` :101
+- `fn collect_entities(` :121
+- `fn get_node_source(node: &TreeNode, lines: &[&str]) -> String` :238
+- `fn get_first_line(node: &TreeNode, lines: &[&str]) -> String` :244
+- `fn detect_visibility(node: &TreeNode) -> String` :253
+- `fn extract_doc_comment(node: &TreeNode, lines: &[&str]) -> Option<String>` :285
+- `fn extract_function(` :310
+- `fn extract_struct(` :351
+- `fn extract_enum(` :425
+- `fn extract_impl(` :497
+- `fn extract_trait(` :567
+- `fn extract_type_alias(` :621
+- `fn extract_const(` :651
+- `fn extract_static(` :680
+- `fn extract_module(` :709
 
-### index_relations.rs (585 rader)
-- `pub struct Relation` :13
-- `pub struct RelationIndex` :34
-- `pub fn index_relations(file_path: &str) -> Result<RelationIndex>` :44
-- `fn get_line(lines: &[&str], line_num: usize) -> String` :79
-- `fn extract_imports(` :88
-- `fn extract_import_target(import_line: &str) -> Option<String>` :159
-- `fn extract_calls(tree: &TreeNode, file_path: &str, lines: &[&str], relations: &mut Vec<Relation>)` :184
-- `fn is_function_like(node_type: &str) -> bool` :191
-- `fn collect_defined_functions(tree: &TreeNode, funcs: &mut std::collections::HashSet<String>)` :198
-- `fn find_calls_in_scope(` :212
-- `fn extract_type_usage(` :260
-- `fn extract_type_refs(` :293
-- `fn extract_impl_relations(` :318
-- `fn extract_trait_from_impl(impl_text: &str) -> Option<String>` :360
+### index_relations.rs (658 rader)
+- `pub struct Relation` :14
+- `pub struct RelationIndex` :43
+- `pub fn index_relations(file_path: &str) -> Result<RelationIndex>` :54
+- `pub fn extract_relations_from_tree(` :64
+- `pub fn resolve_relations(relations: &mut [Relation], entities: &[Entity])` :104
+- `fn get_line(lines: &[&str], line_num: usize) -> String` :142
+- `fn extract_imports(` :151
+- `fn extract_import_target(import_line: &str) -> Option<String>` :224
+- `fn extract_calls(tree: &TreeNode, file_path: &str, lines: &[&str], relations: &mut Vec<Relation>)` :249
+- `fn is_function_like(node_type: &str) -> bool` :254
+- `fn find_calls_in_scope(` :261
+- `fn extract_type_usage(` :330
+- `fn extract_type_refs(` :363
+- `fn extract_impl_relations(` :389
+- `fn extract_trait_from_impl(impl_text: &str) -> Option<String>` :432
 
 ### inspect.rs (514 rader)
 - `pub enum InspectMode` :12
@@ -1464,7 +1475,7 @@ _(inga toppnivå-items)_
 
 ## src/mcp/
 
-### mod.rs (3944 rader)
+### mod.rs (3967 rader)
 _(inga toppnivå-items)_
 
 ## src/parser/
@@ -1971,6 +1982,14 @@ _(inga toppnivå-items)_
 
 ### relational_integration.rs (55 rader)
 _(inga toppnivå-items)_
+
+### t6_canonical_ids.rs (206 rader)
+- `fn parse(code: &str) -> gnawtreewriter::parser::TreeNode` :16
+- `fn impl_methods_are_qualified_in_ids()` :22
+- `fn disambiguation_is_deterministic_by_line_order()` :56
+- `fn entity_paths_are_canonical()` :97
+- `fn relations_carry_honest_targets()` :108
+- `fn db_stores_graph_tables_and_resolves_cross_file()` :159
 
 > ⚠ 3 fil(er) med syntaxvarning (partiell AST, items kan saknas):
 >   - color_test.rs (Partial parse: syntax error found — results may be incomplete (editors still refuse this file strictly) @ line 1)

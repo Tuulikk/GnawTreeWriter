@@ -3,6 +3,7 @@
 //! Extracts call relationships, imports, type usage, and other dependencies
 //! that a Memory System can store as graph edges.
 
+use crate::core::index_entities::Entity;
 use crate::parser::TreeNode;
 use crate::GnawTreeWriter;
 use anyhow::Result;
@@ -12,15 +13,23 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 pub struct Relation {
     /// Source entity ID: `gtw:{file}:function:{name}` when the relation
-    /// originates inside a named function/method, `gtw:{file}:impl:{name}`
-    /// / `gtw:{file}:file:{stem}` for the other relation kinds — and for
-    /// calls without any enclosing scope (static initializers, top-level
-    /// expressions) the stable synthetic `gtw:{file}:callsite:{line}`.
-    /// NEVER an empty string (Motor2 report 2026-10-05 — consumers rely
-    /// on this to key their UIs).
+    /// originates inside a named function/method (impl methods qualified
+    /// `Type::name`, T6), `gtw:{file}:impl:{name}` / `gtw:{file}:file:{stem}`
+    /// for the other relation kinds — and for calls without any enclosing
+    /// scope (static initializers, top-level expressions) the stable
+    /// synthetic `gtw:{file}:callsite:{line}`. NEVER an empty string
+    /// (Motor2 report 2026-10-05 — consumers rely on this to key their UIs).
+    /// Synthetic callsite ids are NOT entity rows (no FK).
     pub from: String,
-    /// Target entity ID (gtw:{file}:{type}:{name})
-    pub to: String,
+    /// T6 honest target, three classes (review decision #12): ALWAYS set —
+    /// a bare identifier (calls, uses, implements) or a module path
+    /// (imports, `std::fmt`).
+    pub to_name: String,
+    /// Full `gtw:` entity ID when the target resolves uniquely against the
+    /// indexed entity set (same-file match preferred); NULL when the target
+    /// is external or ambiguous — those live in the `symbols` store, not as
+    /// entity references. FK integrity exists only on this column.
+    pub to_id: Option<String>,
     /// Relation type (calls, imports, implements, uses, defines, contains)
     pub relation_type: String,
     /// Line number where the relation occurs
@@ -41,10 +50,22 @@ pub struct RelationIndex {
 }
 
 /// Extract relations from a file.
+/// Extract relations from a file (CLI/MCP path — parses via GnawTreeWriter).
 pub fn index_relations(file_path: &str) -> Result<RelationIndex> {
+    let canon = crate::core::index_entities::canonical_entity_path(file_path);
     let writer = GnawTreeWriter::new(file_path)?;
     let tree = writer.analyze();
     let source = writer.get_source();
+    Ok(extract_relations_from_tree(tree, source, &canon))
+}
+
+/// Tree-based relation extraction for callers that already hold a parsed
+/// tree (the code-index store reuses its own parse — no double parsing).
+pub fn extract_relations_from_tree(
+    tree: &TreeNode,
+    source: &str,
+    file_path: &str,
+) -> RelationIndex {
     let lines: Vec<&str> = source.lines().collect();
 
     let mut relations = Vec::new();
@@ -67,11 +88,53 @@ pub fn index_relations(file_path: &str) -> Result<RelationIndex> {
         *summary.entry(rel.relation_type.clone()).or_insert(0) += 1;
     }
 
-    Ok(RelationIndex {
+    RelationIndex {
         file: file_path.to_string(),
         relations,
         summary,
-    })
+    }
+}
+
+/// T6: fill `to_id` where the target resolves uniquely against the entity
+/// set — bare-name match on `Entity.name` (impl methods keep their bare
+/// `name`, so a call to `new` resolves to `Foo::new`), qualified-name
+/// match on the ID tail for `Type::name` callees. Same-file candidates
+/// win; everything ambiguous or external stays NULL — a symbol, not an
+/// entity reference (review decision #12).
+pub fn resolve_relations(relations: &mut [Relation], entities: &[Entity]) {
+    let mut by_name: std::collections::HashMap<String, Vec<(String, String)>> = Default::default();
+    fn collect(e: &Entity, by: &mut std::collections::HashMap<String, Vec<(String, String)>>) {
+        by.entry(e.name.clone())
+            .or_default()
+            .push((e.file.clone(), e.id.clone()));
+        for c in &e.children {
+            collect(c, by);
+        }
+    }
+    for e in entities {
+        collect(e, &mut by_name);
+    }
+    for rel in relations.iter_mut() {
+        let bare = rel
+            .to_name
+            .rsplit("::")
+            .next()
+            .unwrap_or(&rel.to_name)
+            .to_string();
+        let mut cands: Vec<(String, String)> = by_name.get(&bare).cloned().unwrap_or_default();
+        if rel.to_name.contains("::") {
+            if let Some(extra) = by_name.get(&rel.to_name) {
+                cands.extend(extra.clone());
+            }
+        }
+        let same_file: Vec<&(String, String)> =
+            cands.iter().filter(|(f, _)| f == &rel.file).collect();
+        rel.to_id = match (same_file.len(), cands.len()) {
+            (1, _) => Some(same_file[0].1.clone()),
+            (0, 1) => Some(cands[0].1.clone()),
+            _ => None,
+        };
+    }
 }
 
 // ── Extraction helpers ──────────────────────────────────────
@@ -115,7 +178,8 @@ fn extract_imports(
 
             relations.push(Relation {
                 from: source_id,
-                to: target,
+                to_name: target,
+                to_id: None,
                 relation_type: "imports".to_string(),
                 line: child.start_line,
                 file: file_path.to_string(),
@@ -146,7 +210,8 @@ fn extract_imports(
 
                 relations.push(Relation {
                     from: source_id,
-                    to: target,
+                    to_name: target,
+                    to_id: None,
                     relation_type: "imports".to_string(),
                     line: grandchild.start_line,
                     file: file_path.to_string(),
@@ -182,9 +247,7 @@ fn extract_import_target(import_line: &str) -> Option<String> {
 }
 
 fn extract_calls(tree: &TreeNode, file_path: &str, lines: &[&str], relations: &mut Vec<Relation>) {
-    let mut defined_funcs: std::collections::HashSet<String> = std::collections::HashSet::new();
-    collect_defined_functions(tree, &mut defined_funcs);
-    find_calls_in_scope(tree, &defined_funcs, file_path, lines, relations, None);
+    find_calls_in_scope(tree, file_path, lines, relations, None, None);
 }
 
 /// Function-like nodes whose name (when present) becomes the caller scope.
@@ -195,43 +258,49 @@ fn is_function_like(node_type: &str) -> bool {
     )
 }
 
-fn collect_defined_functions(tree: &TreeNode, funcs: &mut std::collections::HashSet<String>) {
-    if tree.node_type == "function_item"
-        || tree.node_type == "function_definition"
-        || tree.node_type == "function_declaration"
-    {
-        if let Some(name) = tree.get_name() {
-            funcs.insert(name);
-        }
-    }
-    for child in &tree.children {
-        collect_defined_functions(child, funcs);
-    }
-}
-
 fn find_calls_in_scope(
     tree: &TreeNode,
-    defined: &std::collections::HashSet<String>,
     file_path: &str,
     _lines: &[&str],
     relations: &mut Vec<Relation>,
     enclosing: Option<&str>,
+    impl_of: Option<&str>,
 ) {
     // The innermost named function/method governs calls in this subtree —
     // scope is threaded while descending (the empty-from bug report
     // 2026-10-05 came from impl-internal call sites with no context at all).
-    let scope: Option<String> = if is_function_like(tree.node_type.as_str()) {
+    // T6: inside an impl the scope is qualified `Type::method` so relation
+    // from-ids match the (qualified) entity ids — FK-integrity prerequisite.
+    //
+    // Every identifier-callee is recorded (T6): same-file calls resolve
+    // inline; CROSS-FILE calls start unresolved (to_id = NULL) and the
+    // full-index resolution pass resolves them — a per-file "defined"
+    // filter would hide cross-file edges from the graph entirely.
+    // Method calls (obj.method()) and macros are different node kinds and
+    // never reach this branch.
+    // The impl qualifier comes from the PARENT impl_item (threaded via
+    // impl_of); this node only CONTRIBUTES one when it is itself an impl.
+    let owned_impl: Option<String> = if tree.node_type == "impl_item" {
         tree.get_name()
     } else {
         None
     };
+    let scope: Option<String> = if is_function_like(tree.node_type.as_str()) {
+        match (impl_of, tree.get_name()) {
+            (Some(t), Some(n)) => Some(format!("{t}::{n}")),
+            (_, n) => n,
+        }
+    } else {
+        None
+    };
     let current: Option<&str> = scope.as_deref().or(enclosing);
+    let impl_next: Option<&str> = owned_impl.as_deref().or(impl_of);
 
     if tree.node_type == "call_expression" {
         for child in &tree.children {
             if child.node_type == "identifier" {
                 let callee = child.get_name().unwrap_or_default();
-                if defined.contains(&callee) || callee.contains("::") {
+                if !callee.is_empty() {
                     // NEVER empty (contract gtw:{file}:{type}:{name}): resolve
                     // the enclosing function/method, else a stable synthetic
                     // callsite id for scope-less calls (static initializers etc).
@@ -241,7 +310,8 @@ fn find_calls_in_scope(
                     };
                     relations.push(Relation {
                         from,
-                        to: callee,
+                        to_name: callee,
+                        to_id: None,
                         relation_type: "calls".to_string(),
                         line: tree.start_line,
                         file: file_path.to_string(),
@@ -253,7 +323,7 @@ fn find_calls_in_scope(
     }
 
     for child in &tree.children {
-        find_calls_in_scope(child, defined, file_path, _lines, relations, current);
+        find_calls_in_scope(child, file_path, _lines, relations, current, impl_next);
     }
 }
 
@@ -303,7 +373,8 @@ fn extract_type_refs(
         if !context_name.is_empty() && type_name != context_name {
             relations.push(Relation {
                 from: format!("gtw:{}:function:{}", file_path, context_name),
-                to: type_name,
+                to_name: type_name,
+                to_id: None,
                 relation_type: "uses".to_string(),
                 line: node.start_line,
                 file: file_path.to_string(),
@@ -344,7 +415,8 @@ fn extract_impl_relations(
 
             relations.push(Relation {
                 from: format!("gtw:{}:impl:{}", file_path, type_name),
-                to: trait_name,
+                to_name: trait_name,
+                to_id: None,
                 relation_type: "implements".to_string(),
                 line: tree.start_line,
                 file: file_path.to_string(),
@@ -449,7 +521,7 @@ fn seed() -> i32 { 1 }
                 !r.from.is_empty(),
                 "empty from at line {} (to={}) — contract broken",
                 r.line,
-                r.to
+                r.to_name
             );
             assert!(
                 r.from.starts_with("gtw:"),
@@ -457,10 +529,11 @@ fn seed() -> i32 { 1 }
                 r.from
             );
         }
-        // Enclosing method resolved for the impl-internal call.
+        // Enclosing method resolved for the impl-internal call — T6
+        // qualified: the method scope is `S::run`.
         assert!(
-            calls.iter().any(|r| r.from.ends_with(":function:run")),
-            "impl-internal call must resolve to its method: {:?}",
+            calls.iter().any(|r| r.from.ends_with(":function:S::run")),
+            "impl-internal call must resolve to its qualified method: {:?}",
             calls.iter().map(|r| &r.from).collect::<Vec<_>>()
         );
         // Free-function scope resolves too.
@@ -495,7 +568,7 @@ impl std::fmt::Display for MyStruct {
             .filter(|r| r.relation_type == "implements")
             .collect::<Vec<_>>();
         assert!(!implements.is_empty(), "Should find implements relation");
-        assert!(implements[0].to.contains("Display"));
+        assert!(implements[0].to_name.contains("Display"));
     }
 
     #[test]

@@ -29,7 +29,7 @@ use std::time::Duration;
 /// key, so stale rows never survive an extractor change silently.
 pub const EXTRACTOR_VERSION: &str = "1";
 
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 const BUSY_TIMEOUT_MS: u64 = 5000;
 
 const SCHEMA_V1: &str = r#"
@@ -61,6 +61,40 @@ CREATE TABLE IF NOT EXISTS staleness_queue (
     from_rev TEXT,
     queued_by TEXT,
     queued_at INTEGER NOT NULL
+);
+"#;
+
+/// Schema v2 (T6 + Phase 3 foundation): knowledge-graph tables born in the
+/// SAME db (consolidation rule — never a fifth index family). Relations
+/// carry the honest target split: to_name always, to_id only on unique
+/// resolution (FK-enforced); unresolved targets aggregate into symbols.
+/// entities mirror the canonical gtw ids (qualified methods, #N suffix).
+const SCHEMA_V2: &str = r#"
+CREATE TABLE IF NOT EXISTS entities (
+    id TEXT PRIMARY KEY,
+    file TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    line INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_entities_file ON entities(file);
+CREATE TABLE IF NOT EXISTS relations (
+    id INTEGER PRIMARY KEY,
+    from_id TEXT NOT NULL,
+    to_name TEXT NOT NULL,
+    to_id TEXT,
+    relation_type TEXT NOT NULL,
+    line INTEGER NOT NULL,
+    file TEXT NOT NULL,
+    FOREIGN KEY(to_id) REFERENCES entities(id)
+);
+CREATE INDEX IF NOT EXISTS idx_relations_file ON relations(file);
+CREATE TABLE IF NOT EXISTS symbols (
+    name TEXT NOT NULL,
+    file TEXT NOT NULL,
+    external INTEGER NOT NULL DEFAULT 0,
+    occurrences INTEGER NOT NULL,
+    PRIMARY KEY (name, file)
 );
 "#;
 
@@ -129,8 +163,13 @@ fn open_and_migrate(path: &Path) -> Result<Connection> {
             SCHEMA_VERSION
         );
     }
-    if v < SCHEMA_VERSION {
+    if v < 1 {
         conn.execute_batch(SCHEMA_V1)?;
+    }
+    if v < 2 {
+        conn.execute_batch(SCHEMA_V2)?;
+    }
+    if v < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
     Ok(conn)
@@ -367,6 +406,18 @@ pub fn refresh(
             &items,
             now,
         )?;
+        // T6/Phase 3: the knowledge graph rides the same parse — entities
+        // + relations stored per file (same-file resolution inline; the
+        // cross-file pass runs after the loop).
+        let ent_index =
+            crate::core::index_entities::extract_entities_from_tree(&tree, &source, &rel, true);
+        let mut rel_index =
+            crate::core::index_relations::extract_relations_from_tree(&tree, &source, &rel);
+        crate::core::index_relations::resolve_relations(
+            &mut rel_index.relations,
+            &ent_index.entities,
+        );
+        store_entities_relations(conn, &rel, &ent_index.entities, &rel_index.relations)?;
         stats.files_parsed += 1;
     }
 
@@ -377,6 +428,17 @@ pub fn refresh(
         }
     }
 
+    // Cross-file resolution + symbol aggregation (T6/review #12): every
+    // relation the per-file pass left NULL gets one shot against the FULL
+    // entity set; what remains unresolved is a symbol, not a reference.
+    resolve_unresolved_in_db(conn)?;
+    conn.execute("DELETE FROM symbols", [])?;
+    conn.execute_batch(
+        "INSERT INTO symbols (name, file, external, occurrences)
+         SELECT to_name, file, (to_name GLOB '*::*'), COUNT(*)
+         FROM relations WHERE to_id IS NULL
+         GROUP BY to_name, file;",
+    )?;
     // A completed refresh leaves nothing stale: every walked file is fresh.
     conn.execute("DELETE FROM staleness_queue", [])?;
     // Leave a checkpointed file behind so read-only consumers (mode=ro)
@@ -516,6 +578,164 @@ pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun> {
         stats,
         notices,
     })
+}
+
+/// Store one file's entities + relations (T6/Phase 3). from_id is plain
+/// text (synthetic callsite ids are not entity rows); the FK lives on
+/// to_id only. Entities insert before relations so same-file to_ids
+/// satisfy the FK inside the transaction.
+fn store_entities_relations(
+    conn: &mut Connection,
+    rel: &str,
+    entities: &[crate::core::index_entities::Entity],
+    relations: &[crate::core::index_relations::Relation],
+) -> Result<()> {
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM entities WHERE file = ?1", params![rel])?;
+    tx.execute("DELETE FROM relations WHERE file = ?1", params![rel])?;
+    {
+        let mut ent = tx.prepare(
+            "INSERT INTO entities (id, file, kind, name, line) VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+        fn flatten<'a>(
+            e: &'a crate::core::index_entities::Entity,
+            out: &mut Vec<(&'a str, &'a str, &'a str, i64)>,
+        ) {
+            out.push((
+                e.id.as_str(),
+                e.entity_type.as_str(),
+                e.name.as_str(),
+                e.line as i64,
+            ));
+            for c in &e.children {
+                flatten(c, out);
+            }
+        }
+        for e in entities {
+            let mut rows = Vec::new();
+            flatten(e, &mut rows);
+            for (id, kind, name, line) in rows {
+                ent.execute(params![id, rel, kind, name, line])?;
+            }
+        }
+        let mut rels = tx.prepare(
+            "INSERT INTO relations (from_id, to_name, to_id, relation_type, line, file)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )?;
+        for x in relations {
+            rels.execute(params![
+                x.from,
+                x.to_name,
+                x.to_id,
+                x.relation_type,
+                x.line as i64,
+                rel
+            ])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// One resolution shot for all still-unresolved relations against the
+/// FULL entity set (cross-file edges). Same-file candidates win; a unique
+/// candidate wins; ambiguous/external stay NULL (symbols, decision #12).
+fn resolve_unresolved_in_db(conn: &Connection) -> Result<()> {
+    let mut by_name: std::collections::HashMap<String, Vec<(String, String)>> = Default::default();
+    {
+        let mut stmt = conn.prepare("SELECT name, file, id FROM entities")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (name, file, id) = row?;
+            by_name.entry(name).or_default().push((file, id));
+        }
+    }
+    let mut stmt = conn.prepare("SELECT id, to_name, file FROM relations WHERE to_id IS NULL")?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut updates: Vec<(i64, String)> = Vec::new();
+    for row in rows {
+        let (rid, to_name, file) = row?;
+        let bare = to_name.rsplit("::").next().unwrap_or(&to_name).to_string();
+        let mut cands = by_name.get(&bare).cloned().unwrap_or_default();
+        if to_name.contains("::") {
+            if let Some(extra) = by_name.get(&to_name) {
+                cands.extend(extra.clone());
+            }
+        }
+        let same_file: Vec<&(String, String)> = cands.iter().filter(|(f, _)| f == &file).collect();
+        let pick = match (same_file.len(), cands.len()) {
+            (1, _) => Some(same_file[0].1.clone()),
+            (0, 1) => Some(cands[0].1.clone()),
+            _ => None,
+        };
+        if let Some(id) = pick {
+            updates.push((rid, id));
+        }
+    }
+    for (rid, id) in &updates {
+        conn.execute(
+            "UPDATE relations SET to_id = ?1 WHERE id = ?2",
+            params![id, rid],
+        )?;
+    }
+    Ok(())
+}
+
+/// MCP query surface: relations for a path prefix.
+pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>> {
+    let mut stmt = conn.prepare(
+        "SELECT from_id, to_name, to_id, relation_type, line, file
+         FROM relations WHERE (?1 IS NULL OR file LIKE ?1 || '%')
+         ORDER BY file, line",
+    )?;
+    let rows = stmt.query_map(params![prefix], |r| {
+        Ok(serde_json::json!({
+            "from": r.get::<_, String>(0)?,
+            "to_name": r.get::<_, String>(1)?,
+            "to_id": r.get::<_, Option<String>>(2)?,
+            "relation_type": r.get::<_, String>(3)?,
+            "line": r.get::<_, i64>(4)?,
+            "file": r.get::<_, String>(5)?
+        }))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+/// MCP query surface: unresolved/external symbols with occurrence counts.
+pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>> {
+    let mut stmt = conn.prepare(
+        "SELECT name, file, external, occurrences
+         FROM symbols ORDER BY occurrences DESC, name",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(serde_json::json!({
+            "name": r.get::<_, String>(0)?,
+            "file": r.get::<_, String>(1)?,
+            "external": r.get::<_, i64>(2)? != 0,
+            "occurrences": r.get::<_, i64>(3)?
+        }))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
 }
 
 /// P5: classify lock-class failures so the caller can degrade to the direct

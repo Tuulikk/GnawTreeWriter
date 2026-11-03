@@ -48,11 +48,82 @@ pub struct EntityIndex {
     pub entity_count: usize,
 }
 
-/// Extract entities from a file.
+/// Extract entities from a file (CLI/MCP path — parses via GnawTreeWriter).
 pub fn index_entities(file_path: &str, include_private: bool) -> Result<EntityIndex> {
+    let canon = canonical_entity_path(file_path);
     let writer = GnawTreeWriter::new(file_path)?;
     let tree = writer.analyze();
     let source = writer.get_source();
+    Ok(collect_entities(tree, source, &canon, include_private))
+}
+
+/// Tree-based entity extraction for callers that already hold a parsed
+/// tree (the code-index store reuses its own parse — no double parsing).
+pub fn extract_entities_from_tree(
+    tree: &TreeNode,
+    source: &str,
+    file_path: &str,
+    include_private: bool,
+) -> EntityIndex {
+    let canon = canonical_entity_path(file_path);
+    collect_entities(tree, source, &canon, include_private)
+}
+
+/// T6: canonical entity path — POSIX separators, git-toplevel-relative
+/// when the file lives inside a work tree, POSIX-ized as-given otherwise.
+/// The same file must yield the same ID no matter absolute/relative
+/// caller input (review decision #11 machinery, entity side).
+pub fn canonical_entity_path(file_path: &str) -> String {
+    let p = std::path::Path::new(file_path);
+    if !p.is_absolute() {
+        return p.to_string_lossy().replace('\\', "/");
+    }
+    let toplevel = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(p.parent().unwrap_or(p))
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| std::path::PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()));
+    match toplevel {
+        Some(root) => p
+            .strip_prefix(&root)
+            .unwrap_or(p)
+            .to_string_lossy()
+            .replace('\\', "/"),
+        None => p.to_string_lossy().replace('\\', "/"),
+    }
+}
+
+/// T6: deterministic ID disambiguation — duplicate IDs within a file get
+/// a "#N" suffix in line order; the first occurrence keeps the bare ID.
+/// Same input, same output (the scan-tools determinism principle).
+fn disambiguate_ids(entities: &mut [Entity]) {
+    fn walk(list: &mut [Entity], seen: &mut std::collections::HashMap<String, usize>) {
+        let mut order: Vec<usize> = (0..list.len()).collect();
+        order.sort_by_key(|i| list[*i].line);
+        for i in order {
+            let id = list[i].id.clone();
+            let count = seen.entry(id).or_insert(0);
+            *count += 1;
+            if *count > 1 {
+                list[i].id = format!("{}#{}", list[i].id, count);
+            }
+        }
+        for e in list.iter_mut() {
+            walk(&mut e.children, seen);
+        }
+    }
+    let mut seen = std::collections::HashMap::new();
+    walk(entities, &mut seen);
+}
+
+fn collect_entities(
+    tree: &TreeNode,
+    source: &str,
+    file_path: &str,
+    include_private: bool,
+) -> EntityIndex {
     let lines: Vec<&str> = source.lines().collect();
 
     let mut entities = Vec::new();
@@ -68,7 +139,9 @@ pub fn index_entities(file_path: &str, include_private: bool) -> Result<EntityIn
             }
             // Functions
             "function_item" | "function_definition" | "function_declaration" => {
-                if let Some(entity) = extract_function(child, &lines, file_path, include_private) {
+                if let Some(entity) =
+                    extract_function(child, &lines, file_path, include_private, None)
+                {
                     if entity.visibility == "pub" {
                         exports.push(entity.name.clone());
                     }
@@ -149,13 +222,15 @@ pub fn index_entities(file_path: &str, include_private: bool) -> Result<EntityIn
         }
     }
 
-    Ok(EntityIndex {
+    disambiguate_ids(&mut entities);
+
+    EntityIndex {
         file: file_path.to_string(),
         entity_count: entities.len() + imports.len(),
         imports,
         exports,
         entities,
-    })
+    }
 }
 
 // ── Extraction helpers ──────────────────────────────────────
@@ -237,6 +312,7 @@ fn extract_function(
     lines: &[&str],
     file_path: &str,
     include_private: bool,
+    qualifier: Option<&str>,
 ) -> Option<Entity> {
     let vis = detect_visibility(node);
     if !include_private && vis == "private" {
@@ -249,8 +325,17 @@ fn extract_function(
     let tokens = crate::core::token_count::estimate_code_tokens(&get_node_source(node, lines));
     let doc = extract_doc_comment(node, lines);
 
+    // T6: methods are name-qualified with their impl type — two impls in
+    // one file with the same method name must not share an ID. Parse the
+    // ID with splitn(4, ':') — the name segment may contain "::" and a
+    // "#N" disambiguation suffix.
+    let qualified = match qualifier {
+        Some(q) => format!("{q}::{name}"),
+        None => name.clone(),
+    };
+
     Some(Entity {
-        id: format!("gtw:{}:function:{}", file_path, name),
+        id: format!("gtw:{}:function:{}", file_path, qualified),
         entity_type: "function".to_string(),
         name,
         signature,
@@ -442,16 +527,22 @@ fn extract_impl(
     let mut children = Vec::new();
     for child in &node.children {
         if child.node_type == "function_item" || child.node_type == "method_definition" {
-            if let Some(entity) = extract_function(child, lines, file_path, include_private) {
+            if let Some(entity) =
+                extract_function(child, lines, file_path, include_private, Some(&type_name))
+            {
                 children.push(entity);
             }
         }
         if child.node_type == "declaration_list" {
             for method in &child.children {
                 if method.node_type == "function_item" || method.node_type == "method_definition" {
-                    if let Some(entity) =
-                        extract_function(method, lines, file_path, include_private)
-                    {
+                    if let Some(entity) = extract_function(
+                        method,
+                        lines,
+                        file_path,
+                        include_private,
+                        Some(&type_name),
+                    ) {
                         children.push(entity);
                     }
                 }
@@ -494,7 +585,9 @@ fn extract_trait(
     let mut children = Vec::new();
     for child in &node.children {
         if child.node_type == "function_item" || child.node_type == "method_definition" {
-            if let Some(entity) = extract_function(child, lines, file_path, include_private) {
+            if let Some(entity) =
+                extract_function(child, lines, file_path, include_private, Some(&name))
+            {
                 children.push(entity);
             }
         }
@@ -502,7 +595,7 @@ fn extract_trait(
             for method in &child.children {
                 if method.node_type == "function_item" || method.node_type == "method_definition" {
                     if let Some(entity) =
-                        extract_function(method, lines, file_path, include_private)
+                        extract_function(method, lines, file_path, include_private, Some(&name))
                     {
                         children.push(entity);
                     }

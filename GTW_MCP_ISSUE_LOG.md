@@ -1697,3 +1697,53 @@ BIBLIOTEKET (byggvägen oberoende av MCP-daemonen) — men agenternas
 verktygsflöden i Motor2-sessioner använder MCP-vägen och ärvde det tomma
 svaret live (upptäckt 2026-11-02 under posts-injektions-bygget i Motor2,
 användarens påpekande: "viktigt att fånga gtw fel då motor2 ärver dom").
+
+---
+
+## 2026-11-03 — T6 STÄNGT: canonical IDs + ärliga relationsmål
+
+**Klass:** saknad funktion / formats-beslut (T6, öppet sedan 2026-10-07).
+**Status:** STÄNGD i samma ändring som Fas 1–2 av code-index SQLite-store.
+
+**Beslutet:** `Entity.id`/`Relation.from` = `gtw:{canonical_relpath}:{type}:{name}`
+— metoder namnkvalificerade (`Foo::new`, trait-metoder med trait-namnet),
+determinisk `#N`-disambiguering i radordning, sökvägar alltid
+`canonical_entity_path` (POSIX, toplevel-relativ). `Relation.to` delas
+ÄRLIGT: `to_name` (alltid) + `to_id` (nullbar, FK — endast unik upplösning,
+samma fil först). Per-fil "defined"-filtret i anropsextraktionen togs bort —
+det dolde ALLA tvärfils-kanter; olösta mål samlas i `symbols`.
+
+**Verifiering:** tests/t6_canonical_ids.rs (kvalificering, disambiguering,
+kanoniska vägar, ärliga mål, DB-graf + tvärfils-upplösning); dogfood på
+GTW-repot: 2 464 entiteter / 4 464 relationer / 969 symboler / 1 130
+upplösta to_id. Motor2-notis skickad (kors-repo-regeln) — `to`→`to_name`/
+`to_id` är konsumentbrytande för deras index_relations-JSON.
+
+---
+
+## 2026-11-03 — FYND: GTW edit_node/batch placerade content fel (2 falanger)
+
+**Klass:** bugg (verktyg), användarfel (mitt eget, se nedan).
+**Verktyg:** GTW MCP `edit_node` + `batch` (edit-op), src/core/index_relations.rs.
+**Parametrar:** edit ops på toppnivå-fn:er med node-paths ur search_nodes
+(10/15/18/20/24/26/27); första försöket innehöll även en use-rad-byte där
+EN use_declaration ersattes med TVÅ rader.
+**Vad som svarade:** batch validate+apply OK ("applied atomically") — men
+kompileringen avslöjade E0428-dubbletter: NYPÅSATTA definitioner bredvid de
+gamla, och efter guardian-nekelse i körning 2 ("Definition header changed")
+appenderades content till FILSLUTET i stället för att ersätta mål-noden.
+Andra omvägen (ren 1:1-replacement, ingen use-rad) gav SAMMA append-beteende.
+**Omväg:** `git checkout` på filen (policy-bryt — se nedan) + hela filen
+omskriven via exakta edit-verktygs-replacements; loggas här per §8/§35-anda.
+**Diagnos-förmodan:** edit_node/batch edit-op i DENNA fil placerade content
+vid fel node (insert-beteende) — skiljer sig från alla andra filer i samma
+session (code_index.rs/cli.rs/mcp/mod.rs: fläckfria 1:1-replacements). Möjligen
+kopplat till filens comment-täta toppnivå (node-index vs child-position).
+**Användarfel (ärlighet):** första försöket var MITT — multi-statement-content
+i en single-node-replacement skiftade indices; guardian-fångsten i körning 2
+var korrekt. Men körning 3 (renad) borde ha ersatt, inte appenderat — det är
+verktygsfyndet. `git checkout`-avvikelsen (i stället för undo) är också min;
+undo användes korrekt efter körning 1.
+
+**Kategori att avbocka:** bugg (edit_node placementskepticism i comment-täta
+filer — värd en reproduktionstest med comment-fylld fil).
