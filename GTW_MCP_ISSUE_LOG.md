@@ -1674,3 +1674,26 @@ CLI (den har --force).
   BACKLOG, ej i denna release.
 - **D osändrat** — er sessions binär verifierar vid nästa upptagning;
   symptomet avviker/kvarstår återöppnas.
+
+---
+
+## 2026-11-02 — MCP `doctor {}` svarar TOMT `{}` medan CLI-doctorn är frisk
+
+**Kategori:** bugg (tyst no-op-svar — den farligaste klassen: ett tomt svar
+kan läsas som "frisk, inga checks" i stället för att skrika).
+**Anrop:** opencode Code Mode, `tools.gnawtreewriter.doctor({})` → `{}`
+(0 nycklar). SAMMA session, CLI `gnawtreewriter doctor` → full rapport
+(parsers ✅ .py/.rs/.js/.ts/.go/.java + backup + transaktionslogg).
+**Körande binär:** `~/.cargo/libexec/gnawtreewriter` daterad 2026-10-31 18:51
+(2 dagar gammal i sessionen) — verifiera mot aktuell källkod före fix.
+**Påverkan:** agenter på MCP-vägen får en LJUGANDE hälsokontroll —
+GTW-först-ritualen (§35.3-mönstret i Motor2/AGENTS) förutsätter en pålitlig
+doctor; en tom `{}` kan stoppa ritualen tyst.
+**Omväg som funkar:** CLI-doctorn (bevisad frisk i samma session).
+**Efterfrågan:** MCP-doctor svarar med SAMMA objekt som CLI:n
+(healthy/passed/failed/checks[]) eller ett FEL — aldrig `{}`.
+**Motor2-arv (varför detta fångades):** motor2-gtw är path-dep mot
+BIBLIOTEKET (byggvägen oberoende av MCP-daemonen) — men agenternas
+verktygsflöden i Motor2-sessioner använder MCP-vägen och ärvde det tomma
+svaret live (upptäckt 2026-11-02 under posts-injektions-bygget i Motor2,
+användarens påpekande: "viktigt att fånga gtw fel då motor2 ärver dom").
