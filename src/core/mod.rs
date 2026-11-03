@@ -623,6 +623,12 @@ impl GnawTreeWriter {
             ));
         }
 
+        // Phase 4: staleness bookkeeping — the store (when it exists)
+        // learns which file was just edited (decision #8: open-existing,
+        // never create; best-effort, never fails the edit).
+        let proj_root = find_project_root(Path::new(&self.file_path));
+        crate::core::code_index_db::mark_stale(&proj_root, &self.file_path);
+
         Ok(())
     }
 

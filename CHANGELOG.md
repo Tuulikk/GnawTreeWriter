@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+### Added — Phase 4 (core): staleness writes + post-commit hook
+- **Edits mark the store stale** (decision #8): every successful edit
+  through the core funnel appends to `staleness_queue` via
+  `code_index_db::mark_stale` — open-existing ONLY (the edit path never
+  creates the store), best-effort (never fails the edit), one upserted
+  row per file. Doctor's staleness count is now meaningful between
+  refreshes; a future daemon/organ polls the same queue.
+- **`code-index --install-hook` / `--uninstall-hook`**: installs a
+  post-commit hook that incrementally refreshes the store + regenerates
+  `code-index.md` after each commit. Idempotent guarded block
+  (`>>> gnawtreewriter code-index >>>`), preserves existing user hook
+  logic, executable bit set. NEVER auto-stages (design: the regenerated
+  file is committed explicitly). P4: personal + explicit — installed
+  only by this command, per clone.
+- Daemon polling remains ROADMAP add-on territory (not core).
+
 ### Added — Phase 3 complete: knowledge graph reads the store; JSON deprecated as writer
 - **`RelationalIndexer` is DB-first** (consolidation rule fulfilled — one
   graph home): `load_all_graphs`/`index_directory`/`resolution_stats`/

@@ -230,6 +230,7 @@ pub fn open_existing(root: &Path) -> Result<Connection> {
 }
 
 /// Doctor-facing store summary (read-only). None when no store exists.
+#[derive(Debug)]
 pub struct StoreStatus {
     pub last_refresh_rev: Option<String>,
     pub queued: usize,
@@ -723,6 +724,28 @@ fn resolve_unresolved_in_db(conn: &Connection) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+/// Phase 4: record an edit in the staleness queue — open-existing ONLY
+/// (decision #8: the edit path never creates the store), best-effort
+/// (errors swallowed: an edit must never fail because of bookkeeping).
+/// One row per file (upsert, latest event wins — decision #8's queue
+/// semantics). Connection-per-call is fine at edit frequency (~µs local).
+pub fn mark_stale(root: &Path, file_path: &str) {
+    if !db_path(root).exists() {
+        return;
+    }
+    let Ok(conn) = open_existing(root) else {
+        return;
+    };
+    let rel = crate::core::code_index::canonical_rel_path(root, Path::new(file_path));
+    let now = chrono::Utc::now().timestamp();
+    let _ = conn.execute(
+        "INSERT INTO staleness_queue (file, reason, from_rev, queued_by, queued_at)
+         VALUES (?1, 'edit', NULL, 'gtw-edit', ?2)
+         ON CONFLICT(file) DO UPDATE SET reason = 'edit', queued_at = ?2",
+        params![rel, now],
+    );
 }
 
 /// MCP query surface: relations for a path prefix.

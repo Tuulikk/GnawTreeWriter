@@ -178,8 +178,10 @@ DB is absent or corrupt. Zero-setup charm is the feature's virtue.
    as the no-DB fallback only — JSON is no longer WRITTEN when the store
    exists. Old `.gnawtreewriter_ai/graph/*.json` files can be deleted;
    cleanup is cosmetic and left to the user.
-4. **Phase 4 (optional)** — trigger plumbing + runner hooks (git hook,
-   staleness writer in edit responses).
+4. **Phase 4** — ✅ core DONE: staleness writes from the edit funnel
+   (open-existing, never create, best-effort) + `--install-hook`/
+   `--uninstall-hook` (guarded idempotent block, preserves user logic,
+   never auto-stages). Daemon polling remains ROADMAP add-on territory.
 
 ## Review 2026-11-02 — decisions
 

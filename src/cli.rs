@@ -223,6 +223,13 @@ enum Commands {
         /// DB (falls back to the direct path when the DB is busy)
         #[arg(long)]
         db: bool,
+        /// Install a post-commit hook that refreshes the store + markdown
+        /// after each commit (explicit, per-clone, never auto-stages — P4)
+        #[arg(long)]
+        install_hook: bool,
+        /// Remove the gnawtreewriter block from the post-commit hook
+        #[arg(long)]
+        uninstall_hook: bool,
         /// Content-hash gate over the committed code-index.md (default
         /// <root>/code-index.md, override with --output): fast tier = body
         /// vs its own Body-hash header; full tier = fresh render vs body.
@@ -1310,6 +1317,8 @@ impl Cli {
                 db,
                 check,
                 fix,
+                install_hook,
+                uninstall_hook,
             } => {
                 let opts = crate::core::code_index::CodeIndexOptions {
                     extensions: extensions
@@ -1321,7 +1330,13 @@ impl Cli {
                     intro_file: intro.map(PathBuf::from),
                     json,
                 };
-                Self::handle_code_index(&path, output.as_deref(), opts, db, check, fix)?;
+                if install_hook || uninstall_hook {
+                    // P4: hooks are personal — installed only via this
+                    // explicit command, never silently, never auto-staging.
+                    Self::handle_code_index_hook(Path::new(&path), install_hook, uninstall_hook)?;
+                } else {
+                    Self::handle_code_index(&path, output.as_deref(), opts, db, check, fix)?;
+                }
             }
             Commands::Compress {
                 file_path,
@@ -2093,6 +2108,120 @@ Use --no-preview to write batch file"
             }
             None => println!("{}", doc),
         }
+        Ok(())
+    }
+
+    const HOOK_BEGIN: &str = "# >>> gnawtreewriter code-index >>>";
+    const HOOK_END: &str = "# <<< gnawtreewriter code-index <<<";
+
+    #[allow(clippy::needless_raw_string_hashes)]
+    fn hook_block() -> String {
+        format!(
+            "{begin}\n# Installed by `gnawtreewriter code-index --install-hook` (P4: explicit, per-clone).\n# Refreshes the code-index store + regenerates code-index.md after each commit.\n# NEVER stages: the regenerated file is committed explicitly (design: no auto-stage).\nif command -v gnawtreewriter >/dev/null 2>&1; then\n    top=$(git rev-parse --show-toplevel 2>/dev/null) && \\\n        gnawtreewriter code-index \"$top\" --db -o \"$top/code-index.md\" >/dev/null 2>&1 || true\nfi\n{end}\n",
+            begin = Self::HOOK_BEGIN,
+            end = Self::HOOK_END
+        )
+    }
+
+    fn handle_code_index_hook(path: &Path, install: bool, uninstall: bool) -> Result<()> {
+        let out = std::process::Command::new("git")
+            .args(["rev-parse", "--absolute-git-dir"])
+            .current_dir(path)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .context("not a git repository — hooks need one")?;
+        let git_dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let hooks_dir = Path::new(&git_dir).join("hooks");
+        std::fs::create_dir_all(&hooks_dir)?;
+        let hook_file = hooks_dir.join("post-commit");
+
+        let existing = std::fs::read_to_string(&hook_file).unwrap_or_default();
+
+        if !install && !uninstall {
+            return Ok(());
+        }
+
+        if uninstall {
+            if !existing.contains(Self::HOOK_BEGIN) {
+                println!(
+                    "inget gnawtreewriter-block i {} — inget att ta bort",
+                    hook_file.display()
+                );
+                return Ok(());
+            }
+            let mut stripped = String::new();
+            let mut in_block = false;
+            for line in existing.lines() {
+                if line.trim() == Self::HOOK_BEGIN {
+                    in_block = true;
+                    continue;
+                }
+                if line.trim() == Self::HOOK_END {
+                    in_block = false;
+                    continue;
+                }
+                if !in_block {
+                    stripped.push_str(line);
+                    stripped.push('\n');
+                }
+            }
+            // A hook reduced to only its shebang is dead weight — remove it.
+            let meaningful = stripped
+                .lines()
+                .any(|l| !l.trim().is_empty() && !l.trim().starts_with("#!"));
+            if meaningful {
+                std::fs::write(&hook_file, stripped)?;
+                println!(
+                    "block borttaget: {} (övrigt innehåll bevarat)",
+                    hook_file.display()
+                );
+            } else {
+                std::fs::remove_file(&hook_file)?;
+                println!("block + tom hook borttagen: {}", hook_file.display());
+            }
+            return Ok(());
+        }
+
+        // Install (idempotent: replace an existing block in place).
+        let mut script = if existing.contains(Self::HOOK_BEGIN) {
+            let mut cleaned = String::new();
+            let mut in_block = false;
+            for line in existing.lines() {
+                if line.trim() == Self::HOOK_BEGIN {
+                    in_block = true;
+                    continue;
+                }
+                if line.trim() == Self::HOOK_END {
+                    in_block = false;
+                    continue;
+                }
+                if !in_block {
+                    cleaned.push_str(line);
+                    cleaned.push('\n');
+                }
+            }
+            cleaned
+        } else {
+            if existing.is_empty() {
+                "#!/bin/sh\n".to_string()
+            } else {
+                existing.clone()
+            }
+        };
+        script.push('\n');
+        script.push_str(&Self::hook_block());
+        std::fs::write(&hook_file, &script)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&hook_file, std::fs::Permissions::from_mode(0o755))?;
+        }
+        println!(
+            "✓ post-commit-hook installerad: {} — refreshar store + markdown efter varje commit (staggar ALDRIG; p4: per-clone, explicit)",
+            hook_file.display()
+        );
+        println!("  ta bort med: gnawtreewriter code-index --uninstall-hook");
         Ok(())
     }
 
