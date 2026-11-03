@@ -169,6 +169,39 @@ impl RelationalIndexer {
 
     /// Scan a directory and build relations between files recursively
     pub fn index_directory(&mut self, dir_path: &Path) -> Result<Vec<FileGraph>> {
+        // Phase 3: when the code-index store exists it IS the graph —
+        // incremental refresh (parses only changed files), then read.
+        // The legacy JSON pipeline below only runs for non-DB setups
+        // (capability ladder: the struktur level still works without DB).
+        let db_root = self
+            .storage_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf());
+        if let Some(root) = db_root {
+            if crate::core::code_index_db::db_path(&root).exists() {
+                let opts = crate::core::code_index::CodeIndexOptions::default();
+                match crate::core::code_index_db::generate_with_db(&root, &opts) {
+                    Ok(_) => {
+                        let graphs = self.load_graphs_from_db()?;
+                        self.last_stats = self.resolution_stats().ok();
+                        return Ok(graphs);
+                    }
+                    Err(e) if crate::core::code_index_db::is_busy_error(&e) => {
+                        // P5: contend, degrade — read the store as-is.
+                        let _ = e;
+                        if let Ok(graphs) = self.load_graphs_from_db() {
+                            if !graphs.is_empty() {
+                                self.last_stats = self.resolution_stats().ok();
+                                return Ok(graphs);
+                            }
+                        }
+                    }
+                    Err(_) => { /* corrupt/newer store: fall through to legacy */ }
+                }
+            }
+        }
+
         let mut graphs = Vec::new();
 
         // 1. First pass: Collect all definitions in the directory recursively
@@ -302,6 +335,141 @@ impl RelationalIndexer {
         }
     }
 
+    /// Phase 3: build FileGraphs from the code-index SQLite store
+    /// (`.gnawtreewriter_ai/code_index.db`) — the graph's home since the
+    /// consolidation rule. definitions/from-path dot-paths come from the
+    /// entities' node_path column (schema v3, T6 freshness caveat
+    /// applies); to_file from the to_id join. Empty Ok when the store
+    /// has no graph rows (caller falls back to JSON).
+    fn load_graphs_from_db(&self) -> Result<Vec<FileGraph>> {
+        let db_root = self
+            .storage_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .ok_or_else(|| anyhow::anyhow!("no project root above the graph dir"))?;
+        let conn = crate::core::code_index_db::open_existing(&db_root)?;
+
+        // entities: id → file / node_path for the from_path and to_file joins
+        let mut ent_file: std::collections::HashMap<String, String> = Default::default();
+        let mut ent_path: std::collections::HashMap<String, String> = Default::default();
+        {
+            let mut stmt = conn.prepare("SELECT id, file, name, node_path FROM entities")?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, file, _name, node_path) = row?;
+                ent_file.insert(id.clone(), file);
+                ent_path.insert(id, node_path);
+            }
+        }
+
+        let mut graphs: std::collections::HashMap<String, FileGraph> = Default::default();
+        let mk = |file: &String| FileGraph {
+            file_path: file.clone(),
+            relations: Default::default(),
+            definitions: Default::default(),
+            imports: Default::default(),
+        };
+
+        // Relations → Relation rows (calls = Call, everything else = Reference)
+        {
+            let mut stmt =
+                conn.prepare("SELECT file, from_id, to_name, to_id, relation_type FROM relations")?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            })?;
+            for row in rows {
+                let (file, from_id, to_name, to_id, rtype) = row?;
+                let g = graphs.entry(file.clone()).or_insert_with(|| mk(&file));
+                let to_file = to_id.as_ref().and_then(|id| ent_file.get(id).cloned());
+                let relation_type = if rtype == "calls" {
+                    RelationType::Call
+                } else {
+                    RelationType::Reference
+                };
+                // Synthetic callsite from-ids have no entity row: their
+                // stable gtw id IS the path value (honest + fresh-stable,
+                // unlike a dot-path captured before later edits).
+                let from_path = ent_path
+                    .get(&from_id)
+                    .cloned()
+                    .unwrap_or_else(|| from_id.clone());
+                g.relations.insert(Relation {
+                    from_file: file.clone(),
+                    from_path,
+                    to_file,
+                    to_name,
+                    relation_type,
+                });
+            }
+        }
+
+        // definitions (name → dot-path) from entities, incl. children
+        {
+            let mut stmt = conn.prepare("SELECT file, name, node_path, kind FROM entities")?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (file, name, node_path, kind) = row?;
+                let g = graphs.entry(file.clone()).or_insert_with(|| mk(&file));
+                if matches!(
+                    kind.as_str(),
+                    "function"
+                        | "struct"
+                        | "enum"
+                        | "trait"
+                        | "impl"
+                        | "type_alias"
+                        | "const"
+                        | "static"
+                        | "module"
+                ) && !node_path.is_empty()
+                {
+                    g.definitions.insert(name, node_path);
+                }
+            }
+        }
+
+        // imports identifier tokens (Fas 4.2 step 3 narrowing): the last
+        // segment of each import target.
+        {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT file, to_name FROM relations WHERE relation_type = 'imports'",
+            )?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            for row in rows {
+                let (file, to_name) = row?;
+                if let Some(g) = graphs.get_mut(&file) {
+                    if let Some(last) = to_name.rsplit("::").next() {
+                        g.imports.insert(last.to_string());
+                    }
+                }
+            }
+        }
+
+        Ok(graphs.into_values().collect())
+    }
+
     pub fn save_graph(&self, graph: &FileGraph) -> Result<()> {
         let file_hash = crate::core::transaction_log::calculate_content_hash(&graph.file_path);
         let save_path = self.storage_dir.join(format!("{}.json", file_hash));
@@ -311,6 +479,16 @@ impl RelationalIndexer {
     }
 
     pub fn load_all_graphs(&self) -> Result<Vec<FileGraph>> {
+        // Phase 3: DB-first (consolidation — one graph home). The JSON
+        // files remain a fallback for pre-v2 stores and non-DB workflows;
+        // the degrade names itself (capability-ladder rule).
+        match self.load_graphs_from_db() {
+            Ok(graphs) if !graphs.is_empty() => return Ok(graphs),
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("varning: code-index storen oläslig — läser graf-JSON i stället ({e:#})");
+            }
+        }
         let mut graphs = Vec::new();
         if !self.storage_dir.exists() {
             return Ok(graphs);

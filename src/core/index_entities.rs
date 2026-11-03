@@ -29,6 +29,10 @@ pub struct Entity {
     pub doc_comment: Option<String>,
     /// Token count of the entity
     pub tokens: usize,
+    /// GTW dot-path captured at extraction — valid for the indexed
+    /// content hash only (T6 freshness caveat); the DB graph uses it for
+    /// definitions/from_path so consumers keep the read_node chain.
+    pub path: String,
     /// Child entities (e.g., methods in an impl block)
     pub children: Vec<Entity>,
 }
@@ -336,6 +340,7 @@ fn extract_function(
 
     Some(Entity {
         id: format!("gtw:{}:function:{}", file_path, qualified),
+        path: node.path.clone(),
         entity_type: "function".to_string(),
         name,
         signature,
@@ -373,6 +378,7 @@ fn extract_struct(
             if let Some(field_name) = child.get_name() {
                 children.push(Entity {
                     id: format!("gtw:{}:field:{}.{}", file_path, name, field_name),
+                    path: child.path.clone(),
                     entity_type: "field".to_string(),
                     name: field_name,
                     signature: get_first_line(child, lines),
@@ -392,6 +398,7 @@ fn extract_struct(
                     if let Some(field_name) = field.get_name() {
                         children.push(Entity {
                             id: format!("gtw:{}:field:{}.{}", file_path, name, field_name),
+                            path: field.path.clone(),
                             entity_type: "field".to_string(),
                             name: field_name,
                             signature: get_first_line(field, lines),
@@ -410,6 +417,7 @@ fn extract_struct(
 
     Some(Entity {
         id: format!("gtw:{}:struct:{}", file_path, name),
+        path: node.path.clone(),
         entity_type: "struct".to_string(),
         name,
         signature,
@@ -446,6 +454,7 @@ fn extract_enum(
             if let Some(var_name) = child.get_name() {
                 children.push(Entity {
                     id: format!("gtw:{}:variant:{}.{}", file_path, name, var_name),
+                    path: child.path.clone(),
                     entity_type: "variant".to_string(),
                     name: var_name,
                     signature: get_first_line(child, lines),
@@ -464,6 +473,7 @@ fn extract_enum(
                     if let Some(var_name) = variant.get_name() {
                         children.push(Entity {
                             id: format!("gtw:{}:variant:{}.{}", file_path, name, var_name),
+                            path: variant.path.clone(),
                             entity_type: "variant".to_string(),
                             name: var_name,
                             signature: get_first_line(variant, lines),
@@ -482,6 +492,7 @@ fn extract_enum(
 
     Some(Entity {
         id: format!("gtw:{}:enum:{}", file_path, name),
+        path: node.path.clone(),
         entity_type: "enum".to_string(),
         name,
         signature,
@@ -552,6 +563,7 @@ fn extract_impl(
 
     Some(Entity {
         id: format!("gtw:{}:impl:{}", file_path, type_name),
+        path: node.path.clone(),
         entity_type: "impl".to_string(),
         name: type_name,
         signature,
@@ -606,6 +618,7 @@ fn extract_trait(
 
     Some(Entity {
         id: format!("gtw:{}:trait:{}", file_path, name),
+        path: node.path.clone(),
         entity_type: "trait".to_string(),
         name,
         signature,
@@ -636,6 +649,7 @@ fn extract_type_alias(
 
     Some(Entity {
         id: format!("gtw:{}:type:{}", file_path, name),
+        path: node.path.clone(),
         entity_type: "type_alias".to_string(),
         name,
         signature,
@@ -665,6 +679,7 @@ fn extract_const(
 
     Some(Entity {
         id: format!("gtw:{}:const:{}", file_path, name),
+        path: node.path.clone(),
         entity_type: "const".to_string(),
         name,
         signature,
@@ -694,6 +709,7 @@ fn extract_static(
 
     Some(Entity {
         id: format!("gtw:{}:static:{}", file_path, name),
+        path: node.path.clone(),
         entity_type: "static".to_string(),
         name,
         signature,
@@ -723,6 +739,7 @@ fn extract_module(
 
     Some(Entity {
         id: format!("gtw:{}:mod:{}", file_path, name),
+        path: node.path.clone(),
         entity_type: "module".to_string(),
         name,
         signature,

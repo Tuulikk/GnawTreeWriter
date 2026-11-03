@@ -1,6 +1,6 @@
 # Design: code-index SQLite store with a committed markdown projection
 
-**Status:** Accepted direction (2026-10-31) · Reviewed 2026-11-02 — 13 findings resolved · Phase 1 + 2 implemented · T6 resolved + Phase 3 STARTED (schema v2: entities/relations/symbols born and filled; JSON-graph deprecation pending consumer audit)
+**Status:** Accepted direction (2026-10-31) · Reviewed 2026-11-02 — 13 findings resolved · Phase 1–3 COMPLETE (store, gate+MCP, graph consolidation) · T6 resolved · Remaining: trigger plumbing/runners (Phase 4, optional)
 **Origin:** User discussion, 2026-10-31 GTW session (after v0.20.1 release)
 **Scope note:** This precedes T3–T6 in the issue-log backlog; T6 (canonical
 ID format) is a *prerequisite* for Phase 3, not for Phase 1.
@@ -171,10 +171,13 @@ DB is absent or corrupt. Zero-setup charm is the feature's virtue.
    change) + doctor `code_index` store check. Deviation from the sketch:
    the header hash is md5 (drift detection, not adversarial) — same
    hasher as the rest of the codebase, no new dependency.
-3. **Phase 3** — 🚧 STARTED (T6 landed): entities/relations/symbols tables
-   born in schema v2 and filled during refresh. REMAINING: migrate the
-   knowledge-graph JSON consumers (RelationalIndexer/impact_analyzer)
-   onto the DB tables, then deprecate `.gnawtreewriter_ai/graph/*.json`.
+3. **Phase 3** — ✅ COMPLETE: entities/relations/symbols born and filled
+   (schema v2), node_path added (schema v3), `RelationalIndexer` and all
+   consumers (impact analysis, blueprint, doctor resolution stats, the
+   MCP callers tool) read the store DB-first; legacy JSON pipeline kept
+   as the no-DB fallback only — JSON is no longer WRITTEN when the store
+   exists. Old `.gnawtreewriter_ai/graph/*.json` files can be deleted;
+   cleanup is cosmetic and left to the user.
 4. **Phase 4 (optional)** — trigger plumbing + runner hooks (git hook,
    staleness writer in edit responses).
 

@@ -29,7 +29,7 @@ use std::time::Duration;
 /// key, so stale rows never survive an extractor change silently.
 pub const EXTRACTOR_VERSION: &str = "1";
 
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 const BUSY_TIMEOUT_MS: u64 = 5000;
 
 const SCHEMA_V1: &str = r#"
@@ -96,6 +96,13 @@ CREATE TABLE IF NOT EXISTS symbols (
     occurrences INTEGER NOT NULL,
     PRIMARY KEY (name, file)
 );
+"#;
+
+/// Schema v3 (Phase 3 completion): entities carry the GTW dot-path so the
+/// DB graph can serve definitions/from_path — the read_node chain
+/// (code-index → read_node → edit_node) survives the JSON deprecation.
+const SCHEMA_V3: &str = r#"
+ALTER TABLE entities ADD COLUMN node_path TEXT NOT NULL DEFAULT '';
 "#;
 
 pub struct RefreshStats {
@@ -168,6 +175,9 @@ fn open_and_migrate(path: &Path) -> Result<Connection> {
     }
     if v < 2 {
         conn.execute_batch(SCHEMA_V2)?;
+    }
+    if v < 3 {
+        conn.execute_batch(SCHEMA_V3)?;
     }
     if v < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -343,6 +353,9 @@ pub fn refresh(
         // file anyway; meta keeps the old generation until the pass
         // completes, so a mid-run abort is detected and healed next time.
         conn.execute("DELETE FROM staleness_queue", [])?;
+        conn.execute("DELETE FROM relations", [])?;
+        conn.execute("DELETE FROM entities", [])?;
+        conn.execute("DELETE FROM symbols", [])?;
         conn.execute("DELETE FROM files", [])?;
     }
 
@@ -423,6 +436,15 @@ pub fn refresh(
 
     for old in known.keys() {
         if !current.contains(old) {
+            // Null out cross-file references BEFORE dropping the file's
+            // entities (FK order), then clean all three tables — removed
+            // files must not leak rows.
+            conn.execute(
+                "UPDATE relations SET to_id = NULL WHERE to_id IN (SELECT id FROM entities WHERE file = ?1)",
+                params![old],
+            )?;
+            conn.execute("DELETE FROM relations WHERE file = ?1", params![old])?;
+            conn.execute("DELETE FROM entities WHERE file = ?1", params![old])?;
             conn.execute("DELETE FROM files WHERE path = ?1", params![old])?;
             stats.files_removed += 1;
         }
@@ -591,21 +613,31 @@ fn store_entities_relations(
     relations: &[crate::core::index_relations::Relation],
 ) -> Result<()> {
     let tx = conn.transaction()?;
+    // Stale cross-file references first: this file's entities are about
+    // to be replaced — other files' relations pointing at them lose
+    // their to_id (the after-loop pass re-resolves them). FK has no
+    // cascade by design: a relation row belongs to its caller file.
+    tx.execute(
+        "UPDATE relations SET to_id = NULL WHERE to_id IN (SELECT id FROM entities WHERE file = ?1)",
+        params![rel],
+    )?;
     tx.execute("DELETE FROM entities WHERE file = ?1", params![rel])?;
     tx.execute("DELETE FROM relations WHERE file = ?1", params![rel])?;
     {
         let mut ent = tx.prepare(
-            "INSERT INTO entities (id, file, kind, name, line) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO entities (id, file, kind, name, line, node_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )?;
         fn flatten<'a>(
             e: &'a crate::core::index_entities::Entity,
-            out: &mut Vec<(&'a str, &'a str, &'a str, i64)>,
+            out: &mut Vec<(&'a str, &'a str, &'a str, i64, &'a str)>,
         ) {
             out.push((
                 e.id.as_str(),
                 e.entity_type.as_str(),
                 e.name.as_str(),
                 e.line as i64,
+                e.path.as_str(),
             ));
             for c in &e.children {
                 flatten(c, out);
@@ -614,8 +646,8 @@ fn store_entities_relations(
         for e in entities {
             let mut rows = Vec::new();
             flatten(e, &mut rows);
-            for (id, kind, name, line) in rows {
-                ent.execute(params![id, rel, kind, name, line])?;
+            for (id, kind, name, line, node_path) in rows {
+                ent.execute(params![id, rel, kind, name, line, node_path])?;
             }
         }
         let mut rels = tx.prepare(

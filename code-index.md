@@ -1,10 +1,10 @@
 # CODE-INDEX — GnawTreeWriter
 
-> Genererad 2026-11-03 20:10 UTC · gnawtreewriter 0.21.0 · git `fbf3db3` +DIRTY
+> Genererad 2026-11-03 21:23 UTC · gnawtreewriter 0.21.0 · git `b7ed2c2` +DIRTY
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 10baa6055b1a194ddd5b0db50d346b7d
+> Body-hash: 8c2b7d171f0e0d2592711533aaacffd8
 
 ## Träd
 
@@ -61,7 +61,7 @@ src/core/
   blast.rs (310 rader)
   blueprint.rs (182 rader)
   code_index.rs (678 rader)
-  code_index_db.rs (757 rader)
+  code_index_db.rs (789 rader)
   compress.rs (487 rader)
   curator.rs (709 rader)
   diagnostics.rs (1053 rader)
@@ -75,7 +75,7 @@ src/core/
   gnaw_refactor.rs (369 rader)
   guardian.rs (332 rader)
   healer.rs (78 rader)
-  index_entities.rs (893 rader)
+  index_entities.rs (910 rader)
   index_relations.rs (658 rader)
   inspect.rs (514 rader)
   label_manager.rs (90 rader)
@@ -107,7 +107,7 @@ src/llm/
   project_indexer.rs (209 rader)
   prompts.rs (174 rader)
   recall_eval.rs (240 rader)
-  relational_index.rs (506 rader)
+  relational_index.rs (684 rader)
   semantic_index.rs (1128 rader)
 src/mcp/
   mod.rs (3967 rader)
@@ -163,6 +163,7 @@ tests/
   gnaw_sense_integration.rs (72 rader)
   insert_position.rs (555 rader)
   mcp_integration.rs (2291 rader)
+  phase3_graph.rs (106 rader)
   relational_integration.rs (55 rader)
   t6_canonical_ids.rs (206 rader)
 ```
@@ -587,36 +588,37 @@ _(inga toppnivå-items)_
 - `pub struct CheckResult` :512
 - `pub fn check_index(` :523
 
-### code_index_db.rs (757 rader)
+### code_index_db.rs (789 rader)
 - `pub const EXTRACTOR_VERSION: &str = "1"` :30
-- `const SCHEMA_VERSION: i32 = 2` :32
+- `const SCHEMA_VERSION: i32 = 3` :32
 - `const BUSY_TIMEOUT_MS: u64 = 5000` :33
 - `const SCHEMA_V1: &str = r#"` :35
 - `const SCHEMA_V2: &str = r#"` :72
-- `pub struct RefreshStats` :101
-- `pub struct DbRun` :110
-- `pub fn db_path(root: &Path) -> PathBuf` :120
-- `pub fn resolve_index_root(root: &Path) -> PathBuf` :127
-- `fn sidecar(path: &Path, suffix: &str) -> PathBuf` :147
-- `fn open_and_migrate(path: &Path) -> Result<Connection>` :153
-- `pub fn open_or_recreate(root: &Path) -> Result<(Connection, bool)>` :180
-- `pub fn open_existing(root: &Path) -> Result<Connection>` :201
-- `pub struct StoreStatus` :223
-- `pub fn store_status(root: &Path) -> Option<StoreStatus>` :230
-- `fn generation_key(opts: &CodeIndexOptions) -> String` :251
-- `fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>>` :259
-- `fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()>` :268
-- `fn upsert_file(` :279
-- `pub fn refresh(` :334
-- `pub(crate) fn load_index(conn: &Connection) -> Result<Vec<FileIndex>>` :460
-- `fn load_warnings(conn: &Connection) -> Result<Vec<String>>` :525
-- `pub fn render(` :538
-- `pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun>` :552
-- `fn store_entities_relations(` :587
-- `fn resolve_unresolved_in_db(conn: &Connection) -> Result<()>` :643
-- `pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :697
-- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :721
-- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :743
+- `const SCHEMA_V3: &str = r#"` :104
+- `pub struct RefreshStats` :108
+- `pub struct DbRun` :117
+- `pub fn db_path(root: &Path) -> PathBuf` :127
+- `pub fn resolve_index_root(root: &Path) -> PathBuf` :134
+- `fn sidecar(path: &Path, suffix: &str) -> PathBuf` :154
+- `fn open_and_migrate(path: &Path) -> Result<Connection>` :160
+- `pub fn open_or_recreate(root: &Path) -> Result<(Connection, bool)>` :190
+- `pub fn open_existing(root: &Path) -> Result<Connection>` :211
+- `pub struct StoreStatus` :233
+- `pub fn store_status(root: &Path) -> Option<StoreStatus>` :240
+- `fn generation_key(opts: &CodeIndexOptions) -> String` :261
+- `fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>>` :269
+- `fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()>` :278
+- `fn upsert_file(` :289
+- `pub fn refresh(` :344
+- `pub(crate) fn load_index(conn: &Connection) -> Result<Vec<FileIndex>>` :482
+- `fn load_warnings(conn: &Connection) -> Result<Vec<String>>` :547
+- `pub fn render(` :560
+- `pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun>` :574
+- `fn store_entities_relations(` :609
+- `fn resolve_unresolved_in_db(conn: &Connection) -> Result<()>` :675
+- `pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :729
+- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :753
+- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :775
 
 ### compress.rs (487 rader)
 - `pub struct CompressedOutput` :12
@@ -839,27 +841,27 @@ _(inga toppnivå-items)_
   - `fn heal_brace_languages(&self, _code: &str, error: &SyntaxError) -> Option<HealingAction>` :40
   - `fn heal_python(&self, code: &str, error: &SyntaxError) -> Option<HealingAction>` :61
 
-### index_entities.rs (893 rader)
+### index_entities.rs (910 rader)
 - `pub struct Entity` :13
-- `pub struct EntityIndex` :38
-- `pub fn index_entities(file_path: &str, include_private: bool) -> Result<EntityIndex>` :52
-- `pub fn extract_entities_from_tree(` :62
-- `pub fn canonical_entity_path(file_path: &str) -> String` :76
-- `fn disambiguate_ids(entities: &mut [Entity])` :101
-- `fn collect_entities(` :121
-- `fn get_node_source(node: &TreeNode, lines: &[&str]) -> String` :238
-- `fn get_first_line(node: &TreeNode, lines: &[&str]) -> String` :244
-- `fn detect_visibility(node: &TreeNode) -> String` :253
-- `fn extract_doc_comment(node: &TreeNode, lines: &[&str]) -> Option<String>` :285
-- `fn extract_function(` :310
-- `fn extract_struct(` :351
-- `fn extract_enum(` :425
-- `fn extract_impl(` :497
-- `fn extract_trait(` :567
-- `fn extract_type_alias(` :621
-- `fn extract_const(` :651
-- `fn extract_static(` :680
-- `fn extract_module(` :709
+- `pub struct EntityIndex` :42
+- `pub fn index_entities(file_path: &str, include_private: bool) -> Result<EntityIndex>` :56
+- `pub fn extract_entities_from_tree(` :66
+- `pub fn canonical_entity_path(file_path: &str) -> String` :80
+- `fn disambiguate_ids(entities: &mut [Entity])` :105
+- `fn collect_entities(` :125
+- `fn get_node_source(node: &TreeNode, lines: &[&str]) -> String` :242
+- `fn get_first_line(node: &TreeNode, lines: &[&str]) -> String` :248
+- `fn detect_visibility(node: &TreeNode) -> String` :257
+- `fn extract_doc_comment(node: &TreeNode, lines: &[&str]) -> Option<String>` :289
+- `fn extract_function(` :314
+- `fn extract_struct(` :356
+- `fn extract_enum(` :433
+- `fn extract_impl(` :508
+- `fn extract_trait(` :579
+- `fn extract_type_alias(` :634
+- `fn extract_const(` :665
+- `fn extract_static(` :695
+- `fn extract_module(` :725
 
 ### index_relations.rs (658 rader)
 - `pub struct Relation` :14
@@ -1417,7 +1419,7 @@ _(inga toppnivå-items)_
 - `pub struct RecallReport` :53
 - `pub fn run_recall_eval(eval_path: &Path, k: usize, json_out: bool) -> Result<()>` :71
 
-### relational_index.rs (506 rader)
+### relational_index.rs (684 rader)
 - `pub enum RelationType` :10
 - `pub struct Relation` :17
 - `pub struct FileGraph` :26
@@ -1430,10 +1432,11 @@ _(inga toppnivå-items)_
   - `pub fn last_index_stats(&self) -> Option<&IndexStats>` :116
   - `pub fn resolution_stats(&self) -> Result<IndexStats>` :123
   - `pub fn index_directory(&mut self, dir_path: &Path) -> Result<Vec<FileGraph>>` :171
-  - `fn collect_definitions(&self, node: &TreeNode, acc: &mut HashMap<String, String>)` :223
-  - `fn extract_relations(` :234
-  - `pub fn save_graph(&self, graph: &FileGraph) -> Result<()>` :305
-  - `pub fn load_all_graphs(&self) -> Result<Vec<FileGraph>>` :313
+  - `fn collect_definitions(&self, node: &TreeNode, acc: &mut HashMap<String, String>)` :256
+  - `fn extract_relations(` :267
+  - `fn load_graphs_from_db(&self) -> Result<Vec<FileGraph>>` :344
+  - `pub fn save_graph(&self, graph: &FileGraph) -> Result<()>` :473
+  - `pub fn load_all_graphs(&self) -> Result<Vec<FileGraph>>` :481
 
 ### semantic_index.rs (1128 rader)
 - `fn vector_to_blob(vector: &[f32]) -> Vec<u8>` :11
@@ -1979,6 +1982,15 @@ _(inga toppnivå-items)_
 - `async fn integration_mcp_edit_rejection_carries_edit_verdict(` :1986
 - `async fn integration_mcp_edit_reports_impact_on_signature_change(` :2090
 - `async fn integration_mcp_batch_rejection_carries_edit_verdict(` :2201
+
+### phase3_graph.rs (106 rader)
+- `fn opts() -> CodeIndexOptions` :8
+- `fn make_store(dir: &std::path::Path)` :15
+- `fn graphs_load_from_db_store()` :23
+- `fn resolution_stats_work_over_db_graphs()` :53
+- `fn impact_analysis_reads_db_graphs()` :67
+- `fn index_directory_uses_store_when_present()` :84
+- `fn legacy_json_pipeline_still_works_without_db()` :97
 
 ### relational_integration.rs (55 rader)
 _(inga toppnivå-items)_

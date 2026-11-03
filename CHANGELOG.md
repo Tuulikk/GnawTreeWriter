@@ -1,5 +1,29 @@
 ## [Unreleased]
 
+### Added — Phase 3 complete: knowledge graph reads the store; JSON deprecated as writer
+- **`RelationalIndexer` is DB-first** (consolidation rule fulfilled — one
+  graph home): `load_all_graphs`/`index_directory`/`resolution_stats`/
+  `analyze_impact` all serve from `.gnawtreewriter_ai/code_index.db`.
+  The legacy parse+JSON pipeline remains as the no-DB fallback
+  (capability ladder) and still covers pre-v2 stores.
+- **Schema v3** (`user_version = 3`): `entities.node_path` — the DB
+  graph now carries dot-paths, so definitions/from_path keep the
+  read_node→edit_node chain (T6 freshness caveat applies: valid at the
+  indexed hash).
+- Mapping: `definitions` ← entities (name→node_path), `from_path` ←
+  entity node_path (synthetic callsite from-ids expose their stable gtw
+  id instead — honest and fresh-stable), `to_file` ← to_id join,
+  `imports` ← last segment of import targets. `RelationType::Call` for
+  "calls", everything else Reference (as before).
+- FK-hygiene fix: a file's entity replacement nulls out cross-file
+  `to_id` references first (no cascade by design — a relation belongs to
+  its caller file; the after-loop pass re-resolves), removed files clean
+  all three graph tables (rows no longer leak), full rebuild clears the
+  graph tables too.
+- Dogfood: doctor's knowledge-graph check now reports over the DB graph
+  without any JSON files — 722/1786 calls resolved (40 %), 65 ambiguous
+  names surfaced.
+
 ### Added — T6 resolved: canonical IDs + honest relation targets (Phase 3 foundation)
 - **Entity IDs canonical** (`gtw:{canonical_relpath}:{type}:{name}`): paths
   POSIX + git-toplevel-relative regardless of caller input
