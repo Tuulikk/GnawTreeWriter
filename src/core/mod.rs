@@ -115,6 +115,14 @@ pub struct EditReceipt {
     pub changed: bool,
     /// Position-aligned byte difference (see count_changed_bytes).
     pub bytes_changed: usize,
+    /// B1(a): the node path AFTER the edit, re-resolved from the fresh
+    /// tree. Content-replacement keeps the ordinal position, so this is
+    /// normally the input path — structural multi-item content is where
+    /// it diverges. Sibling paths AFTER the node may shift (B1).
+    pub new_node_path: String,
+    /// B1(a): content hash of the edited node post-write — the freshness
+    /// key for consumers replaying stored paths (compare before trusting).
+    pub node_content_hash: String,
 }
 
 impl GnawTreeWriter {
@@ -272,6 +280,54 @@ impl GnawTreeWriter {
         Ok(node.content.clone())
     }
 
+    /// B1(b): declare the expected identity of the node at `node_path`
+    /// BEFORE editing — a mismatch rejects with "PATH STALE" instead of
+    /// writing the wrong node. Paths are positional (B1,
+    /// GTW_RAPPORT_2026-11-01): they invalidate after every structural
+    /// edit, so callers replaying stored paths MUST verify first.
+    /// `expect_name` compares the node's identifier, `expect_kind` the
+    /// raw tree-sitter kind (e.g. "function_item", "struct_item").
+    pub fn expect_node(
+        &self,
+        node_path: &str,
+        expect_name: Option<&str>,
+        expect_kind: Option<&str>,
+    ) -> Result<()> {
+        // Canonical resolver: numeric dot-paths AND @kind:name anchors.
+        // Anchors are self-validating (resolved BY name) — the stale-path
+        // guard matters for positional paths, which is exactly what the
+        // callers replaying stored paths use.
+        let node = self.resolve_path(node_path).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Node not found at path: {} — node paths are positional and invalidate after structural edits; re-run search_nodes.",
+                node_path
+            )
+        })?;
+        let name = node.get_name().unwrap_or_default();
+        if let Some(want) = expect_name {
+            if name != want {
+                anyhow::bail!(
+                    "PATH STALE: node at path {} is '{}' (kind '{}'), expected name '{}'. Node paths are positional and invalidate after structural edits — re-run search_nodes and retry with the fresh path.",
+                    node_path,
+                    name,
+                    node.node_type,
+                    want
+                );
+            }
+        }
+        if let Some(want) = expect_kind {
+            if node.node_type != want {
+                anyhow::bail!(
+                    "PATH STALE: node at path {} has kind '{}', expected kind '{}'. Re-run search_nodes and retry with the fresh path.",
+                    node_path,
+                    node.node_type,
+                    want
+                );
+            }
+        }
+        Ok(())
+    }
+
     // Test indent insert
     pub fn edit(&mut self, operation: EditOperation, force: bool) -> Result<()> {
         // Calculate before hash
@@ -279,6 +335,14 @@ impl GnawTreeWriter {
         let pre_edit_source = self.source_code.clone();
         self.last_verdict = None;
         self.last_impact = None;
+
+        // B1(a): the receipt carries the addressed path — consumers diff
+        // intent (expect) vs outcome (new path + hash).
+        let target_for_receipt = match &operation {
+            EditOperation::Edit { node_path, .. } => Some(node_path.clone()),
+            EditOperation::Delete { node_path } => Some(node_path.clone()),
+            _ => None,
+        };
 
         let modified_code = match &operation {
             EditOperation::Edit { node_path, content } => {
@@ -313,7 +377,7 @@ impl GnawTreeWriter {
                         PathBuf::from(&self.file_path),
                         Some(resolved_path.clone()),
                         Some(resolved_content.clone()),
-                        Some(resolved_content),
+                        Some(resolved_content.clone()),
                         "NO-OP (identical content) — nothing written".to_string(),
                         HashMap::new(),
                     )?;
@@ -323,6 +387,10 @@ impl GnawTreeWriter {
                         verified: true,
                         changed: false,
                         bytes_changed: 0,
+                        new_node_path: resolved_path.clone(),
+                        node_content_hash: crate::core::transaction_log::calculate_content_hash(
+                            &resolved_content,
+                        ),
                     });
                     return Ok(());
                 }
@@ -630,11 +698,27 @@ impl GnawTreeWriter {
         let parser = get_parser(Path::new(&self.file_path))?;
         self.tree = parser.parse(&self.source_code)?;
 
+        // B1(a): re-resolve the addressed node in the FRESH tree — content
+        // replacement keeps the ordinal position, so this path is
+        // authoritative for the next edit; the hash is the freshness key
+        // for stored-path consumers (compare before trusting).
+        let (new_node_path, node_content_hash) = match &target_for_receipt {
+            Some(p) => match self.find_node_by_path(&self.tree, p) {
+                Some(found) => (
+                    found.path.clone(),
+                    crate::core::transaction_log::calculate_content_hash(&found.content),
+                ),
+                None => (p.clone(), String::new()),
+            },
+            None => (String::new(), String::new()),
+        };
         let receipt = EditReceipt {
             transaction_id,
             verified,
             changed: before_hash != after_hash,
             bytes_changed: count_changed_bytes(&pre_edit_source, &self.source_code),
+            new_node_path,
+            node_content_hash,
         };
         let verified = receipt.verified;
         self.last_receipt = Some(receipt);

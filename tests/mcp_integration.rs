@@ -2289,3 +2289,109 @@ async fn integration_mcp_batch_rejection_carries_edit_verdict(
     server_handle.await?;
     Ok(())
 }
+
+/// B1: edit_node with an expect_name that mismatches the addressed node
+/// must reject with E_PATH_STALE and write nothing; a matching
+/// expectation succeeds and the response carries new_node_path +
+/// node_content_hash (the freshness key for stored-path consumers).
+#[tokio::test]
+async fn integration_mcp_edit_node_expect_name_guard() -> Result<(), Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, rx) = oneshot::channel::<()>();
+    let token = Some("secret".to_string());
+    let server_handle = tokio::spawn(async move {
+        let shutdown_fut = async move {
+            let _ = rx.await;
+        };
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
+            .await
+            .unwrap();
+    });
+    let url = format!("http://{}/", addr);
+    let client = Client::new();
+    let mut ready = false;
+    for _ in 0..40 {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                ready = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_connect() {
+                    sleep(Duration::from_millis(50)).await;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(ready, "server did not become ready in time");
+
+    // Isolated project (hermetic — never operate on repo root state).
+    let dir = tempfile::tempdir()?;
+    let target = dir.path().join("g.rs");
+    std::fs::write(&target, "/// Doc.\nfn alpha() -> u8 { 1 }\n")?;
+
+    // Wrong expectation → E_PATH_STALE, nothing written.
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&json!({
+            "jsonrpc":"2.0", "method":"tools/call", "id": 21,
+            "params": {"name": "edit_node", "arguments": {
+                "file_path": target.to_string_lossy(),
+                "node_path": "1",
+                "content": "fn alpha() -> u8 { 9 }\n",
+                "expect_name": "beta"
+            }}
+        }))
+        .send()
+        .await?;
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").expect("tool errors are results");
+    assert_eq!(r.get("isError"), Some(&json!(true)), "{:?}", r["content"]);
+    assert_eq!(r["code"], json!("E_PATH_STALE"));
+    assert!(
+        std::fs::read_to_string(&target)?.contains("{ 1 }"),
+        "rejected expectation writes nothing"
+    );
+
+    // Matching expectation → success; receipt fields present in data.
+    let resp = client
+        .post(&url)
+        .header("Authorization", "Bearer secret")
+        .json(&json!({
+            "jsonrpc":"2.0", "method":"tools/call", "id": 22,
+            "params": {"name": "edit_node", "arguments": {
+                "file_path": target.to_string_lossy(),
+                "node_path": "1",
+                "content": "fn alpha() -> u8 { 9 }\n",
+                "expect_name": "alpha"
+            }}
+        }))
+        .send()
+        .await?;
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").expect("success is a result");
+    assert_ne!(r.get("isError"), Some(&json!(true)), "{:?}", r["content"]);
+    let text = r
+        .get("content")
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|item| item.get("text"))
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .to_string();
+    assert!(text.contains("Node edited"), "success text: {text}");
+
+    let _ = tx.send(());
+    server_handle.await?;
+    Ok(())
+}

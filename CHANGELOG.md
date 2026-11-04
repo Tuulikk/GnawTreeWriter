@@ -1,3 +1,24 @@
+## [Unreleased]
+
+### Added — B1: path freshness — expect-guards + receipt path/hash
+Implements the B1 wish from `GTW_RAPPORT_2026-11-01.md` (and pays for the
+2026-11-03 incident, which was B1's cost in practice):
+- **`EditReceipt` gains `new_node_path` + `node_content_hash`** (B1a):
+  the addressed node re-resolved in the fresh tree after write, with its
+  content hash — the freshness key for consumers replaying stored paths.
+- **`edit_node` gains `expect_name` / `expect_kind`** (B1b): declared
+  identity checked BEFORE any write; mismatch rejects with
+  **`E_PATH_STALE`** and the guidance "re-run search_nodes" instead of
+  writing the wrong node. Works with numeric dot-paths and `@kind:name`
+  anchors (anchors are self-validating; the guard matters for
+  positional paths).
+- `GnawTreeWriter::expect_node` exposes the same guard to library
+  callers. `@`-semantic paths were never stale-prone (resolved BY name);
+  the guard targets positional paths — the replay case.
+- tests/b1_path_validation.rs + an MCP integration test: receipt fields,
+  mismatch rejects before writing, the 2026-11-03 incident shape is
+  caught by an expect declaration.
+
 ## [0.22.0] - 2026-11-03
 
 ### Added — capability ladder (2026-10-31 proposal, spår 2)

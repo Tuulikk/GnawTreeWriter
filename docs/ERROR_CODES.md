@@ -15,6 +15,7 @@ sync: every `tool_error_code(..., "CODE")` must appear here).
 | `E_STRICT_PARSE` | Editor refused to open the file: the EXISTING content has syntax errors | read paths (`analyze`/`get_skeleton`/`read_node`) still answer partially with the position — fix the file before editing |
 | `E_NODE_NOT_FOUND` | node_path/source/target stale or not a parent | re-run `analyze`/`list_nodes` for fresh paths |
 | `E_EDIT_REJECTED` | Validation/guardian rejected the write (syntax or error-severity rule) | fix the message's details, `preview_edit` first |
+| `E_PATH_STALE` | B1: expect_name/expect_kind mismatched the node at the addressed path — nothing written | re-run `search_nodes` for a fresh path, retry with corrected `expect_*` |
 | `E_VALIDATION` | Proposed code failed syntax validation (model proposal) | adjust request and retry (`edit --ask` style flows) |
 | `E_SEMANTIC_NO_MATCH` | semantic_edit/insert found nothing above the relevance floor | different anchor phrase, or `insert_node` with a `parent_path` from `list_nodes` |
 | `E_MODEL_UNAVAILABLE` | Local model missing/disabled (feature gate or `ai setup` needed) | `gnawtreewriter ai setup`, rebuild with `modernbert` feature |

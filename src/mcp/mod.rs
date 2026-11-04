@@ -439,7 +439,17 @@ pub mod mcp_server {
                             .get("force")
                             .and_then(Value::as_bool)
                             .unwrap_or(false);
-                        Ok(handle_edit_node_internal(state, fp, np, c, force))
+                        let expect_name = arguments.get("expect_name").and_then(Value::as_str);
+                        let expect_kind = arguments.get("expect_kind").and_then(Value::as_str);
+                        Ok(handle_edit_node_internal(
+                            state,
+                            fp,
+                            np,
+                            c,
+                            force,
+                            expect_name,
+                            expect_kind,
+                        ))
                     }
                     "preview_edit" => {
                         let fp = validate_arg("file_path")?;
@@ -849,13 +859,15 @@ pub mod mcp_server {
             json!({
                 "name": "edit_node",
                 "title": "Edit node content",
-                "description": "Replace the content of ONE AST node (by dot-path) with new code — syntax-validated BEFORE writing, so a broken replacement is rejected instead of corrupting the file. WHEN: changing a function/struct/impl you already located; safer than text search-replace because the target cannot silently mismatch. RETURNS: a diff summary and a transaction id (revert via undo). Example: {\"file_path\": \"a.rs\", \"node_path\": \"1.2\", \"content\": \"fn fixed() { }\"}.",
+                "description": "Replace the content of ONE AST node (by dot-path) with new code — syntax-validated BEFORE writing, so a broken replacement is rejected instead of corrupting the file. WHEN: changing a function/struct/impl you already located; safer than text search-replace because the target cannot silently mismatch. B1: pass expect_name (and/or expect_kind) when replaying stored paths — a stale path rejects with E_PATH_STALE instead of writing the wrong node, and the success response carries new_node_path + node_content_hash for the next edit. RETURNS: a diff summary, transaction id, receipt. Example: {\"file_path\": \"a.rs\", \"node_path\": \"1.2\", \"content\": \"fn fixed() { }\", \"expect_name\": \"fixed\"}.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "file_path": { "type": "string", "description": "Path to the file" },
                         "node_path": { "type": "string", "description": "Dot-path of the node to replace" },
                         "content": { "type": "string", "description": "New complete content for the node (validated as code before write)" },
+                        "expect_name": { "type": "string", "description": "B1: expected identifier of the node at node_path — mismatch (stale path) rejects with E_PATH_STALE instead of writing the wrong node. Strongly recommended when replaying stored paths" },
+                        "expect_kind": { "type": "string", "description": "B1: expected tree-sitter kind (e.g. function_item, struct_item) at node_path — same stale-path guard as expect_name" },
                         "force": { "type": "boolean", "description": "Bypass a guardian critical-block ONLY after confirming the flagged reduction is intentional via read_node (default false — exists because the statement-diff can flag legit restructures)" }
                     },
                     "required": ["file_path", "node_path", "content"]
@@ -3397,7 +3409,15 @@ or list_nodes for a flat index of this file.",
                     // carries what was matched, with what confidence, and which
                     // alternatives were considered.
                     let mut result =
-                        handle_edit_node_internal(state, file_path, &best_node.path, content, false);
+                        handle_edit_node_internal(
+                            state,
+                            file_path,
+                            &best_node.path,
+                            content,
+                            false,
+                            None,
+                            None,
+                        );
                     if let Some(obj) = result.as_object_mut() {
                         obj.insert(
                             "semantic_match".to_string(),
@@ -3650,9 +3670,28 @@ or list_nodes for a flat index of this file.",
         node_path: &str,
         content: &str,
         force: bool,
+        expect_name: Option<&str>,
+        expect_kind: Option<&str>,
     ) -> Value {
         match GnawTreeWriter::new(file_path) {
             Ok(mut w) => {
+                // B1(b): verify the addressed node's identity BEFORE any
+                // write — a stale path (positional, invalidated by prior
+                // structural edits) rejects with guidance instead of
+                // landing on the wrong node. Runs before the idempotent
+                // check: a stale path should shout even on retries.
+                if expect_name.is_some() || expect_kind.is_some() {
+                    if let Err(e) = w.expect_node(node_path, expect_name, expect_kind) {
+                        bump_duplex_metric(&state.project_root, "rejected");
+                        return tool_error_code(
+                            format!(
+                                "{} — the addressed node did not match the expectation; nothing was written.",
+                                e
+                            ),
+                            "E_PATH_STALE",
+                        );
+                    }
+                }
                 // Idempotent retry (Phase 10): after a host timeout the
                 // retry finds the content already in place — succeed with
                 // already_applied instead of a scary E_EDIT_REJECTED.
@@ -3695,14 +3734,17 @@ or list_nodes for a flat index of this file.",
                 bump_duplex_metric(&state.project_root, "validated");
                 bump_duplex_metric(&state.project_root, "applied");
                 let pulse = generate_pulse(state, file_path, node_path);
+                let receipt = w.last_edit_receipt().cloned();
                 attach_impact(
                     tool_success_with_pulse(
                         format!("Node edited.\nDiff:\n{}", diff),
                         Some(json!({
                             "diff": diff,
                             "transaction_id": w.last_transaction_id(),
-                            "verified": w.last_edit_receipt().map(|r| r.verified).unwrap_or(false),
-                            "bytes_changed": w.last_edit_receipt().map(|r| r.bytes_changed).unwrap_or(0)
+                            "verified": receipt.as_ref().map(|r| r.verified).unwrap_or(false),
+                            "bytes_changed": receipt.as_ref().map(|r| r.bytes_changed).unwrap_or(0),
+                            "new_node_path": receipt.as_ref().map(|r| r.new_node_path.clone()).unwrap_or_default(),
+                            "node_content_hash": receipt.as_ref().map(|r| r.node_content_hash.clone()).unwrap_or_default()
                         })),
                         pulse,
                     ),

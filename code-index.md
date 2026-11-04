@@ -1,10 +1,10 @@
 # CODE-INDEX — GnawTreeWriter
 
-> Genererad 2026-11-04 11:57 UTC · gnawtreewriter 0.22.0 · git `527491a`
+> Genererad 2026-11-04 12:10 UTC · gnawtreewriter 0.22.0 · git `903e8d8`
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 01376a1ea556eb1c72c062afeac40896
+> Body-hash: e6c48124b8eaedabdf3ba0d1cb6259f3
 
 ## Träd
 
@@ -159,7 +159,7 @@ tests/
   code_index_db.rs (189 rader)
   doc_comment_handling.rs (123 rader)
   edit_multibyte_regression.rs (113 rader)
-  edit_node_insert_regression.rs (50 rader)
+  edit_node_insert_regression.rs (99 rader)
   edit_node_midline_block_regression.rs (152 rader)
   gnaw_sense_integration.rs (72 rader)
   insert_position.rs (555 rader)
@@ -1933,8 +1933,12 @@ _(inga toppnivå-items)_
 - `fn find_export_block_path(w: &gnawtreewriter::GnawTreeWriter) -> Option<String>` :68
 - `fn edit_node_on_multibyte_js_file_does_not_panic()` :81
 
-### edit_node_insert_regression.rs (50 rader)
-- `fn edit_replaces_node_with_doc_and_attribute()` :23
+### edit_node_insert_regression.rs (99 rader)
+- `const SOURCE: &str = "/// Doc for alpha.\n#[derive(Clone)]\nfn alpha() -> u8 { 1 }\n\n/// Doc for beta.\nfn be…` :21
+- `fn edit(path: &str, content: &str, dir: &tempfile::TempDir) -> String` :23
+- `fn attribute_path_replaces_attribute_only_and_f2_swallows_doc()` :39
+- `fn function_path_replaces_function_only_and_keeps_doc_and_attribute()` :63
+- `fn struct_style_multi_item_content_replaces_exactly_the_addressed_node()` :78
 
 ### edit_node_midline_block_regression.rs (152 rader)
 - `const JS_FILE: &str = r#"// Åäö + emoji i prefixet — kolumnräkningen ska vara tecken-baserad 🌲` :20
