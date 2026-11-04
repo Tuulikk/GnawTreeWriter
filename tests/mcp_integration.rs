@@ -2290,6 +2290,117 @@ async fn integration_mcp_batch_rejection_carries_edit_verdict(
     Ok(())
 }
 
+/// B4: search_nodes alternation — `a|b` is OR with dedup by node path and
+/// `matched_pattern` naming which alternative hit; an alternation with no
+/// non-empty alternatives errors loudly instead of returning silent 0 hits.
+#[tokio::test]
+async fn integration_mcp_search_nodes_alternation() -> Result<(), Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, rx) = oneshot::channel::<()>();
+    let token = Some("secret".to_string());
+    let server_handle = tokio::spawn(async move {
+        let shutdown_fut = async move {
+            let _ = rx.await;
+        };
+        gnawtreewriter::mcp::mcp_server::serve_with_shutdown(listener, token, shutdown_fut)
+            .await
+            .unwrap();
+    });
+    let url = format!("http://{}/", addr);
+    let client = Client::new();
+    let mut ready = false;
+    for _ in 0..40 {
+        match client
+            .post(&url)
+            .json(&json!({"jsonrpc":"2.0","method":"initialize","id":1}))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                ready = true;
+                break;
+            }
+            Err(e) => {
+                if e.is_connect() {
+                    sleep(Duration::from_millis(50)).await;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(ready, "server did not become ready in time");
+
+    // Isolated project (hermetic — never operate on repo root state).
+    let dir = tempfile::tempdir()?;
+    let target = dir.path().join("s.rs");
+    std::fs::write(
+        &target,
+        "fn alpha_search() -> u8 { 1 }\nfn beta_search() -> u8 { 2 }\n",
+    )?;
+
+    let call = |id: u32, pattern: String| {
+        client
+            .post(&url)
+            .header("Authorization", "Bearer secret")
+            .json(&json!({
+                "jsonrpc":"2.0", "method":"tools/call", "id": id,
+                "params": {"name": "search_nodes", "arguments": {
+                    "file_path": target.to_string_lossy(),
+                    "pattern": pattern
+                }}
+            }))
+    };
+
+    // Alternation finds BOTH symbols, merged with matched_pattern fields.
+    let resp = call(31, "alpha_search|beta_search".into()).send().await?;
+    let v: serde_json::Value = resp.json().await?;
+    let text = v
+        .pointer("/result/content/0/text")
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .to_string();
+    assert!(
+        text.contains("matches for")
+            && text.contains("alpha_search")
+            && text.contains("beta_search"),
+        "both alternatives hit (root node may match both): {text}"
+    );
+    assert!(text.contains("matched: alpha_search"), "{text}");
+
+    // Single patterns still work (B4 regression: multi → silent 0 hits).
+    let resp = call(32, "alpha_search".into()).send().await?;
+    let v: serde_json::Value = resp.json().await?;
+    let text = v
+        .pointer("/result/content/0/text")
+        .and_then(|t| t.as_str())
+        .unwrap_or("");
+    assert!(
+        text.contains("1 alternative(s)") && text.contains("alpha_search"),
+        "single pattern still hits (B4 regression): {text}"
+    );
+
+    // Empty alternation errors loudly — never a silent 0-hit answer.
+    let resp = call(34, "||".into()).send().await?;
+    let v: serde_json::Value = resp.json().await?;
+    let r = v.get("result").expect("tool errors are results");
+    assert_eq!(r.get("isError"), Some(&json!(true)));
+    let err_text = r
+        .get("content")
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|item| item.get("text"))
+        .and_then(|t| t.as_str())
+        .unwrap_or("");
+    assert!(err_text.contains("Empty search pattern"), "{err_text}");
+
+    let _ = tx.send(());
+    server_handle.await?;
+    Ok(())
+}
+
 /// B1: edit_node with an expect_name that mismatches the addressed node
 /// must reject with E_PATH_STALE and write nothing; a matching
 /// expectation succeeds and the response carries new_node_path +

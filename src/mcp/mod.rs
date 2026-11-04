@@ -840,7 +840,7 @@ pub mod mcp_server {
             json!({
                 "name": "search_nodes",
                 "title": "Search nodes by text",
-                "description": "Find AST nodes whose content or name contains a text pattern, in one file. WHEN: you know an identifier or snippet and need the node path that edit_node/read_node require — unlike Grep it returns dot-paths, not line numbers. RETURNS: matching paths with type and name. Example: {\"file_path\": \"src/cli.rs\", \"pattern\": \"handle_lint\"}.",
+                "description": "Find AST nodes whose content or name contains a text pattern, in one file. B4 alternation: split the pattern on | — each alternative is a substring match, results merge deduped by node path and `matched_pattern` names which alternative hit (\"alpha|beta\" finds both; a literal pipe is not searchable; an alternation with no non-empty alternatives errors loudly instead of returning silent 0 hits). WHEN: you know an identifier or snippet and need the node path that edit_node/read_node require — unlike Grep it returns dot-paths, not line numbers. RETURNS: matching paths with type, name and matched_pattern. Example: {\"file_path\": \"src/cli.rs\", \"pattern\": \"handle_lint|handle_search\"}.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -3119,37 +3119,70 @@ or list_nodes for a flat index of this file.",
     }
 
     fn handle_search_nodes(file_path: &str, pattern: &str) -> Value {
+        // B4 (GTW_RAPPORT 2026-11-01): `a|b` is OR-alternation — each
+        // alternative is a substring match; results merge with dedup by
+        // node path and `matched_pattern` names which alternative hit.
+        // A literal pipe is not searchable; an alternation with no
+        // non-empty alternatives is a spec error, loudly (never a silent
+        // 0-hit answer).
+        let alternatives: Vec<&str> = pattern
+            .split('|')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if alternatives.is_empty() {
+            return tool_error(format!(
+                "Empty search pattern (alternation with no alternatives): \"{}\" — give at least one substring between pipes, e.g. \"alpha|beta\".",
+                pattern
+            ));
+        }
         match GnawTreeWriter::new_lenient(file_path) {
             Ok((w, warning)) => {
-                let mut m = Vec::new();
-                fn find(n: &TreeNode, acc: &mut Vec<Value>, p: &str) {
+                let mut m: Vec<Value> = Vec::new();
+                let mut seen: std::collections::HashSet<String> = Default::default();
+                fn find(
+                    n: &TreeNode,
+                    acc: &mut Vec<Value>,
+                    seen: &mut std::collections::HashSet<String>,
+                    p: &str,
+                    alt: &str,
+                ) {
                     if acc.len() >= 500 {
                         return;
                     }
-                    if n.content.contains(p) {
+                    if n.content.contains(p) && seen.insert(n.path.clone()) {
                         acc.push(
-                            json!({"path": n.path, "type": n.node_type, "name": n.get_name()}),
+                            json!({"path": n.path, "type": n.node_type, "name": n.get_name(), "matched_pattern": alt}),
                         );
                     }
                     for c in &n.children {
-                        find(c, acc, p);
+                        find(c, acc, seen, p, alt);
                     }
                 }
-                find(w.analyze(), &mut m, pattern);
+                let tree = w.analyze();
+                for alt in &alternatives {
+                    find(tree, &mut m, &mut seen, alt, alt);
+                }
                 // Match lines in the TEXT part (Issue 14: "Found N matches"
                 // without paths left edit_node without targets; payload keeps
                 // the full structured list).
                 const TEXT_MATCH_LINES: usize = 50;
-                let mut msg = format!("Found {} matches for \"{}\"", m.len(), pattern);
+                let mut msg = format!(
+                    "Found {} matches for \"{}\" ({} alternative(s))",
+                    m.len(),
+                    pattern,
+                    alternatives.len()
+                );
                 if m.len() >= 500 {
                     msg.push_str(" (limit reached)");
                 }
                 for n in m.iter().take(TEXT_MATCH_LINES) {
                     msg.push_str(&format!(
-                        "\n{} [{}] {}",
+                        "\n{} [{}] {} (matched: {})",
                         n.get("path").and_then(Value::as_str).unwrap_or("?"),
                         n.get("type").and_then(Value::as_str).unwrap_or("?"),
-                        n.get("name").and_then(Value::as_str).unwrap_or("")
+                        n.get("name").and_then(Value::as_str).unwrap_or(""),
+                        n.get("matched_pattern").and_then(Value::as_str).unwrap_or("?")
                     ));
                 }
                 if m.len() > TEXT_MATCH_LINES {
@@ -3158,7 +3191,7 @@ or list_nodes for a flat index of this file.",
                         m.len() - TEXT_MATCH_LINES
                     ));
                 }
-                let mut payload = json!({"matches": m});
+                let mut payload = json!({"matches": m, "alternatives": alternatives});
                 if let Some(wn) = &warning {
                     msg.push_str(&format!(
                         " ⚠ partial parse (syntax error at {}:{})",
@@ -3173,7 +3206,10 @@ or list_nodes for a flat index of this file.",
                 }
                 tool_success(msg, Some(payload))
             }
-            Err(e) => tool_error_code(format!("IO error: {} — check the path exists and points at a supported source file (search_nodes finds files by name; analyze parses any supported file)", e), "E_FILE_NOT_FOUND"),
+            Err(e) => tool_error(format!(
+                "search_nodes could not read {}: {} — check the path exists and is a supported source file (search_nodes finds files, analyze parses any supported file).",
+                file_path, e
+            )),
         }
     }
 

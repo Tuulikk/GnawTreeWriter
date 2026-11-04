@@ -1990,21 +1990,50 @@ Use --no-preview to write batch file"
         filter_type: Option<&str>,
         limit: Option<usize>,
     ) -> Result<()> {
+        // B4 (GTW_RAPPORT 2026-11-01): `a|b` is OR-alternation — same
+        // semantics as the MCP search_nodes tool: each alternative is a
+        // substring match, results merge deduped by node path, and the
+        // matching alternative is shown. An alternation with no non-empty
+        // alternatives errors loudly (never a silent 0-hit answer).
+        let alternatives: Vec<&str> = pattern
+            .split('|')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if alternatives.is_empty() {
+            anyhow::bail!(
+            "Empty search pattern (alternation with no alternatives): \"{}\" — give at least one substring between pipes, e.g. \"alpha|beta\".",
+            pattern
+        );
+        }
         let writer = GnawTreeWriter::new(file_path)?;
         let tree = writer.analyze();
-        let mut matches = Vec::new();
+        let mut matches: Vec<(String, String, String, String)> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = Default::default();
 
-        fn find(n: &TreeNode, acc: &mut Vec<(String, String, String)>, p: &str, f: Option<&str>) {
-            if n.content.contains(p) && f.is_none_or(|filter| n.node_type == filter) {
+        fn find(
+            n: &TreeNode,
+            acc: &mut Vec<(String, String, String, String)>,
+            seen: &mut std::collections::HashSet<String>,
+            p: &str,
+            alt: &str,
+            f: Option<&str>,
+        ) {
+            if n.content.contains(p)
+                && f.is_none_or(|filter| n.node_type == filter)
+                && seen.insert(n.path.clone())
+            {
                 let name = n.get_name().unwrap_or_else(|| "unnamed".to_string());
-                acc.push((n.path.clone(), n.node_type.clone(), name));
+                acc.push((n.path.clone(), n.node_type.clone(), name, alt.to_string()));
             }
             for child in &n.children {
-                find(child, acc, p, f);
+                find(child, acc, seen, p, alt, f);
             }
         }
 
-        find(tree, &mut matches, pattern, filter_type);
+        for alt in &alternatives {
+            find(tree, &mut matches, &mut seen, alt, alt, filter_type);
+        }
 
         // Sort by relevance (node types containing "definition" or "item" first)
         matches.sort_by(|a, b| {
@@ -2019,19 +2048,25 @@ Use --no-preview to write batch file"
         }
 
         if matches.is_empty() {
-            println!("No matches found for '{}' in {}", pattern, file_path);
+            println!(
+                "No matches found for '{}' in {} ({} alternative(s))",
+                pattern,
+                file_path,
+                alternatives.len()
+            );
         } else {
             println!(
-                "Found {} matches in {} (showing {}):",
+                "Found {} matches in {} (showing {}, {} alternative(s)):",
                 total_found,
                 file_path,
-                matches.len()
+                matches.len(),
+                alternatives.len()
             );
-            for (path, node_type, name) in &matches {
-                println!("  {} [{}] '{}'", path, node_type, name);
+            for (path, node_type, name, alt) in &matches {
+                println!("  {} [{}] '{}' (matched: {})", path, node_type, name, alt);
             }
 
-            if let Some((path, _, _)) = matches.first() {
+            if let Some((path, _, _, _)) = matches.first() {
                 println!("\n💡 [GnawTip]: To edit the first match surgically, use:");
                 println!("   gnawtreewriter edit {} {} -", file_path, path);
             }
