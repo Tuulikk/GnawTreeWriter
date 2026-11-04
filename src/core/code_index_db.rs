@@ -779,6 +779,51 @@ pub fn is_stale(root: &Path, file: &str) -> bool {
     .unwrap_or(false)
 }
 
+/// MCP/konsument-yta: alla filer som edit-vägen markerat stale (open-existing
+/// only — ingen store → tom mängd, aldrig en skapad store).
+pub fn stale_files(root: &Path) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    if !db_path(root).exists() {
+        return out;
+    }
+    let Ok(conn) = open_existing(root) else {
+        return out;
+    };
+    if let Ok(mut stmt) = conn.prepare("SELECT file FROM staleness_queue ORDER BY file") {
+        if let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+            for row in rows.flatten() {
+                out.insert(row);
+            }
+        }
+    }
+    out
+}
+
+/// Konsument-yta: entiteterna ur storen (kind/name/line per id), optionally
+/// prefix-filtered on file. Consumers (Motor2's map) read facts HERE instead
+/// of re-parsing the same files — one authority, no double parse.
+pub fn load_entities(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, file, kind, name, line
+         FROM entities WHERE (?1 IS NULL OR file LIKE ?1 || '%')
+         ORDER BY file, line",
+    )?;
+    let rows = stmt.query_map(params![prefix], |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_, String>(0)?,
+            "file": r.get::<_, String>(1)?,
+            "kind": r.get::<_, String>(2)?,
+            "name": r.get::<_, String>(3)?,
+            "line": r.get::<_, i64>(4)?,
+        }))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
 /// MCP query surface: relations for a path prefix.
 pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>> {
     let mut stmt = conn.prepare(
