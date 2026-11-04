@@ -748,6 +748,37 @@ pub fn mark_stale(root: &Path, file_path: &str) {
     );
 }
 
+/// Content hash used by the store (md5 hex) — the ONE freshness truth,
+/// shared with `files.hash`. Consumers (Motor2's map) must not invent their
+/// own freshness signal: `mtime:size` both over-invalidated (a plain `touch`
+/// forced a re-parse) and under-detected (same length within the same second
+/// could slip through). Hashing the bytes answers the actual question.
+pub fn content_hash(path: &Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    Some(format!("{:x}", md5::compute(&bytes)))
+}
+
+/// Did the edit path mark this file stale? Open-existing only (decision #8):
+/// no store → `false`, and the caller falls back to the content hash, which
+/// is the durable truth either way. A `true` here may only make a consumer
+/// recompute EARLIER, never later.
+pub fn is_stale(root: &Path, file: &str) -> bool {
+    if !db_path(root).exists() {
+        return false;
+    }
+    let Ok(conn) = open_existing(root) else {
+        return false;
+    };
+    let rel = crate::core::code_index::canonical_rel_path(root, Path::new(file));
+    conn.query_row(
+        "SELECT 1 FROM staleness_queue WHERE file = ?1",
+        params![rel],
+        |r| r.get::<_, i64>(0),
+    )
+    .map(|v| v == 1)
+    .unwrap_or(false)
+}
+
 /// MCP query surface: relations for a path prefix.
 pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>> {
     let mut stmt = conn.prepare(
