@@ -10,7 +10,9 @@
 > consolidation, staleness queue + post-commit hook; T6 canonical IDs
 > resolved). Current plan of record: `docs/CODE_INDEX_SQLITE_DESIGN.md`
 > and `CHANGELOG.md`. LSP-grade symbol resolution and the MCP daemon
-> remain the open add-on tracks (see the design doc's trigger section).
+> remain the open add-on tracks; the **code-index scan-tools family**
+> (claim_scan, island_scan, manifest_check — `docs/CODE_INDEX_SCAN_TOOLS_PROPOSAL.md`)
+> is the accepted extension track on the structure layer.
 
 GnawTreeWriter is a tree-based code editor optimized for LLM-assisted editing. This roadmap outlines the evolution from a precise CLI tool to an intelligent agent-integrated platform.
 

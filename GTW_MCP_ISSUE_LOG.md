@@ -1723,6 +1723,24 @@ upplösta to_id. Motor2-notis skickad (kors-repo-regeln) — `to`→`to_name`/
 
 ## 2026-11-03 — FYND: GTW edit_node/batch placerade content fel (2 falanger)
 
+**UPPDATERING 2026-11-04 — REPRODUCERAT PÅ 0.22.0, trigger isolerad, hypotes död:**
+Den tidigare förmodaden ("stale daemon-binär") är MOTBEVISAD — buggen reproduceras
+med färsk 0.22.0-binär på en filkopia. Trigger (bisektion):
+- mål-nod föregås av doc-kommentar ENBART → replace fungerar
+- mål-nod föregås av doc-kommentar + `#[attribut]` → **INSERTION i stället för
+  replace** — gamla noden överlever som dubblettdefinition (E0428 downstream),
+  verktyget rapporterar ✓
+Mekanism-shape: F2 doc-svälj-regionen tar bort [doc..attribut] men lämnar
+[node.start_line..node.end_line] — insättning, inte ersättning. Drabber
+kärnvägen (edit_node_at_path/preview_edit) → CLI + MCP + batch alike.
+**Repro-bevis:** `tests/edit_node_insert_regression.rs` (#[ignore]-märkt
+regressionstest med bisektionstabellen — `cargo test -- --ignored` falera tills
+fixen landar; unignore = kompletteringskriterium). Replay-artefakter: samma
+7-op-spec på filkopia → 7 defs → 14 (7×2), 658 → 928 rader, både multi-op och
+singel-op-per-batch.
+
+**Kategori att avbocka när fixen landar:** bugg (F2-region × attribut).
+
 **Klass:** bugg (verktyg), användarfel (mitt eget, se nedan).
 **Verktyg:** GTW MCP `edit_node` + `batch` (edit-op), src/core/index_relations.rs.
 **Parametrar:** edit ops på toppnivå-fn:er med node-paths ur search_nodes
