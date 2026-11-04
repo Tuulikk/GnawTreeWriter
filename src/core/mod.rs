@@ -125,6 +125,149 @@ pub struct EditReceipt {
     pub node_content_hash: String,
 }
 
+/// B3 (GTW_RAPPORT_2026-11-01): outline skeleton — named structure only.
+/// Comments, use/import statements, attributes and unnamed siblings
+/// collapse into a count, so the big-file answer is orientation instead
+/// of a 289-row flat dump. `outline=false` keeps the raw everything.
+/// Returns (rendered text, visible nodes, collapsed nodes).
+pub(crate) fn skeleton_outline(
+    tree: &TreeNode,
+    max_depth: usize,
+    outline: bool,
+) -> (String, usize, usize) {
+    const NODE_LIMIT: usize = 500;
+    let mut out = String::new();
+    let mut visible = 0usize;
+    let mut collapsed = 0usize;
+
+    fn is_noise(n: &TreeNode) -> bool {
+        let t = n.node_type.as_str();
+        t.contains("comment")
+            || t == "use_declaration"
+            || t == "import_statement"
+            || t == "import_from_statement"
+            || t == "attribute_item"
+            || t.contains("empty")
+    }
+
+    fn build(
+        n: &TreeNode,
+        out: &mut String,
+        d: usize,
+        md: usize,
+        visible: &mut usize,
+        collapsed: &mut usize,
+        outline: bool,
+    ) {
+        if *visible >= NODE_LIMIT {
+            return;
+        }
+        if outline && is_noise(n) {
+            *collapsed += 1;
+            return;
+        }
+        if outline && d > 0 && n.get_name().is_none() {
+            *collapsed += 1;
+            return;
+        }
+        if d > md {
+            return;
+        }
+        *visible += 1;
+        out.push_str(&format!(
+            "{}{} [{}] {}\n",
+            "  ".repeat(d),
+            n.path,
+            n.node_type,
+            n.get_name().unwrap_or_default()
+        ));
+        if *visible == NODE_LIMIT {
+            out.push_str("... (limit of 500 nodes reached)\n");
+            return;
+        }
+        for c in &n.children {
+            build(c, out, d + 1, md, visible, collapsed, outline);
+        }
+    }
+
+    build(
+        tree,
+        &mut out,
+        0,
+        max_depth,
+        &mut visible,
+        &mut collapsed,
+        outline,
+    );
+    (out, visible, collapsed)
+}
+
+/// B2 (GTW_RAPPORT_2026-11-01): partial-replacement detector — if the OLD
+/// node's distinctive content ends up AFTER the new content's last line,
+/// the edit degraded to insertion (duplicate definitions downstream while
+/// the tool reported success). Soundness rules: distinctive = trimmed,
+/// ≥ 12 chars (braces/one-liners too generic), absent from the new
+/// content AND absent from the original file OUTSIDE the node's span —
+/// lines that already lived before/after the node are other code, not
+/// remnants. Returns the remnant lines when found.
+pub(crate) fn detect_replacement_remnant(
+    modified: &str,
+    original_source: &str,
+    old_content: &str,
+    new_content: &str,
+    region_start_line: usize,
+    node_end_line: usize,
+) -> Option<Vec<String>> {
+    let new_set: std::collections::HashSet<&str> = new_content
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect();
+    // Original lines OUTSIDE the node's own span — other code, never remnants.
+    let outside_original: std::collections::HashSet<&str> = original_source
+        .lines()
+        .enumerate()
+        .filter(|(i, _)| *i + 1 < region_start_line || *i + 1 > node_end_line)
+        .map(|(_, l)| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let distinctive: Vec<&str> = old_content
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| l.len() >= 12 && !new_set.contains(l) && !outside_original.contains(l))
+        .collect();
+    if distinctive.is_empty() {
+        return None;
+    }
+    let last_new_trim = new_content
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .map(|l| l.trim().to_string())?;
+    let lines: Vec<&str> = modified.lines().collect();
+    let start_idx = lines
+        .iter()
+        .enumerate()
+        .skip(region_start_line.saturating_sub(1))
+        .find_map(|(i, l)| {
+            if l.trim() == last_new_trim {
+                Some(i)
+            } else {
+                None
+            }
+        })?;
+    let remnants: Vec<String> = distinctive
+        .iter()
+        .filter(|d| lines.iter().skip(start_idx + 1).any(|l| l.trim() == **d))
+        .map(|d| (*d).to_string())
+        .collect();
+    if remnants.is_empty() {
+        None
+    } else {
+        Some(remnants)
+    }
+}
+
 impl GnawTreeWriter {
     pub fn new(file_path: &str) -> Result<Self> {
         let path = Path::new(file_path);
@@ -902,7 +1045,7 @@ impl GnawTreeWriter {
         };
 
         // If we have column information, use it for surgical precision
-        if node.start_col > 0 && node.end_col > 0 {
+        let modified = if node.start_col > 0 && node.end_col > 0 {
             let mut new_lines: Vec<String> = Vec::new();
 
             // Lines before the node's start line
@@ -949,7 +1092,7 @@ impl GnawTreeWriter {
                 new_lines.push(line.to_string());
             }
 
-            Ok(new_lines.join("\n"))
+            new_lines.join("\n")
         } else {
             let mut new_lines: Vec<String> = Vec::new();
 
@@ -971,8 +1114,28 @@ impl GnawTreeWriter {
                 new_lines.push(line.to_string());
             }
 
-            Ok(new_lines.join("\n"))
+            new_lines.join("\n")
+        };
+
+        // B2 (GTW_RAPPORT 2026-11-01): partial-replacement guard — the
+        // old node's distinctive content must not survive after the new
+        // content. Loud rejection, nothing written (the funnel converts
+        // this to a rejection with the B2 class named).
+        if let Some(remnants) = detect_replacement_remnant(
+            &modified,
+            &self.source_code,
+            &node.content,
+            new_content,
+            region_start,
+            node.end_line,
+        ) {
+            anyhow::bail!(
+                "PARTIAL REPLACEMENT detected: the old node's content survives after the replacement ({} distinctive line(s), first: '{}'). Nothing written — B2 class (GTW_RAPPORT_2026-11-01); inspect with preview_edit and re-check the node path/content.",
+                remnants.len(),
+                remnants[0]
+            );
         }
+        Ok(modified)
     }
 
     fn insert_node_at_path(
@@ -1236,6 +1399,11 @@ pub(crate) fn signature_impact_for(
 mod tests {
     use super::*;
 
+    fn parse_tree(code: &str) -> TreeNode {
+        let parser = crate::parser::get_parser(Path::new("x.rs")).unwrap();
+        parser.parse_lenient(code).0.unwrap()
+    }
+
     fn temp_rust_file(code: &str) -> (tempfile::TempDir, String) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sample.rs");
@@ -1351,6 +1519,54 @@ mod tests {
         let verdict = gtw.last_edit_verdict().expect("verdict present");
         assert_eq!(verdict["level"], "notice");
         assert_eq!(verdict["findings"][0]["rule"], "no_op");
+    }
+
+    /// B3: outline skeleton — noise kinds collapse into a count, named
+    /// structure stays; raw mode keeps everything.
+    #[test]
+    fn skeleton_outline_collapses_noise_but_keeps_named() {
+        let code = "//! Module doc.\nuse std::fmt;\n\n/// Doc.\n#[derive(Clone)]\npub struct Widget { pub a: u16 }\n\npub fn make() -> Widget { Widget { a: 1 } }\n";
+        let tree = parse_tree(code);
+        let (text, visible, collapsed) = skeleton_outline(&tree, 5, true);
+        assert!(text.contains("Widget"), "named stays: {text}");
+        assert!(text.contains("make"), "named fn stays: {text}");
+        assert!(!text.contains("use_declaration"), "use collapsed: {text}");
+        assert!(!text.contains("line_comment"), "comment collapsed: {text}");
+        assert!(collapsed >= 2, "noise counted: collapsed={collapsed}");
+        assert!(visible >= 2);
+        // Raw keeps everything — the old behavior, one flag away.
+        let (raw_text, raw_visible, raw_collapsed) = skeleton_outline(&tree, 5, false);
+        assert!(raw_text.contains("use_declaration"));
+        assert!(raw_text.contains("line_comment"));
+        assert!(raw_visible > visible || raw_collapsed == 0);
+    }
+
+    /// B2 detector: lines that ALREADY lived outside the node's span are
+    /// other code, not remnants; true insertion remnants fire.
+    #[test]
+    fn replacement_remnant_detector_is_sound() {
+        let old = "fn big() {\n    if true { } else { }\n    for i in 0..10 { }\n}\n";
+        let new = "fn big() {}\n";
+        // The reported B2 signature: new content + the OLD body surviving
+        // below — no other code existed outside the node span.
+        let original_solo = old;
+        let modified_solo = "fn big() {}\n    if true { } else { }\n    for i in 0..10 { }\n}\n";
+        let detected = detect_replacement_remnant(modified_solo, original_solo, old, new, 1, 4);
+        assert!(
+            detected.is_some(),
+            "insertion remnant must fire: {detected:?}"
+        );
+
+        // The same lines living in a HELPER below the node: other code —
+        // must NOT fire (this was the guardian-test false positive).
+        let original =
+            "fn big() {\n    if true { } else { }\n    for i in 0..10 { }\n}\n\nfn helper() {\n    if true { } else { }\n    for i in 0..10 { }\n}\n";
+        let modified_helper = "fn big() {}\n\nfn helper() {\n    if true { } else { }\n    for i in 0..10 { }\n    match 1 { _ => {} }\n}\n";
+        let detected = detect_replacement_remnant(modified_helper, original, old, new, 1, 4);
+        assert!(
+            detected.is_none(),
+            "other code is not a remnant: {detected:?}"
+        );
     }
 
     /// Fas 3: a successful edit produces a receipt proving bytes landed

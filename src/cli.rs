@@ -194,6 +194,10 @@ enum Commands {
         file_path: String,
         #[arg(short, long, default_value = "2")]
         depth: usize,
+        /// B3: include unnamed/comment/attribute nodes (default: outline
+        /// mode — named structure only, noise collapsed with a count)
+        #[arg(long)]
+        raw: bool,
     },
     /// Generate a project code index (tree + per-file item skeletons)
     CodeIndex {
@@ -1304,8 +1308,12 @@ impl Cli {
             } => {
                 Self::handle_search(&file_path, &pattern, filter_type.as_deref(), limit)?;
             }
-            Commands::Skeleton { file_path, depth } => {
-                Self::handle_skeleton(&file_path, depth)?;
+            Commands::Skeleton {
+                file_path,
+                depth,
+                raw,
+            } => {
+                Self::handle_skeleton(&file_path, depth, raw)?;
             }
             Commands::CodeIndex {
                 path,
@@ -2225,31 +2233,29 @@ Use --no-preview to write batch file"
         Ok(())
     }
 
-    fn handle_skeleton(file_path: &str, max_depth: usize) -> Result<()> {
+    fn handle_skeleton(file_path: &str, max_depth: usize, raw: bool) -> Result<()> {
         let writer = GnawTreeWriter::new(file_path)?;
         let tree = writer.analyze();
+        let outline = !raw;
 
-        println!("Skeletal view of {} (max depth {}):", file_path, max_depth);
+        println!(
+            "Skeletal view of {} (max depth {}{})",
+            file_path,
+            max_depth,
+            if outline { ", outline" } else { ", raw" }
+        );
 
-        fn build(n: &TreeNode, d: usize, md: usize, count: &mut usize) {
-            if d > md || *count >= 500 {
-                return;
-            }
-            *count += 1;
-            let indent = "  ".repeat(d);
-            let name = n.get_name().unwrap_or_default();
-            println!("{}{} [{}] {}", indent, n.path, n.node_type, name);
-            if *count == 500 {
-                println!("... (limit of 500 nodes reached)");
-                return;
-            }
-            for child in &n.children {
-                build(child, d + 1, md, count);
-            }
+        let (text, visible, collapsed) = crate::core::skeleton_outline(tree, max_depth, outline);
+        print!("{}", text);
+        if outline && collapsed > 0 {
+            println!(
+                "... {} unnamed/comment/attribute node(s) collapsed (pass --raw to include)",
+                collapsed
+            );
         }
-
-        let mut count = 0;
-        build(tree, 0, max_depth, &mut count);
+        if visible == 0 {
+            println!("no nodes at this depth — raise max_depth or drop --raw");
+        }
         Ok(())
     }
 

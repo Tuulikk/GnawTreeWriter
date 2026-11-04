@@ -1,10 +1,10 @@
 # CODE-INDEX — GnawTreeWriter
 
-> Genererad 2026-11-04 12:10 UTC · gnawtreewriter 0.22.0 · git `903e8d8`
+> Genererad 2026-11-04 12:36 UTC · gnawtreewriter 0.22.0 · git `704630e`
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: e6c48124b8eaedabdf3ba0d1cb6259f3
+> Body-hash: 8eff2ea2607995a211847ced5269c71a
 
 ## Träd
 
@@ -80,7 +80,7 @@ src/core/
   inspect.rs (514 rader)
   label_manager.rs (90 rader)
   macro_dispatcher.rs (249 rader)
-  mod.rs (1501 rader)
+  mod.rs (1585 rader)
   pack.rs (749 rader)
   parse_cache.rs (119 rader)
   report.rs (86 rader)
@@ -110,7 +110,7 @@ src/llm/
   relational_index.rs (684 rader)
   semantic_index.rs (1128 rader)
 src/mcp/
-  mod.rs (3976 rader)
+  mod.rs (4018 rader)
 src/parser/
   bash.rs (84 rader)
   c.rs (84 rader)
@@ -155,6 +155,7 @@ test_dir/
   test2.rs (1 rader)
 tests/
   ai_modernbert_tests.rs (184 rader)
+  b1_path_validation.rs (106 rader)
   code_index_check.rs (117 rader)
   code_index_db.rs (189 rader)
   doc_comment_handling.rs (123 rader)
@@ -163,7 +164,7 @@ tests/
   edit_node_midline_block_regression.rs (152 rader)
   gnaw_sense_integration.rs (72 rader)
   insert_position.rs (555 rader)
-  mcp_integration.rs (2291 rader)
+  mcp_integration.rs (2397 rader)
   phase3_graph.rs (106 rader)
   phase4_runners.rs (161 rader)
   relational_integration.rs (55 rader)
@@ -936,37 +937,38 @@ _(inga toppnivå-items)_
 - `pub fn is_token_tree(node: &TreeNode) -> bool` :147
 - `pub fn try_expand_macro(` :152
 
-### mod.rs (1501 rader)
+### mod.rs (1585 rader)
 - `pub struct GnawTreeWriter` :63
 - `pub enum EditOperation` :86
 - `pub struct EditReceipt` :110
-- `impl GnawTreeWriter` :120
-  - `pub fn new(file_path: &str) -> Result<Self>` :121
-  - `pub fn new_lenient(file_path: &str) -> Result<(Self, Option<crate::parser::SyntaxError>)>` :153
-  - `pub fn last_backup_path(&self) -> Option<PathBuf>` :183
-  - `pub fn last_transaction_id(&self) -> Option<String>` :189
-  - `pub fn last_edit_receipt(&self) -> Option<&EditReceipt>` :196
-  - `pub fn last_edit_verdict(&self) -> Option<&serde_json::Value>` :204
-  - `fn set_verdict(` :208
-  - `pub fn last_edit_impact(&self) -> Option<&serde_json::Value>` :226
-  - `pub(crate) fn create_backup(&mut self) -> Result<PathBuf>` :230
-  - `pub fn analyze(&self) -> &TreeNode` :264
-  - `pub fn show_node(&self, node_path: &str) -> Result<String>` :268
-  - `pub fn edit(&mut self, operation: EditOperation, force: bool) -> Result<()>` :276
-  - `pub fn preview_edit(&self, operation: EditOperation) -> Result<String>` :657
-  - `fn resolve_path<'a>(&'a self, query: &str) -> Option<&'a TreeNode>` :696
-  - `fn find_node_by_path<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :712
-  - `fn find_node_by_name<'a>(` :727
-  - `fn doc_block_start_line(&self, node: &TreeNode) -> usize` :779
-  - `pub fn describe_node(&self, query: &str) -> Option<(String, String, Option<String>)>` :801
-  - `fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String>` :806
-  - `fn insert_node_at_path(` :894
-  - `fn delete_node_at_path(&self, node_path: &str) -> Result<String>` :1015
-  - `pub fn get_source(&self) -> &str` :1046
-- `pub fn find_project_root(start_path: &Path) -> PathBuf` :1053
-- `fn count_changed_bytes(before: &str, after: &str) -> usize` :1082
-- `pub(crate) fn verdict_json(` :1094
-- `pub(crate) fn signature_impact_for(` :1113
+- `impl GnawTreeWriter` :128
+  - `pub fn new(file_path: &str) -> Result<Self>` :129
+  - `pub fn new_lenient(file_path: &str) -> Result<(Self, Option<crate::parser::SyntaxError>)>` :161
+  - `pub fn last_backup_path(&self) -> Option<PathBuf>` :191
+  - `pub fn last_transaction_id(&self) -> Option<String>` :197
+  - `pub fn last_edit_receipt(&self) -> Option<&EditReceipt>` :204
+  - `pub fn last_edit_verdict(&self) -> Option<&serde_json::Value>` :212
+  - `fn set_verdict(` :216
+  - `pub fn last_edit_impact(&self) -> Option<&serde_json::Value>` :234
+  - `pub(crate) fn create_backup(&mut self) -> Result<PathBuf>` :238
+  - `pub fn analyze(&self) -> &TreeNode` :272
+  - `pub fn show_node(&self, node_path: &str) -> Result<String>` :276
+  - `pub fn expect_node(` :290
+  - `pub fn edit(&mut self, operation: EditOperation, force: bool) -> Result<()>` :332
+  - `pub fn preview_edit(&self, operation: EditOperation) -> Result<String>` :741
+  - `fn resolve_path<'a>(&'a self, query: &str) -> Option<&'a TreeNode>` :780
+  - `fn find_node_by_path<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :796
+  - `fn find_node_by_name<'a>(` :811
+  - `fn doc_block_start_line(&self, node: &TreeNode) -> usize` :863
+  - `pub fn describe_node(&self, query: &str) -> Option<(String, String, Option<String>)>` :885
+  - `fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String>` :890
+  - `fn insert_node_at_path(` :978
+  - `fn delete_node_at_path(&self, node_path: &str) -> Result<String>` :1099
+  - `pub fn get_source(&self) -> &str` :1130
+- `pub fn find_project_root(start_path: &Path) -> PathBuf` :1137
+- `fn count_changed_bytes(before: &str, after: &str) -> usize` :1166
+- `pub(crate) fn verdict_json(` :1178
+- `pub(crate) fn signature_impact_for(` :1197
 
 ### pack.rs (749 rader)
 - `pub enum PackFormat` :15
@@ -1485,7 +1487,7 @@ _(inga toppnivå-items)_
 
 ## src/mcp/
 
-### mod.rs (3976 rader)
+### mod.rs (4018 rader)
 _(inga toppnivå-items)_
 
 ## src/parser/
@@ -1899,6 +1901,15 @@ _(inga toppnivå-items)_
 - `fn batch_embeddings_match_singles() -> Result<()>` :55
 - `fn bge_batch_embeddings_match_singles() -> Result<()>` :125
 
+### b1_path_validation.rs (106 rader)
+- `const SOURCE: &str =` :8
+- `fn setup(dir: &tempfile::TempDir) -> (std::path::PathBuf, GnawTreeWriter)` :11
+- `fn receipt_carries_new_path_and_content_hash()` :19
+- `fn expect_mismatch_rejects_before_writing()` :43
+- `fn expect_match_passes_and_edit_lands()` :62
+- `fn the_2026_11_03_incident_is_caught_by_expect()` :79
+- `fn missing_path_is_a_clear_stale_path_error()` :99
+
 ### code_index_check.rs (117 rader)
 - `fn opts() -> CodeIndexOptions` :9
 - `fn make_repo(dir: &Path) -> std::path::PathBuf` :16
@@ -1970,7 +1981,7 @@ _(inga toppnivå-items)_
 - `fn insert_pos3_does_not_nest_inside_first_root_fn()` :485
 - `fn insert_in_range_slot_lands_between_siblings()` :518
 
-### mcp_integration.rs (2291 rader)
+### mcp_integration.rs (2397 rader)
 - `async fn integration_mcp_auth() -> Result<(), Box<dyn std::error::Error>>` :16
 - `async fn integration_mcp_tools_list() -> Result<(), Box<dyn std::error::Error>>` :85
 - `async fn integration_mcp_tools_call_missing_args() -> Result<(), Box<dyn std::error::Error>>` :164
@@ -1996,6 +2007,7 @@ _(inga toppnivå-items)_
 - `async fn integration_mcp_edit_rejection_carries_edit_verdict(` :1986
 - `async fn integration_mcp_edit_reports_impact_on_signature_change(` :2090
 - `async fn integration_mcp_batch_rejection_carries_edit_verdict(` :2201
+- `async fn integration_mcp_edit_node_expect_name_guard() -> Result<(), Box<dyn std::error::Error>>` :2298
 
 ### phase3_graph.rs (106 rader)
 - `fn opts() -> CodeIndexOptions` :8

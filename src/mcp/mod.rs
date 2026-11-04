@@ -186,7 +186,13 @@ pub mod mcp_server {
                             .get("max_depth")
                             .and_then(Value::as_u64)
                             .unwrap_or(2) as usize;
-                        Ok(handle_get_skeleton(fp, max_depth))
+                        // B3: outline (named structure) is the default;
+                        // named_only=false restores the raw dump.
+                        let named_only = arguments
+                            .get("named_only")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(true);
+                        Ok(handle_get_skeleton(fp, max_depth, named_only))
                     }
                     "compress" => {
                         let fp = validate_arg("file_path")?;
@@ -605,7 +611,8 @@ pub mod mcp_server {
                     "type": "object",
                     "properties": {
                         "file_path": { "type": "string" },
-                        "max_depth": { "type": "integer" }
+                        "max_depth": { "type": "integer" },
+                        "named_only": { "type": "boolean", "description": "B3 outline (default true): named structure only — unnamed/comment/attribute siblings collapse into a count. false = raw dump" }
                     },
                     "required": ["file_path"]
                 }
@@ -1633,54 +1640,51 @@ pub mod mcp_server {
         )
     }
 
-    fn handle_get_skeleton(file_path: &str, max_depth: usize) -> Value {
-        const NODE_LIMIT: usize = 500;
+    fn handle_get_skeleton(file_path: &str, max_depth: usize, named_only: bool) -> Value {
         match GnawTreeWriter::new_lenient(file_path) {
             Ok((w, warning)) => {
-                let mut s = String::new();
-                let mut count = 0;
-                fn build(n: &TreeNode, out: &mut String, d: usize, md: usize, count: &mut usize) {
-                    if d > md || *count >= 500 {
-                        return;
-                    }
-                    *count += 1;
-                    out.push_str(&format!(
-                        "{}{} [{}] {}\n",
-                        "  ".repeat(d),
-                        n.path,
-                        n.node_type,
-                        n.get_name().unwrap_or_default()
-                    ));
-                    if *count == 500 {
-                        out.push_str("... (limit reached)\n");
-                        return;
-                    }
-                    for c in &n.children {
-                        build(c, out, d + 1, md, count);
-                    }
-                }
-                build(w.analyze(), &mut s, 0, max_depth, &mut count);
-                let truncated = count >= NODE_LIMIT;
+                // B3: outline mode (default) — named structure only, with
+                // unnamed/comment/attribute siblings collapsed into a
+                // count so the big-file answer is orientation, not a flat
+                // dump (GTW_RAPPORT_2026-11-01 B3).
+                let (s, count, collapsed) =
+                    crate::core::skeleton_outline(w.analyze(), max_depth, named_only);
+                let truncated = count >= 500;
                 // NEVER silently empty (ROADMAP 9.5): an empty skeleton must
                 // fail loudly with next steps, not return a bare header.
                 if s.is_empty() {
                     return tool_error(format!(
-                        "get_skeleton produced no nodes for {} (max_depth={}) — this must never be \
+                        "get_skeleton produced no nodes for {} (max_depth={}{}) — this must never be \
 read as a valid empty answer. Next: raise max_depth, run analyze for the raw tree, \
 or list_nodes for a flat index of this file.",
-                        file_path, max_depth
+                        file_path,
+                        max_depth,
+                        if named_only { ", named_only" } else { "" }
                     ));
                 }
                 let mut header = format!(
-                    "Skeleton of {} ({} node(s){})
+                    "Skeleton of {} ({} node(s){}{})
 {}",
                     file_path,
                     count,
                     if truncated { ", truncated at 500 — raise max_depth only after list_nodes" } else { "" },
+                    if named_only && collapsed > 0 {
+                        format!(
+                            " — {} unnamed/comment/attribute node(s) collapsed (named_only=true)",
+                            collapsed
+                        )
+                    } else {
+                        String::new()
+                    },
                     s
                 );
-                let mut payload =
-                    json!({"skeleton": s, "nodes": count, "truncated": truncated});
+                let mut payload = json!({
+                    "skeleton": s,
+                    "nodes": count,
+                    "truncated": truncated,
+                    "named_only": named_only,
+                    "collapsed": collapsed
+                });
                 if let Some(wn) = &warning {
                     header = format!(
                         "⚠ PARTIAL PARSE: syntax error at line {} col {} — skeleton may be incomplete (editors still refuse this file strictly)\n{}",

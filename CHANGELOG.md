@@ -1,5 +1,29 @@
 ## [Unreleased]
 
+### Fixed — B2: partial-replacement guard (loud rejection, nothing written)
+- **`edit_node` now proves the replacement landed 1:1**: a remnant
+  detector (`detect_replacement_remnant`) checks after every edit that
+  the OLD node's distinctive content does not survive below the new
+  content — the exact B2 signature ("rest of the OLD code below the
+  new", duplicate definitions downstream, tool said success). Soundness:
+  lines that already lived OUTSIDE the node's span in the original are
+  other code, never remnants (this was the false-positive class the
+  first detector version had — caught by the guardian reduction test).
+  On detection: loud rejection, nothing written, B2 class named.
+- Dogfood: the full funnel test-suite (300+ edits incl. doc-swallow,
+  attribute, batch flows) runs through the guard without a single false
+  positive; the crafted B2 signature fires.
+
+### Added — B3: skeleton outline mode (named structure by default)
+- **`get_skeleton` / `skeleton` default to OUTLINE**: named nodes only —
+  comments, use/import statements, attributes and unnamed siblings
+  collapse into a count ("N unnamed/comment/attribute node(s) collapsed
+  — pass --raw to include"). The big-file answer is orientation, not a
+  flat 289-row dump (B3's exact complaint).
+- `--raw` (CLI) / `named_only: false` (MCP) restores the old full dump.
+  Shared builder (`core::skeleton_outline`) — CLI and MCP can no longer
+  diverge. MCP payload gains `named_only` + `collapsed`.
+
 ### Added — B1: path freshness — expect-guards + receipt path/hash
 Implements the B1 wish from `GTW_RAPPORT_2026-11-01.md` (and pays for the
 2026-11-03 incident, which was B1's cost in practice):
