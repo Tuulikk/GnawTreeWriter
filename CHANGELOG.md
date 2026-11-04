@@ -1,4 +1,18 @@
-## [Unreleased]
+## [0.23.0] - 2026-11-04
+
+### Fixed — B4: search_nodes alternation (`a|b` is OR)
+- **`a|b` is alternation** (GTW_RAPPORT_2026-11-01 B4): each pipe-separated
+  alternative is a substring match; results merge, deduped by node path,
+  and every match names `matched_pattern`. Single patterns behave as
+  before. An alternation with no non-empty alternatives errors loudly
+  ("Empty search pattern") instead of the silent 0-hit answer B4
+  reported. Grammar documented in the tool schema + GTW_INSTRUCTIONS.
+  CLI parity: `gnawtreewriter search <file> "a|b"` shares the same
+  alternation semantics (dedup + matched pattern in the output; loud
+  error on empty alternation) — CLI and MCP no longer diverge on this,
+  same anti-divergence class as B3's shared skeleton builder.
+- tests/mcp_integration.rs: alternation finds both symbols (dedup +
+  matched_pattern), single patterns unchanged, empty alternation errors.
 
 ### Fixed — B2: partial-replacement guard (loud rejection, nothing written)
 - **`edit_node` now proves the replacement landed 1:1**: a remnant

@@ -2,7 +2,31 @@
 
 **AI-native tree-based code editor** - Edit code files based on AST structure levels with surgical precision, avoiding the common pitfalls of LLM-generated code.
 
-## 🚀 Version 0.21.x: Code-Index Store, Knowledge Graph & Self-Running Bits
+## 🚀 Version 0.23.x: Edit Reliability & Capability Ladder
+
+This release hardens the edit/search reliability that agent sessions depend on (Motor2 rapport B1–B5, all five bugs handled):
+
+- **B1 path freshness**: `edit_node` takes `expect_name` / `expect_kind` — a stale positional path (invalidated by prior structural edits) rejects with `E_PATH_STALE` instead of writing the wrong node. The success response carries `new_node_path` + `node_content_hash` for the next edit.
+- **B2 partial-replacement guard**: an edit that would leave the OLD node's content below the new one (duplicate definitions downstream) is rejected loudly — nothing written.
+- **B4 search alternation**: `search_nodes` pattern `"alpha|beta"` is OR — results merge deduped with `matched_pattern` naming the hit; empty alternations error loudly instead of silent 0 hits.
+- **B3 skeleton outline**: `skeleton` / `get_skeleton` default to named structure only (comments/uses/attributes collapse into a count); `--raw` / `named_only: false` keeps the old dump.
+- **Capability ladder**: `doctor` reports it (`bas` → `struktur` → `semantik`); sense/search_semantic responses carry `level` — tools degrade and name what answered.
+- **T4**: NO-OP edits are `Ok(changed: false)` — no longer an error.
+
+```bash
+# Search with alternation (OR) — merged results name the matching pattern
+gnawtreewriter search src/lib.rs "parse_config|load_settings"
+
+# Guard a replayed path against staleness (MCP)
+edit_node { file_path, node_path, content, expect_name: "alpha" }
+
+# Outline skeleton on a big file (named structure, noise collapsed)
+gnawtreewriter skeleton src/mcp/mod.rs --depth 1
+```
+
+---
+
+## 🚀 Version 0.21.x/0.22.x: Code-Index Store, Knowledge Graph & Self-Running Bits
 
 The project structure index grew into a full **structure layer** (capability ladder: bas → struktur → semantik — tools degrade and name the level that answered; `doctor` reports it).
 
