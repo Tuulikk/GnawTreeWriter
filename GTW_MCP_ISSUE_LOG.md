@@ -1723,25 +1723,34 @@ upplösta to_id. Motor2-notis skickad (kors-repo-regeln) — `to`→`to_name`/
 
 ## 2026-11-03 — FYND: GTW edit_node/batch placerade content fel (2 falanger)
 
-**UPPDATERING 2026-11-04 — REPRODUCERAT PÅ 0.22.0, trigger isolerad, hypotes död:**
-Den tidigare förmodaden ("stale daemon-binär") är MOTBEVISAD — buggen reproduceras
-med färsk 0.22.0-binär på en filkopia. Trigger (bisektion):
-- mål-nod föregås av doc-kommentar ENBART → replace fungerar
-- mål-nod föregås av doc-kommentar + `#[attribut]` → **INSERTION i stället för
-  replace** — gamla noden överlever som dubblettdefinition (E0428 downstream),
-  verktyget rapporterar ✓
-Mekanism-shape: F2 doc-svälj-regionen tar bort [doc..attribut] men lämnar
-[node.start_line..node.end_line] — insättning, inte ersättning. Drabber
-kärnvägen (edit_node_at_path/preview_edit) → CLI + MCP + batch alike.
-**Repro-bevis:** `tests/edit_node_insert_regression.rs` (#[ignore]-märkt
-regressionstest med bisektionstabellen — `cargo test -- --ignored` falera tills
-fixen landar; unignore = kompletteringskriterium). Replay-artefakter: samma
-7-op-spec på filkopia → 7 defs → 14 (7×2), 658 → 928 rader, både multi-op och
-singel-op-per-batch.
+**SLUTVERDICT 2026-11-04: ANVÄNDARFEL (B1-klassen) — ingen verktygsbugg.**
+Den andra uppdateringens "reproducerat på 0.22.0 + trigger isolerad (doc +
+attribut)" var OCKÅÅ fel: replayen använde path "10" som I 5-use-filen är
+**derive-attributet** (struct = "11"). GTW ersatte exakt den adresserade
+noden — korrekt beteende, fel adressat mål av mig. Korrekt-väg-prover:
+"11" (struct) och "2" (fn i mini-shape) → ren ersättning varje gång,
+F2-doc-sväljning vid attribut-mål är korrekt semantik (innehållet bar
+egen doc).
 
-**Kategori att avbocka när fixen landar:** bugg (F2-region × attribut).
+**Rotorsak i original-incidenten:** paths hämtade från ett filtillstånd
+som ändrats (use-block-insertion +1 nod) utan re-query — **exakt B1
+(GTW_RAPPORT_2026-11-01): positionella paths är ogiltiga efter
+strukturella edits; re-query innan edit.** Incidenten är B1:s kostnad
+i praktiken och STÄRKER B1:s prioritet (edit-svar med ny path +
+innehålls-hash skulle ha fångat detta före skrivning).
 
-**Klass:** bugg (verktyg), användarfel (mitt eget, se nedan).
+**Artefakt som blir kvar:** `tests/edit_node_insert_regression.rs` →
+omdöpt till addresserings-semantik: fäster att en path adresserar exakt
+EN nod (doc/attribut är egna siblings), att edit på attribut/fn bara
+rör sitt mål, och att F2 sväljer föregående doc vid `///`-innehåll.
+Framtida path-förvirring = kör mot dessa tester först.
+
+**Lärdom (§35-anda):** första diagnosen ("stale daemon 0.20.0") och den
+andra ("F2-mekanism, levande bugg") var båda hypoteser som motbevisades
+av empirin — replay på filkopia + bisektion + korrekt-vägs-prover. Två
+avbockningar: användarfel ×2, verktygsbugg ×0.
+
+**Klass:** användarfel (B1-klassen).
 **Verktyg:** GTW MCP `edit_node` + `batch` (edit-op), src/core/index_relations.rs.
 **Parametrar:** edit ops på toppnivå-fn:er med node-paths ur search_nodes
 (10/15/18/20/24/26/27); första försöket innehöll även en use-rad-byte där

@@ -1,10 +1,10 @@
 # CODE-INDEX — GnawTreeWriter
 
-> Genererad 2026-11-03 21:59 UTC · gnawtreewriter 0.22.0 · git `94b3885` +DIRTY
+> Genererad 2026-11-04 11:57 UTC · gnawtreewriter 0.22.0 · git `527491a`
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 336553c23ae1e25a9cfc5fb0195a6e5b
+> Body-hash: 01376a1ea556eb1c72c062afeac40896
 
 ## Träd
 
@@ -159,6 +159,7 @@ tests/
   code_index_db.rs (189 rader)
   doc_comment_handling.rs (123 rader)
   edit_multibyte_regression.rs (113 rader)
+  edit_node_insert_regression.rs (50 rader)
   edit_node_midline_block_regression.rs (152 rader)
   gnaw_sense_integration.rs (72 rader)
   insert_position.rs (555 rader)
@@ -1931,6 +1932,9 @@ _(inga toppnivå-items)_
 - `const JS_FILE: &str = r#"// Tool-guard — mekaniskt stopp för §35-filredigeringsbrott i bash.` :19
 - `fn find_export_block_path(w: &gnawtreewriter::GnawTreeWriter) -> Option<String>` :68
 - `fn edit_node_on_multibyte_js_file_does_not_panic()` :81
+
+### edit_node_insert_regression.rs (50 rader)
+- `fn edit_replaces_node_with_doc_and_attribute()` :23
 
 ### edit_node_midline_block_regression.rs (152 rader)
 - `const JS_FILE: &str = r#"// Åäö + emoji i prefixet — kolumnräkningen ska vara tecken-baserad 🌲` :20
