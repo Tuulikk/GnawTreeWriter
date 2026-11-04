@@ -270,6 +270,16 @@ pub(crate) fn detect_replacement_remnant(
 
 impl GnawTreeWriter {
     pub fn new(file_path: &str) -> Result<Self> {
+        Self::new_with_boundary(file_path, None)
+    }
+
+    /// Boundary-aware constructor (2026-11-04, "en bas").
+    ///
+    /// The transaction log — and therefore the backups and the session marker —
+    /// is anchored at the caller's workspace root, and discovery NEVER walks
+    /// above it. Without a boundary the legacy discovery applies, so CLI/editor
+    /// callers keep today's behaviour.
+    pub fn new_with_boundary(file_path: &str, boundary: Option<&Path>) -> Result<Self> {
         let path = Path::new(file_path);
         let source_code =
             fs::read_to_string(path).context(format!("Failed to read file: {}", file_path))?;
@@ -279,7 +289,7 @@ impl GnawTreeWriter {
 
         // Initialize transaction log for the project root
         // Use find_project_root to ensure we log to the correct centralized location
-        let project_root = find_project_root(path);
+        let project_root = find_project_root_in(path, boundary);
         let transaction_log = TransactionLog::load(project_root)?;
 
         Ok(Self {
@@ -302,6 +312,16 @@ impl GnawTreeWriter {
     /// (`new` + edit/insert/quick-replace) stay strict. Parsers without
     /// a lenient override behave exactly like `new`.
     pub fn new_lenient(file_path: &str) -> Result<(Self, Option<crate::parser::SyntaxError>)> {
+        Self::new_lenient_with_boundary(file_path, None)
+    }
+
+    /// Boundary-aware read-path constructor — same contract as
+    /// `new_with_boundary`: the transaction log/marker never escapes the
+    /// caller's workspace root.
+    pub fn new_lenient_with_boundary(
+        file_path: &str,
+        boundary: Option<&Path>,
+    ) -> Result<(Self, Option<crate::parser::SyntaxError>)> {
         let path = Path::new(file_path);
         let source_code =
             fs::read_to_string(path).context(format!("Failed to read file: {}", file_path))?;
@@ -310,7 +330,7 @@ impl GnawTreeWriter {
         let (tree_result, warning) = parser.parse_lenient(&source_code);
         let tree = tree_result?;
 
-        let project_root = find_project_root(path);
+        let project_root = find_project_root_in(path, boundary);
         let transaction_log = TransactionLog::load(project_root)?;
 
         Ok((
@@ -1298,6 +1318,19 @@ impl GnawTreeWriter {
 /// Helper function to find the project root
 /// Searches upwards for .gnawtreewriter_session.json or .git
 pub fn find_project_root(start_path: &Path) -> PathBuf {
+    find_project_root_in(start_path, None)
+}
+
+/// Boundary-bounded project-root discovery (2026-11-04, "en bas").
+///
+/// Same marker rules (session file / `.git`) as `find_project_root`, but the
+/// search NEVER walks above `boundary`. A caller that owns a workspace root
+/// (Motor2: the session's workspace root) states it here, so a stray marker
+/// file in a parent directory cannot capture the project — the class that put
+/// 172 backups in `Gnaw-Software/` instead of in the project the agent worked
+/// in (the lying rollback track, 2026-10-28). Discovery without a boundary
+/// keeps the legacy behaviour for CLI/editor callers.
+pub fn find_project_root_in(start_path: &Path, boundary: Option<&Path>) -> PathBuf {
     let mut current = if start_path.is_file() {
         start_path.parent().unwrap_or(Path::new(".")).to_path_buf()
     } else {
@@ -1309,12 +1342,21 @@ pub fn find_project_root(start_path: &Path) -> PathBuf {
         current = abs;
     }
 
+    // The ceiling: canonicalised once so symlinked/relative boundaries match.
+    let stop = boundary.map(|b| fs::canonicalize(b).unwrap_or_else(|_| b.to_path_buf()));
     let start = current.clone();
 
     loop {
         // Check for session file or git
         if current.join(".gnawtreewriter_session.json").exists() || current.join(".git").exists() {
             return current;
+        }
+
+        if let Some(stop) = &stop {
+            if &current == stop {
+                // Boundary reached without a marker: the boundary IS the root.
+                return current;
+            }
         }
 
         if !current.pop() {

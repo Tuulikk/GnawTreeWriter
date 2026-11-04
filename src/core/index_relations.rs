@@ -49,11 +49,19 @@ pub struct RelationIndex {
     pub summary: std::collections::HashMap<String, usize>,
 }
 
-/// Extract relations from a file.
 /// Extract relations from a file (CLI/MCP path — parses via GnawTreeWriter).
 pub fn index_relations(file_path: &str) -> Result<RelationIndex> {
-    let canon = crate::core::index_entities::canonical_entity_path(file_path);
-    let writer = GnawTreeWriter::new(file_path)?;
+    index_relations_in(file_path, None)
+}
+
+/// Boundary-aware relation extraction (2026-11-04, "en bas") — see
+/// `index_entities::canonical_path_within`.
+pub fn index_relations_in(
+    file_path: &str,
+    boundary: Option<&std::path::Path>,
+) -> Result<RelationIndex> {
+    let canon = crate::core::index_entities::canonical_entity_path_in(file_path, boundary);
+    let writer = GnawTreeWriter::new_with_boundary(file_path, boundary)?;
     let tree = writer.analyze();
     let source = writer.get_source();
     Ok(extract_relations_from_tree(tree, source, &canon))

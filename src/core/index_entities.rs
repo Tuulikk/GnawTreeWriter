@@ -54,8 +54,20 @@ pub struct EntityIndex {
 
 /// Extract entities from a file (CLI/MCP path — parses via GnawTreeWriter).
 pub fn index_entities(file_path: &str, include_private: bool) -> Result<EntityIndex> {
-    let canon = canonical_entity_path(file_path);
-    let writer = GnawTreeWriter::new(file_path)?;
+    index_entities_in(file_path, include_private, None)
+}
+
+/// Boundary-aware extraction (2026-11-04, "en bas"): the caller states the
+/// workspace root it owns (Motor2: the session workspace root) and ids become
+/// relative to THAT. Without a boundary the legacy discovery (git toplevel, or
+/// the path as given) applies — so CLI/editor callers keep working unchanged.
+pub fn index_entities_in(
+    file_path: &str,
+    include_private: bool,
+    boundary: Option<&std::path::Path>,
+) -> Result<EntityIndex> {
+    let canon = canonical_entity_path_in(file_path, boundary);
+    let writer = GnawTreeWriter::new_with_boundary(file_path, boundary)?;
     let tree = writer.analyze();
     let source = writer.get_source();
     Ok(collect_entities(tree, source, &canon, include_private))
@@ -69,8 +81,53 @@ pub fn extract_entities_from_tree(
     file_path: &str,
     include_private: bool,
 ) -> EntityIndex {
-    let canon = canonical_entity_path(file_path);
+    extract_entities_from_tree_in(tree, source, file_path, include_private, None)
+}
+
+/// Boundary-aware tree extraction — the store's path (see `index_entities_in`).
+pub fn extract_entities_from_tree_in(
+    tree: &TreeNode,
+    source: &str,
+    file_path: &str,
+    include_private: bool,
+    boundary: Option<&std::path::Path>,
+) -> EntityIndex {
+    let canon = canonical_entity_path_in(file_path, boundary);
     collect_entities(tree, source, &canon, include_private)
+}
+
+/// Boundary-relative canonical path — one base, no environment dependency.
+///
+/// `boundary` is the workspace root the caller owns. The result is relative to
+/// it with POSIX separators, so identity is stable when the tree moves between
+/// directories, disks or machines. No git, no marker discovery, and never a
+/// path above the boundary. Both sides are canonicalised ONCE so symlinked
+/// callers and case-insensitive filesystems (Windows/macOS) agree with the
+/// boundary instead of producing two id worlds for one file.
+///
+/// A file OUTSIDE the boundary keeps its as-given POSIX path — the caller can
+/// see that it did not land inside, instead of getting a silently wrong id.
+pub fn canonical_path_within(file_path: &str, boundary: &std::path::Path) -> String {
+    let p = std::path::Path::new(file_path);
+    let (full, base) = match (std::fs::canonicalize(p), std::fs::canonicalize(boundary)) {
+        (Ok(full), Ok(base)) => (full, base),
+        _ => (p.to_path_buf(), boundary.to_path_buf()),
+    };
+    match full.strip_prefix(&base) {
+        Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
+        Err(_) => full.to_string_lossy().replace('\\', "/"),
+    }
+}
+
+/// Canonical entity path with an optional boundary (see `canonical_path_within`).
+pub fn canonical_entity_path_in(
+    file_path: &str,
+    boundary: Option<&std::path::Path>,
+) -> String {
+    match boundary {
+        Some(b) => canonical_path_within(file_path, b),
+        None => canonical_entity_path(file_path),
+    }
 }
 
 /// T6: canonical entity path — POSIX separators, git-toplevel-relative
@@ -906,5 +963,51 @@ pub enum Color {
 
         assert_eq!(r1.entities[0].id, r2.entities[0].id);
         assert!(r1.entities[0].id.starts_with("gtw:"));
+    }
+
+    /// BOUNDARY-KONTRAKTET (2026-11-04, "en bas"): ett projekt UTAN egen
+    /// markör, som ligger under en katalog med en kvarglömd
+    /// `.gnawtreewriter_session.json`, fick tidigare föräldern som "projekt"
+    /// (172 backuper i Gnaw-Software, absoluta id) — fyra impl-block
+    /// kollapsade och id:na var maskinberoende. Med ett TAK ska:
+    ///   1. rot-upptäckten aldrig klättra över taket,
+    ///   2. id:t bli tak-relativt (portabelt), inte absolut.
+    /// Detta test fallerar på den gamla koden (absolut path / förälder).
+    #[test]
+    fn boundary_keeps_ids_project_relative_despite_stray_parent_marker() {
+        let base = std::env::temp_dir().join(format!("gtw-boundary-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        // Föräldern bär en stray-markör (exakt Gnaw-Software-läget).
+        std::fs::write(base.join(".gnawtreewriter_session.json"), "{}\n").unwrap();
+        // Projektet saknar egen markör (82 av 83 testprojekt).
+        let proj = base.join("projekt");
+        std::fs::create_dir_all(proj.join("src")).unwrap();
+        let file = proj.join("src/kalkyl.rs");
+        std::fs::write(&file, "pub fn trippela(x: i32) -> i32 { x * 3 }\n").unwrap();
+
+        // 1. Upptäckten stannar vid taket.
+        let root = crate::core::find_project_root_in(&file, Some(&proj));
+        assert_eq!(
+            std::fs::canonicalize(&root).unwrap(),
+            std::fs::canonicalize(&proj).unwrap(),
+            "utan egen markör ska TAKET vara projektroten — inte föräldern med stray-filen"
+        );
+
+        // 2. Id:t är tak-relativt => portabelt mellan kataloger/diskar/maskiner.
+        let idx = index_entities_in(file.to_str().unwrap(), true, Some(&proj)).unwrap();
+        assert_eq!(
+            idx.entities[0].id, "gtw:src/kalkyl.rs:function:trippela",
+            "id ska vara tak-relativt, aldrig absolut"
+        );
+
+        // 3. Legacy-vägen (utan tak) är oförändrad — CLI/editor-kontraktet.
+        let legacy = index_entities(file.to_str().unwrap(), true).unwrap();
+        assert!(
+            legacy.entities[0].id.contains("kalkyl.rs"),
+            "utan tak gäller legacy-beteendet"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
