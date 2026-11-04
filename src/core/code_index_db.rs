@@ -824,6 +824,34 @@ pub fn load_entities(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serd
     Ok(out)
 }
 
+/// Konsument-yta: AST-hierarkin (`items`) med föräldra-koppling, så en
+/// konsument kan uttrycka "impl äger metoder" i stället för att platta ut allt
+/// till fil-nivå. `parent_*` är None för rot-entiteter.
+pub fn load_items(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>> {
+    let mut stmt = conn.prepare(
+        "SELECT i.file, i.kind, i.name, i.line, p.kind, p.name, p.line
+         FROM items i LEFT JOIN items p ON p.id = i.parent_id
+         WHERE (?1 IS NULL OR i.file LIKE ?1 || '%')
+         ORDER BY i.file, i.line",
+    )?;
+    let rows = stmt.query_map(params![prefix], |r| {
+        Ok(serde_json::json!({
+            "file": r.get::<_, String>(0)?,
+            "kind": r.get::<_, String>(1)?,
+            "name": r.get::<_, String>(2)?,
+            "line": r.get::<_, i64>(3)?,
+            "parent_kind": r.get::<_, Option<String>>(4)?,
+            "parent_name": r.get::<_, Option<String>>(5)?,
+            "parent_line": r.get::<_, Option<i64>>(6)?,
+        }))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
 /// MCP query surface: relations for a path prefix.
 pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>> {
     let mut stmt = conn.prepare(
