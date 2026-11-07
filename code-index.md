@@ -1,10 +1,10 @@
 # CODE-INDEX — GnawTreeWriter
 
-> Genererad 2026-11-04 18:17 UTC · gnawtreewriter 0.23.0 · git `dbe2712` +DIRTY
+> Genererad 2026-11-04 19:15 UTC · gnawtreewriter 0.23.0 · git `37b834a` +DIRTY
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 5e3d736351d6d995407a82f231f0d0a2
+> Body-hash: 1db0f696f1104cfa883313991149aaf1
 
 ## Träd
 
@@ -61,7 +61,7 @@ src/core/
   blast.rs (310 rader)
   blueprint.rs (182 rader)
   code_index.rs (678 rader)
-  code_index_db.rs (812 rader)
+  code_index_db.rs (916 rader)
   compress.rs (487 rader)
   curator.rs (709 rader)
   diagnostics.rs (1077 rader)
@@ -593,7 +593,7 @@ _(inga toppnivå-items)_
 - `pub struct CheckResult` :512
 - `pub fn check_index(` :523
 
-### code_index_db.rs (812 rader)
+### code_index_db.rs (916 rader)
 - `pub const EXTRACTOR_VERSION: &str = "1"` :30
 - `const SCHEMA_VERSION: i32 = 3` :32
 - `const BUSY_TIMEOUT_MS: u64 = 5000` :33
@@ -622,9 +622,14 @@ _(inga toppnivå-items)_
 - `fn store_entities_relations(` :610
 - `fn resolve_unresolved_in_db(conn: &Connection) -> Result<()>` :676
 - `pub fn mark_stale(root: &Path, file_path: &str)` :734
-- `pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :752
-- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :776
-- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :798
+- `pub fn content_hash(path: &Path) -> Option<String>` :756
+- `pub fn is_stale(root: &Path, file: &str) -> bool` :765
+- `pub fn stale_files(root: &Path) -> std::collections::BTreeSet<String>` :784
+- `pub fn load_entities(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :805
+- `pub fn load_items(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :830
+- `pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :856
+- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :880
+- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :902
 
 ### compress.rs (487 rader)
 - `pub struct CompressedOutput` :12
