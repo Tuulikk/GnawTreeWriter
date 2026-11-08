@@ -1077,6 +1077,13 @@ impl GnawTreeWriter {
     /// citerad JSON (`"text"`) tolkas som JSON-värde, ociterad text
     /// blir literal-strängen (ergonomin ur rapporten — ingen agent ska
     /// behöva gissa citat-form).
+    ///
+    /// **INTERIM (användaren 2026-11-08):** detta är en tillfällig lösning.
+    /// JSON ska ha en riktig AST-parser med span som de andra språken
+    /// (tree-sitter-json eller egen span-spårare) — då återfår JSON
+    /// kirurgisk byte-precision och re-renderingen försvinner. Kostnaden
+    /// idag: formateringsnormalisering (pretty 2-space) vid avvikande
+    /// underlag. Parkerad uppföljning, se CHANGELOG 0.23.1.
     fn json_semantic_edit(&self, node_path: &str, new_content: &str) -> Result<String> {
         let mut root: serde_json::Value = serde_json::from_str(&self.source_code).map_err(|e| {
             anyhow::anyhow!("JSON-edit: källfilen är inte giltig JSON: {e}")

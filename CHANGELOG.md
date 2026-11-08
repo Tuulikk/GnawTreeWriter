@@ -27,6 +27,12 @@
 - Regressioner: `json_edit_both_quote_forms_and_nesting`,
   `json_edit_preserves_key_order`, `json_edit_refuses_structural_sneak`.
   Live-bevis: båda formerna genom riktiga CLI:t på en flödesliknande fil.
+- **NOTERING — TILLFÄLLIG LÖSNING (användaren 2026-11-08):** värde-nivå-editen
+  är ett INTERIM. JSON ska ha en riktig AST-parser med span som de andra
+  språken (tree-sitter-json — idag medvetet avstått pga versionskonflikter —
+  eller en egen span-spårare); då återfår JSON kirurgisk byte-precision och
+  re-renderingen försvinner. Uppföljning parkerad tills behov/bevis visar
+  sig (formateringsnormalisering är den enda kända kostnaden idag).
 
 ## [0.23.0] - 2026-11-04
 
