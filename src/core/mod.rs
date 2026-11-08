@@ -499,6 +499,20 @@ impl GnawTreeWriter {
         self.last_verdict = None;
         self.last_impact = None;
 
+        // J1 (2026-11-08, rapport 2026-11-05): JSON redigeras SEMANTISKT —
+        // den legacy-JSON-parsern är positionsblind (alla noder rad 1..1,
+        // kolumn 0), så edit_node_at_path:s rad-splicing kan aldrig fungera
+        // för JSON (båda citat-formerna nekades: "expected ident" med rå
+        // text, "trailing characters" med citerad). Värde-nivån är rätt
+        // abstraktion för JSON: navigera nod-pathen, ersätt värdet,
+        // re-serialisera hela dokumentet (pretty 2-space; preserve_order
+        // håller nyckelordningen).
+        let is_json = Path::new(&self.file_path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("json"))
+            .unwrap_or(false);
+
         // B1(a): the receipt carries the addressed path — consumers diff
         // intent (expect) vs outcome (new path + hash).
         let target_for_receipt = match &operation {
@@ -557,7 +571,11 @@ impl GnawTreeWriter {
                     });
                     return Ok(());
                 }
-                self.edit_node_at_path(&resolved.path, content)?
+                if is_json {
+                    self.json_semantic_edit(&resolved.path, content)?
+                } else {
+                    self.edit_node_at_path(&resolved.path, content)?
+                }
             }
             EditOperation::Insert {
                 parent_path,
@@ -1050,6 +1068,149 @@ impl GnawTreeWriter {
         Some((node.path.clone(), node.node_type.clone(), node.get_name()))
     }
 
+    /// J1 (2026-11-08): semantisk JSON-redigering — rad-splicing är
+    /// meningslöst för en positionsblind parser, så JSON-edit går på
+    /// VÄRDE-nivå: nod-pathen navigeras (nycklar + array-index, samma
+    /// form som JsonParser bygger), värdet ersätts, hela dokumentet
+    /// re-serialiseras deterministiskt (pretty 2-space, preserve_order
+    /// bevarar nyckelordningen). Sträng-noder tar BÅDA formerna:
+    /// citerad JSON (`"text"`) tolkas som JSON-värde, ociterad text
+    /// blir literal-strängen (ergonomin ur rapporten — ingen agent ska
+    /// behöva gissa citat-form).
+    fn json_semantic_edit(&self, node_path: &str, new_content: &str) -> Result<String> {
+        let mut root: serde_json::Value = serde_json::from_str(&self.source_code).map_err(|e| {
+            anyhow::anyhow!("JSON-edit: källfilen är inte giltig JSON: {e}")
+        })?;
+
+        // Tom path = roten (JsonParser ger roten id "").
+        if node_path.is_empty() {
+            let v = Self::json_new_value(new_content, true)
+                .ok_or_else(|| Self::json_content_error(new_content, "dokumentet (roten)"))?;
+            return Ok(Self::json_render(&v));
+        }
+
+        // Navigera till föräldern, segment för segment.
+        let segments: Vec<&str> = node_path.split('.').collect();
+        let (last, parents) = segments
+            .split_last()
+            .expect("icke-tom path har minst ett segment");
+        let mut cursor = &mut root;
+        for (i, seg) in parents.iter().enumerate() {
+            cursor = match cursor {
+                serde_json::Value::Object(map) => map.get_mut(*seg).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "JSON-edit: segment {} ('{}') finns inte — pathen pekar ingenstans",
+                        i + 1,
+                        seg
+                    )
+                })?,
+                serde_json::Value::Array(arr) => {
+                    let idx: usize = seg.parse().map_err(|_| {
+                        anyhow::anyhow!(
+                            "JSON-edit: segment {} ('{}') är inte ett array-index",
+                            i + 1,
+                            seg
+                        )
+                    })?;
+                    arr.get_mut(idx).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "JSON-edit: array-index {} utanför gränsen (segment {})",
+                            idx,
+                            i + 1
+                        )
+                    })?
+                }
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "JSON-edit: segment {} ('{}') går genom ett skalärt värde",
+                        i + 1,
+                        seg
+                    ))
+                }
+            };
+        }
+
+        // Målets nuvarande typ styr vad ociterat innehåll får vara.
+        let target_is_string = match cursor {
+            serde_json::Value::Object(map) => {
+                matches!(map.get(*last), Some(serde_json::Value::String(_)))
+            }
+            serde_json::Value::Array(arr) => last
+                .parse::<usize>()
+                .ok()
+                .and_then(|i| arr.get(i))
+                .is_some_and(|v| v.is_string()),
+            _ => false,
+        };
+        let new_value = Self::json_new_value(new_content, target_is_string)
+            .ok_or_else(|| Self::json_content_error(new_content, "noden"))?;
+
+        match cursor {
+            serde_json::Value::Object(map) => {
+                if !map.contains_key(*last) {
+                    return Err(anyhow::anyhow!(
+                        "JSON-edit: nyckeln '{}' finns inte i objektet — edit ändrar, den skapar inte (insert_node för tillägg)",
+                        last
+                    ));
+                }
+                map.insert(last.to_string(), new_value);
+            }
+            serde_json::Value::Array(arr) => {
+                let idx: usize = last.parse().map_err(|_| {
+                    anyhow::anyhow!("JSON-edit: '{}' är inte ett array-index", last)
+                })?;
+                if idx >= arr.len() {
+                    return Err(anyhow::anyhow!(
+                        "JSON-edit: array-index {} utanför gränsen (längd {})",
+                        idx,
+                        arr.len()
+                    ));
+                }
+                arr[idx] = new_value;
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "JSON-edit: föräldern till '{}' är ett skalärt värde",
+                    last
+                ))
+            }
+        }
+        Ok(Self::json_render(&root))
+    }
+
+    /// Nytt värde ur edit-innehållet: giltig JSON först (citerade
+    /// strängar, tal, objekt, arrayer); ociterad text = literal sträng
+    /// NÄR målet är en sträng-nod (allow_string).
+    fn json_new_value(content: &str, allow_string: bool) -> Option<serde_json::Value> {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(content) {
+            return Some(v);
+        }
+        if allow_string {
+            return Some(serde_json::Value::String(content.to_string()));
+        }
+        None
+    }
+
+    fn json_content_error(content: &str, target: &str) -> anyhow::Error {
+        anyhow::anyhow!(
+            "JSON-edit: innehållet är inte giltig JSON och målet ({}) är inte en sträng-nod \
+             (sträng-noder tar ociterad text som literal; objekt/array/tal kräver giltig JSON: \
+             {{…}}, […], 42, true). Innehållet börjar med: '{}'",
+            target,
+            content.chars().take(40).collect::<String>()
+        )
+    }
+
+    /// Deterministisk rendering: pretty 2-space + avslutande radbrytning
+    /// (samma form som flödesfilerna skrivs i).
+    fn json_render(v: &serde_json::Value) -> String {
+        let mut s = serde_json::to_string_pretty(v).unwrap_or_default();
+        if !s.ends_with('\n') {
+            s.push('\n');
+        }
+        s
+    }
+
     fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String> {
         let node = self
             .find_node_by_path(&self.tree, node_path)
@@ -1452,6 +1613,154 @@ mod tests {
         std::fs::write(&path, code).unwrap();
         let path_str = path.to_str().unwrap().to_string();
         (dir, path_str)
+    }
+
+    /// J1 (2026-11-08, rapport 2026-11-05): JSON-strängnoder ska kunna
+    /// redigeras i BÅDA citat-formerna (ociterad = literal; citerad =
+    /// JSON-värde) — förr nekades båda ("expected ident"/"trailing
+    /// characters") eftersom rad-splicing aldrig kan fungera mot den
+    /// positionsblinda JSON-parsern. Nu: värde-nivå + re-serialisering.
+    #[test]
+    fn json_edit_both_quote_forms_and_nesting() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("flow.json");
+        let original = concat!(
+            "{\n",
+            "  \"name\": \"gammal\",\n",
+            "  \"steps\": [\n",
+            "    {\"path\": \"/a\", \"expect_status\": 200}\n",
+            "  ]\n",
+            "}\n"
+        );
+        std::fs::write(&path, original).unwrap();
+        let path_str = path.to_str().unwrap().to_string();
+
+        // OCITERAD text → literal sträng (ergonomin ur rapporten).
+        let mut w = GnawTreeWriter::new(&path_str).unwrap();
+        w.edit(
+            EditOperation::Edit {
+                node_path: "name".into(),
+                content: "ny rubrik".into(),
+            },
+            false,
+        )
+        .unwrap();
+        let doc: serde_json::Value = serde_json::from_str(w.get_source()).unwrap();
+        assert_eq!(doc["name"], serde_json::json!("ny rubrik"));
+
+        // CITERAD JSON → tolkas som JSON-värde (samma resultat).
+        let mut w = GnawTreeWriter::new(&path_str).unwrap();
+        w.edit(
+            EditOperation::Edit {
+                node_path: "name".into(),
+                content: "\"citerad form\"".into(),
+            },
+            false,
+        )
+        .unwrap();
+        let doc: serde_json::Value = serde_json::from_str(w.get_source()).unwrap();
+        assert_eq!(doc["name"], serde_json::json!("citerad form"));
+
+        // Nästlad path med array-index.
+        let mut w = GnawTreeWriter::new(&path_str).unwrap();
+        w.edit(
+            EditOperation::Edit {
+                node_path: "steps.0.path".into(),
+                content: "/b".into(),
+            },
+            false,
+        )
+        .unwrap();
+        let doc: serde_json::Value = serde_json::from_str(w.get_source()).unwrap();
+        assert_eq!(doc["steps"][0]["path"], serde_json::json!("/b"));
+
+        // Tal-nod: giltig JSON krävs (ociterad text nekas med vägledning).
+        let mut w = GnawTreeWriter::new(&path_str).unwrap();
+        let err = w
+            .edit(
+                EditOperation::Edit {
+                    node_path: "steps.0.expect_status".into(),
+                    content: "tvåhundra".into(),
+                },
+                false,
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("inte giltig JSON"), "{err}");
+        assert!(err.to_string().contains("sträng-noder"), "{err}");
+    }
+
+    /// J1: nyckelordningen bevaras vid re-serialisering (preserve_order)
+    /// — utan den vore varje JSON-edit diff-brus över hela filen.
+    #[test]
+    fn json_edit_preserves_key_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ordning.json");
+        std::fs::write(
+            &path,
+            "{\n  \"zeta\": 1,\n  \"alpha\": 2,\n  \"middle\": {\n    \"z_last\": \"x\",\n    \"a_first\": \"y\"\n  }\n}\n",
+        )
+        .unwrap();
+        let path_str = path.to_str().unwrap().to_string();
+        let mut w = GnawTreeWriter::new(&path_str).unwrap();
+        w.edit(
+            EditOperation::Edit {
+                node_path: "middle.z_last".into(),
+                content: "ändrad".into(),
+            },
+            false,
+        )
+        .unwrap();
+        let src = w.get_source();
+        let zeta = src.find("\"zeta\"").unwrap();
+        let alpha = src.find("\"alpha\"").unwrap();
+        assert!(zeta < alpha, "nyckelordningen bevaras (zeta före alpha): {src}");
+        let z_last = src.find("\"z_last\"").unwrap();
+        let a_first = src.find("\"a_first\"").unwrap();
+        assert!(z_last < a_first, "nästlade nycklar orörda i ordning: {src}");
+    }
+
+    /// J1: edit ändrar ALDRIG struktur i smyg — okänd nyckel och utanför-
+    /// gräns-index nekas högt (samma kontrakt som kod-språken: edit ≠ insert).
+    #[test]
+    fn json_edit_refuses_structural_sneak() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vakt.json");
+        std::fs::write(&path, "{\"a\": [1, 2]}\n").unwrap();
+        let path_str = path.to_str().unwrap().to_string();
+
+        let mut w = GnawTreeWriter::new(&path_str).unwrap();
+        let err = w
+            .edit(
+                EditOperation::Edit {
+                    node_path: "saknad_nyckel".into(),
+                    content: "\"x\"".into(),
+                },
+                false,
+            )
+            .unwrap_err();
+        // Okänd nyckel nekas HÖGT — antingen i path-upplösningen (trädet
+        // känner bara existerande noder) eller i den semantiska editen.
+        let m = err.to_string();
+        assert!(
+            m.contains("finns inte") || m.contains("Could not resolve"),
+            "okänd nyckel ska nekas högt: {m}"
+        );
+
+        let mut w = GnawTreeWriter::new(&path_str).unwrap();
+        let err = w
+            .edit(
+                EditOperation::Edit {
+                    node_path: "a.5".into(),
+                    content: "9".into(),
+                },
+                false,
+            )
+            .unwrap_err();
+        let m = err.to_string();
+        assert!(
+            m.contains("utanför gränsen") || m.contains("Could not resolve"),
+            "utanför-gräns-index ska nekas högt: {m}"
+        );
     }
 
     /// Regression: the Guardian must compare the old NODE content with the

@@ -1,6 +1,6 @@
 [package]
 name = "gnawtreewriter"
-version = "0.23.0"
+version = "0.23.1"
 edition = "2021"
 authors = ["gnaw Software"]
 description = "Tree-based code editor for LLM-assisted editing"
@@ -60,7 +60,7 @@ serde_yaml = "0.9"
 pulldown-cmark = "0.13"
 chrono = { version = "0.4", features = ["serde"] }
 xmltree = "0.12"
-serde_json = "1.0"  # ← Bara denna!
+serde_json = { version = "1.0", features = ["preserve_order"] }  # J1 (2026-11-08): JSON-edit re-serialiserar — nyckelordningen måste överleva (BTreeMap-sortering vore diff-brus över hela filen)
 rayon = "1.10"
 rusqlite = { version = "0.32", features = ["bundled"] }
 

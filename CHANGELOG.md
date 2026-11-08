@@ -1,3 +1,33 @@
+## [0.23.1] - 2026-11-08
+
+### Fixed — J1: JSON-strängnoder redigerbara i båda citat-formerna
+
+- **Rotorsak** (rapport 2026-11-05 från Motor2-agenten, via gnawdrivers
+  `GTW_MCP_ISSUE_LOG`): den legacy-JSON-parseren är **positionsblind** —
+  alla noder får rad 1..1/kolumn 0 — så `edit_node_at_path:s` rad-splicing
+  kan aldrig fungera för JSON. Båda citat-formerna nekades: ociterad text →
+  "expected ident" (inte giltig JSON), citerad → "trailing characters"
+  (splicingen förstörde dokumentet och re-parsen föll).
+- **Fixen är semantisk, inte syntaktisk**: JSON redigeras på VÄRDE-nivå
+  (`json_semantic_edit`) — nod-pathen navigeras (nycklar + array-index,
+  samma form som `JsonParser` bygger), värdet ersätts, hela dokumentet
+  re-serialiseras deterministiskt (pretty 2-space + avslutande newline).
+  Rad-splicing och B2-radkontroll är rätt för kod med riktiga span — för
+  JSON är värde-nivån abstraktionen.
+- **Sträng-noder tar BÅDA formerna**: citerad (`"text"`) tolkas som
+  JSON-värde; ociterad text blir literal-strängen. Ingen agent ska behöva
+  gissa citat-form (ergonomi-poenget ur rapporten).
+- **`serde_json` får `preserve_order`** — utan den hade varje JSON-edit
+  sorterat om ALLA nycklar (BTreeMap) och varit diff-brus över hela
+  filen; nu bevaras nyckelordningen (regressionstest).
+- **Edit ändrar, den skapar inte**: okänd nyckel/utanför-gräns-index
+  nekas högt (samma kontrakt som kod-språken; insert för tillägg).
+- Båda vägarna delar fixen: MCP `edit_node`/`batch` + CLI `edit` (de går
+  genom `GnawTreeWriter::edit`). Guardian/receipt/transactions oförändrade.
+- Regressioner: `json_edit_both_quote_forms_and_nesting`,
+  `json_edit_preserves_key_order`, `json_edit_refuses_structural_sneak`.
+  Live-bevis: båda formerna genom riktiga CLI:t på en flödesliknande fil.
+
 ## [0.23.0] - 2026-11-04
 
 ### Fixed — B4: search_nodes alternation (`a|b` is OR)
