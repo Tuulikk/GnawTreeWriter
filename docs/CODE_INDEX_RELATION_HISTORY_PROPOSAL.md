@@ -355,3 +355,49 @@ Största möjligheten: **metodanrops-extraktion på `candidate`-nivå** (fas 1)
 inget om deras täckning. `coverage` byggs som permanent harness; edit-receiptet får
 `revision_id`; preview-scope anges explicit (resolution mot hypotetisk
 helhet är UR scopet).
+
+## Fas 2-designnoter (låsta 2026-11-10 — resoner som annars försvinner i chatt)
+
+Fas 2, ökning 1 levererad (`5db65e4`): schema v4 + revisionskedja-skelett +
+D9-signaler i coverage. Följande design-beslut är LÅSTA och motiverade här
+så att implementationen har sitt varför bredvid sig:
+
+- **D5 = väg (a), en atomisk tx — med rationale:** SQLite WAL ger
+  snapshot-isolering — läsare ser senaste committade revisionen, aldrig
+  en blandning, utan någon swap-mekanik. En tx är "enklast som håller
+  invarianten". Väg (b) staging + `active_revision_id`-byte är
+  escape-hatch ENDAST om benchmark på Motor2-storlek fixtur visar ett
+  olåsbart skrivfönster.
+- **relation_key-format:** `from_entity|relation_type|target_key` där
+  `target_key` = `to_id` (resolved) eller `"name:" + to_name` (unresolved).
+  Flips resolved↔unresolved = delete+add (D1-regeln). `count_before/
+  count_after` på raden (D8); callsite-ankare i before/after-JSON.
+  Ingen separat callsite-tabell i v1.
+- **Prosa-färskhet — state machine.** Indexet äger STATUSERNA som fakta;
+  prosatexten förblir CLAIM. Sweepen körs per completed revision
+  (index-sida, deterministisk); producenter (lokal modell / agenter /
+  bakgrundsagenter) skriver via `upsert_prose`; aldrig grind.
+  - `fresh` — ankare + hash matchar aktuellt tillstånd
+  - `stale` ("ej färsk") — identitet kvar men fil-hash ändrad
+  - `invalid` ("ej gällande") — ankaret borta; `suggested_key` sätts
+    när exakt EN samnamnig efterträdare finns (aldrig en gissning)
+- **Migrations-helande (commit-hook/två-binär-racet):** en ÄLDRE binär
+  (commit-hookens) kan migrera storen till en schema-version med ett
+  äldre ADD-sätt; nyare binär får då halvfärdiga tabeller. Därför kör
+  `migrate_connection` idempotent DDL (`CREATE ... IF NOT EXISTS`) vid
+  VARJE öppning + additiv kolumn-reparation (`PRAGMA table_info` +
+  `ALTER ADD ... DEFAULT DEFAULT`). Läxa: version-gated ALTER och
+  idempotent CREATE ska aldrig blandas i samma versions-arm.
+- **Prosa-regenerering som arbetskö:** coverage-rapporten räknar
+  fresh/stale/invalid; stale+invalid > 0 = regenerering rekommenderad.
+  Producenter läser kön (status + `suggested_key`) och skriver om via
+  `upsert_prose` — modellgödsel på index-fakta, aldrig tvärtom.
+- **Test-pin-principen:** fixture-assertions pinnas på MÄTTA värden
+  (surfa ur storen först, aldrig gissade förväntan); när en increment
+  ändrar beteende flippar assertionerna medvetet med motivering — aldrig
+  tyst. (Tillämpades i `tests/code_index_fixtures.rs`: 3 → 11 calls,
+  varje flip kommenterad med sitt hål-id.)
+- **D7-ansats (förberedd, inte påbörjad):** from-identitetens
+  kvalificering sker i extraktorns scope-trådning; målbilden är att
+  relations-from använder SAMMA kvalificering som entitets-id:n.
+  Källor som inte kan klassificeras får `unknown_source` med filankare.

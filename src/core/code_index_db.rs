@@ -164,6 +164,23 @@ CREATE TABLE IF NOT EXISTS relation_changes (
     PRIMARY KEY (revision_id, relation_key)
 );
 CREATE INDEX IF NOT EXISTS idx_relation_changes_key ON relation_changes(relation_key);
+CREATE TABLE IF NOT EXISTS prose_annotations (
+    id INTEGER PRIMARY KEY,
+    anchor_kind TEXT NOT NULL,
+    anchor_key TEXT NOT NULL,
+    anchor_hash TEXT NOT NULL,
+    body TEXT NOT NULL,
+    producer TEXT NOT NULL,
+    model TEXT,
+    language TEXT NOT NULL,
+    revision_id INTEGER REFERENCES index_revisions(id),
+    generated_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'fresh',
+    invalid_reason TEXT,
+    suggested_key TEXT,
+    UNIQUE (anchor_kind, anchor_key, producer, language)
+);
+CREATE INDEX IF NOT EXISTS idx_prose_status ON prose_annotations(status);
 "#;
 
 pub struct RefreshStats {
@@ -246,13 +263,62 @@ pub(crate) fn migrate_connection(conn: &Connection) -> Result<()> {
         conn.execute_batch(SCHEMA_V2)?;
     }
     if v < 3 {
+        // ALTER is NOT idempotent — stays version-gated (duplicate column
+        // would abort otherwise).
         conn.execute_batch(SCHEMA_V3)?;
     }
     if v < 4 {
         conn.execute_batch(SCHEMA_V4)?;
     }
-    if v < SCHEMA_VERSION {
+    // Phase 2 lock 7 correction (2026-11-10): CREATE-only batches are
+    // idempotent (CREATE ... IF NOT EXISTS), so they run on EVERY open —
+    // a store already at v4 that predates a later additive table (e.g.
+    // prose_annotations, committed mid-increment by a commit-hook refresh
+    // with an older binary) heals here instead of erroring downstream.
+    conn.execute_batch(SCHEMA_V4)?;
+    repair_prose_columns(conn)?;
+    if v < SCHEMA_VERSION || v == SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    }
+    Ok(())
+}
+
+/// Additive-column repair for pre-release v4 stores that carried the
+/// prose table before later columns existed (0 rows, unreleased schema —
+/// ALTER with DEFAULT is safe). Idempotent by PRAGMA table_info check.
+fn repair_prose_columns(conn: &Connection) -> Result<()> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'prose_annotations'",
+            [],
+            |r| r.get::<_, i64>(0).map(|c| c > 0),
+        )
+        .unwrap_or(false);
+    if !exists {
+        return Ok(());
+    }
+    let cols: Vec<String> = {
+        let mut stmt = conn.prepare("PRAGMA table_info(prose_annotations)")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(1))?;
+        rows.flatten().collect()
+    };
+    if !cols.iter().any(|c| c == "anchor_name") {
+        conn.execute(
+            "ALTER TABLE prose_annotations ADD COLUMN anchor_name TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    if !cols.iter().any(|c| c == "suggested_key") {
+        conn.execute(
+            "ALTER TABLE prose_annotations ADD COLUMN suggested_key TEXT",
+            [],
+        )?;
+    }
+    if !cols.iter().any(|c| c == "invalid_reason") {
+        conn.execute(
+            "ALTER TABLE prose_annotations ADD COLUMN invalid_reason TEXT",
+            [],
+        )?;
     }
     Ok(())
 }
@@ -592,6 +658,129 @@ pub(crate) fn record_revision(
     Ok(rid)
 }
 
+/// Phase 2 prose layer (optional enrichment, ROADMAP 2026-11-10): the
+/// producer path — local model, agents or background tools write CLAIMS
+/// here. The index owns only the FACTS about those claims (anchor + hash +
+/// status); prose never gates anything. Upsert on
+/// (anchor_kind, anchor_key, producer, language): re-generating the same
+/// claim resets it to fresh.
+#[allow(clippy::too_many_arguments)]
+pub fn upsert_prose(
+    conn: &mut Connection,
+    anchor_kind: &str,
+    anchor_key: &str,
+    anchor_hash: &str,
+    anchor_name: &str,
+    body: &str,
+    producer: &str,
+    model: Option<&str>,
+    language: &str,
+    revision_id: Option<i64>,
+) -> Result<()> {
+    let now = chrono::Utc::now().timestamp();
+    conn.execute(
+        "INSERT INTO prose_annotations (anchor_kind, anchor_key, anchor_hash, anchor_name, body, producer, model, language, revision_id, generated_at, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'fresh')
+         ON CONFLICT(anchor_kind, anchor_key, producer, language) DO UPDATE SET
+           body = excluded.body, anchor_hash = excluded.anchor_hash,
+           anchor_name = excluded.anchor_name, model = excluded.model,
+           revision_id = excluded.revision_id, generated_at = excluded.generated_at,
+           status = 'fresh', invalid_reason = NULL, suggested_key = NULL",
+        params![anchor_kind, anchor_key, anchor_hash, anchor_name, body, producer, model, language, revision_id, now],
+    )?;
+    Ok(())
+}
+
+/// Deterministic freshness sweep (index-side FACTS about prose claims —
+/// the user-facing semantics: stale = "ej färsk" (content moved, identity
+/// kept), invalid = "ej gällande" (anchor provably gone)). Runs after each
+/// completed revision. Reports, never gates.
+pub(crate) fn sweep_prose_freshness(conn: &mut Connection) -> Result<()> {
+    let rows: Vec<(i64, String, String, String, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, anchor_kind, anchor_key, anchor_hash, anchor_name
+             FROM prose_annotations WHERE status != 'invalid'",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?;
+        rows.collect::<std::result::Result<_, _>>()?
+    };
+    // Owned strings — the successors lookup lives in a narrower scope than
+    // the deferred updates (E0597 lesson: borrow the decision, own the data).
+    let mut updates: Vec<(i64, &'static str, Option<String>, Option<String>)> = Vec::new();
+    for (id, kind, key, anchor_hash, _anchor_name) in &rows {
+        match kind.as_str() {
+            "file" => {
+                let h = conn.query_row(
+                    "SELECT hash FROM files WHERE path = ?1",
+                    params![key],
+                    |r| r.get::<_, String>(0),
+                );
+                match h {
+                    Ok(h) if h == *anchor_hash => {}
+                    Ok(_) => updates.push((*id, "stale", Some("content_changed".to_string()), None)),
+                    Err(_) => updates.push((*id, "invalid", Some("anchor_removed".to_string()), None)),
+                }
+            }
+            "entity" => {
+                let file = conn.query_row(
+                    "SELECT file FROM entities WHERE id = ?1",
+                    params![key],
+                    |r| r.get::<_, String>(0),
+                );
+                match file {
+                    Ok(f) => {
+                        let h = conn.query_row(
+                            "SELECT hash FROM files WHERE path = ?1",
+                            params![f],
+                            |r| r.get::<_, String>(0),
+                        );
+                        match h {
+                            Ok(h) if h == *anchor_hash => {}
+                            Ok(_) => {
+                                updates.push((*id, "stale", Some("content_changed".to_string()), None))
+                            }
+                            Err(_) => {
+                                updates.push((*id, "stale", Some("anchor_file_missing".to_string()), None))
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Anchor gone: a same-NAMED successor (bare name =
+                        // last ':' segment of the id) becomes the suggested
+                        // re-anchor when it is unique — never a guess.
+                        let bare = key.rsplit(':').next().unwrap_or("");
+                        let successors: Vec<String> = {
+                            let mut stmt = conn.prepare("SELECT id FROM entities WHERE name = ?1")?;
+                            let rows = stmt.query_map(params![bare], |r| r.get::<_, String>(0))?;
+                            rows.flatten().collect()
+                        };
+                        if successors.len() == 1 {
+                            updates.push((
+                                *id,
+                                "invalid",
+                                Some("anchor_removed".to_string()),
+                                Some(successors[0].clone()),
+                            ));
+                        } else {
+                            updates.push((*id, "invalid", Some("anchor_removed".to_string()), None));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for (id, status, reason, suggested) in &updates {
+        conn.execute(
+            "UPDATE prose_annotations SET status = ?1, invalid_reason = ?2, suggested_key = ?3 WHERE id = ?4",
+            params![status, reason, suggested, id],
+        )?;
+    }
+    Ok(())
+}
+
 /// Load the stored index back into the shared render shape. Items come back
 /// in line order; methods reattach to their parent row. Orphaned children
 /// (impossible in practice — cascades prevent them) are promoted, never
@@ -718,6 +907,12 @@ pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun> {
         .unwrap_or_else(|_| "refresh_manual".to_string());
     if let Err(e) = record_revision(&mut conn, &index_root, &source) {
         notices.push(format!("revisionspost kunde inte skrivas: {e:#}"));
+    }
+    // Freshness sweep after the revision: prose claims are facts-checked
+    // against the NEW store state (fresh / stale / invalid — D9-family
+    // semantics, reports never gates).
+    if let Err(e) = sweep_prose_freshness(&mut conn) {
+        notices.push(format!("prosa-färskhet kunde inte uppdateras: {e:#}"));
     }
     let doc = render(&conn, &index_root, opts, &artifact_notices)?;
     Ok(DbRun {

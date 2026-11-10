@@ -56,6 +56,20 @@ pub struct SymbolSummary {
     pub external: i64,
 }
 
+/// Phase 2 prose layer (optional enrichment): the index owns only the
+/// FACTS about prose claims — freshness counts + the regenerate
+/// recommendation. The prose TEXT lives in prose_annotations; producers
+/// (model / agents / background tools) read the queue and rewrite.
+#[derive(Serialize)]
+pub struct ProseSummary {
+    pub fresh: i64,
+    pub stale: i64,
+    pub invalid: i64,
+    /// stale + invalid > 0 → producers should regenerate (a
+    /// recommendation surfaced in coverage/doctor — never a gate).
+    pub regenerate_recommended: bool,
+}
+
 #[derive(Serialize)]
 pub struct CoverageReport {
     pub files: i64,
@@ -70,6 +84,7 @@ pub struct CoverageReport {
     /// predates the revision chain (or history was lost); every impact /
     /// delta claim must carry this, never silently green.
     pub history_gap: bool,
+    pub prose: ProseSummary,
     pub extractor_version: String,
     pub generation_key: Option<String>,
     pub last_refresh_rev: Option<String>,
@@ -195,6 +210,31 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
         )
         .unwrap_or(0);
     let history_gap = files > 0 && completed_revisions == 0;
+    let prose: ProseSummary = {
+        let mut stmt = conn.prepare(
+            "SELECT status, COUNT(*) FROM prose_annotations GROUP BY status",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        let mut fresh = 0i64;
+        let mut stale = 0i64;
+        let mut invalid = 0i64;
+        for row in rows.flatten() {
+            match row.0.as_str() {
+                "fresh" => fresh = row.1,
+                "stale" => stale = row.1,
+                "invalid" => invalid = row.1,
+                _ => {}
+            }
+        }
+        ProseSummary {
+            fresh,
+            stale,
+            invalid,
+            regenerate_recommended: stale + invalid > 0,
+        }
+    };
     let relations_total: i64 = relations_total(conn)?;
     Ok(CoverageReport {
         files,
@@ -208,6 +248,7 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
         },
         index_stale,
         history_gap,
+        prose,
         extractor_version: meta("extractor_version")?.unwrap_or_default(),
         generation_key: meta("generation_key")?,
         last_refresh_rev: meta("last_refresh_rev")?,
