@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.25.0] - 2026-11-10
 
 ### Fixed — `edit_node` förstörde dokument- och configfiler
 
@@ -53,6 +53,58 @@ Verifierat mot 0.24.0-binären innan fixen:
   använde regex — `LANGUAGE_SUPPORT_PLAN.md` påstod pulldown-cmark).
 - Ny delad konverterare `parser::tree_from_ts_node` + `parse_with_tree_sitter`:
   byte-spann-logiken bor på ett ställe i stället för att kopieras per parser.
+
+### Added — graf-frågor (P2) och planerings-ytan
+
+- **`code_graph`** — graf-frågor över code-index-storen: `reachable` (SQL
+  rekursiv `UNION`, så cykler terminerar; djupgräns som parameter), `cycles`
+  (iterativ DFS, rotationskanoniserad, djupbegränsad), `chain` (BFS med
+  förälder vid första upptäckt) samt `impact` + `resolve_symbols` (ett bart
+  *namn* slås upp mot `entities.name`; okänt namn = synligt tomt).
+- **MCP:** `code_index kind=cycles|impact` med `symbol`/`depth` i schemat.
+- **CLI:** `code-index --cycles`, `--impact <namn>`, `--why <namn>`,
+  `--depth N` — read-only, kräver store.
+- **`--why <namn>`** — per utgående kant: `resolved`, `to_id`, `target_defs`
+  och `verdict` (`unique_in_index` / `ambiguous_pick` / `unresolved`). Gör ett
+  grafsvar falsifierbart på ett anrop.
+- **`meta`-kuvert på varje grafsvar:** `store_rev`, `worktree_rev`,
+  `worktree_dirty`, `index_stale`, `static_only` — svaret bär sin egen
+  osäkerhet i stället för att se ut som ett faktum.
+
+### Fixed — sex agent-vända CLI-hål
+
+| Före | Efter |
+|---|---|
+| `--version`/`--help` → exit 1 + stderr | `e.exit()`: stdout + 0; användningsfel → 2 |
+| `analyze` → exit 0 när inget parsades | non-zero (delscan behåller 0) |
+| `insert` panikade på **varje** anrop i debug-bygge | `position: Option<usize>` (default 1) |
+| `curate` två `-m`, `pack` två `-i` (×2), `restore` bool-positional | long-only / flagga |
+| cachad numerisk path skrev **tyst fel nod** | `edit --expect-name <namn>` → avvisar, fil orörd |
+| `quick-replace '-1'` krävde `--` | `allow_hyphen_values` |
+
+Nya grindar: `tests/cli_contract.rs` (`Cli::command().debug_assert()`) och
+`tests/cli_behaviour.rs` (kör den riktiga binären: exit-koder/strömmar).
+
+### Changed (beteende) — konsumenter påverkas
+
+- **Resolutionen är striktare (extraktor v3).** Kors-fil-mål som är *metoder*
+  resolvas inte längre: ett namn som är unikt i indexet är inte unikt i
+  verkligheten (std indexeras inte). Mätt på GTW:s egen store: resolvade
+  call-kanter **3 898 → 2 064**, kors-fil metodmål **1 848 → 0**, fler-nods­cykler
+  **338 → 29**. `EXTRACTOR_VERSION` 2 → 3 ⇒ full ombyggnad vid nästa refresh.
+  **Motor2 m.fl.:** räkna med lägre `to_id`-täckning — det som försvinner är
+  fabricerade kanter, och `coverage` redovisar dem som `unresolved`.
+- **Exit-koder** enligt ovan (skript som grenar på `!= 0` påverkas inte;
+  `== 1` som "användningsfel" gör det).
+- **`refresh()` vägrar nedgradera** en store byggd av en nyare binär.
+
+### Fixed — post-commit-hooken kan inte längre skriva sönder storen
+
+Hooken valde `gnawtreewriter` från PATH (den *installerade* binären). Med en
+äldre binär skrev den över en nyare store med äldre regler (v2 över v3, med
+fabricerade kanter tillbaka) och krympte `code-index.md` (32 → 15 ändelser).
+Nu: `target/release` → `target/debug` → PATH, och **hoppar över** med en rad på
+stderr när binären är äldre än `Cargo.toml`/`src`.
 
 ### Known (medvetet kvar)
 
