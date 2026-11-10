@@ -1267,6 +1267,32 @@ impl GnawTreeWriter {
         s
     }
 
+    /// Re-join split lines WITHOUT losing the file's final newline.
+    ///
+    /// `str::lines()` drops the trailing terminator and `join("\n")` never puts
+    /// it back, so every edit silently removed the last newline: git then
+    /// reported "no newline at end of file" on content nobody had touched, and
+    /// the byte-level contract behind `bytes_changed` was off by one. Restore
+    /// exactly the terminator the source used (LF or CRLF).
+    fn join_preserving_newline<S: AsRef<str>>(lines: &[S], source: &str) -> String {
+        let mut out = lines
+            .iter()
+            .map(|l| l.as_ref())
+            .collect::<Vec<&str>>()
+            .join("\n");
+        let term = if source.ends_with("\r\n") {
+            "\r\n"
+        } else if source.ends_with('\n') {
+            "\n"
+        } else {
+            ""
+        };
+        if !term.is_empty() && !out.ends_with(term) {
+            out.push_str(term);
+        }
+        out
+    }
+
     fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String> {
         let node = self
             .find_node_by_path(&self.tree, node_path)
@@ -1332,7 +1358,7 @@ impl GnawTreeWriter {
                 new_lines.push(line.to_string());
             }
 
-            new_lines.join("\n")
+            Self::join_preserving_newline(&new_lines, &self.source_code)
         } else {
             let mut new_lines: Vec<String> = Vec::new();
 
@@ -1354,7 +1380,7 @@ impl GnawTreeWriter {
                 new_lines.push(line.to_string());
             }
 
-            new_lines.join("\n")
+            Self::join_preserving_newline(&new_lines, &self.source_code)
         };
 
         // B2 (GTW_RAPPORT 2026-11-01): partial-replacement guard — the
@@ -1496,7 +1522,10 @@ impl GnawTreeWriter {
             }
         }
 
-        Ok(new_lines.join("\n"))
+        Ok(Self::join_preserving_newline(
+            &new_lines,
+            &self.source_code,
+        ))
     }
 
     fn delete_node_at_path(&self, node_path: &str) -> Result<String> {
@@ -1528,7 +1557,10 @@ impl GnawTreeWriter {
             .copied()
             .collect();
 
-        Ok(new_lines.join("\n"))
+        Ok(Self::join_preserving_newline(
+            &new_lines,
+            &self.source_code,
+        ))
     }
     pub fn get_source(&self) -> &str {
         &self.source_code

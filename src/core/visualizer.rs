@@ -27,7 +27,12 @@ impl TreeVisualizer {
         if depths.is_empty() {
             return "DNA: [empty]".to_string();
         }
-        let max = *depths.iter().max().unwrap_or(&1);
+        // A single-node tree has max depth 0. That is the normal case when a
+        // LEAF is edited (the visual diff renders the edited node as its own
+        // root), and the index math below then divided by zero: the CLI
+        // panicked AFTER the edit had been written and verified on disk, so the
+        // caller saw a crash and had no way to know the file had changed.
+        let max = (*depths.iter().max().unwrap_or(&1)).max(1);
         let chars = [" ", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
         let s: String = depths
             .iter()
@@ -134,5 +139,62 @@ impl TreeVisualizer {
             }
         }
         (ap.len() - common) + (bp.len() - common)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::TreeNode;
+
+    /// A LEAF node rendered as its own root has max depth 0. The sparkline
+    /// index math used to divide by that zero and panic — after the edit had
+    /// already been written and verified on disk, so the caller believed the
+    /// operation had failed. Editing any leaf (a CSS value, a JSON string,
+    /// an identifier) went through this path.
+    #[test]
+    fn sparkline_of_a_single_node_does_not_divide_by_zero() {
+        let leaf = TreeNode {
+            id: "0".to_string(),
+            path: "0".to_string(),
+            node_type: "value".to_string(),
+            content: "red".to_string(),
+            start_line: 1,
+            end_line: 1,
+            start_col: 1,
+            end_col: 4,
+            children: Vec::new(),
+        };
+        let viz = TreeVisualizer::new(2, false);
+        let out = viz.generate_sparkline(&leaf);
+        assert!(out.starts_with("DNA: ["), "unexpected sparkline: {out}");
+    }
+
+    #[test]
+    fn sparkline_of_a_deep_tree_still_scales() {
+        let leaf = TreeNode {
+            id: "0.0".to_string(),
+            path: "0.0".to_string(),
+            node_type: "identifier".to_string(),
+            content: "x".to_string(),
+            start_line: 1,
+            end_line: 1,
+            start_col: 1,
+            end_col: 2,
+            children: Vec::new(),
+        };
+        let root = TreeNode {
+            id: "0".to_string(),
+            path: "0".to_string(),
+            node_type: "root".to_string(),
+            content: String::new(),
+            start_line: 1,
+            end_line: 1,
+            start_col: 1,
+            end_col: 2,
+            children: vec![leaf],
+        };
+        let viz = TreeVisualizer::new(2, false);
+        assert!(viz.generate_sparkline(&root).starts_with("DNA: ["));
     }
 }

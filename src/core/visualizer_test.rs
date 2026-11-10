@@ -20,7 +20,8 @@ impl TreeVisualizer {
         }
         collect(root, 0, &mut depths);
         if depths.is_empty() { return "DNA: [empty]".to_string(); }
-        let max = *depths.iter().max().unwrap_or(&1);
+        // Same guard as visualizer.rs: a leaf-as-root tree has max depth 0.
+        let max = (*depths.iter().max().unwrap_or(&1)).max(1);
         let chars = [" ", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
         let s: String = depths.iter().take(50).map(|&d| chars[(d * (chars.len()-1)) / max]).collect();
         format!("DNA: [{}] (Complexity: {})", s.cyan(), max)
