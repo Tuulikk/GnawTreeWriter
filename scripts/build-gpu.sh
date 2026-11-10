@@ -18,8 +18,13 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONTAINER_CMD="${CONTAINER_CMD:-podman}"
 CUDA_IMAGE="${CUDA_IMAGE:-docker.io/nvidia/cuda:12.8.1-devel-ubuntu24.04}"
 LIBDIR="$HOME/.local/lib/gnawtreewriter-cuda"
-REALBIN="$HOME/.cargo/libexec/gnawtreewriter"
-WRAPPER="$HOME/.cargo/bin/gnawtreewriter"
+# Distinct names on purpose. `cargo install --path .` writes
+# ~/.cargo/bin/gnawtreewriter — the CPU build the terminal and the MCP client
+# use — so a GPU build installed under the SAME name is destroyed by the next
+# commit-build run. Measured 2026-11-10: the wrapper vanished, `ai index --gpu`
+# silently fell back to CPU, and the 0.24.0 GPU binary sat unreachable.
+REALBIN="$HOME/.cargo/libexec/gnawtreewriter-gpu"
+WRAPPER="$HOME/.cargo/bin/gnawtreewriter-gpu"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -100,8 +105,9 @@ WRAP
 chmod +x "$WRAPPER"
 
 echo
-echo "== DONE. Verify: gnawtreewriter --version"
-echo "== GPU indexing is opt-in:"
+echo "== DONE. Verify: gnawtreewriter-gpu --version"
+echo "== The CPU build (gnawtreewriter) is untouched — MCP and the terminal keep using it."
+echo "== GPU indexing is opt-in, and runs through the GPU build:"
+echo "     one-off:    gnawtreewriter-gpu ai index --gpu"
 echo "     persistent: set 'indexing: { device: auto }' in gnawtreewriter.yaml (see AGENTS.md)"
-echo "     one-off:    gnawtreewriter ai index --gpu"
 echo "   (20%-VRAM safety gate applies; without the flag everything stays CPU)"

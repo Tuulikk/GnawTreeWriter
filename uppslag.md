@@ -250,9 +250,28 @@ använder. Alltså pekar allt mot gammalt *innehåll*, inte fel modell.
 startar och går ifrån, inte något som hör i en snabb cykel — och docs som säger
 "kör `ai index`" bör säga det.
 
-**Kvar att mäta:** efter-poängen. Kommandot:
-`gnawtreewriter sense 'where are dependency cycles detected'` → jämför topp-poäng
-och om `code_graph.rs` hamnar i listan.
+**MÄTT 2026-11-11 — halva påståendet höll, halva föll.** Omindexering på GPU
+(276 filer, 10 398 vektorer, ~2 min):
+
+| | före (index 7 okt) | efter (färskt index) |
+|---|---|---|
+| topp-poäng | 0,02 | **0,02** |
+| träffar | `anchor.rs`, `curator.rs` — **fel** | `docs/…EXTENSIONS.md`, **`src/core/code_graph.rs`** — **rätt** |
+
+Alltså: **innehållet var stale** (rankningen blev rätt; `code_graph.rs` äger
+`cycles`), men **poängen förklarades inte av staleness**. Skalan är en egen
+bugg: `src/cli.rs:3041` varnar när `matches[0].score < 0.5`, och en korrekt
+träff ger 0,02 → **varningen lyser på varje fråga**, vilket är exakt
+alarm-trötthetsklassen vi städat hela dagen.
+
+**Att undersöka:** om `score` är en rå dot-produkt på onormaliserade vektorer,
+en felkonverterad distans, eller om tröskeln 0,5 är kalibrerad för ett annat
+mått. Tills dess: lita på *ordningen*, inte på siffran.
+
+**Nytt fynd — `ai index` på GPU:** ~2 minuter för 276 filer (734 MiB VRAM, 97 %
+ledigt vid start, 20 %-grinden passerad) mot **>22 min utan att bli klar** på
+CPU. GPU-vägen kräver `gnawtreewriter-gpu` (eget namn sedan 2026-11-11, så
+`cargo install` inte kan klippa den).
 
 **Om påståendet är fel:** vi lägger en eftermiddag på en ombyggnad som inte
 löser något, medan docs säger "fixa med `ai index`" och `sense` förblir
