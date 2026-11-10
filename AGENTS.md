@@ -96,8 +96,13 @@ sessioner. De gäller oavsett vilket verktyg du använder.
 4. **MCP-daemoner lever kvar** med binären de startade med — de ägs av
    bakgrundstjänsten/klientverktyget, inte av sessionen (se OpenCode
    2.x-sektionen nedan). Symptom: "gamla beteenden trots ny version".
-   Kontroll: `readlink /proc/<pid>/exe` → `(deleted)` = stela. `kill <pid>`
-   — värden spawnar nytt vid nästa anrop (inte omedelbart).
+   Kontroll: `readlink /proc/<pid>/exe` → `(deleted)` = stela.
+   **Verktyg: `scripts/daemon-hygiene.sh`** listar pid/ålder/cwd/`(deleted)`/RSS;
+   `scripts/daemon-hygiene.sh reap --older-than 60 --yes` dödar de stela.
+   **Dry-run är default** med flit: den egna klientens daemon ser likadan ut, och
+   att döda den kopplar ner sessionens MCP — mätt 2026-11-10, den kom inte
+   tillbaka av sig själv ("MCP server is not connected"). Reapa helst mellan
+   sessioner. (Åtta daemoner i 95–285 minuter körde samma döda binär den dagen.)
 5. **Feature-matrisen:** default OCH `mamba` båda har `modernbert` på —
    cfg-hål utanför modernbert syns BARA i
    `cargo check --no-default-features --all-targets` (CI kör det;

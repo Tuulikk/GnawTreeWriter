@@ -1,6 +1,6 @@
 # CODE-INDEX — GnawTreeWriter
 
-> Genererad 2026-11-10 19:54 UTC · gnawtreewriter 0.25.1 · git `3cc8d19`
+> Genererad 2026-11-10 19:54 UTC · gnawtreewriter 0.25.1 · git `ec0a25e`
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).

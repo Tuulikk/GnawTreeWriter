@@ -13,6 +13,40 @@
 
 ---
 
+## 2026-11-10 — Daemoner som överlever sin binär: sopa eller självutgång?  🟥 FARLIG
+
+**Mätt:** åtta `gnawtreewriter mcp`-daemoner, 95–285 minuter gamla, **alla** med
+`readlink /proc/<pid>/exe` → `(deleted)`. De betjänade kod som inte längre finns
+på disk — det är hela förklaringen till att "fixen inte tog" under sessionen.
+
+**Gjort:** alla åtta dödade. `scripts/daemon-hygiene.sh` listar (pid, ålder, cwd,
+`deleted`/`on-disk`, RSS) och `reap` dödar **bara** `(deleted)`-poster, med
+`--older-than` och dry-run som default. Bevisat på en kontrollerad stale-daemon
+(binär kopierad, startad, sedan raderad → verktyget såg `(deleted)` och dödade
+exakt den, medan de levande fick stå).
+
+**Bättre än en periodisk sopare (förslag, ej byggt).** Låt daemonen känna sin
+egen föråldring i stället för att en janitor gissar:
+
+1. vid start: spara identitet för `/proc/self/exe` (path + inode + mtime);
+2. per anrop: stat'a om — ändrad eller försvunnen → svara `E_DAEMON_STALE`
+   ("nyare binär på disk, starta om MCP-servern") och avsluta **efter** svaret;
+3. idle-timeout (t.ex. 30 min, env-styrd) → exit 0, så oanvända daemoner dör
+   själva utan att någon sveper.
+
+En sopare behöver ett schema och en definition av "inaktiv" som **inte går att
+mäta utifrån** — man ser CPU-tid, inte klientens avsikt — och den kommer förr
+eller senare att döda någon som används. Självutgång avgörs av den enda part
+som vet svaret.
+
+**Mätt baksida (avgörande för utformningen):** att döda *den här sessionens*
+daemon kopplade ner klienten — *"MCP server is not connected"* — och den kom
+**inte** tillbaka av sig själv. Därför dry-run som default, `--older-than`, och
+reapa helst mellan sessioner. Samma skäl kräver att en idle-timeout är generös
+(≥30 min): en lång klient-tur utan verktygsanrop får inte se daemonen dö.
+
+---
+
 ## 2026-11-10 — Rotvakten fångar `$HOME` men INTE förälderkataloger  🟥 FARLIG
 
 **Påstående:** `root_is_too_broad` avvisar `$HOME` och `/`, men en MCP-daemon
