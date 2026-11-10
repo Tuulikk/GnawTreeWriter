@@ -183,7 +183,22 @@ reapa helst mellan sessioner. Samma skäl kräver att en idle-timeout är gener�
 
 ---
 
-## 2026-11-10 — Rotvakten fångar `$HOME` men INTE förälderkataloger  🟥 FARLIG
+## 2026-11-10 — JSON: `--preview` och apply är oense  ✅ ÅTGÄRDAT
+
+`preview_edit` tog en **annan väg** än den skarpa edit: apply grenar till
+`json_semantic_edit` för JSON, preview anropade `edit_node_at_path` för allt.
+Alltså visade `--preview` den råa textdelningen medan apply skrev om värdet
+semantiskt — en förhandsvisning av ett dokument som aldrig skulle uppstå.
+
+**Fixat:** ett enda predikat `is_json_document()` avgör för **båda**, och
+invarianten är låst i testet `json_preview_and_apply_agree` (*efter* apply ska
+samma edit förhandsvisa **ingen** ändring). Verifierat på installerad binär:
+preview `- "name": "old"` / `+ "name": "new"` → apply skrev exakt det → ny
+preview utan ändring.
+
+---
+
+## 2026-11-10 — Rotvakten fångar `$HOME` men INTE förälderkataloger  ✅ ÅTGÄRDAT
 
 **Påstående:** `root_is_too_broad` avvisar `$HOME` och `/`, men en MCP-daemon
 med `cwd=/mnt/.../Gnaw-Software` — förälder till sex repon — passerar vakten,
@@ -196,6 +211,15 @@ katalogen (pid 3419795). Vakten jämför bara mot `$HOME` och `/`.
 förälderkatalogen. Svarar `sense` med träffar ur syskonrepon är luckan kvar.
 
 **Status:** `belagt`, ej åtgärdat — vakten är ofullständig.
+
+**ÅTGÄRDAT 2026-11-10** (`looks_like_workspace_container`): en katalog som
+saknar egen projektmarkör (`.git`/`Cargo.toml`/`package.json`/`pyproject.toml`/
+`gnawtreewriter.yaml`) men där **majoriteten av underkatalogerna** är projekt
+avvisas nu. Regeln kräver majoritet, inte "två ser ut som projekt": första
+versionen nekade `/tmp` (temp-byggda kataloger med `Cargo.toml` ser ut som
+projekt) — det fångades av `a_project_directory_is_not_too_broad`, som nu testar
+en junk-drawer med exakt ett projekt. Monorepo (markör i roten) går fri.
+Beslut av ägaren: **neka**, inte varna.
 
 **Om den förblir olöst:** en agent som öppnar sin klient i en workspace-rot får
 tyst svar från flera projekt. Samma klass som AndroidSDK-läckan.
