@@ -38,6 +38,11 @@ edit the codebase, the way it is meant to be used.
   `gnawtreewriter_*` tool calls do not exist any more (since 2026-10-15).
   Full recipe + fallbacks: the `gnawtreewriter` skill and
   `~/.config/opencode/instructions/gnawtreewriter.md`.
+- **In Cline**: MCP tools surface as **native tools** named
+  `gnawtreewriter__<tool>` (double underscore — `gnawtreewriter__analyze`,
+  `gnawtreewriter__edit_node`, …), and Cline loads this repo's `SKILL.md`
+  through its `skills` tool. The calling convention is a **direct tool call**,
+  not `execute` + `tools.gnawtreewriter.*`. See the host matrix in `SKILL.md`.
 - **In Codex**: use GTW MCP if its tools are present in the current tool
   catalog. If they are absent, use the `gnawtreewriter` CLI for the same
   analyze → preview → edit sequence. Do not spend the task building the code

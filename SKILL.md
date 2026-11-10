@@ -6,11 +6,16 @@ description: >-
   edits, rename, undo an edit), diagnose or explore file structure (AST
   skeleton, analyze, list nodes), find where something is implemented
   (semantic search via sense/search_semantic), read a specific node,
+  map a codebase or answer dependency questions (code_index: items, coverage,
+  impact, cycles, --why), decide which files are worth reading (curate/pack),
   lint/fix code, check system health (doctor), or produce an AST-aware
   diff — in any project where GnawTreeWriter is installed. Triggers: "edit
   code", "where is X implemented", "file structure", "batch edit",
-  "fix bug", "implement feature", "refactor", "rename", "undo edit", "GTW", "gnawtreewriter", "ändra en funktion",
-  "var är X implementerat", "struktur på filen", "lint", "doctor". Prefer
+  "fix bug", "implement feature", "refactor", "rename", "undo edit", "GTW", "gnawtreewriter",
+  "what breaks if I change", "who calls this", "dependency cycles", "code index",
+  "which files matter", "blast radius",
+  "ändra en funktion", "var är X implementerat", "struktur på filen", "vad påverkas om jag ändrar",
+  "vem anropar", "beroenden", "lint", "doctor". Prefer
   GTW tools over plain text editing when the target is code.
 ---
 
@@ -26,16 +31,26 @@ You are an expert in using **GnawTreeWriter** for surgical, AST-based code editi
 4. **Time Machine Safety**: `undo` exists per transaction; use `session-start` for multi-step work
 5. **Verify, don't assume**: GTW failures are LOUD (no-match replace, unknown rule id, empty skeleton all error with guidance) — read the error, it tells you the next step
 6. **Semantic search**: prefer `sense` over `grep` when the project is indexed — then confirm with `read_node` (one cheap read beats re-searching)
+7. **Structure before meaning**: `code_index` answers *where code sits and what depends on what* in ONE call; `sense` answers *what it means*; `grep` answers neither well. If you are about to grep to find a file or a dependency, use the index instead.
+8. **Guard a reused path**: a numeric node path is a POSITION and shifts on every insert/delete. Pass `expect_name` (MCP) / `--expect-name <name>` (CLI) when the path came from an earlier call — GTW then REJECTS a stale path instead of silently editing the wrong node.
 
-## 🧰 HOW TO CALL GTW (Code Mode — read this first!)
+## 🧰 HOW TO CALL GTW (pick your host row — read this first!)
 
-OpenCode exposes MCP tools **only** through the Code Mode catalog, reached via the
-`execute` tool. Direct `gnawtreewriter_*` tool calls no longer exist (that era ended
-2026-10-15 — this is why GTW usage collapsed: agents reached for plain `edit`, which
-stayed one call away). The tools ARE there and healthy; the calling convention changed.
+The tool **names are identical everywhere**; only the *calling convention* differs.
+Find your host, use that row. If you are unsure: try the direct call first — if
+the tool is in your catalog, it works (no wrapper needed).
 
-**The recipe** — calls below in this skill mean `await tools.gnawtreewriter.<name>({...})`
-inside `execute`. Group discovery and preview, inspect the result, then write:
+| Your host | How you call it | Notes |
+|---|---|---|
+| **Cline** | `gnawtreewriter__<tool>` as a **native tool** — e.g. `gnawtreewriter__analyze`, `gnawtreewriter__edit_node` | Double underscore, no wrapper. Cline also loads this skill through its `skills` tool. |
+| **VSCode / Copilot Chat** | `mcp_gnawtreewrite_<tool>` | The host truncates the server name; the suffix is the GTW tool name. |
+| **OpenCode 2.x (Code Mode)** | `await tools.gnawtreewriter.<tool>({...})` **inside `execute`** | MCP tools are not direct tools there; discover with `search({ namespace: "gnawtreewriter" })`. Recipe below. |
+| **Codex** | the `gnawtreewriter` MCP tools, if they appear in your catalog | Codex-specific variant: `.agents/skills/gnawtreewriter/SKILL.md`. A newly registered server may need a new session. |
+| **Terminal / no MCP at all** | `gnawtreewriter <command>` | Same names in CLI form. Shell escaping applies — pass content via `-` (STDIN) when it contains quotes/braces. |
+
+**OpenCode 2.x only — the `execute` recipe** (skip this block on every other host):
+calls below in this skill mean `await tools.gnawtreewriter.<name>({...})` inside
+`execute`. Group discovery and preview, inspect the result, then write:
 
 ```js
 // optional discovery: exact names + signatures for the 37 tools
@@ -50,9 +65,10 @@ const preview = await tools.gnawtreewriter.preview_edit({ file_path: "a.rs", nod
 
 - **No shell-escaping traps on this path** — content passes as native JS strings. The old
   double-brace/STDIN advice applies ONLY to the CLI fallback below.
-- **Codex or another agent without GTW MCP in its tool catalog?** Use the
-  `gnawtreewriter` CLI for analyze → preview → edit. `code-index` refresh is
-  indexing work; it does not satisfy the code-edit requirement.
+- **GTW tools missing from your catalog?** Then — and only then — use the
+  `gnawtreewriter` CLI for analyze → preview → edit. A host that HAS the MCP
+  tools should never shell out: the CLI adds quoting traps for free. (`code-index`
+  refresh is indexing work; it does not satisfy a code-edit request.)
 - **`gnawtreewriter` namespace missing from the catalog?** The MCP server is down:
   `opencode api get /api/mcp` to confirm, then
   `opencode api post /api/experimental/mcp/gnawtreewriter/connect` to reconnect.
@@ -99,8 +115,18 @@ column is the fallback when the MCP namespace is missing.
 | Is this file safe to edit? (syntax gate) | `validate` → `gnawtreewriter validate <file>` | `validate {"file_path": "src/main.rs"}` → {valid, nodes} eller E_STRICT_PARSE |
 | Verify exactly what changed after a write | `diff` (samma kärna som `gnaw-diff`) | `diff {"old_file": "/tmp/before.rs", "new_file": "src/lib.rs"}` |
 | Show what undo WOULD revert first | `undo {preview: true}` | `undo {"steps": 1, "preview": true}` → operations-lista, noll ändringar |
+| **"Where does code sit?"** / what's in this module | `code_index` (query) → `code-index <root>` | `code_index {"mode": "query", "kind": "items", "path_prefix": "src/core"}` |
+| **"What breaks if I change X?"** | `code_index kind=impact` → `code-index <root> --impact <name>` | `code_index {"mode": "query", "kind": "impact", "symbol": "parse_file", "depth": 3}` |
+| Are there dependency cycles? | `code_index kind=cycles` → `code-index <root> --cycles` | `code_index {"mode": "query", "kind": "cycles", "depth": 20}` |
+| Is this dependency edge REAL? (falsify it) | CLI `code-index <root> --why <name>` | per edge: `resolved`, `target_defs`, `verdict` (`unique_in_index` / `ambiguous_pick` / `unresolved`) |
+| Can I trust this graph answer? | the `meta` block on every graph answer | `meta.index_stale: true` ⇒ run `code-index <root> --db` before planning |
+| Which files should I read FIRST for this task? | `curate` → `gnawtreewriter curate "<task>"` | `curate {"task": "auth flow", "max_tokens": 5000}` |
+| Give me the whole project condensed | `pack` → `gnawtreewriter pack . --compress` | `pack {"path": ".", "compress": true, "format": "markdown"}` |
+| Who calls this function? (CLI impact answer) | (CLI) `gnaw-blast` — no MCP tool yet | `gnawtreewriter gnaw-blast <file> <node_path> --recursive` |
 
-**Diagnostic chain**: `analyze`/`get_skeleton` → `sense`/`search_nodes` → `read_node` → `preview_edit` → `edit_node`/`semantic_edit` → verify (`cargo check`/tests) → `undo` if wrong.
+**Diagnostic chain** (editing one file): `analyze`/`get_skeleton` → `sense`/`search_nodes` → `read_node` → `preview_edit` → `edit_node`/`semantic_edit` → verify (`cargo check`/tests) → `undo` if wrong.
+
+**Planning chain** (before you touch anything): `code_index query` (where) → `impact` / `cycles` (what depends) → check `meta.index_stale` → spot-check ONE edge with `--why` → then the diagnostic chain per file. A graph answer without `meta` or `--why` is a claim, not a fact.
 
 ## 🆘 Fallback Rule (timeout or tool error)
 
