@@ -1,4 +1,23 @@
-## [0.25.0] - 2026-11-10
+## [0.25.1] - 2026-11-10
+
+### Changed (CLI) — `--db` skriver artefakten i stället för att dumma den
+
+- **`code-index <root> --db`** skriver nu **`<root>/code-index.md`** — samma
+  default som `--check` redan använde — och bekräftar med en rad
+  (`code-index skriven: … (N rader)`). Tidigare gick hela dokumentet till
+  stdout, så en *refresh* dumpade ~2 300 rader markdown i terminalen, och både
+  hooken och operatören fick upprepa `-o <path>`. Tre ställen kände filnamnet,
+  bara ett gjorde det till default.
+- **`--stdout`** behåller gamla beteendet: `--db --stdout` skriver inget, bara
+  skriver ut.
+- **Hooken** behöver inte längre `-o` (genereras om vid `--install-hook`).
+- `code-index <root>` **utan** `--db` är oförändrat: renderaren skriver till
+  stdout så den kan pipe:as.
+
+**Brytande för skript:** `code-index . --db > fil.md` skriver inte längre till
+stdout. Använd `--stdout` (behåll pipe) eller `-o <path>` (explicit fil).
+
+
 
 ### Fixed — `edit_node` förstörde dokument- och configfiler
 
