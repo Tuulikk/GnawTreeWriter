@@ -400,6 +400,15 @@ pub fn store_status(root: &Path) -> Option<StoreStatus> {
 /// Action-key (decision #1): identity of everything that affects extraction.
 /// Presentation options (max_sig, json, output) are deliberately absent —
 /// signatures are stored untruncated and truncated at render.
+/// True when the store was written by a HIGHER extractor version than this
+/// binary. Non-numeric versions never compare — no false refusals.
+fn store_is_newer(store: &str, mine: &str) -> bool {
+    match (store.trim().parse::<u32>(), mine.trim().parse::<u32>()) {
+        (Ok(s), Ok(m)) => s > m,
+        _ => false,
+    }
+}
+
 fn generation_key(opts: &CodeIndexOptions) -> String {
     let mut exts = opts.extensions.clone();
     exts.sort();
@@ -491,6 +500,22 @@ pub fn refresh(
     root: &Path,
     opts: &CodeIndexOptions,
 ) -> Result<RefreshStats> {
+    // ANTI-DOWNGRADE (2026-11-10): a binary OLDER than the store must not
+    // rewrite it. Measured failure: the post-commit hook ran an installed
+    // 0.24.0 (extractor v2) and silently rebuilt a v3 store, reinstating the
+    // fabricated cross-file method edges that v3 exists to remove — a
+    // confident regression written to disk by a stale binary. A stale index is
+    // recoverable; a stale rewrite is not, so refuse and say how to fix it.
+    if let Some(store_ver) = meta_get(conn, "extractor_version")? {
+        if store_is_newer(&store_ver, EXTRACTOR_VERSION) {
+            anyhow::bail!(
+                "code-index store was built by a NEWER gnawtreewriter \
+                 (extractor v{store_ver}, this binary is v{EXTRACTOR_VERSION}) — \
+                 rebuild this source (`cargo install --path .`) instead of \
+                 downgrading the store"
+            );
+        }
+    }
     let want = generation_key(opts);
     let full_rebuild = meta_get(conn, "generation_key")?.as_deref() != Some(want.as_str());
     if full_rebuild {
@@ -1269,4 +1294,29 @@ pub fn is_busy_error(err: &anyhow::Error) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod version_guard_tests {
+    use super::*;
+
+    #[test]
+    fn a_newer_store_version_is_detected() {
+        assert!(
+            store_is_newer("3", "2"),
+            "v3 store + v2 binary is a DOWNGRADE — must refuse"
+        );
+        assert!(
+            !store_is_newer("2", "3"),
+            "v2 store + v3 binary is the normal upgrade path"
+        );
+        assert!(!store_is_newer("3", "3"), "same version is not a downgrade");
+    }
+
+    #[test]
+    fn unparseable_versions_never_refuse() {
+        // No false refusals: a future non-numeric version must not lock users out.
+        assert!(!store_is_newer("v3-beta", "3"));
+        assert!(!store_is_newer("3", ""));
+    }
 }

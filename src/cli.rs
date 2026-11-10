@@ -2378,11 +2378,34 @@ Use --no-preview to write batch file"
 
     #[allow(clippy::needless_raw_string_hashes)]
     fn hook_block() -> String {
-        format!(
-            "{begin}\n# Installed by `gnawtreewriter code-index --install-hook` (P4: explicit, per-clone).\n# Refreshes the code-index store + regenerates code-index.md after each commit.\n# NEVER stages: the regenerated file is committed explicitly (design: no auto-stage).\n# Revisions are tagged source=git_hook (phase 2 provenience).\nif command -v gnawtreewriter >/dev/null 2>&1; then\n    top=$(git rev-parse --show-toplevel 2>/dev/null) && \\\n        GTW_CODE_INDEX_SOURCE=git_hook gnawtreewriter code-index \"$top\" --db -o \"$top/code-index.md\" >/dev/null 2>&1 || true\nfi\n{end}\n",
-            begin = Self::HOOK_BEGIN,
-            end = Self::HOOK_END
-        )
+        let body = r#"# Installed by `gnawtreewriter code-index --install-hook` (P4: explicit, per-clone).
+# Refreshes the code-index store + regenerates code-index.md after each commit.
+# NEVER stages: the regenerated file is committed explicitly (design: no auto-stage).
+# Revisions are tagged source=git_hook (phase 2 provenience).
+#
+# BINARY SELECTION (2026-11-10). This hook used to call `gnawtreewriter` from
+# PATH — usually the INSTALLED binary, which can be older than the source. Two
+# measured failures: the refresh silently rewrote a newer store with older rules
+# (extractor v2 overwrote a v3 store, reinstating fabricated cross-file method
+# edges), and code-index.md shrank (32 -> 15 extensions). Now: prefer the
+# workspace build, and SKIP loudly when the chosen binary is older than
+# Cargo.toml/src. A stale index is recoverable; a stale rewrite is not.
+top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+bin=""
+for cand in "$top/target/release/gnawtreewriter" "$top/target/debug/gnawtreewriter"; do
+    if [ -x "$cand" ]; then bin=$cand; break; fi
+done
+if [ -z "$bin" ] && command -v gnawtreewriter >/dev/null 2>&1; then
+    bin=$(command -v gnawtreewriter)
+fi
+[ -n "$bin" ] || exit 0
+if [ -n "$(find "$top/Cargo.toml" "$top/src" -newer "$bin" -print -quit 2>/dev/null)" ]; then
+    echo "gnawtreewriter: $bin is older than the source — code-index refresh SKIPPED (rebuild: cargo install --path .)" >&2
+    exit 0
+fi
+GTW_CODE_INDEX_SOURCE=git_hook "$bin" code-index "$top" --db -o "$top/code-index.md" >/dev/null 2>&1 || true
+"#;
+        format!("{}\n{}\n{}\n", Self::HOOK_BEGIN, body, Self::HOOK_END)
     }
 
     fn handle_code_index_hook(path: &Path, install: bool, uninstall: bool) -> Result<()> {
