@@ -1,10 +1,10 @@
 # CODE-INDEX — GnawTreeWriter
 
-> Genererad 2026-11-10 17:33 UTC · gnawtreewriter 0.24.0 · git `9815472` +DIRTY
+> Genererad 2026-11-10 17:34 UTC · gnawtreewriter 0.24.0 · git `2490095` +DIRTY
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 0464e23bfda71a2d2b921ba8cdc0f921
+> Body-hash: 8cdc80e250c85477ccf14aaddd78745e
 
 ## Träd
 
@@ -12,38 +12,65 @@
 ./
   build.rs (40 rader)
   color_test.rs (1 rader)
+  demo_workflow.sh (53 rader)
+  sync-docs.sh (146 rader)
   test.go (5 rader)
   test.py (1 rader)
+  test.qml (12 rader)
+  test_add_prop.qml (17 rader)
   test_preview.rs (1 rader)
   test_sense.rs (7 rader)
   test_transaction.py (2 rader)
   test_transaction2.py (2 rader)
 examples/
   HelloWorld.java (48 rader)
+  complex_test.qml (50 rader)
   debug_loading.rs (17 rader)
   demo.py (48 rader)
   example.c (83 rader)
   example.cpp (179 rader)
   example.php (20 rader)
   example.py (15 rader)
+  example.qml (13 rader)
   example.rs (4 rader)
+  example.sh (181 rader)
   example.ts (15 rader)
   hello.c (14 rader)
   hello.cpp (33 rader)
+  hello.sh (31 rader)
   hello.zig (49 rader)
   mcp_client.rs (300 rader)
   node_mcp_client.js (287 rader)
   python_complex.py (20 rader)
   python_mcp_client.py (275 rader)
+  qml_complex.qml (41 rader)
   typescript_complex.ts (47 rader)
 examples/temporal-demo/
   notes.py (8 rader)
+  restore_demo.sh (20 rader)
+extensions/gemini/
+  run_mcp.sh (14 rader)
 extensions/vscode/src/
   extension.js (135 rader)
+extensions/zed/
+  build-dist.sh (215 rader)
+extensions/zed/scripts/
+  mcp-client.sh (127 rader)
+  mcp-serve.sh (168 rader)
+  mcp-stop.sh (141 rader)
+  test-mcp.sh (172 rader)
 extensions/zed/src/
   lib.rs (34 rader)
 scripts/
+  benchmark_ai.sh (66 rader)
+  build-gpu.sh (107 rader)
+  check-license.sh (14 rader)
+  commit-build.sh (76 rader)
   gtw_adoption_report.py (118 rader)
+  mcp-client.sh (127 rader)
+  mcp-serve.sh (198 rader)
+  mcp-stop.sh (141 rader)
+  test-mcp.sh (172 rader)
 scripts/hooks/
   block-text-replace.py (258 rader)
 src/
@@ -188,10 +215,22 @@ tests/
 ### color_test.rs (1 rader)
 _(inga toppnivå-items)_
 
+### demo_workflow.sh (53 rader)
+_(inga toppnivå-items)_
+
+### sync-docs.sh (146 rader)
+_(inga toppnivå-items)_
+
 ### test.go (5 rader)
 - `func main()` :3
 
 ### test.py (1 rader)
+_(inga toppnivå-items)_
+
+### test.qml (12 rader)
+_(inga toppnivå-items)_
+
+### test_add_prop.qml (17 rader)
 _(inga toppnivå-items)_
 
 ### test_preview.rs (1 rader)
@@ -221,6 +260,9 @@ _(inga toppnivå-items)_
   - `void greet(String name)` :40
 - `class SimpleGreeter implements Greeter` :43
   - `@Override` :44
+
+### complex_test.qml (50 rader)
+_(inga toppnivå-items)_
 
 ### debug_loading.rs (17 rader)
 - `fn main()` :5
@@ -254,8 +296,21 @@ _(inga toppnivå-items)_
   - `def __init__(self, name)` :7
   - `def say_hello(self)` :10
 
+### example.qml (13 rader)
+_(inga toppnivå-items)_
+
 ### example.rs (4 rader)
 - `fn main()` :1
+
+### example.sh (181 rader)
+- `print_message()` :20
+- `log()` :27
+- `command_exists()` :34
+- `add()` :39
+- `process_file()` :46
+- `print_array()` :68
+- `main()` :78
+- `cleanup()` :171
 
 ### example.ts (15 rader)
 - `interface Person` :1
@@ -272,6 +327,11 @@ _(inga toppnivå-items)_
   - `void greet()` :11
 - `int main()` :16
 - `int add(int a, int b)` :25
+
+### hello.sh (31 rader)
+- `greet()` :5
+- `add()` :10
+- `main()` :16
 
 ### hello.zig (49 rader)
 - `pub fn main() !void` :3
@@ -321,6 +381,9 @@ _(inga toppnivå-items)_
 - `def build_arg_parser() -> argparse.ArgumentParser` :206
 - `def main(argv=None)` :240
 
+### qml_complex.qml (41 rader)
+_(inga toppnivå-items)_
+
 ### typescript_complex.ts (47 rader)
 - `interface User` :1
 - `interface AppState` :8
@@ -335,6 +398,14 @@ _(inga toppnivå-items)_
 ### notes.py (8 rader)
 - `def save_note(text)` :2
 
+### restore_demo.sh (20 rader)
+_(inga toppnivå-items)_
+
+## extensions/gemini/
+
+### run_mcp.sh (14 rader)
+_(inga toppnivå-items)_
+
 ## extensions/vscode/src/
 
 ### extension.js (135 rader)
@@ -345,6 +416,28 @@ _(inga toppnivå-items)_
   - `provideMcpServerDefinitions(token)` :78
 - `function activate(context)` :116
 - `function deactivate() {}` :133
+
+## extensions/zed/
+
+### build-dist.sh (215 rader)
+- `usage()` :28
+
+## extensions/zed/scripts/
+
+### mcp-client.sh (127 rader)
+- `usage()` :25
+- `run_example()` :70
+
+### mcp-serve.sh (168 rader)
+- `usage()` :25
+
+### mcp-stop.sh (141 rader)
+- `usage()` :19
+
+### test-mcp.sh (172 rader)
+- `usage()` :23
+- `cleanup()` :60
+- `run_client()` :147
 
 ## extensions/zed/src/
 
@@ -358,10 +451,38 @@ _(inga toppnivå-items)_
 
 ## scripts/
 
+### benchmark_ai.sh (66 rader)
+- `bench()` :11
+- `mcp()` :21
+
+### build-gpu.sh (107 rader)
+- `die() { echo "ERROR: $*" >&2; exit 1; }` :24
+
+### check-license.sh (14 rader)
+_(inga toppnivå-items)_
+
+### commit-build.sh (76 rader)
+_(inga toppnivå-items)_
+
 ### gtw_adoption_report.py (118 rader)
 - `def rows_old_era(cur: sqlite3.Cursor) -> dict[str, dict[str, int]]` :32
 - `def rows_new_era(cur: sqlite3.Cursor) -> dict[str, dict[str, int]]` :50
 - `def main() -> int` :70
+
+### mcp-client.sh (127 rader)
+- `usage()` :25
+- `run_example()` :70
+
+### mcp-serve.sh (198 rader)
+- `usage()` :55
+
+### mcp-stop.sh (141 rader)
+- `usage()` :19
+
+### test-mcp.sh (172 rader)
+- `usage()` :23
+- `cleanup()` :60
+- `run_client()` :147
 
 ## scripts/hooks/
 
