@@ -12,6 +12,18 @@
   något var hårdkodat.
 - Test: `root_guard_tests` (3 fall, rena — ingen filsystem-beroende).
 
+### Fixed (version) — staleness-larmet var avklippt
+
+- **`build.stale` var alltid `false` i en installerad binär.** Båda
+  jämförelserna läste `CARGO_MANIFEST_DIR` med `std::env::var` i **runtime** —
+  variabeln finns bara under bygget — så `run_git` gav upp (`head_moved =
+  false`) och mtime-kollen föll tillbaka på cwd. `doctor` rapporterade "färsk"
+  för en 0.25.0-binär mot 0.25.1-källa. Nu `env!` (kompileringstid), med
+  regressionstest `staleness_check_can_reach_git_and_the_source_tree`.
+  Bevisat live: `touch src/version.rs` → `⚠ BINARY STALE`, ombygge → tyst.
+- Hookens bash-koll (`src/cli.rs:2419`) fungerade hela tiden — två
+  implementationer av samma fråga, en levande och en död.
+
 ### Known (kvar)
 
 - `AiManager::new` väljer modellcache **allt-eller-inget på `modernbert`**
