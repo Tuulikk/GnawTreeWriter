@@ -33,9 +33,31 @@ upplösningsregeln och `code-index.md`-namnet.
 
 ---
 
-## 2026-11-10 — Idé: en växel så att ingen daemon KAN bli stale  🟨 förslag
+## 2026-11-10 — Växeln finns redan som OSS — en lucka kvar  🟨
 
-I stället för att upptäcka eller sopa bort stale daemoner: se till att **ingen
+**Kontrollerat 2026-11-10 (README + docs/architecture.md):**
+
+| Verktyg | Vad det gör | Lucka |
+|---|---|---|
+| [`mcpmon`](https://github.com/neilopet/mcpmon) (Node, MIT) | Transparent stdio-proxy; startar om barnet vid filändring, **klienten förblir ansluten**, buffrar meddelanden, krasch-omstart med backoff. `MCPMON_WATCH` styr vad som bevakas. | Inget `--cwd`. Arkitekturdokumentet nämner **inte** `initialize`-replay till det nya barnet — måste verifieras. |
+| [`mcp-reloader`](https://github.com/0xHayd3n/mcp-reloader) (Node, MIT) | Injicerar ett `reload`-**verktyg** som agenten anropar (`--build` + respawn), utnyttjar `tools/list_changed`. Har `--cwd`. | Uttryckligen **osäker mitt i ett anrop**: "any tool call still in flight against the old backend will error out… not for firing mid-operation". |
+
+**Slutsats:** bygg ingen egen växel först. `mcpmon` täcker drift-halvan
+(klientanslutning + auto-omstart + krasch-omstart). Den **odefinierade** delen
+är MCP-handskakningen: ett nytt barn som aldrig sett `initialize` +
+`notifications/initialized` får enligt specen inte ta `tools/call`. Att fånga
+klientens `initialize` och spela upp den mot det nya barnet är ~50 rader — och
+det gynnar *varje* MCP-server, inte bara GTW. Det är den bidragen som är värd
+något, inte ännu en proxy.
+
+**För vårt eget bruk, i den ordningen:** (1) `mcpmon` framför GTW med
+`MCPMON_WATCH` på `src/` + binären, `bash -c "cd <proj> && exec …"` för cwd:t
+(mcpmon har ingen `--cwd`); (2) mät om ett omstartat barn faktiskt tar
+`tools/call` utan replay; (3) är svaret nej → bidra med replayen uppströms.
+
+---
+
+Om man ändå bygger egen växel (först då) är designen: se till att **ingen
 process håller en kodbild längre än koden lever**.
 
 ```
@@ -63,8 +85,9 @@ installation); och den måste vara **högljudd** (logga varje swap, exponera
 `worker_generation` i health) annars återinför den en tyst felklass.
 
 **Fasning:** 0 = `daemon-hygiene.sh` (klart) → 1 = `E_DAEMON_STALE` + exit efter
-svar (billigt, men beroende av att klienten respawnar) → 2 = växeln. Starta
-inte 2 före en paus: den rör MCP-livscykeln och behöver egna tester.
+svar (billigt, men beroende av att klienten respawnar) → 2 = `mcpmon` framför
+servern, alternativt ett replay-bidrag uppströms. Starta inte 2 före en paus:
+den rör MCP-livscykeln och behöver egna tester.
 
 ---
 
