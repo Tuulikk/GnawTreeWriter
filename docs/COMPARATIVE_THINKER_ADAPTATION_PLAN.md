@@ -1,6 +1,6 @@
 # Adaptationsplan — Comparative-Thinker → GnawTreeWriter
 
-**Status:** Förslag (design, ej byggd) · **Datum:** 2026-11-10
+**Status:** Förslag (design, ej byggd) · **Datum:** 2026-11-10 · **Rev II samma dag:** granskad av agent — GTW-ankare spot-checkade 6/6; fyra fixar (§4.3-begränsning, symbol-ankare, P1-funktionsgate, kuvert-notis)
 **Källa:** `/mnt/secret-stash2/Drive/dev/Gnaw-Software/Comparative-Thinker`
 (1 squash-commit `9a37133` 2025-12-05, 30 experiment, vilande)
 **Källans karaktär:** experimentellt projekt —
@@ -260,6 +260,12 @@ situation där `suspect_reason` idag bara säger `low_cosine` eller
 `0.0033…0.0166`-rymden; varians över dem mäter ingenting. Detta är den enda
 punkten där en naiv implementation blir vackert fel.
 
+**Funktionsgate (P1):** harmoni-matematiken (`harmony.rs`) är ren och
+kompileras alltid; wiringen bor i `semantic_index.rs`/`gnaw_sense.rs`
+(modernbert-området). §8.2:s `--no-default-features --all-targets`-grind
+är det som fångar gating-fel — zoom-sense utan satellite ger
+`pillars_available = 1` (neutral), aldrig fejkad konfidens.
+
 ### 3.3 Design
 
 ```rust
@@ -474,9 +480,10 @@ Men GTW har redan 38 MCP-verktyg, och varje verktyg kostar schema-tokens i
 varje `tools/list`. Därför:
 
 - **Utöka `code_index`** med `kind: "cycles"` och `kind: "impact"` — dispatch
-  finns redan på ett ställe (`src/mcp/mod.rs:3109`:
-  `"relations" => code_index_db::load_relations(&conn, prefix)`), så det är
-  +2 armar i en befintlig match, inte +2 verktyg i katalogen.
+  finns redan på ett ställe (`handle_code_index_mcp`-dispatchen), så det är
+  +2 armar i en befintlig match, inte +2 verktyg i katalogen. Svaren går
+  genom standard-kuvertet (`content[]`, `envelope_code_index` 2026-11-10) —
+  nya `kind`-värden ärver det, inget nytt exponeringsbeslut.
 - **Nya funktioner i en egen modul** `src/core/code_graph.rs` som tar
   `&Connection` (inte filsystemet): då är de testbara mot en temp-DB utan
   hermetik-problem (AGENTS.md lärdom #6).
@@ -524,6 +531,14 @@ pub fn reachable(
 `WHERE r.to_id IS NOT NULL` är den strukturella motsvarigheten till
 `unresolved_calls`: oupplösta mål **räknas** (separat fråga på `symbols`),
 men de ingår inte i gången — de kan inte ge en falsk påverkanskedja.
+
+**Känd begränsning i v1 (dokumenteras, inte döljs):** kanter förankrade i
+syntetiska callsite-id (`gtw:{file}:callsite:{line}` som `from_id`)
+traverseras inte av `reachable`/`chain` — ett callsite-id kan aldrig bli en
+nod i gången (de förekommer bara som `from_id`, och `to_id` är FK mot
+entiteter). Påverkans-kedjor som börjar i scope-less-anrop under-räknas
+därför; de syns via rå relations-fråga i stället. V2-refinement: mappa
+syntetiska id till filnivå-påverkan.
 
 **Cykler görs i Rust** — därför att vi vill ha *vägen* (för attribution: fil,
 rad, kedja), inte bara "ja/nej". Här är den klass av fel vi undviker:
@@ -1000,6 +1015,11 @@ Plus, per inkrement:
 `08.x`-serien, `09_harmony_analysis_base`.
 
 ## Appendix B — GTW-fästen (verifierade i koden)
+
+> **Ankra med SYMBOL, inte rad:** rader ruttnar (t.ex. `mcp/mod.rs:3109` är
+> idag dispatchen i `handle_code_index_mcp`; `code_index_db.rs:73-91` → 81
+> efter schema v4). Rad-talen nedan är inkrement-dagens; symbol-namnen är
+> de bestående referenserna.
 
 | Yta | Fil:rad | Används av |
 |---|---|---|
