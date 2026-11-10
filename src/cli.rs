@@ -243,6 +243,12 @@ enum Commands {
         /// With --check: rewrite the artifact when stale instead of failing
         #[arg(long)]
         fix: bool,
+        /// Measure graph quality of the store (Phase 1 coverage harness,
+        /// proposal 2026-11-09): resolution rate per relation type, D7
+        /// source-identity classes and unresolved target classes.
+        /// Read-only — never creates the store. JSON to stdout.
+        #[arg(long)]
+        coverage: bool,
     },
     /// Compress source code by replacing function bodies with placeholders
     Compress {
@@ -1327,6 +1333,7 @@ impl Cli {
                 fix,
                 install_hook,
                 uninstall_hook,
+                coverage,
             } => {
                 let opts = crate::core::code_index::CodeIndexOptions {
                     extensions: extensions
@@ -1342,6 +1349,10 @@ impl Cli {
                     // P4: hooks are personal — installed only via this
                     // explicit command, never silently, never auto-staging.
                     Self::handle_code_index_hook(Path::new(&path), install_hook, uninstall_hook)?;
+                } else if coverage {
+                    // Phase 1 coverage harness (proposal 2026-11-09):
+                    // measure the store graph — read-only, JSON out.
+                    Self::handle_code_index_coverage(Path::new(&path))?;
                 } else {
                     Self::handle_code_index(&path, output.as_deref(), opts, db, check, fix)?;
                 }
@@ -1939,6 +1950,21 @@ Use --no-preview to actually perform the restore"
         Ok(())
     }
 
+    /// Phase 1 coverage harness (CODE_INDEX_RELATION_HISTORY_PROPOSAL,
+        /// 2026-11-09): print graph-quality metrics for the store as JSON.
+        /// Opens an EXISTING store only (decision #8) — a missing store is a
+        /// loud error with the refresh hint, never a created one.
+        fn handle_code_index_coverage(path: &Path) -> Result<()> {
+            let index_root = crate::core::code_index_db::resolve_index_root(path);
+            let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
+                anyhow::anyhow!(
+                    "code-index coverage needs a store — run `gnawtreewriter code-index <root> --db` first ({e:#})"
+                )
+            })?;
+            let report = crate::core::code_index_coverage::measure(&conn)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
     fn handle_diff_to_batch(diff_file: &str, output: Option<&str>, preview: bool) -> Result<()> {
         use crate::core::diff_parser::{diff_to_batch, parse_diff_file, preview_diff};
 
@@ -3956,7 +3982,12 @@ Use --no-preview to perform the restoration"
         Ok(())
     }
 
-    fn handle_commands(json: bool) -> Result<()> {
+        fn handle_commands(json: bool) -> Result<()> {
+        // Manifest synced with the Commands enum 2026-11-10 (v0.24.0) — it
+        // had drifted to 28 of 54 commands (code-index, validate, the
+        // gnaw-* family and the AI family were missing). The durable fix is
+        // clap-generated introspection; until then this list is contract-
+        // checked against the enum on every release (CHANGELOG note).
         let commands = serde_json::json!([
             {"name": "analyze", "tool": "gtw_analyze", "write": false, "desc": "Parse file and show AST tree structure"},
             {"name": "list", "tool": "gtw_list", "write": false, "desc": "List all tree nodes, optionally filtered by type"},
@@ -3983,9 +4014,35 @@ Use --no-preview to perform the restoration"
             {"name": "restore", "tool": "gtw_restore", "write": true, "desc": "Restore file to a specific transaction"},
             {"name": "restore-project", "tool": "gtw_restore_project", "write": true, "desc": "Restore entire project to a point"},
             {"name": "restore-session", "tool": "gtw_restore_session", "write": true, "desc": "Undo all changes from a session"},
+            {"name": "restore-files", "tool": "gtw_restore_files", "write": true, "desc": "Restore files changed since a timestamp"},
             {"name": "session-start", "tool": "gtw_session_start", "write": false, "desc": "Start a new editing session"},
             {"name": "mcp", "tool": "gtw_mcp", "write": false, "desc": "Manage MCP server"},
-            {"name": "semantic-report", "tool": "gtw_semantic_report", "write": false, "desc": "Generate semantic code quality report"}
+            {"name": "semantic-report", "tool": "gtw_semantic_report", "write": false, "desc": "Generate semantic code quality report"},
+            {"name": "code-index", "tool": "gtw_code_index", "write": true, "desc": "Project structure index: --db refresh, query, --check gate, --coverage quality report"},
+            {"name": "validate", "tool": "gtw_validate", "write": false, "desc": "Strict syntax check of a file (nonzero exit on error)"},
+            {"name": "sense", "tool": "gtw_sense", "write": false, "desc": "Semantic code search via local AI"},
+            {"name": "sense-insert", "tool": "gtw_sense_insert", "write": true, "desc": "Semantic insertion at an AI-chosen anchor"},
+            {"name": "semantic-edit", "tool": "gtw_semantic_edit", "write": true, "desc": "Describe WHAT to change; local AI finds the node"},
+            {"name": "explain", "tool": "gtw_explain", "write": false, "desc": "Plain-language explanation of a code node (local AI)"},
+            {"name": "summarize", "tool": "gtw_summarize", "write": false, "desc": "Hierarchical directory summary (local AI)"},
+            {"name": "investigate", "tool": "gtw_investigate", "write": false, "desc": "Answer a question across the codebase (local AI)"},
+            {"name": "explore", "tool": "gtw_explore", "write": false, "desc": "Zoomable map-like codebase navigation"},
+            {"name": "pack", "tool": "gtw_pack", "write": false, "desc": "Package project into an AI-optimized context blob"},
+            {"name": "curate", "tool": "gtw_curate", "write": false, "desc": "Pick task-relevant files for context"},
+            {"name": "compress", "tool": "gtw_compress", "write": false, "desc": "Shrink function bodies to placeholders (~70% token cut)"},
+            {"name": "stats", "tool": "gtw_stats", "write": false, "desc": "Project token and file statistics"},
+            {"name": "blueprint", "tool": "gtw_blueprint", "write": false, "desc": "Generate a project blueprint"},
+            {"name": "scaffold", "tool": "gtw_scaffold", "write": true, "desc": "Scaffold a new file from a schema"},
+            {"name": "ai", "tool": "gtw_ai", "write": false, "desc": "AI tools: index, calibrate, recall-eval, report"},
+            {"name": "rules", "tool": "gtw_rules", "write": false, "desc": "List lint rules (add writes config: gtw rules add)"},
+            {"name": "alf", "tool": "gtw_alf", "write": false, "desc": "Agentic Logging Framework"},
+            {"name": "version", "tool": "gtw_version", "write": false, "desc": "Show version information"},
+            {"name": "gnaw-find", "tool": "gtw_find", "write": false, "desc": "AST node search across project files"},
+            {"name": "gnaw-inspect", "tool": "gtw_inspect", "write": false, "desc": "Advanced code inspection"},
+            {"name": "gnaw-blast", "tool": "gtw_blast", "write": false, "desc": "Change impact analysis"},
+            {"name": "gnaw-refactor", "tool": "gtw_refactor", "write": true, "desc": "Automated refactoring"},
+            {"name": "gnaw-diff", "tool": "gtw_diff", "write": false, "desc": "AST-aware diff between files"},
+            {"name": "gnaw-graph", "tool": "gtw_graph", "write": false, "desc": "Visualize code relations"},
         ]);
 
         if json {

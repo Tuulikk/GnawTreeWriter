@@ -579,7 +579,7 @@ pub mod mcp_server {
             json!({
                 "name": "code_index",
                 "title": "Project code index: refresh | query | check",
-                "description": "The project structure index — per-file items (fns/structs/impls/classes) with name, signature, line and GTW node_path. WHAT: one call answers WHERE code sits and WHAT a project contains; node_path chains into read_node/edit_node (re-validate the name first — paths are valid at the indexed hash only). WHEN: orienting in an unfamiliar repo, building a map for a large refactor, or gating a deploy on index freshness. mode=refresh: incremental SQLite refresh (.gnawtreewriter_ai/code_index.db, parses only changed files) returning markdown + stats; mode=query: item rows from the existing store, filterable by path_prefix — never creates the store; mode=check: content-hash gate over the committed code-index.md (fast tier: body vs its own Body-hash header; full tier: fresh render vs body) — DB-free. RETURNS: refresh -> {stats, notices, doc}; query -> {files[{path,lines,items[{category,name,sig,line,node_path,methods}]}]}; check -> {ok, fixed, failures[]}. Example: {\"mode\": \"refresh\", \"root\": \".\"}.",
+                "description": "The project structure index — per-file items (fns/structs/impls/classes) with name, signature, line and GTW node_path. WHAT: one call answers WHERE code sits and WHAT a project contains; node_path chains into read_node/edit_node (re-validate the name first — paths are valid at the indexed hash only). WHEN: orienting in an unfamiliar repo, building a map for a large refactor, or gating a deploy on index freshness. mode=refresh: incremental SQLite refresh (.gnawtreewriter_ai/code_index.db, parses only changed files) returning markdown + stats; mode=query: item rows from the existing store, filterable by path_prefix — never creates the store; mode=check: content-hash gate over the committed code-index.md (fast tier: body vs its own Body-hash header; full tier: fresh render vs body) — DB-free; mode=coverage: graph-quality report from the store (resolution rate per relation type, D7 source-identity classes, unresolved target classes) — read-only. RETURNS: refresh -> {stats, notices, doc}; query -> {files[{path,lines,items[{category,name,sig,line,node_path,methods}]}]}; check -> {ok, fixed, failures[]}; coverage -> {report}. Example: {\"mode\": \"refresh\", \"root\": \".\"}.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -3033,9 +3033,11 @@ or list_nodes for a flat index of this file.",
     }
 
     /// `code_index` — the structure-index surface: refresh (incremental store),
-    /// query (items / relations / symbols from the store) and check
-    /// (content-hash gate). Query and check never create the store
-    /// (decision #8 / P6).
+    /// query (items / relations / symbols from the store), check
+    /// (content-hash gate) and coverage (Phase 1 graph-quality metrics:
+    /// resolution rate per relation type, D7 source-identity classes,
+    /// unresolved target classes). Query, check and coverage never create
+    /// the store (decision #8 / P6).
     fn handle_code_index_mcp(
         mode: &str,
         root: &str,
@@ -3052,6 +3054,21 @@ or list_nodes for a flat index of this file.",
             opts.intro_file = Some(std::path::PathBuf::from(i));
         }
         match mode {
+            "coverage" => {
+                            // Phase 1 coverage harness (proposal 2026-11-09): read-only
+                            // store metrics; never creates the store (decision #8).
+                            let index_root = code_index_db::resolve_index_root(root_path);
+                            match code_index_db::open_existing(&index_root) {
+                                Ok(conn) => match crate::core::code_index_coverage::measure(&conn) {
+                                    Ok(report) => json!({ "mode": "coverage", "report": report }),
+                                    Err(e) => tool_error(format!("code_index coverage failed: {e:#}")),
+                                },
+                                Err(e) => tool_error(format!(
+                                    "code_index coverage: no store under {} — run mode=refresh first ({e:#})",
+                                    index_root.display()
+                                )),
+                            }
+                        }
             "refresh" => match code_index_db::generate_with_db(root_path, &opts) {
                 Ok(run) => json!({
                     "mode": "refresh",
@@ -3114,7 +3131,7 @@ or list_nodes for a flat index of this file.",
                     Err(e) => tool_error(format!("code_index check failed: {e:#}")),
                 }
             }
-            _ => tool_error("mode must be one of: refresh | query | check".to_string()),
+            _ => tool_error("mode must be one of: refresh | query | check | coverage".to_string()),
         }
     }
 

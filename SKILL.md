@@ -1,14 +1,15 @@
 ---
 name: gnawtreewriter
 description: >-
-  Use when the agent needs to edit code (change a function or node, batch
+  Load before the first code edit, including bug fixes, feature work and
+  refactors. Use when the agent needs to edit code (change a function or node, batch
   edits, rename, undo an edit), diagnose or explore file structure (AST
   skeleton, analyze, list nodes), find where something is implemented
   (semantic search via sense/search_semantic), read a specific node,
   lint/fix code, check system health (doctor), or produce an AST-aware
   diff — in any project where GnawTreeWriter is installed. Triggers: "edit
   code", "where is X implemented", "file structure", "batch edit",
-  "rename", "undo edit", "GTW", "gnawtreewriter", "ändra en funktion",
+  "fix bug", "implement feature", "refactor", "rename", "undo edit", "GTW", "gnawtreewriter", "ändra en funktion",
   "var är X implementerat", "struktur på filen", "lint", "doctor". Prefer
   GTW tools over plain text editing when the target is code.
 ---
@@ -33,21 +34,25 @@ OpenCode exposes MCP tools **only** through the Code Mode catalog, reached via t
 2026-10-15 — this is why GTW usage collapsed: agents reached for plain `edit`, which
 stayed one call away). The tools ARE there and healthy; the calling convention changed.
 
-**The recipe** — all calls below in this skill mean `await tools.gnawtreewriter.<name>({...})`
-inside one `execute` call:
+**The recipe** — calls below in this skill mean `await tools.gnawtreewriter.<name>({...})`
+inside `execute`. Group discovery and preview, inspect the result, then write:
 
 ```js
 // optional discovery: exact names + signatures for the 37 tools
 const hits = search({ namespace: "gnawtreewriter", query: "edit" });
 
-// chain the whole task in ONE execute call — sequential awaits, one round-trip:
+// discovery and reads can share one execute call:
 const skel = await tools.gnawtreewriter.get_skeleton({ file_path: "src/cli.rs", max_depth: 2 });
 const node = await tools.gnawtreewriter.read_node({ file_path: "a.rs", node_path: "35.2.105" });
-await tools.gnawtreewriter.edit_node({ file_path: "a.rs", node_path: "35.2.105", content: "fn x() {}" });
+const preview = await tools.gnawtreewriter.preview_edit({ file_path: "a.rs", node_path: "35.2.105", content: "fn x() {}" });
+// Review the preview before a separate edit_node call with the same arguments.
 ```
 
 - **No shell-escaping traps on this path** — content passes as native JS strings. The old
   double-brace/STDIN advice applies ONLY to the CLI fallback below.
+- **Codex or another agent without GTW MCP in its tool catalog?** Use the
+  `gnawtreewriter` CLI for analyze → preview → edit. `code-index` refresh is
+  indexing work; it does not satisfy the code-edit requirement.
 - **`gnawtreewriter` namespace missing from the catalog?** The MCP server is down:
   `opencode api get /api/mcp` to confirm, then
   `opencode api post /api/experimental/mcp/gnawtreewriter/connect` to reconnect.

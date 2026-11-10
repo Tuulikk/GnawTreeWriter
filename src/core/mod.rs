@@ -12,6 +12,7 @@ pub mod batch;
 pub mod blast;
 pub mod blueprint;
 pub mod code_index;
+pub mod code_index_coverage;
 pub mod code_index_db;
 pub mod compress;
 pub mod curator;
@@ -266,6 +267,54 @@ pub(crate) fn detect_replacement_remnant(
     } else {
         Some(remnants)
     }
+}
+
+/// E_DUPLICATE_ATTRIBUTE (dogfood finding 2026-11-10): when the lines
+/// directly above the target node are attributes (`#[...]`) and the
+/// replacement content re-includes the SAME attribute line, the write
+/// stacks a second copy. Valid Rust — the syntax gate cannot see it — but
+/// doubled behaviour (a doubled `#[test]` registers the test twice: the
+/// diagnostic-round trap this guard exists to kill). Loud rejection,
+/// nothing written. The fix is mechanical: node content starts at the
+/// item — attributes live OUTSIDE the node, so drop them from the
+/// replacement. Attributes are scanned upward while they are directly
+/// adjacent; a doc comment or blank line stops the scan (conservative —
+/// attribute-above-doc layouts are missed rather than false-positived).
+pub(crate) fn check_duplicate_attribute_above(
+    source_lines: &[&str],
+    node_start_line: usize,
+    new_content: &str,
+) -> Result<()> {
+    let mut attr_above: Vec<String> = Vec::new();
+    let mut idx = node_start_line.saturating_sub(2);
+    loop {
+        if idx >= source_lines.len() {
+            break;
+        }
+        let trimmed = source_lines[idx].trim();
+        if trimmed.starts_with("#[") {
+            attr_above.push(trimmed.to_string());
+            if idx == 0 {
+                break;
+            }
+            idx -= 1;
+        } else {
+            break;
+        }
+    }
+    if attr_above.is_empty() {
+        return Ok(());
+    }
+    let first_new = new_content.lines().map(str::trim).find(|l| !l.is_empty());
+    if let Some(first_new) = first_new {
+        if attr_above.iter().any(|a| a == first_new) {
+            anyhow::bail!(
+                "DUPLICATE ATTRIBUTE: the replacement content re-includes '{}' which is                  already attached directly above the target node — writing it would stack                  a second copy (valid syntax, doubled behaviour, e.g. a doubled #[test]                  registers the test twice). Nothing written — E_DUPLICATE_ATTRIBUTE                  (dogfood finding 2026-11-10). Fix: node content starts at the item;                  attributes live OUTSIDE the node — drop the attribute line from the                  replacement.",
+                first_new
+            );
+        }
+    }
+    Ok(())
 }
 
 impl GnawTreeWriter {
@@ -1232,6 +1281,9 @@ impl GnawTreeWriter {
             node.start_line
         };
 
+        // E_DUPLICATE_ATTRIBUTE funnel hook — see check_duplicate_attribute_above.
+        check_duplicate_attribute_above(&lines, node.start_line, new_content)?;
+
         // If we have column information, use it for surgical precision
         let modified = if node.start_col > 0 && node.end_col > 0 {
             let mut new_lines: Vec<String> = Vec::new();
@@ -1900,6 +1952,36 @@ mod tests {
     }
 
     /// B2 detector: lines that ALREADY lived outside the node's span are
+    #[test]
+        fn duplicate_attribute_guard_rejects_reinclusion() {
+            // Dogfood finding 2026-11-10: replacing a node whose leading
+            // sibling is #[test] with content that STARTS with #[test] must
+            // be rejected loudly (E_DUPLICATE_ATTRIBUTE) — valid Rust, so the
+            // syntax gate cannot catch it, and a doubled #[test] registers the
+            // test twice.
+            let lines: Vec<&str> = vec!["#[test]", "fn t() { let a = 1; }"];
+            let err = check_duplicate_attribute_above(&lines, 2, "#[test]\nfn t() { let a = 2; }")
+                .expect_err("re-included attribute must be rejected");
+            assert!(format!("{err:#}").contains("E_DUPLICATE_ATTRIBUTE"));
+    
+            // Replacement WITHOUT the attribute passes (the correct fix shape).
+            check_duplicate_attribute_above(&lines, 2, "fn t() { let a = 2; }").unwrap();
+    
+            // Different attribute above: still rejected (same-line collision).
+            let lines2: Vec<&str> = vec!["#[cfg(test)]", "fn t() {}"];
+            let err2 =
+                check_duplicate_attribute_above(&lines2, 2, "#[cfg(test)]\nfn t() {}").expect_err("must reject");
+            assert!(format!("{err2:#}").contains("E_DUPLICATE_ATTRIBUTE"));
+    
+            // No attribute above: anything goes.
+            let lines3: Vec<&str> = vec!["pub struct S;", "fn t() {}"];
+            check_duplicate_attribute_above(&lines3, 2, "#[test]\nfn t() {}").unwrap();
+    
+            // Doc comment between attribute and node stops the scan conservatively
+            // (attribute-above-doc layout is missed, never false-positived).
+            let lines4: Vec<&str> = vec!["#[test]", "/// docs", "fn t() {}"];
+            check_duplicate_attribute_above(&lines4, 3, "#[test]\nfn t2() {}").unwrap();
+        }
     /// other code, not remnants; true insertion remnants fire.
     #[test]
     fn replacement_remnant_detector_is_sound() {

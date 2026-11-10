@@ -1,3 +1,56 @@
+## [0.24.0] - 2026-11-10
+
+### Added — code-index coverage (fas 1), extraktor v2 och attribut-guard
+
+- **`code-index --coverage` / MCP `code_index mode=coverage`**: grafkvalitet
+  ur storen — upplösningsgrad per relationstyp, D7-källklasser (matched /
+  synthetic_callsite / function_scope_unmatched / file_scope_unmatched /
+  other), target-klasser (resolved / unresolved_macro /
+  unresolved_qualified_path / unresolved_plain_name), symbols-sammanfattning
+  och meta (extractor/generation/rev). Read-only: öppnar aldrig en store
+  (beslut #8), loud error utan store med refresh-hint.
+- **Extraktor v2** (`EXTRACTOR_VERSION = "2"` → full ombyggnad vid nästa
+  refresh): metodanrop (`obj.method()` — metodnamnet är sista identifier-
+  barnet, aldrig mottagaren), scoped-path-anrop (`super::`/`crate::`),
+  makron (bang-suffix → `unresolved_macro`-klassen) och
+  relationstyp-medveten implements-upplösning (matchar bara `kind=trait`).
+- **Före/efter på GTW-repot (147 filer):** relations 4 650 → 22 095;
+  resolved call-kanter 890 → **3 848 (4,3×)**; käll-matched 49,4 % →
+  70,7 %. Upplösningsgrad per typ SANK (calls 34,8 → 19,2 %) — nämnaren
+  växte med ärligt olösligt (stdlib + makron); mät per konstruktion,
+  inte total-raten. implements 88,5 → 39,7 % är en KVALITETS-höjning:
+  de gamla 69 innehöll fel-mål-resolutions till impl-entiteter, de nya
+  31 pekar alla på riktiga traits (SQL-join-verifierat 31/31).
+- **`E_DUPLICATE_ATTRIBUTE`-guard** i edit-funneln
+  (`check_duplicate_attribute_above` + hook i `edit_node_at_path`):
+  replacement-content som åter-included attributet ovanför målnoden
+  avvisas högljuddt — dubbel-`#[test]`-fällan (giltig syntax, testet
+  registreras och körs två gånger) kan inte längre uppstå tyst.
+  Enhetstest med 4 fall (kollision, korrekt form, annan attribut-typ,
+  doc-kommentar stoppar skanning konservativt).
+- **Hermetisk fixtursvit** `tests/code_index_fixtures.rs` (D8-multiplicitet,
+  F7-ambiguitet, post-C-inventering 11/5 — pinnad på MÄTTA värden) och
+  handmärkt facit-projekt (`testprojekt/code-index-fixture/`, FACTS.md).
+- **`docs/`**: `CODE_INDEX_RELATION_HISTORY_PROPOSAL.md` (revisionsbunden
+  relationsgraf; granskningsbeslut D1–D10 + T1–T5), `HANDOVER-LATEST.md`
+  (Motor2-mönstret), `AGENTS.md` OpenCode 2.x-sektion (klient–server,
+  per-katalog-daemner, binär-pickup-kedjan).
+
+### Changed — hjälp-manifestet synkat (var 28 av 54)
+
+- `gnawtreewriter commands` listade 28 av 54 kommandon (code-index,
+  validate, gnaw-* -familjen och AI-familjen saknades — manifest-drift
+  sedan tidigare push). Synkad till fullständig lista; den varaktiga
+  fixen (clap-genererad introspektion) är backlog. `--help` från clap
+  var alltid korrekt.
+- `GTW_INSTRUCTIONS.md`: coverage-läge + verktygsräkning 37 → 38.
+
+### Fix
+
+- `migrate_connection` delad mellan fil-backad öppning och in-memory
+  test-schema — en DDL-sanning (fixtur-testerna använder exakt
+  produktionsschemat).
+
 ## [0.23.1] - 2026-11-08
 
 ### Fixed — J1: JSON-strängnoder redigerbara i båda citat-formerna

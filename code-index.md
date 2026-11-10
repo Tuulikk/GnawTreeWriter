@@ -1,10 +1,10 @@
 # CODE-INDEX — GnawTreeWriter
 
-> Genererad 2026-11-04 19:15 UTC · gnawtreewriter 0.23.0 · git `37b834a` +DIRTY
+> Genererad 2026-11-08 14:47 UTC · gnawtreewriter 0.23.0 · git `2eae5ba` +DIRTY
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 1db0f696f1104cfa883313991149aaf1
+> Body-hash: bd7656264e05ff1d1da46f4611b3080e
 
 ## Träd
 
@@ -80,7 +80,7 @@ src/core/
   inspect.rs (514 rader)
   label_manager.rs (90 rader)
   macro_dispatcher.rs (249 rader)
-  mod.rs (1843 rader)
+  mod.rs (2159 rader)
   pack.rs (749 rader)
   parse_cache.rs (119 rader)
   report.rs (86 rader)
@@ -947,7 +947,7 @@ _(inga toppnivå-items)_
 - `pub fn is_token_tree(node: &TreeNode) -> bool` :147
 - `pub fn try_expand_macro(` :152
 
-### mod.rs (1843 rader)
+### mod.rs (2159 rader)
 - `pub struct GnawTreeWriter` :63
 - `pub enum EditOperation` :86
 - `pub struct EditReceipt` :110
@@ -969,21 +969,25 @@ _(inga toppnivå-items)_
   - `pub fn show_node(&self, node_path: &str) -> Result<String>` :439
   - `pub fn expect_node(` :453
   - `pub fn edit(&mut self, operation: EditOperation, force: bool) -> Result<()>` :495
-  - `pub fn preview_edit(&self, operation: EditOperation) -> Result<String>` :904
-  - `fn resolve_path<'a>(&'a self, query: &str) -> Option<&'a TreeNode>` :943
-  - `fn find_node_by_path<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :959
-  - `fn find_node_by_name<'a>(` :974
-  - `fn doc_block_start_line(&self, node: &TreeNode) -> usize` :1026
-  - `pub fn describe_node(&self, query: &str) -> Option<(String, String, Option<String>)>` :1048
-  - `fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String>` :1053
-  - `fn insert_node_at_path(` :1161
-  - `fn delete_node_at_path(&self, node_path: &str) -> Result<String>` :1282
-  - `pub fn get_source(&self) -> &str` :1313
-- `pub fn find_project_root(start_path: &Path) -> PathBuf` :1320
-- `pub fn find_project_root_in(start_path: &Path, boundary: Option<&Path>) -> PathBuf` :1333
-- `fn count_changed_bytes(before: &str, after: &str) -> usize` :1371
-- `pub(crate) fn verdict_json(` :1383
-- `pub(crate) fn signature_impact_for(` :1402
+  - `pub fn preview_edit(&self, operation: EditOperation) -> Result<String>` :922
+  - `fn resolve_path<'a>(&'a self, query: &str) -> Option<&'a TreeNode>` :961
+  - `fn find_node_by_path<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :977
+  - `fn find_node_by_name<'a>(` :992
+  - `fn doc_block_start_line(&self, node: &TreeNode) -> usize` :1044
+  - `pub fn describe_node(&self, query: &str) -> Option<(String, String, Option<String>)>` :1066
+  - `fn json_semantic_edit(&self, node_path: &str, new_content: &str) -> Result<String>` :1087
+  - `fn json_new_value(content: &str, allow_string: bool) -> Option<serde_json::Value>` :1191
+  - `fn json_content_error(content: &str, target: &str) -> anyhow::Error` :1201
+  - `fn json_render(v: &serde_json::Value) -> String` :1213
+  - `fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String>` :1221
+  - `fn insert_node_at_path(` :1329
+  - `fn delete_node_at_path(&self, node_path: &str) -> Result<String>` :1450
+  - `pub fn get_source(&self) -> &str` :1481
+- `pub fn find_project_root(start_path: &Path) -> PathBuf` :1488
+- `pub fn find_project_root_in(start_path: &Path, boundary: Option<&Path>) -> PathBuf` :1501
+- `fn count_changed_bytes(before: &str, after: &str) -> usize` :1539
+- `pub(crate) fn verdict_json(` :1551
+- `pub(crate) fn signature_impact_for(` :1570
 
 ### pack.rs (749 rader)
 - `pub enum PackFormat` :15

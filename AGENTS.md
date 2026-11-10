@@ -26,19 +26,42 @@ edit the codebase, the way it is meant to be used.
 | AST edit failed twice with corrected input | fall back to text tools |
 
 ### How to reach the tool
+- **Before the first code edit:** choose the edit path below now. Building
+  `code-index.md` is indexing, not a substitute for editing code with GTW.
 - **In OpenCode 2.x (Code Mode — the primary path)**: MCP tools are reachable
   ONLY via the `execute` tool. Discover with
   `search({ namespace: "gnawtreewriter" })`, call with
-  `await tools.gnawtreewriter.<tool>({ ...args })` — chain the whole task
-  (analyze → read_node → edit_node) in ONE execute call. Content passes as
+  `await tools.gnawtreewriter.<tool>({ ...args })` — group discovery,
+  reading and preview in one `execute` call, then inspect the preview
+  before a separate write call. Content passes as
   native JS strings: no shell-escaping traps on this path. Direct
   `gnawtreewriter_*` tool calls do not exist any more (since 2026-10-15).
   Full recipe + fallbacks: the `gnawtreewriter` skill and
   `~/.config/opencode/instructions/gnawtreewriter.md`.
+- **In Codex**: use GTW MCP if its tools are present in the current tool
+  catalog. If they are absent, use the `gnawtreewriter` CLI for the same
+  analyze → preview → edit sequence. Do not spend the task building the code
+  index merely because the MCP namespace is absent.
 - **In VSCode / Copilot Chat**: MCP tools prefixed `mcp_gnawtreewrite_*`
   (`edit_node`, `semantic_edit`, `insert_node`, `batch`, `preview_edit`, `compress`, `pack`, `curate`, ...).
 - **In a terminal / CLI agent**: the `gnawtreewriter` binary
   (`gnawtreewriter edit <file> <path> -`, `gnawtreewriter batch <spec.json>`, ...).
+
+For the first OpenCode code edit, call `execute` with a native JS string and
+preview before writing:
+
+```js
+const nodes = await tools.gnawtreewriter.search_nodes({ file_path: "src/cli.rs", pattern: "target_name" });
+// Choose the exact path from nodes and supply the complete replacement code.
+const node_path = "<path from nodes>";
+const replacement = "<complete replacement node>";
+const before = await tools.gnawtreewriter.read_node({ file_path: "src/cli.rs", node_path });
+const preview = await tools.gnawtreewriter.preview_edit({ file_path: "src/cli.rs", node_path, content: replacement });
+// Review preview, then call edit_node with the same file_path, node_path and content.
+```
+
+If the namespace is missing, use the CLI immediately and record the MCP
+availability issue. After any write, re-read the node or inspect `git diff`.
 
 ### 🧠 Lektioner från agent-sessioner (läs detta — det är dyr info)
 
@@ -61,10 +84,11 @@ sessioner. De gäller oavsett vilket verktyg du använder.
    `cargo install --path . --features modernbert,mcp`. Kontrollera med
    `gnawtreewriter --version` mot `Cargo.toml`. Debug-bin:
    `$CARGO_TARGET_DIR/debug/gnawtreewriter`.
-4. **MCP-daemoner lever kvar** i andras sessioner med binären de startade
-   med. Symptom: "gamla beteenden trots ny version". Kontroll:
-   `readlink /proc/<pid>/exe` → `(deleted)` = stela. `kill <pid>` — värden
-   spawnar nytt vid nästa anrop (inte omedelbart).
+4. **MCP-daemoner lever kvar** med binären de startade med — de ägs av
+   bakgrundstjänsten/klientverktyget, inte av sessionen (se OpenCode
+   2.x-sektionen nedan). Symptom: "gamla beteenden trots ny version".
+   Kontroll: `readlink /proc/<pid>/exe` → `(deleted)` = stela. `kill <pid>`
+   — värden spawnar nytt vid nästa anrop (inte omedelbart).
 5. **Feature-matrisen:** default OCH `mamba` båda har `modernbert` på —
    cfg-hål utanför modernbert syns BARA i
    `cargo check --no-default-features --all-targets` (CI kör det;
@@ -106,6 +130,50 @@ sessioner. De gäller oavsett vilket verktyg du använder.
     (misstänkta/nollträff-sökningar med prior_failures),
     `.gnawtreewriter_metrics.json` (duplexräknare),
     `gnawtreewriter doctor` (hälsa), `history` (vad GTW ändrade).
+
+### OpenCode 2.x — arkitektur, MCP-livscykel, binär-pickup (2026-11-10)
+
+Grovmodellen (OpenCode V2-dokumentationen, verifierad live i daemn-trädet
+2026-11-10):
+
+1. **Klient–server.** TUI:n är en klient mot en **delad bakgrundstjänst**
+   (`opencode serve --service`) som äger sessioner, konfig, plugins,
+   permissions, tool-execution — och MCP-serverna. Sessioner har **ingen
+   mekanisk roll** för MCP-livscykeln: `/new`, ny/gammal session, TUI ut
+   och in gör ingenting. Never say "nästa session" om binär-pickup.
+2. **MCP-anslutningsenheten är katalogen** (directory), inte sessionen:
+   varje öppen katalog startar varje konfigurerad MCP-server själv — flera
+   daemner samtidigt är normalt (2026-11-10: sex daemner = sex kataloger).
+   `pool: true` kan dela en anslutning mellan kataloger men kräver
+   MCP-protokoll 2026-07-28 + identisk kommand/cwd/env. GTW:s legacy
+   `stdio` får och ska ha en daemn per katalog — indexet är per klon.
+3. **Vad startar om MCP-processer:** service-omstart (`opencode service
+   restart` / TUI `/restart`), config-spara (watchern laddar om MCP),
+   `/reload`, `/mcps` connect/disconnect, daemnkrasch + respawn vid nästa
+   anrop.
+4. **Binär-pickup-kedjan** — daemnen kör binären på kommandots sökväg
+   (`~/.cargo/libexec/gnawtreewriter` för GTW:s MCP) **vid spawn-tillfället**
+   och håller den tills processen dör (`readlink /proc/<pid>/exe` →
+   `(deleted)` = filen borta, processen lever vidare på gammal kod).
+   Ny kod når MCP först via: **(1)** `cargo install --path . --features
+   mcp` → **(2)** MCP-omstart (service-restart eller /reload) → **(3)**
+   verifiera med beteende (anropa det nya, lyssna på feltexten).
+   Restart utan install byter daemner men inte kod — bevisat 2026-11-10
+   (katalogen bytte 37→38 verktyg men coverage-mode svarade med gammal
+   feltext).
+5. **Två binärer, två frågor:** `~/.cargo/libexec/gnawtreewriter` är
+   GPU-bygget (kräver `libcudart`; `--version` i ett skal utan tjänstens
+   miljö kan krascha på biblioteksladdning), `~/.cargo/bin/gnawtreewriter`
+   är CPU-bygget på PATH. Jämför version mot RÄTT binär (läxa #3).
+6. **Daemn-hygien — identifiera föräldern först** (`ps -o ppid= -p <pid>`,
+   sen `ps -p <ppid> -o cmd=`): daemner delas mellan klientverktyg, och
+   hygienen skiljer sig. Fynd 2026-11-10: ~85 `(deleted)`-daemner sedan
+   3 nov under `cline-cli --cline-hub-daemon` (Cline saknar tjänst-nivå-
+   städning — "lite back i funktion", användarens ord), 6 färska under
+   `opencode serve --service` (en per katalog — korrekt hygien), 1 under
+   Codex CLI:s app-server-daemon (likt OpenCode; Codex Desktop har ingen
+   daemon — användaruppgift, otröknat). Döda `(deleted)`-daemner medvetet;
+   ägarverktyget respawna vid nästa anrop om det behöver dem.
 
 ### GPU indexing (opt-in; devs recommended)
 

@@ -110,11 +110,19 @@ pub fn extract_relations_from_tree(
 /// win; everything ambiguous or external stays NULL — a symbol, not an
 /// entity reference (review decision #12).
 pub fn resolve_relations(relations: &mut [Relation], entities: &[Entity]) {
-    let mut by_name: std::collections::HashMap<String, Vec<(String, String)>> = Default::default();
-    fn collect(e: &Entity, by: &mut std::collections::HashMap<String, Vec<(String, String)>>) {
+    // Delmål C (H4, 2026-11-10): implements resolves against kind=trait
+    // ONLY — `impl:Speaker` and `trait:Speaker` share the bare name, so
+    // the kind-blind candidate set made same-file implements refuse to
+    // resolve (fixture F10 sat at 0 % with the right target in-file).
+    let mut by_name: std::collections::HashMap<String, Vec<(String, String, String)>> =
+        Default::default();
+    fn collect(
+        e: &Entity,
+        by: &mut std::collections::HashMap<String, Vec<(String, String, String)>>,
+    ) {
         by.entry(e.name.clone())
             .or_default()
-            .push((e.file.clone(), e.id.clone()));
+            .push((e.file.clone(), e.id.clone(), e.entity_type.clone()));
         for c in &e.children {
             collect(c, by);
         }
@@ -129,14 +137,18 @@ pub fn resolve_relations(relations: &mut [Relation], entities: &[Entity]) {
             .next()
             .unwrap_or(&rel.to_name)
             .to_string();
-        let mut cands: Vec<(String, String)> = by_name.get(&bare).cloned().unwrap_or_default();
+        let mut cands: Vec<(String, String, String)> =
+            by_name.get(&bare).cloned().unwrap_or_default();
         if rel.to_name.contains("::") {
             if let Some(extra) = by_name.get(&rel.to_name) {
                 cands.extend(extra.clone());
             }
         }
-        let same_file: Vec<&(String, String)> =
-            cands.iter().filter(|(f, _)| f == &rel.file).collect();
+        if rel.relation_type == "implements" {
+            cands.retain(|(_, _, entity_type)| entity_type == "trait");
+        }
+        let same_file: Vec<&(String, String, String)> =
+            cands.iter().filter(|(f, _, _)| f == &rel.file).collect();
         rel.to_id = match (same_file.len(), cands.len()) {
             (1, _) => Some(same_file[0].1.clone()),
             (0, 1) => Some(cands[0].1.clone()),
@@ -284,10 +296,21 @@ fn find_calls_in_scope(
     // inline; CROSS-FILE calls start unresolved (to_id = NULL) and the
     // full-index resolution pass resolves them — a per-file "defined"
     // filter would hide cross-file edges from the graph entirely.
-    // Method calls (obj.method()) and macros are different node kinds and
-    // never reach this branch.
     // The impl qualifier comes from the PARENT impl_item (threaded via
     // impl_of); this node only CONTRIBUTES one when it is itself an impl.
+    //
+    // Delmål C (proposal 2026-11-10): callee shapes beyond the bare
+    // identifier now land too —
+    // - scoped_identifier (super::/crate::/path::call): get_name() yields
+    //   the BARE name (the last identifier child), so same-file resolution
+    //   still works and unresolved paths fall into their honest classes;
+    // - field_expression (obj.method()): the METHOD name is the LAST
+    //   identifier child — never the receiver (get_name would return the
+    //   receiver for `w.describe()` — H1, the biggest resolution lift);
+    // - macro_invocation: recorded with a `!` suffix, self-identifying as
+    //   the unresolved_macro coverage class (H2). The bare-name resolver
+    //   will not match it, which is honest — macro expansion needs its own
+    //   extractor (proposal §Täckning).
     let owned_impl: Option<String> = if tree.node_type == "impl_item" {
         tree.get_name()
     } else {
@@ -306,8 +329,23 @@ fn find_calls_in_scope(
 
     if tree.node_type == "call_expression" {
         for child in &tree.children {
-            if child.node_type == "identifier" {
-                let callee = child.get_name().unwrap_or_default();
+            let callee: Option<String> = match child.node_type.as_str() {
+                "identifier" | "scoped_identifier" => child.get_name(),
+                "field_expression" => {
+                    // The method name is the LAST identifier child of the
+                    // field expression (receiver first, method last).
+                    let mut method: Option<String> = None;
+                    for f in &child.children {
+                        if f.node_type == "identifier" || f.node_type == "field_identifier" {
+                            method = f.get_name().or(method);
+                        }
+                    }
+                    method
+                }
+                _ => None,
+            };
+            if let Some(callee) = callee {
+                let callee = callee.trim().to_string();
                 if !callee.is_empty() {
                     // NEVER empty (contract gtw:{file}:{type}:{name}): resolve
                     // the enclosing function/method, else a stable synthetic
@@ -326,6 +364,32 @@ fn find_calls_in_scope(
                     });
                 }
                 break;
+            }
+        }
+    } else if tree.node_type == "macro_invocation" {
+        // H2 (delmål C): macros land with a `!` suffix — self-identifying
+        // as the unresolved_macro coverage class.
+        let mut name: Option<String> = None;
+        for child in &tree.children {
+            if child.node_type == "identifier" {
+                name = child.get_name();
+                break;
+            }
+        }
+        if let Some(name) = name {
+            if !name.is_empty() {
+                let from = match current {
+                    Some(n) => format!("gtw:{}:function:{}", file_path, n),
+                    None => format!("gtw:{}:callsite:{}", file_path, tree.start_line),
+                };
+                relations.push(Relation {
+                    from,
+                    to_name: format!("{name}!"),
+                    to_id: None,
+                    relation_type: "calls".to_string(),
+                    line: tree.start_line,
+                    file: file_path.to_string(),
+                });
             }
         }
     }
@@ -645,7 +709,14 @@ def main():
         let src = std::fs::read_to_string("src/mcp/mod.rs").unwrap();
         let lines = src.lines().count();
         assert!(
-            result.relations.len() < (lines / 4).max(200),
+            // Sanity cap that survives legitimate file growth AND the
+            // richer delmål-C extractor (2026-11-10): method calls,
+            // scoped-path calls and macros are relations now, and dense
+            // handler code measures ~0.41 rows/line on mcp/mod.rs. The
+            // cap moved from lines/4 (bare-identifier era, ~0.25/line)
+            // to lines/2 — still tight enough to catch runaway/duplicate
+            // bugs, which would blow far past one row per two lines.
+            result.relations.len() < (lines / 2).max(200),
             "Too many relations: {} for {} lines",
             result.relations.len(),
             lines

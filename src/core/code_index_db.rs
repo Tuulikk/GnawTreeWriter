@@ -27,7 +27,7 @@ use std::time::Duration;
 
 /// Bump on ANY change to item extraction output — part of the generation
 /// key, so stale rows never survive an extractor change silently.
-pub const EXTRACTOR_VERSION: &str = "1";
+pub const EXTRACTOR_VERSION: &str = "2";
 
 const SCHEMA_VERSION: i32 = 3;
 const BUSY_TIMEOUT_MS: u64 = 5000;
@@ -162,6 +162,14 @@ fn open_and_migrate(path: &Path) -> Result<Connection> {
     conn.busy_timeout(Duration::from_millis(BUSY_TIMEOUT_MS))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
+    migrate_connection(&conn)?;
+    Ok(conn)
+}
+
+/// Schema setup shared by the file-backed open path and in-memory test
+/// connections — one DDL truth for both (the coverage tests reuse the
+/// exact production schema, not a copy).
+pub(crate) fn migrate_connection(conn: &Connection) -> Result<()> {
     let v: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if v > SCHEMA_VERSION {
         anyhow::bail!(
@@ -182,7 +190,7 @@ fn open_and_migrate(path: &Path) -> Result<Connection> {
     if v < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
-    Ok(conn)
+    Ok(())
 }
 
 /// Open the DB, or on corruption rebuild from scratch. Recovery removes
@@ -674,32 +682,39 @@ fn store_entities_relations(
 /// FULL entity set (cross-file edges). Same-file candidates win; a unique
 /// candidate wins; ambiguous/external stay NULL (symbols, decision #12).
 fn resolve_unresolved_in_db(conn: &Connection) -> Result<()> {
-    let mut by_name: std::collections::HashMap<String, Vec<(String, String)>> = Default::default();
+    // Delmål C (H4, 2026-11-10): implements resolves against kind=trait
+    // only — same rule as the per-file pass (name collisions between
+    // impl:Foo and trait:Foo must not leave the honest target unresolved).
+    let mut by_name: std::collections::HashMap<String, Vec<(String, String, String)>> =
+        Default::default();
     {
-        let mut stmt = conn.prepare("SELECT name, file, id FROM entities")?;
+        let mut stmt = conn.prepare("SELECT name, file, id, kind FROM entities")?;
         let rows = stmt.query_map([], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
                 r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
             ))
         })?;
         for row in rows {
-            let (name, file, id) = row?;
-            by_name.entry(name).or_default().push((file, id));
+            let (name, file, id, kind) = row?;
+            by_name.entry(name).or_default().push((file, id, kind));
         }
     }
-    let mut stmt = conn.prepare("SELECT id, to_name, file FROM relations WHERE to_id IS NULL")?;
+    let mut stmt = conn
+        .prepare("SELECT id, to_name, file, relation_type FROM relations WHERE to_id IS NULL")?;
     let rows = stmt.query_map([], |r| {
         Ok((
             r.get::<_, i64>(0)?,
             r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
         ))
     })?;
     let mut updates: Vec<(i64, String)> = Vec::new();
     for row in rows {
-        let (rid, to_name, file) = row?;
+        let (rid, to_name, file, relation_type) = row?;
         let bare = to_name.rsplit("::").next().unwrap_or(&to_name).to_string();
         let mut cands = by_name.get(&bare).cloned().unwrap_or_default();
         if to_name.contains("::") {
@@ -707,7 +722,11 @@ fn resolve_unresolved_in_db(conn: &Connection) -> Result<()> {
                 cands.extend(extra.clone());
             }
         }
-        let same_file: Vec<&(String, String)> = cands.iter().filter(|(f, _)| f == &file).collect();
+        if relation_type == "implements" {
+            cands.retain(|(_, _, kind)| kind == "trait");
+        }
+        let same_file: Vec<&(String, String, String)> =
+            cands.iter().filter(|(f, _, _)| f == &file).collect();
         let pick = match (same_file.len(), cands.len()) {
             (1, _) => Some(same_file[0].1.clone()),
             (0, 1) => Some(cands[0].1.clone()),

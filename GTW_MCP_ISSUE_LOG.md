@@ -1774,3 +1774,39 @@ undo användes korrekt efter körning 1.
 
 **Kategori att avbocka:** bugg (edit_node placementskepticism i comment-täta
 filer — värd en reproduktionstest med comment-fylld fil).
+
+---
+
+## 2026-11-10 — E_DUPLICATE_ATTRIBUTE + whole-node-replacement-stubben (code-index fas 1-sessionen)
+
+**Klass:** användarfel ×2 (B1-klassen) — med verktygsförbättring som direkt
+följd, byggd och testad samma session.
+**Verktyg:** GTW MCP `edit_node` (tests/code_index_fixtures.rs).
+**Parametrar:** (1) replacement-content började med `#[test]` medan
+mål-noden (function_item) hade attributet som SYSKON ovanför → filen fick
+dubbla `#[test]` (giltig Rust — cargo test registrerar fn:en TVÅ gånger,
+testet kördes två gånger, "2 failed" för en test-fn). (2) replacement-
+content var 2 rader av en ~60-raders funktion → hela noden ersattes med
+stubben; syntax-gatten släppte igenom eftersom resultatet var GILTIG kod
+(trunkerad fn med kvarvarande avslutande klammer, unused-var-warning endast).
+**Vad som svarade:** båda edits "applied" — dubbletten upptäcktes först när
+testsviten rapporterade två exekveringar av en fn, trunceringen när grep
+efter test-kroppen gav 0 träffar. Diagnostic-rundor: 2 — exakt det mönster
+användaren varnar för ("brukar bli stunds diagnosrunda varje gång det
+sker; jag hade hoppats gtw skulle vara immun").
+**Omväg:** hel-fil-återställning via write (alla assertions fanns i
+kontexten), därefter mätta påståenden i stället för gissningar (11/5 calls,
+2 bang-rader — surfade ur storen innan test-facit skrevs).
+**Fix (samma session):** `check_duplicate_attribute_above` + funnel-hook i
+`edit_node_at_path` → högljudd `E_DUPLICATE_ATTRIBUTE`-rejection när
+replacementens första icke-tomma rad kolliderar med ett attribut direkt
+ovanför målnoden (B2-precedent: ovillkorlig bail, fix-vägledning i
+meddelandet). Enhetstest: `duplicate_attribute_guard_rejects_reinclusion`
+(4 fall: kollision, korrekt form, annan attribut-typ, doc-kommentar stoppar
+skanning konservativt). 282/282 gröna.
+**Kvarvarande idé (icke-avbockt):** storleksschock-synlighet i kvittot
+("node content shrank 60 → 2 lines") — icke-blockerande, backlog.
+**Lärdom:** nod-ersättning är WHOLE-NODE-replacement; attribut lever
+UTANFÖR item-noder. Preview + läs-diffen innan apply — båda incidenterna
+hade varit synliga i preview-diffen. Använd preview på varje edit där
+content börjar med attribut eller är avsevärt kortare än noden.

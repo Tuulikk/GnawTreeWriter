@@ -2,6 +2,21 @@
 
 **AI-native tree-based code editor** - Edit code files based on AST structure levels with surgical precision, avoiding the common pitfalls of LLM-generated code.
 
+## 🚀 Version 0.24.0: Code-Index Coverage & Extractor v2
+
+- **`code-index --coverage`** (CLI) och **`code_index mode=coverage`** (MCP):
+  grafkvalitet ur storen — upplösningsgrad per relationstyp, D7-källklasser
+  (matched / synthetic_callsite / function_scope_unmatched / file_scope /
+  other), target-klasser (resolved / unresolved_macro / qualified / plain)
+  och symbols-sammanfattning. Read-only, JSON, öppnar aldrig en store.
+- **Extraktor v2**: metodanrop (`obj.method()`), scoped-path-anrop
+  (`super::`/`crate::`) och makron (bang-suffix) landar nu som relationer;
+  implements matchar bara `kind=trait` (fel-mål-resolutions borttagna —
+  resolved kanter på GTW-repot 890 → 3 848).
+- **`E_DUPLICATE_ATTRIBUTE`-guard**: replacement-content som åter-inkluderar
+  attributet ovanför målnoden avvisas högljuddt (dubbel-`#[test]`-fällan).
+- **Hjälp-manifestet synkat**: `gnawtreewriter commands` listar nu alla 54.
+
 ## 🚀 Version 0.23.x: Edit Reliability & Capability Ladder
 
 This release hardens the edit/search reliability that agent sessions depend on (Motor2 rapport B1–B5, all five bugs handled):
@@ -51,7 +66,7 @@ gnawtreewriter code-index . --install-hook
 gnawtreewriter doctor
 ```
 
-**MCP tool `code_index`** — one surface for the layer: `mode: refresh | query | check`, query payloads `kind: items | relations | symbols` (filtered by `path_prefix`). Relations carry `to_name` + resolved `to_id`; `node_path` chains into `read_node`/`edit_node` (valid at the indexed hash — re-validate the name first).
+**MCP tool `code_index`** — one surface for the layer: `mode: refresh | query | check | coverage`, query payloads `kind: items | relations | symbols` (filtered by `path_prefix`). Relations carry `to_name` + resolved `to_id`; `node_path` chains into `read_node`/`edit_node` (valid at the indexed hash — re-validate the name first). Coverage returns graph-quality metrics (resolution rate per relation type, D7 source-identity classes, unresolved target classes) — read-only.
 
 Design + decisions: `docs/CODE_INDEX_SQLITE_DESIGN.md` (review 2026-11-02, Phases 1–4 complete). Queries also work without GTW: `sqlite3 "file:.gnawtreewriter_ai/code_index.db?mode=ro"`.
 

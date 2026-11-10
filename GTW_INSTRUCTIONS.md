@@ -1,6 +1,6 @@
 GnawTreeWriter MCP-server är registrerad för alla OpenCode-sessioner.
 
-37 GTW-verktyg finns tillgängliga (synkhanteras av kontraktstestet
+38 GTW-verktyg finns tillgängliga (synkhanteras av kontraktstestet
 `integration_mcp_instructions_listed` — varje registrerat verktyg måste
 finnas i tabellen här nedan; nya verktyg läggs till här samtidigt):
 
@@ -14,7 +14,7 @@ finnas i tabellen här nedan; nya verktyg läggs till här samtidigt):
 | Koordinera | `batch`, `undo` | Atomära multi-fil-transaktioner; snabb återställning |
 | Historik & status | `history`, `stats`, `doctor` | Vad ändrades nyss / hur stort är projektet / är GTW vid liv OCH aktuell (hälsa + build/stale i ett anrop) |
 | AI-kontext | `compress`, `pack`, `curate`, `diff_since`, `save_state` | Token-medveten analys, projekt-paketering, ändringsspårning |
-| Indexera | `index_project`, `index_entities`, `index_relations`, `code_index` | `index_project` bygger VEKTORINDEXET som satellit-`sense` söker (start/status i bakgrund); de två andra bygger KUNSKAPSGRAFEN; `code_index` är strukturlagret — refresh (inkrementell SQLite-store, parsar bara ändrade filer) / query (items, relations eller symbols via `kind`; relations bär `to_name`+`to_id` enligt T6) / check (content-hash-grind mot committad code-index.md) |
+| Indexera | `index_project`, `index_entities`, `index_relations`, `code_index` | `index_project` bygger VEKTORINDEXET som satellit-`sense` söker (start/status i bakgrund); de två andra bygger KUNSKAPSGRAFEN; `code_index` är strukturlagret — refresh (inkrementell SQLite-store, parsar bara ändrade filer) / query (items, relations eller symbols via `kind`; relations bär `to_name`+`to_id` enligt T6) / check (content-hash-grind mot committad code-index.md) / coverage (fas 1-kvalitetsmätning av store-grafen: upplösningsgrad per relationstyp + D7-källklasser + unresolved-targetklasser; read-only) |
 | Lint & regler | `lint`, `add_rule` | Mönsterlintering (`fix`/`preview` för automatisering); skriv egna regler |
 | AI-rapporter | `get_semantic_report` | Kodkvalitetsrapport med källcitat (`sources`) |
 
