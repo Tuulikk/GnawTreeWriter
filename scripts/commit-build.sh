@@ -92,3 +92,27 @@ echo "[commit-build] OBS: (2) MCP-klienten (Cline/opencode) kör den binär den 
 echo "                  nya grepp når den först när daemonen bytts ut:"
 echo "                  scripts/daemon-hygiene.sh reap --yes   (dödar även din egen daemon)"
 echo "                  kör det mellan sessioner, eller starta om klienten."
+
+# 5. Fråga om reap — men ALDRIG när stdin inte är en terminal.
+#    En agent som kör det här skriptet skulle annars blockera på `read` för
+#    evigt (uppmätt mönster: agenter kör skript icke-interaktivt). Styr utan
+#    fråga med GTW_REAP=yes|no.
+ask_reap() {
+    local svar
+    case "${GTW_REAP:-ask}" in
+        yes) scripts/daemon-hygiene.sh reap --yes ;;
+        no) echo "[commit-build] reap hoppad (GTW_REAP=no)." ;;
+        *)
+            if [[ -t 0 ]]; then
+                read -r -p "Döda gamla MCP-daemoner nu? (dödar även denna sessions) [j/N] " svar || svar=""
+                case "$svar" in
+                    j|J|ja|JA|y|Y) scripts/daemon-hygiene.sh reap --yes ;;
+                    *) echo "[commit-build] hoppar reap — kör scripts/daemon-hygiene.sh reap --yes när du vill." ;;
+                esac
+            else
+                echo "[commit-build] icke-interaktiv körning: frågar inte (GTW_REAP=yes tvingar)."
+            fi
+            ;;
+    esac
+}
+ask_reap
