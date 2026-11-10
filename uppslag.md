@@ -13,6 +13,43 @@
 
 ---
 
+## 2026-11-10 — `sense` saknar `root`-parameter  🟨
+
+**Belagt:** `code_index` tar `root` (default `.`), `sense` tar bara
+`query`/`file_path`/`expand`. Från en `$HOME`-rotad daemon kan en agent alltså
+lösa `code_index` med `root=<absolut>` (bevisat: gav 11 riktiga noder), men
+**inte** `sense` — där återstår `file_path` (zoom), CLI:t, eller att klienten
+startas i projektet.
+
+**Delvis åtgärdat:** rotvakten sa först "pass an explicit absolute root/path"
+även för `sense` — råd som inte gick att följa. Nu är meddelandet
+verktygsspecifikt (`af3fa63`) och testet
+`broad_root_error_advises_only_what_the_tool_can_do` låser fast det.
+
+**Kvar:** ge `sense` en riktig `root`. Kräver att sense-brokern kan instansieras
+per rot (idag byggs den en gång ur `state.project_root`) — alltså en cache
+`root → broker` i stället för en enda. Inte gjort; rör modell-laddning.
+
+---
+
+## 2026-11-10 — `$HOME`-roten är en Cline-grej, inte opencode  ✅ mätt
+
+**Bevis:** alla fem `gnawtreewriter mcp`-daemoner hade förälder
+`cline-cli --cline-hub-daemon --cwd /home/tuulikk`; ingen hade opencode som
+förälder. Fyra stod i `/home/tuulikk`, **en** i `GnawTreeWriter` — samma
+förälder. Alltså: hubben *kan* spawna rätt; det beror på vilken workspace som
+öppnas, inte på GTW.
+
+**Slutsats:** `$HOME`-roten kommer från att Cline-hubben körs med
+`--cwd /home/tuulikk` och att GTW-entryn saknar `cwd`. OpenCode:s modell (en
+daemon per katalog) har inte den felklassen — men det är bevisat för *nuvarande*
+daemoner, inte för alla framtida.
+
+**Klientagnostiskt är däremot staleness** (långlivade stdio-servrar håller sin
+bild) — därför sitter rotvakten serverside och skyddar båda.
+
+---
+
 ## 2026-11-10 — Staleness-larmet var avklippt  🟥 FARLIG
 
 **Mätt:** `doctor` rapporterade `stale: false` för en **0.25.0**-binär mot
