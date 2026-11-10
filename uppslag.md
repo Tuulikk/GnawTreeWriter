@@ -211,13 +211,24 @@ användaren.
 **Påstående (obesvisat):** de låga poängen beror på att `embeddings.db` är
 daterad 2026-10-07, och att `gnawtreewriter ai index` höjer dem.
 
-**Bevis:** CLI `sense` i repot gav topp **0,02** ("Low confidence < 0.5");
-MCP-probe gav **0,01** över 10 träffar. `ls -la
-.gnawtreewriter_ai/index/embeddings.db` → 7 okt 04.29.
+**Bevis:** CLI `sense` i repot gav topp **0,02** ("Low confidence < 0.5") med
+träffar i `src/core/anchor.rs` och `src/core/curator.rs` — **fel svar**, eftersom
+`src/core/code_graph.rs` (som äger `cycles`) finns i repot. MCP-probe gav **0,01**
+över 10 träffar. `embeddings.db` var daterad 2026-10-07.
 
-**Verifieras:** kör `ai index`, mät om topp-poängen stiger. Stiger de **inte** är
-orsaken embedder/dimension (index byggt med annan modell) — då krävs ombyggnad
-med metadatakontroll, inte bara ett nytt index.
+**Embedder-mismatch är UTESLUTEN (mätt):** `model_info` i indexet säger
+`bge-base-en-v1.5` med `dimension 768` — samma modell som konfigurationen
+använder. Alltså pekar allt mot gammalt *innehåll*, inte fel modell.
+
+**Nytt fynd — `ai index` är inte ett loop-steg:** på CPU (binären är byggd utan
+`cuda`) tog en full omindexering av 180 filer **>9 minuter utan att bli klar**
+(≈340 % CPU, 520 MB RSS, upsertar ~7 600 rader). Det är en bakgrundssyssla man
+startar och går ifrån, inte något som hör i en snabb cykel — och docs som säger
+"kör `ai index`" bör säga det.
+
+**Kvar att mäta:** efter-poängen. Kommandot:
+`gnawtreewriter sense 'where are dependency cycles detected'` → jämför topp-poäng
+och om `code_graph.rs` hamnar i listan.
 
 **Om påståendet är fel:** vi lägger en eftermiddag på en ombyggnad som inte
 löser något, medan docs säger "fixa med `ai index`" och `sense` förblir
