@@ -2186,7 +2186,7 @@ Use --no-preview to write batch file"
     #[allow(clippy::needless_raw_string_hashes)]
     fn hook_block() -> String {
         format!(
-            "{begin}\n# Installed by `gnawtreewriter code-index --install-hook` (P4: explicit, per-clone).\n# Refreshes the code-index store + regenerates code-index.md after each commit.\n# NEVER stages: the regenerated file is committed explicitly (design: no auto-stage).\nif command -v gnawtreewriter >/dev/null 2>&1; then\n    top=$(git rev-parse --show-toplevel 2>/dev/null) && \\\n        gnawtreewriter code-index \"$top\" --db -o \"$top/code-index.md\" >/dev/null 2>&1 || true\nfi\n{end}\n",
+            "{begin}\n# Installed by `gnawtreewriter code-index --install-hook` (P4: explicit, per-clone).\n# Refreshes the code-index store + regenerates code-index.md after each commit.\n# NEVER stages: the regenerated file is committed explicitly (design: no auto-stage).\n# Revisions are tagged source=git_hook (phase 2 provenience).\nif command -v gnawtreewriter >/dev/null 2>&1; then\n    top=$(git rev-parse --show-toplevel 2>/dev/null) && \\\n        GTW_CODE_INDEX_SOURCE=git_hook gnawtreewriter code-index \"$top\" --db -o \"$top/code-index.md\" >/dev/null 2>&1 || true\nfi\n{end}\n",
             begin = Self::HOOK_BEGIN,
             end = Self::HOOK_END
         )

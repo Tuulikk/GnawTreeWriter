@@ -64,6 +64,12 @@ pub struct CoverageReport {
     pub source_coverage: Vec<SourceClass>,
     pub target_classes: Vec<TargetClass>,
     pub symbols: SymbolSummary,
+    /// D9 read-time signals: staleness queue non-empty at measure time.
+    pub index_stale: bool,
+    /// D9: files indexed but NO completed revision in history — the store
+    /// predates the revision chain (or history was lost); every impact /
+    /// delta claim must carry this, never silently green.
+    pub history_gap: bool,
     pub extractor_version: String,
     pub generation_key: Option<String>,
     pub last_refresh_rev: Option<String>,
@@ -172,6 +178,23 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
         Ok(rows.next().transpose()?)
     };
 
+    // D9 read-time signals (phase 2 lock 5): staleness queue non-empty =
+    // index_stale; files present but no completed revision = history_gap
+    // (the store predates the revision chain, or history was lost).
+    let index_stale: bool = conn
+        .query_row("SELECT COUNT(*) FROM staleness_queue", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .map(|c| c > 0)
+        .unwrap_or(false);
+    let completed_revisions: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM index_revisions WHERE status = 'completed'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or(0);
+    let history_gap = files > 0 && completed_revisions == 0;
     let relations_total: i64 = relations_total(conn)?;
     Ok(CoverageReport {
         files,
@@ -183,6 +206,8 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
             total: symbols_total,
             external: symbols_external,
         },
+        index_stale,
+        history_gap,
         extractor_version: meta("extractor_version")?.unwrap_or_default(),
         generation_key: meta("generation_key")?,
         last_refresh_rev: meta("last_refresh_rev")?,
@@ -291,6 +316,10 @@ mod tests {
         assert_eq!(report.symbols.external, 1);
         assert_eq!(report.extractor_version, "1");
         assert_eq!(report.last_refresh_rev.as_deref(), Some("r9"));
+        // D9 pins: seeded store has files but NO completed revisions —
+        // history_gap must be true; the queue is empty → not stale.
+        assert!(report.history_gap, "files without revision history = gap");
+        assert!(!report.index_stale);
     }
 
     #[test]
@@ -302,6 +331,9 @@ mod tests {
         assert!(report.source_coverage.is_empty());
         assert_eq!(report.files, 0);
         assert_eq!(report.symbols.total, 0);
+        // D9: no files → no gap, no staleness.
+        assert!(!report.history_gap);
+        assert!(!report.index_stale);
     }
 
     #[test]

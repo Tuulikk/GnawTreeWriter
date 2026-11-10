@@ -29,7 +29,7 @@ use std::time::Duration;
 /// key, so stale rows never survive an extractor change silently.
 pub const EXTRACTOR_VERSION: &str = "2";
 
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 const BUSY_TIMEOUT_MS: u64 = 5000;
 
 const SCHEMA_V1: &str = r#"
@@ -103,6 +103,67 @@ CREATE TABLE IF NOT EXISTS symbols (
 /// (code-index → read_node → edit_node) survives the JSON deprecation.
 const SCHEMA_V3: &str = r#"
 ALTER TABLE entities ADD COLUMN node_path TEXT NOT NULL DEFAULT '';
+"#;
+
+/// Identity scheme version (D2/D6, phase 2 lock 2026-11-10): the revision
+/// delta KEY algorithm. Any change here is a HISTORY BREAK — the next
+/// refresh starts a new baseline (old deltas keep their meaning only
+/// under the scheme that wrote them). Third component of the generation
+/// key, next to schema and extractor versions.
+pub(crate) const IDENTITY_SCHEME_VERSION: &str = "1";
+
+/// Schema v4 (phase 2, proposal D1/D5/D7-D9): revision history —
+/// append-only revision chain + per-file versions + AGGREGATED deltas
+/// (relation_key = from_entity|type|target_key with count_before/after
+/// per D8; callsite anchors live in the before/after JSON). Additive:
+/// existing tables untouched; PRAGMA user_version 3 -> 4.
+const SCHEMA_V4: &str = r#"
+CREATE TABLE IF NOT EXISTS index_revisions (
+    id INTEGER PRIMARY KEY,
+    parent_id INTEGER REFERENCES index_revisions(id),
+    git_rev TEXT NOT NULL,
+    dirty INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    identity_scheme_version TEXT NOT NULL,
+    generation_key TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    status TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_revisions_parent ON index_revisions(parent_id);
+CREATE TABLE IF NOT EXISTS revisions_tx_links (
+    revision_id INTEGER NOT NULL REFERENCES index_revisions(id),
+    transaction_id TEXT NOT NULL,
+    PRIMARY KEY (revision_id, transaction_id)
+);
+CREATE TABLE IF NOT EXISTS file_versions (
+    revision_id INTEGER NOT NULL REFERENCES index_revisions(id),
+    path TEXT NOT NULL,
+    before_hash TEXT,
+    after_hash TEXT,
+    parse_status TEXT NOT NULL,
+    PRIMARY KEY (revision_id, path)
+);
+CREATE TABLE IF NOT EXISTS entity_changes (
+    revision_id INTEGER NOT NULL REFERENCES index_revisions(id),
+    entity_key TEXT NOT NULL,
+    change_kind TEXT NOT NULL,
+    before_json TEXT,
+    after_json TEXT,
+    PRIMARY KEY (revision_id, entity_key)
+);
+CREATE TABLE IF NOT EXISTS relation_changes (
+    revision_id INTEGER NOT NULL REFERENCES index_revisions(id),
+    relation_key TEXT NOT NULL,
+    change_kind TEXT NOT NULL,
+    count_before INTEGER NOT NULL DEFAULT 0,
+    count_after INTEGER NOT NULL DEFAULT 0,
+    before_json TEXT,
+    after_json TEXT,
+    resolution_status TEXT NOT NULL,
+    PRIMARY KEY (revision_id, relation_key)
+);
+CREATE INDEX IF NOT EXISTS idx_relation_changes_key ON relation_changes(relation_key);
 "#;
 
 pub struct RefreshStats {
@@ -186,6 +247,9 @@ pub(crate) fn migrate_connection(conn: &Connection) -> Result<()> {
     }
     if v < 3 {
         conn.execute_batch(SCHEMA_V3)?;
+    }
+    if v < 4 {
+        conn.execute_batch(SCHEMA_V4)?;
     }
     if v < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -271,7 +335,10 @@ fn generation_key(opts: &CodeIndexOptions) -> String {
     let mut exts = opts.extensions.clone();
     exts.sort();
     exts.dedup();
-    let raw = format!("{SCHEMA_VERSION}|{EXTRACTOR_VERSION}|{}", exts.join(","));
+    let raw = format!(
+        "{SCHEMA_VERSION}|{EXTRACTOR_VERSION}|{IDENTITY_SCHEME_VERSION}|{}",
+        exts.join(",")
+    );
     format!("{:x}", md5::compute(raw.as_bytes()))
 }
 
@@ -484,6 +551,47 @@ pub fn refresh(
     Ok(stats)
 }
 
+/// Phase 2 skeleton (D5 lock (a)): record one COMPLETED revision — the
+/// chain (parent = previous completed revision), git facts, identity
+/// scheme version and per-file snapshots (after-only at this scaffolding
+/// stage; before/after deltas arrive with the single-tx wrap where the
+/// pre-refresh state is naturally in scope). Failed refreshes record
+/// nothing yet — the dedicated failure path lands with the wrap.
+pub(crate) fn record_revision(
+    conn: &mut Connection,
+    root: &Path,
+    source: &str,
+) -> Result<i64> {
+    let (rev, dirty) = git_facts(root);
+    let now = chrono::Utc::now().timestamp();
+    let gk = meta_get(conn, "generation_key")?.unwrap_or_default();
+    let parent: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM index_revisions WHERE status = 'completed' ORDER BY id DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .ok();
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT INTO index_revisions (parent_id, git_rev, dirty, source, identity_scheme_version, generation_key, started_at, completed_at, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, 'completed')",
+        params![parent, rev, dirty as i64, source, IDENTITY_SCHEME_VERSION, gk, now],
+    )?;
+    let rid = tx.last_insert_rowid();
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO file_versions (revision_id, path, before_hash, after_hash, parse_status)
+             SELECT ?1, path, NULL, hash,
+                    CASE WHEN warning IS NULL THEN 'ok' ELSE 'warning' END
+             FROM files",
+        )?;
+        stmt.execute(params![rid])?;
+    }
+    tx.commit()?;
+    Ok(rid)
+}
+
 /// Load the stored index back into the shared render shape. Items come back
 /// in line order; methods reattach to their parent row. Orphaned children
 /// (impossible in practice — cascades prevent them) are promoted, never
@@ -603,6 +711,14 @@ pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun> {
         notices.push(line);
     }
     let stats = refresh(&mut conn, &index_root, opts)?;
+    // Phase 2: one revision row per completed refresh — the chain
+    // (parent = previous completed), git facts, identity version. Source
+    // via GTW_CODE_INDEX_SOURCE (git_hook sets it in the installed hook).
+    let source = std::env::var("GTW_CODE_INDEX_SOURCE")
+        .unwrap_or_else(|_| "refresh_manual".to_string());
+    if let Err(e) = record_revision(&mut conn, &index_root, &source) {
+        notices.push(format!("revisionspost kunde inte skrivas: {e:#}"));
+    }
     let doc = render(&conn, &index_root, opts, &artifact_notices)?;
     Ok(DbRun {
         doc,
