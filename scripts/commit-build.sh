@@ -106,9 +106,6 @@ echo "                  nya grepp når den först när daemonen bytts ut:"
 echo "                  scripts/daemon-hygiene.sh reap --yes   (dödar även din egen daemon)"
 echo "                  kör det mellan sessioner, eller starta om klienten."
 
-# Maskinläsbart facit för agenter: en rad, ett ord. Allt ovan är prosa.
-echo "[commit-build] RESULT ok"
-
 # 5. Fråga om reap — men ALDRIG när stdin inte är en terminal.
 #    En agent som kör det här skriptet skulle annars blockera på `read` för
 #    evigt (uppmätt mönster: agenter kör skript icke-interaktivt). Styr utan
@@ -131,4 +128,8 @@ ask_reap() {
             ;;
     esac
 }
+
 ask_reap
+
+# Maskinläsbart facit SIST — en agent läser `tail -1`, inte prosan ovanför.
+echo "[commit-build] RESULT ok"
