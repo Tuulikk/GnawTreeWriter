@@ -1,4 +1,72 @@
-## [0.24.0] - 2026-11-10
+## [Unreleased]
+
+### Fixed — `edit_node` förstörde dokument- och configfiler
+
+De fem "position-blinda" parsrarna (markdown, css, yaml, toml — och json via
+sitt interim-spår) gav noder **utan byte-spann**: `start_col`/`end_col` var 0
+och `content` var ofta rekonstruerad text i stället för en källslice. Splitten
+föll då tillbaka på **helrads-ersättning**, vilket tyst skrev om grannnoder.
+Verifierat mot 0.24.0-binären innan fixen:
+
+- **markdown:** rubrik-edit skrev tillbaka enbart texten och **raderade `#`**;
+  stycke-edit **åt upp blankraden** efter stycket. Ny parser: `tree-sitter-md`
+  (byte-exakta spann + varje rubriksektion nästlas under föregående).
+- **css:** edit av ett deklarationsvärde **ersatte hela regelraden** med värdet.
+  Ny parser: `tree-sitter-css` (var tidigare avstängd i `Cargo.toml` med
+  motiveringen "version conflicts" — proben visar att den motiveringen inte
+  längre gäller).
+- **yaml/toml:** noder rapporterade rad 1, kolumn 0-0 → alla edits **nekades**
+  av Duplex-vakten, dvs formaten var i praktiken read-only. Nya parsrar:
+  `tree-sitter-yaml` resp. `tree-sitter-toml-ng` (`pair`-noder låter värdet
+  redigeras utan att nyckeln rörs).
+- **panik vid leaf-edit:** `TreeVisualizer::generate_sparkline` delade med noll
+  när den renderade en ensam nod (max-djup 0 — normalfallet när en **leaf**
+  redigeras). Krashen kom **efter** att editen skrivits och verifierats på
+  disk, så anroparen såg ett fel på en lyckad operation. Guard: `max(1)`
+  (`visualizer.rs`, `visualizer_test.rs`).
+
+### Added — språk
+
+- **PowerShell** (`.ps1`, `.psm1`, `.psd1`) — 20 filer i arbetsytan, ingen
+  parser tidigare. Kända grammatikegenheter: tom fil ger ERROR-noder, och en
+  funktionskropp med flera statements på EN rad ger ERROR vid `param`.
+- **CMake** (`.cmake` + `CMakeLists.txt` via filnamn).
+- **Makefile** (`Makefile`/`makefile`/`GNUmakefile` via filnamn).
+- **Ruby** (`.rb`) — inte en ny funktion utan en **reparation**:
+  `get_parser_for_language` mappade `ruby`/`rb` → `"rb"`, men `get_parser`
+  hade ingen `"rb"`-arm, så Ruby föll tyst till `GenericParser` (en enda nod)
+  och `language: ruby`-regler kompilerade mot ett tomt träd och matchade
+  aldrig.
+- **Tillägg ovanpå befintliga språk** (noll nya grammatiker): `.pyi` → Python,
+  `.mts`/`.cts` → TypeScript, samt **filnamnsdetektering** för ändelselösa
+  filer (`.bashrc`, `.bash_profile`, `.bash_aliases`, `.zshrc`, `.zshenv`,
+  `.profile` → bash-parsern). `Path::extension()` är `None` för dem, så de
+  föll tidigare till `GenericParser` trots att parsern fanns.
+- **`code_index`-default:** 15 → 32 ändelser — bara sådana som har en riktig
+  parser (`kt/kts`, `swift`, `cs`, `dart`, `svelte`, `sql`, `qml`, `slint`,
+  `mjs/cjs`, `cc/cxx/hxx`, `pyi`, `mts/cts`, `sh/bash`). Nio grupper hade
+  parser men indexerades aldrig.
+
+### Changed
+
+- `pulldown-cmark` borttagen: noll användningar i `src/` (markdown-parsern
+  använde regex — `LANGUAGE_SUPPORT_PLAN.md` påstod pulldown-cmark).
+- Ny delad konverterare `parser::tree_from_ts_node` + `parse_with_tree_sitter`:
+  byte-spann-logiken bor på ett ställe i stället för att kopieras per parser.
+
+### Known (medvetet kvar)
+
+- **JSON** går fortfarande på serde + `json_semantic_edit` (J1). Det fungerar
+  (värde-edit ger giltig JSON), men paths är **nyckelnamn**, inte numeriska —
+  ett byte till `tree-sitter-json` ändrar varje JSON-path och måste göras
+  tillsammans med den funktionen. Separat fynd: `--preview` visar den råa
+  splitten medan skarp edit tar den semantiska vägen; preview och apply är
+  oense för JSON.
+- **`.h` → C-parsern** (även för C++-headers med `class`/`template`). I den här
+  ytan finns 49 `.h` mot 50 `.cpp`. Heuristik (`.h` med `.cpp`-syskon → cpp) är
+  en beteendeförändring på befintliga filer och kräver egna tester.
+
+
 
 ### Added — code-index coverage (fas 1), extraktor v2 och attribut-guard
 
