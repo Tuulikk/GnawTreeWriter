@@ -1,10 +1,10 @@
 # CODE-INDEX — GnawTreeWriter
 
-> Genererad 2026-11-10 21:17 UTC · gnawtreewriter 0.25.1 · git `786d86f`
+> Genererad 2026-11-10 21:35 UTC · gnawtreewriter 0.25.1 · git `893e968`
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: b420323781635ee82c8347152c91222c
+> Body-hash: 2828bf44f069944ba809e65713b53637
 
 ## Träd
 
@@ -142,7 +142,7 @@ src/llm/
   relational_index.rs (684 rader)
   semantic_index.rs (1247 rader)
 src/mcp/
-  mod.rs (4259 rader)
+  mod.rs (4291 rader)
 src/parser/
   bash.rs (84 rader)
   c.rs (84 rader)
@@ -1697,7 +1697,7 @@ _(inga toppnivå-items)_
 
 ## src/mcp/
 
-### mod.rs (4259 rader)
+### mod.rs (4291 rader)
 _(inga toppnivå-items)_
 
 ## src/parser/
