@@ -130,7 +130,9 @@ sessioner. De gäller oavsett vilket verktyg du använder.
 10. **Release:** följ "Release Process"-sektionen nedan; lib-yteändringar
     (enum-/struct-fält, nya obligatoriska parametrar) kräver en
     `### BREAKING (lib)`-sektion i CHANGELOG **innan** taggen — Motor2
-    och andra path-dep:ar litar på att brytningar ropas ut.
+    och andra path-dep:ar litar på att brytningar ropas ut. Efter varje
+    release: `grep -n '^## \[' CHANGELOG.md` — 0.24.0 och 0.25.0 låg båda under
+    en `## [0.25.1]`-rubrik och syntes inte alls i historiken.
 11. **GPU för utvecklare:** `gnawtreewriter.yaml` → `indexing.device: auto`
     (enda konfigen; 20 %-VRAM-gate gäller alltid) + bygg med
     `scripts/build-gpu.sh` (podman, ingen CUDA-toolkit krävs på värden).
@@ -138,7 +140,36 @@ sessioner. De gäller oavsett vilket verktyg du använder.
 12. **Diagnostik-filer att läsa innan du gissar:** `.gnawtreewriter_search_log.jsonl`
     (misstänkta/nollträff-sökningar med prior_failures),
     `.gnawtreewriter_metrics.json` (duplexräknare),
-    `gnawtreewriter doctor` (hälsa), `history` (vad GTW ändrade).
+    `gnawtreewriter doctor` (hälsa), `history` (vad GTW ändrade), och
+    **`uppslag.md`** (öppna trådar, osäkerheter, halvbevis — läs den innan du
+    "fixar" något som redan är utrett, och skriv dit det du inte kunde bevisa).
+13. **Projektroten ÄRVS från cwd — kontrollera den innan du tror på ett svar.**
+    `sense` och `code_index` löser projektet ur MCP-serverns arbetskatalog. En
+    daemon startad i `$HOME` svarade en `sense`-fråga med 5/5 träffar i
+    `~/AndroidSDK`, rapporterade repots egen store som frånvarande och
+    degraderade den semantiska kanalen — tre symptom, en fel rot. Vakt finns
+    sedan 2026-11-10 för `$HOME` och `/`, men **inte** för förälderkataloger med
+    flera repon och **inte** på CLI-vägen. Känn igen symptomen: träffar utanför
+    projektet, eller "no code-index store" trots att
+    `.gnawtreewriter_ai/code_index.db` ligger där. Kontrollera med
+    `readlink /proc/<pid>/cwd` på daemonen.
+14. **`ai status` grön betyder INTE att `sense` fungerar.** Tre oberoende saker
+    kan fela samtidigt: modellcachen väljs **allt-eller-inget på `modernbert`**
+    (`ai_manager.rs:563`, så en global `bge-base` ignoreras när `modernbert`
+    finns lokalt), `ai setup` laddar modeller medan `ai index` bygger vektorn,
+    och `~/.gnawtreewriter_ai/models` är en annan katalog än
+    `<projekt>/.gnawtreewriter_ai/models`. Mät i stället: `sense` med
+    topp-poäng under ~0.5 är oanvändbar oavsett grön bock.
+15. **Bevisa MCP-beteende utan att starta om daemoner.** Pipa JSON-RPC
+    (`initialize` → `notifications/initialized` → `tools/call`) in i
+    `gnawtreewriter mcp stdio` — det kör den *nya* binären direkt. Så bevisades
+    rotvakten i båda riktningar (från `$HOME` = avslag, från repot = träffar)
+    medan de åtta daemonerna fortfarande körde gammal kod.
+16. **Skillen har en källa och två genererade ytor.** Redigera bara rotens
+    `SKILL.md`: `.agents/skills/gnawtreewriter/SKILL.md` är en symlink och
+    `gnawtreewriter-crush.skill` är ett zip-paket som `scripts/pack-skill.sh`
+    bygger. `--check` (körs i CI) failar på drift — utan den hade Crush fått
+    v0.9.2-instruktioner medan repot stod på 0.25.x.
 
 ### OpenCode 2.x — arkitektur, MCP-livscykel, binär-pickup (2026-11-10)
 
