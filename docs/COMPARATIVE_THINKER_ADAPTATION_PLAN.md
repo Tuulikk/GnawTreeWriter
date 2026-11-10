@@ -451,6 +451,28 @@ med". Det skiljer GTW från CT, som alltid räknar tre pelare.
 **Insats:** S (~150 rad kod + 7 tester). **Risk:** låg.
 **Roadmap-fäste:** ROADMAP rad 384 (confidence threshold), rad 406 (feedback loop).
 
+#### Studieanteckning — 09.1 dissonance (IFYLLD 2026-11-10, S5 steg 1: ren modul)
+
+| Fält | Värde |
+|---|---|
+| Källa (läst) | `experiments/09.1_dissonance_detection/src/lib.rs:1-53` (hela) |
+| S0 Proveniens | agent-genererad, ogranskad — läsmaterial |
+| S1 Läst | hela filen, 53 rader |
+| S2 Körbar | `cargo build --release` → ok (6,4 s, abi3-forward); `run_experiment.py` → **KÖRDE**: 6 cases med mätta värden (0.0175 / 0.0300 / 0.5700 / 0.4300 / 0.0000 / 1.0000) |
+| S3 Karaktäriseringstest | `/tmp/opencode/ct-091-characterization.txt` + `harmony_matches_measured_ct_characterization` (alla 6 mätta värden pinnade i `src/llm/harmony.rs`) |
+| S4 Klassning | **DERIVE** — normaliserad varians är läroboksstatistik; (N−1)/N-härledningen i §3.1 gjordes utan källan |
+| Extern referens | varians-normalisering (läroboksstatistik); trösklarna 0.25/0.50 är designval, kalibreras mot GTW:s evals senare |
+| S5 GTW-form | `src/llm/harmony.rs::harmony` + `dissonance_of` — 9 tester gröna (282 → 290) |
+
+**Kontrakt-beslut under S5 (med motivering):** ensam pelare → `score = rå
+pelaren` (plan §3.3-skissens early-return, aldrig fejkad 1.0); frånvaro av
+pelare är NEUTRAL (2-pelarsvaret beräknas på kvarvarande pelare — en
+protesterande tredje pelare sänker score mer än frånvaro; det ärliga
+påståendet är `pillars_available`, inte den starkare olikheten).
+
+**Kvar i P1:** wiringen — `RerankedHit.lex`/`graph` (råa 0..1 före RRF) +
+`satellite_response` bär `harmony` per träff (§3.4-wire-format).
+
 ---
 
 ## 4. P2 — graf-frågor: `cycles`, `impact(depth)`, `chain`

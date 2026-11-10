@@ -1,6 +1,7 @@
 pub mod ai_manager;
 pub mod batch;
 pub mod gnaw_sense;
+pub mod harmony;
 pub mod impact_analyzer;
 pub mod llm_integration;
 #[cfg(feature = "mamba")]

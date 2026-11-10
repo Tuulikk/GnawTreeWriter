@@ -277,9 +277,7 @@ pub(crate) fn migrate_connection(conn: &Connection) -> Result<()> {
     // with an older binary) heals here instead of erroring downstream.
     conn.execute_batch(SCHEMA_V4)?;
     repair_prose_columns(conn)?;
-    if v < SCHEMA_VERSION || v == SCHEMA_VERSION {
-        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-    }
+    conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
 }
 
