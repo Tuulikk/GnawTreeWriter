@@ -972,6 +972,7 @@ pub enum Color {
     /// kollapsade och id:na var maskinberoende. Med ett TAK ska:
     ///   1. rot-upptäckten aldrig klättra över taket,
     ///   2. id:t bli tak-relativt (portabelt), inte absolut.
+    ///
     /// Detta test fallerar på den gamla koden (absolut path / förälder).
     #[test]
     fn boundary_keeps_ids_project_relative_despite_stray_parent_marker() {

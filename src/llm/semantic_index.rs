@@ -839,8 +839,10 @@ mod tests {
             .collect();
         // The graph's OWN file is seed #1 (f1), and f1 calls into f9 —
         // the graph channel's exact contract.
-        let mut graph = crate::llm::relational_index::FileGraph::default();
-        graph.file_path = "src/f1.rs".to_string();
+        let mut graph = crate::llm::relational_index::FileGraph {
+            file_path: "src/f1.rs".to_string(),
+            ..Default::default()
+        };
         graph.relations.insert(crate::llm::relational_index::Relation {
             from_file: "src/f1.rs".to_string(),
             from_path: "f1::call".to_string(),
