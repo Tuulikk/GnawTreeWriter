@@ -1234,6 +1234,57 @@ pub mod mcp_server {
         json!({"content": [{ "type": "text", "text": msg }], "isError": true})
     }
 
+    /// The user's home directory, used only to detect an unusable root.
+    fn home_dir() -> Option<std::path::PathBuf> {
+        std::env::var_os("HOME").map(std::path::PathBuf::from)
+    }
+
+    /// A "project root" that is the home directory (or the filesystem root) is
+    /// not a project: every relative store, model-cache lookup and lexical walk
+    /// under it spans unrelated trees.
+    ///
+    /// Field finding 2026-11-10 (GTW_MCP_ISSUE_LOG): an MCP daemon started with
+    /// `cwd=$HOME` answered `sense` with 5/5 hits from `~/AndroidSDK`, reported
+    /// the caller's own store as absent, and degraded the semantic channel —
+    /// all three from this one wrong root. Such roots are refused loudly now.
+    fn root_is_too_broad(root: &std::path::Path, home: Option<&std::path::Path>) -> bool {
+        fn normalize(p: &std::path::Path) -> std::path::PathBuf {
+            if let Ok(c) = std::fs::canonicalize(p) {
+                return c;
+            }
+            // Relative paths that do not exist yet resolve against the cwd.
+            if p.is_relative() {
+                if let Ok(cwd) = std::env::current_dir() {
+                    if let Ok(c) = std::fs::canonicalize(cwd.join(p)) {
+                        return c;
+                    }
+                }
+            }
+            p.to_path_buf()
+        }
+
+        let root = normalize(root);
+        if root.parent().is_none() {
+            return true; // "/" — everything is under it
+        }
+        match home {
+            Some(h) => normalize(h) == root,
+            None => false,
+        }
+    }
+
+    /// Loud refusal for a too-broad root, naming the tool, the root and the fix.
+    fn broad_root_error(tool: &str, root: &std::path::Path) -> Value {
+        tool_error(format!(
+            "{tool}: refusing to use {} as a project root — it is the home directory (or the \
+             filesystem root), so any store, index or lexical walk under it covers unrelated \
+             trees (this is how a $HOME-rooted server once answered a sense query with hits from \
+             ~/AndroidSDK). Start the MCP server in the project directory, or pass an explicit \
+             absolute root/path.",
+            root.display()
+        ))
+    }
+
     /// Duplex-loop metrics (Motor2 plan #23): propose/validate/apply counts
     /// persisted at <project>/.gnawtreewriter_metrics.json so integrations
     /// can aggregate rates across sessions. Read-modify-write (rare
@@ -1310,22 +1361,22 @@ pub mod mcp_server {
     /// Fas 4: attach the impact report to a successful edit response —
     /// only when there IS impact data (signature change with indexed
     /// MCP-standard-kuvert: code_index-hanteraren returnerar bar-objekt
-        /// ({mode, report|ok, ...}) — tjänstens klient läser result.content[]
-        /// och bar-objekt blir null (dogfood-fynd 2026-11-10 efter
-        /// service-omstarten: sträng-svarande verktyg fungerade, code_index
-        /// blev null). Payloaden serialiseras som content[0].text (JSON) —
-        /// samma kontrakt som övriga JSON-returnerande handlers.
-        fn envelope_code_index(payload: Value) -> Value {
-            let is_error = payload
-                .get("isError")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let text = serde_json::to_string(&payload).unwrap_or_default();
-            json!({
-                "content": [{ "type": "text", "text": text }],
-                "isError": is_error
-            })
-        }
+    /// ({mode, report|ok, ...}) — tjänstens klient läser result.content[]
+    /// och bar-objekt blir null (dogfood-fynd 2026-11-10 efter
+    /// service-omstarten: sträng-svarande verktyg fungerade, code_index
+    /// blev null). Payloaden serialiseras som content[0].text (JSON) —
+    /// samma kontrakt som övriga JSON-returnerande handlers.
+    fn envelope_code_index(payload: Value) -> Value {
+        let is_error = payload
+            .get("isError")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let text = serde_json::to_string(&payload).unwrap_or_default();
+        json!({
+            "content": [{ "type": "text", "text": text }],
+            "isError": is_error
+        })
+    }
     /// callers). Missing index ⇒ field omitted, never null noise.
     fn attach_impact(mut result: Value, w: &GnawTreeWriter) -> Value {
         if let (Some(obj), Some(impact)) = (result.as_object_mut(), w.last_edit_impact()) {
@@ -3081,26 +3132,31 @@ or list_nodes for a flat index of this file.",
         use crate::core::code_index::{self as ci, CodeIndexOptions};
         use crate::core::code_index_db;
         let root_path = std::path::Path::new(root);
+        // A daemon rooted at $HOME reported this project's store as absent and
+        // pointed the caller at `--db`, which would have built a store FOR $HOME.
+        if root_is_too_broad(root_path, home_dir().as_deref()) {
+            return broad_root_error("code_index", root_path);
+        }
         let mut opts = CodeIndexOptions::default();
         if let Some(i) = intro {
             opts.intro_file = Some(std::path::PathBuf::from(i));
         }
         match mode {
             "coverage" => {
-                            // Phase 1 coverage harness (proposal 2026-11-09): read-only
-                            // store metrics; never creates the store (decision #8).
-                            let index_root = code_index_db::resolve_index_root(root_path);
-                            match code_index_db::open_existing(&index_root) {
-                                Ok(conn) => match crate::core::code_index_coverage::measure(&conn) {
-                                    Ok(report) => json!({ "mode": "coverage", "report": report }),
-                                    Err(e) => tool_error(format!("code_index coverage failed: {e:#}")),
-                                },
-                                Err(e) => tool_error(format!(
-                                    "code_index coverage: no store under {} — run mode=refresh first ({e:#})",
-                                    index_root.display()
-                                )),
-                            }
-                        }
+                // Phase 1 coverage harness (proposal 2026-11-09): read-only
+                // store metrics; never creates the store (decision #8).
+                let index_root = code_index_db::resolve_index_root(root_path);
+                match code_index_db::open_existing(&index_root) {
+                    Ok(conn) => match crate::core::code_index_coverage::measure(&conn) {
+                        Ok(report) => json!({ "mode": "coverage", "report": report }),
+                        Err(e) => tool_error(format!("code_index coverage failed: {e:#}")),
+                    },
+                    Err(e) => tool_error(format!(
+                        "code_index coverage: no store under {} — run mode=refresh first ({e:#})",
+                        index_root.display()
+                    )),
+                }
+            }
             "refresh" => match code_index_db::generate_with_db(root_path, &opts) {
                 Ok(run) => json!({
                     "mode": "refresh",
@@ -3124,13 +3180,15 @@ or list_nodes for a flat index of this file.",
                         // P2 (Comparative-Thinker-planen §4): graph QUERIES over
                         // the same store. Read-only, and they never create it —
                         // empty store is a loud error with a refresh hint.
-                        "cycles" => match crate::core::code_graph::cycles(&conn, depth.unwrap_or(64)) {
-                            Ok(rows) => json!({
-                                "mode": "query", "kind": "cycles",
-                                "count": rows.len(), "cycles": rows
-                            }),
-                            Err(e) => tool_error(format!("code_index cycles failed: {e:#}")),
-                        },
+                        "cycles" => {
+                            match crate::core::code_graph::cycles(&conn, depth.unwrap_or(64)) {
+                                Ok(rows) => json!({
+                                    "mode": "query", "kind": "cycles",
+                                    "count": rows.len(), "cycles": rows
+                                }),
+                                Err(e) => tool_error(format!("code_index cycles failed: {e:#}")),
+                            }
+                        }
                         "impact" => {
                             let Some(sym) = symbol else {
                                 return tool_error(
@@ -3293,6 +3351,12 @@ or list_nodes for a flat index of this file.",
         file_path: Option<&str>,
         expand: bool,
     ) -> Value {
+        // Root guard first: a $HOME root degrades the semantic channel AND makes
+        // the lexical fallback walk the whole home directory (field finding
+        // 2026-11-10 — answers came from ~/AndroidSDK).
+        if root_is_too_broad(&state.project_root, home_dir().as_deref()) {
+            return broad_root_error("sense", &state.project_root);
+        }
         #[cfg(feature = "modernbert")]
         {
             use crate::llm::SenseResponse;
@@ -4060,6 +4124,41 @@ or list_nodes for a flat index of this file.",
     /// part of list_nodes/search_nodes/analyze must carry dot-paths —
     /// clients that render (or truncate) only content[0].text previously
     /// saw bare "Found N ..." headers and could not target edit_node.
+    /// Root-guard tests (field finding 2026-11-10): a home/root cwd must be
+    /// refused, a real project directory must pass. Pure — no filesystem setup.
+    #[cfg(test)]
+    mod root_guard_tests {
+        use super::*;
+
+        #[test]
+        fn home_and_filesystem_root_are_too_broad() {
+            let home = std::path::Path::new("/home/nonexistent-user");
+            assert!(root_is_too_broad(home, Some(home)));
+            assert!(root_is_too_broad(std::path::Path::new("/"), None));
+        }
+
+        #[test]
+        fn a_project_directory_is_not_too_broad() {
+            let home = std::path::Path::new("/home/nonexistent-user");
+            assert!(!root_is_too_broad(std::path::Path::new("/tmp"), Some(home)));
+            assert!(!root_is_too_broad(
+                std::path::Path::new("/home/nonexistent-user/proj"),
+                Some(home)
+            ));
+        }
+
+        #[test]
+        fn the_actual_home_dir_is_detected() {
+            if let Some(h) = home_dir() {
+                assert!(
+                    root_is_too_broad(&h, Some(&h)),
+                    "HOME={} must be refused as a project root",
+                    h.display()
+                );
+            }
+        }
+    }
+
     #[cfg(test)]
     mod read_path_tests {
         use super::*;

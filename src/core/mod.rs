@@ -11,9 +11,9 @@ pub mod backup;
 pub mod batch;
 pub mod blast;
 pub mod blueprint;
+pub mod code_graph;
 pub mod code_index;
 pub mod code_index_coverage;
-pub mod code_graph;
 pub mod code_index_db;
 pub mod compress;
 pub mod curator;
@@ -1135,9 +1135,8 @@ impl GnawTreeWriter {
     /// idag: formateringsnormalisering (pretty 2-space) vid avvikande
     /// underlag. Parkerad uppföljning, se CHANGELOG 0.23.1.
     fn json_semantic_edit(&self, node_path: &str, new_content: &str) -> Result<String> {
-        let mut root: serde_json::Value = serde_json::from_str(&self.source_code).map_err(|e| {
-            anyhow::anyhow!("JSON-edit: källfilen är inte giltig JSON: {e}")
-        })?;
+        let mut root: serde_json::Value = serde_json::from_str(&self.source_code)
+            .map_err(|e| anyhow::anyhow!("JSON-edit: källfilen är inte giltig JSON: {e}"))?;
 
         // Tom path = roten (JsonParser ger roten id "").
         if node_path.is_empty() {
@@ -1523,10 +1522,7 @@ impl GnawTreeWriter {
             }
         }
 
-        Ok(Self::join_preserving_newline(
-            &new_lines,
-            &self.source_code,
-        ))
+        Ok(Self::join_preserving_newline(&new_lines, &self.source_code))
     }
 
     fn delete_node_at_path(&self, node_path: &str) -> Result<String> {
@@ -1558,10 +1554,7 @@ impl GnawTreeWriter {
             .copied()
             .collect();
 
-        Ok(Self::join_preserving_newline(
-            &new_lines,
-            &self.source_code,
-        ))
+        Ok(Self::join_preserving_newline(&new_lines, &self.source_code))
     }
     pub fn get_source(&self) -> &str {
         &self.source_code
@@ -1805,7 +1798,10 @@ mod tests {
         let src = w.get_source();
         let zeta = src.find("\"zeta\"").unwrap();
         let alpha = src.find("\"alpha\"").unwrap();
-        assert!(zeta < alpha, "nyckelordningen bevaras (zeta före alpha): {src}");
+        assert!(
+            zeta < alpha,
+            "nyckelordningen bevaras (zeta före alpha): {src}"
+        );
         let z_last = src.find("\"z_last\"").unwrap();
         let a_first = src.find("\"a_first\"").unwrap();
         assert!(z_last < a_first, "nästlade nycklar orörda i ordning: {src}");
@@ -1986,35 +1982,35 @@ mod tests {
 
     /// B2 detector: lines that ALREADY lived outside the node's span are
     #[test]
-        fn duplicate_attribute_guard_rejects_reinclusion() {
-            // Dogfood finding 2026-11-10: replacing a node whose leading
-            // sibling is #[test] with content that STARTS with #[test] must
-            // be rejected loudly (E_DUPLICATE_ATTRIBUTE) — valid Rust, so the
-            // syntax gate cannot catch it, and a doubled #[test] registers the
-            // test twice.
-            let lines: Vec<&str> = vec!["#[test]", "fn t() { let a = 1; }"];
-            let err = check_duplicate_attribute_above(&lines, 2, "#[test]\nfn t() { let a = 2; }")
-                .expect_err("re-included attribute must be rejected");
-            assert!(format!("{err:#}").contains("E_DUPLICATE_ATTRIBUTE"));
-    
-            // Replacement WITHOUT the attribute passes (the correct fix shape).
-            check_duplicate_attribute_above(&lines, 2, "fn t() { let a = 2; }").unwrap();
-    
-            // Different attribute above: still rejected (same-line collision).
-            let lines2: Vec<&str> = vec!["#[cfg(test)]", "fn t() {}"];
-            let err2 =
-                check_duplicate_attribute_above(&lines2, 2, "#[cfg(test)]\nfn t() {}").expect_err("must reject");
-            assert!(format!("{err2:#}").contains("E_DUPLICATE_ATTRIBUTE"));
-    
-            // No attribute above: anything goes.
-            let lines3: Vec<&str> = vec!["pub struct S;", "fn t() {}"];
-            check_duplicate_attribute_above(&lines3, 2, "#[test]\nfn t() {}").unwrap();
-    
-            // Doc comment between attribute and node stops the scan conservatively
-            // (attribute-above-doc layout is missed, never false-positived).
-            let lines4: Vec<&str> = vec!["#[test]", "/// docs", "fn t() {}"];
-            check_duplicate_attribute_above(&lines4, 3, "#[test]\nfn t2() {}").unwrap();
-        }
+    fn duplicate_attribute_guard_rejects_reinclusion() {
+        // Dogfood finding 2026-11-10: replacing a node whose leading
+        // sibling is #[test] with content that STARTS with #[test] must
+        // be rejected loudly (E_DUPLICATE_ATTRIBUTE) — valid Rust, so the
+        // syntax gate cannot catch it, and a doubled #[test] registers the
+        // test twice.
+        let lines: Vec<&str> = vec!["#[test]", "fn t() { let a = 1; }"];
+        let err = check_duplicate_attribute_above(&lines, 2, "#[test]\nfn t() { let a = 2; }")
+            .expect_err("re-included attribute must be rejected");
+        assert!(format!("{err:#}").contains("E_DUPLICATE_ATTRIBUTE"));
+
+        // Replacement WITHOUT the attribute passes (the correct fix shape).
+        check_duplicate_attribute_above(&lines, 2, "fn t() { let a = 2; }").unwrap();
+
+        // Different attribute above: still rejected (same-line collision).
+        let lines2: Vec<&str> = vec!["#[cfg(test)]", "fn t() {}"];
+        let err2 = check_duplicate_attribute_above(&lines2, 2, "#[cfg(test)]\nfn t() {}")
+            .expect_err("must reject");
+        assert!(format!("{err2:#}").contains("E_DUPLICATE_ATTRIBUTE"));
+
+        // No attribute above: anything goes.
+        let lines3: Vec<&str> = vec!["pub struct S;", "fn t() {}"];
+        check_duplicate_attribute_above(&lines3, 2, "#[test]\nfn t() {}").unwrap();
+
+        // Doc comment between attribute and node stops the scan conservatively
+        // (attribute-above-doc layout is missed, never false-positived).
+        let lines4: Vec<&str> = vec!["#[test]", "/// docs", "fn t() {}"];
+        check_duplicate_attribute_above(&lines4, 3, "#[test]\nfn t2() {}").unwrap();
+    }
     /// other code, not remnants; true insertion remnants fire.
     #[test]
     fn replacement_remnant_detector_is_sound() {

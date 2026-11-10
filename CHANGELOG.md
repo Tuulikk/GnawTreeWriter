@@ -1,3 +1,24 @@
+## [Unreleased]
+
+### Fixed (MCP) — en `$HOME`-rot betjänade främmande träd
+
+- **`sense` och `code_index` avvisar nu en projektrot som är `$HOME` eller
+  `/`** (`root_is_too_broad` + `broad_root_error`, kopplade i `handle_sense`
+  och `handle_code_index_mcp`). Fältfynd: en MCP-daemon startad med
+  `cwd=$HOME` svarade en `sense`-fråga med 5/5 träffar i `~/AndroidSDK`,
+  rapporterade anroparens egen store som frånvarande och degraderade den
+  semantiska kanalen — tre symptom, en felaktig rot. Rötter kommer från
+  `std::env::current_dir()`; felet var att den ärvdes utan vakt, inte att
+  något var hårdkodat.
+- Test: `root_guard_tests` (3 fall, rena — ingen filsystem-beroende).
+
+### Known (kvar)
+
+- `AiManager::new` väljer modellcache **allt-eller-inget på `modernbert`**
+  (`src/llm/ai_manager.rs:563`): finns `modernbert` lokalt ignoreras en global
+  `bge-base` och tvärtom → `sense` kan rapporteras "degraderad" trots att
+  modellen är installerad. Bör lösas per modell.
+
 ## [0.25.1] - 2026-11-10
 
 ### Changed (CLI) — `--db` skriver artefakten i stället för att dumma den

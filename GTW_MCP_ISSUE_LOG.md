@@ -1931,3 +1931,30 @@ självdiagnostiserande.
 - [ ] inte hittad vid behov
 - [ ] under förmåga
 
+**ÅTGÄRDAD 2026-11-10 (samma dag):** `root_is_too_broad` + `broad_root_error` i
+`src/mcp/mod.rs`, kopplade i `handle_sense` och `handle_code_index_mcp`. En rot
+som är `$HOME` (eller `/`) avvisas nu **högljutt** med rot, orsak och fix i
+meddelandet, i stället för att tyst betjäna ett främmande träd. Test:
+`root_guard_tests` (3 fall, rena).
+
+Rotorsaken är alltså **inte** hårdkodade sökvägar — `grep -rnE '"/home/|"/Users/|/mnt/' src/`
+gav noll träffar. Alla rötter kommer från `std::env::current_dir()` (tio ställen
+i `mcp/mod.rs`); felet var att den **ärvdes utan vakt**.
+
+**Systereffekt som samtidigt förklarades (inte åtgärdad):** `sense` såg
+"degraderad" ut i samma session, men `bge-base` låg i
+`<repo>/.gnawtreewriter_ai/models/bge-base/` hela tiden. `AiManager::new`
+(`src/llm/ai_manager.rs:563`) väljer cachekatalog **allt-eller-inget på
+`modernbert`**: finns `modernbert` lokalt används hela den lokala katalogen,
+annars hela `$HOME`s. Från en `$HOME`-rot blir båda samma katalog, där
+`modernbert` finns men inte `bge-base` → semantisk kanal faller till lexikal
+sökning. Fix (backlog): lös modell **per modell** (lokal om *den* modellen
+finns lokalt, annars global) i stället för att avgöra hela katalogen på en
+annan modells närvaro.
+
+**Tredje tillståndet, mätt:** med korrekt rot svarar `sense` semantiskt, men
+`embeddings.db` var daterad 2026-10-07 och topp-poängen låg på **0,02**
+("Low confidence: 0.02 < 0.5"). Levande kanal, värdelös rankning — botas med
+`gnawtreewriter ai index`, inte med `ai setup`.
+
+

@@ -120,10 +120,7 @@ pub fn canonical_path_within(file_path: &str, boundary: &std::path::Path) -> Str
 }
 
 /// Canonical entity path with an optional boundary (see `canonical_path_within`).
-pub fn canonical_entity_path_in(
-    file_path: &str,
-    boundary: Option<&std::path::Path>,
-) -> String {
+pub fn canonical_entity_path_in(file_path: &str, boundary: Option<&std::path::Path>) -> String {
     match boundary {
         Some(b) => canonical_path_within(file_path, b),
         None => canonical_entity_path(file_path),

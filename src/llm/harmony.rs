@@ -165,7 +165,11 @@ mod tests {
 
     #[test]
     fn harmony_single_pillar_is_neutral_not_confident() {
-        let h = harmony(&Pillars { semantic: 0.9, lexical: None, graph: None });
+        let h = harmony(&Pillars {
+            semantic: 0.9,
+            lexical: None,
+            graph: None,
+        });
         assert_eq!(h.pillars_available, 1);
         assert!(approx(h.dissonance, 0.0));
         assert!(approx(h.score, 0.9), "score == pillar, never faked 1.0");
@@ -173,14 +177,22 @@ mod tests {
 
     #[test]
     fn harmony_two_agreeing_pillars_is_one() {
-        let h = harmony(&Pillars { semantic: 0.9, lexical: Some(0.9), graph: None });
+        let h = harmony(&Pillars {
+            semantic: 0.9,
+            lexical: Some(0.9),
+            graph: None,
+        });
         assert!(approx(h.dissonance, 0.0));
         assert!(approx(h.score, 1.0));
     }
 
     #[test]
     fn harmony_two_max_disagreement_is_zero() {
-        let h = harmony(&Pillars { semantic: 1.0, lexical: Some(0.0), graph: None });
+        let h = harmony(&Pillars {
+            semantic: 1.0,
+            lexical: Some(0.0),
+            graph: None,
+        });
         assert!(approx(h.dissonance, 1.0));
         assert!(approx(h.score, 0.0));
     }
@@ -193,13 +205,30 @@ mod tests {
         // the score further; absence does not. Either way the response
         // declares what participated (pillars_available) — the consumer
         // decides how much to trust a 2-pillar verdict.
-        let without = harmony(&Pillars { semantic: 0.9, lexical: Some(0.1), graph: None });
-        let with_zero = harmony(&Pillars { semantic: 0.9, lexical: Some(0.1), graph: Some(0.0) });
-        assert!(approx(without.dissonance, 0.64), "2-pillar normalised variance");
-        assert!(approx(with_zero.dissonance, 0.73), "dissenting third pillar adds spread");
+        let without = harmony(&Pillars {
+            semantic: 0.9,
+            lexical: Some(0.1),
+            graph: None,
+        });
+        let with_zero = harmony(&Pillars {
+            semantic: 0.9,
+            lexical: Some(0.1),
+            graph: Some(0.0),
+        });
+        assert!(
+            approx(without.dissonance, 0.64),
+            "2-pillar normalised variance"
+        );
+        assert!(
+            approx(with_zero.dissonance, 0.73),
+            "dissenting third pillar adds spread"
+        );
         assert_eq!(without.pillars_available, 2);
         assert_eq!(with_zero.pillars_available, 3);
-        assert!(without.suggestion.is_some(), "2-pillar dissonance still explains itself");
+        assert!(
+            without.suggestion.is_some(),
+            "2-pillar dissonance still explains itself"
+        );
     }
 
     // ---- S3 characterization pins (MEASURED source run, 2026-11-10) ----
@@ -208,26 +237,78 @@ mod tests {
     fn harmony_matches_measured_ct_characterization() {
         // From /tmp/opencode/ct-091-characterization.txt — every value
         // below is a MEASURED output of the source binary, not invented.
-        let case = |s: Pillars| dissonance_of(&{
-            let mut v = vec![s.semantic];
-            if let Some(l) = s.lexical { v.push(l); }
-            if let Some(g) = s.graph { v.push(g); }
-            v
-        });
+        let case = |s: Pillars| {
+            dissonance_of(&{
+                let mut v = vec![s.semantic];
+                if let Some(l) = s.lexical {
+                    v.push(l);
+                }
+                if let Some(g) = s.graph {
+                    v.push(g);
+                }
+                v
+            })
+        };
 
-        assert!(approx(case(Pillars { semantic: 0.9, lexical: Some(0.8), graph: Some(0.95) }), 0.0175));
-        assert!(approx(case(Pillars { semantic: 0.7, lexical: Some(0.8), graph: Some(0.6) }), 0.0300));
-        assert!(approx(case(Pillars { semantic: 0.9, lexical: Some(0.1), graph: Some(0.2) }), 0.5700));
-        assert!(approx(case(Pillars { semantic: 0.2, lexical: Some(0.3), graph: Some(0.9) }), 0.4300));
-        assert!(approx(case(Pillars { semantic: 0.7, lexical: Some(0.7), graph: Some(0.7) }), 0.0));
-        assert!(approx(case(Pillars { semantic: 0.0, lexical: Some(1.0), graph: Some(0.0) }), 1.0));
+        assert!(approx(
+            case(Pillars {
+                semantic: 0.9,
+                lexical: Some(0.8),
+                graph: Some(0.95)
+            }),
+            0.0175
+        ));
+        assert!(approx(
+            case(Pillars {
+                semantic: 0.7,
+                lexical: Some(0.8),
+                graph: Some(0.6)
+            }),
+            0.0300
+        ));
+        assert!(approx(
+            case(Pillars {
+                semantic: 0.9,
+                lexical: Some(0.1),
+                graph: Some(0.2)
+            }),
+            0.5700
+        ));
+        assert!(approx(
+            case(Pillars {
+                semantic: 0.2,
+                lexical: Some(0.3),
+                graph: Some(0.9)
+            }),
+            0.4300
+        ));
+        assert!(approx(
+            case(Pillars {
+                semantic: 0.7,
+                lexical: Some(0.7),
+                graph: Some(0.7)
+            }),
+            0.0
+        ));
+        assert!(approx(
+            case(Pillars {
+                semantic: 0.0,
+                lexical: Some(1.0),
+                graph: Some(0.0)
+            }),
+            1.0
+        ));
     }
 
     #[test]
     fn harmony_three_matches_derived_reference() {
         // DERIVE cross-check (plan §3.1): [0.9, 0.2, 0.1] — mean 0.4,
         // Σsq = 0.38, normalised = 0.38 / (2/3) = 0.57.
-        let h = harmony(&Pillars { semantic: 0.9, lexical: Some(0.2), graph: Some(0.1) });
+        let h = harmony(&Pillars {
+            semantic: 0.9,
+            lexical: Some(0.2),
+            graph: Some(0.1),
+        });
         assert!(approx(h.dissonance, 0.57));
         assert_eq!(h.verdict, HarmonyVerdict::Disharmonious);
     }
@@ -236,22 +317,48 @@ mod tests {
     fn harmony_verdict_thresholds() {
         // [0.8, 0.3, 0.2]: mean 0.4333, Σsq ≈ 0.2067 → d ≈ 0.31 —
         // comfortably inside the MINOR band (0.25..0.50).
-        let h_mid = harmony(&Pillars { semantic: 0.8, lexical: Some(0.3), graph: Some(0.2) });
-        assert!(approx(h_mid.dissonance, 0.31), "comfortably inside the MINOR band");
+        let h_mid = harmony(&Pillars {
+            semantic: 0.8,
+            lexical: Some(0.3),
+            graph: Some(0.2),
+        });
+        assert!(
+            approx(h_mid.dissonance, 0.31),
+            "comfortably inside the MINOR band"
+        );
         assert_eq!(h_mid.verdict, HarmonyVerdict::MinorDissonance);
-        let h_low = harmony(&Pillars { semantic: 0.9, lexical: Some(0.8), graph: Some(0.85) });
+        let h_low = harmony(&Pillars {
+            semantic: 0.9,
+            lexical: Some(0.8),
+            graph: Some(0.85),
+        });
         assert_eq!(h_low.verdict, HarmonyVerdict::Harmonious);
-        let h_high = harmony(&Pillars { semantic: 0.9, lexical: Some(0.1), graph: Some(0.2) });
+        let h_high = harmony(&Pillars {
+            semantic: 0.9,
+            lexical: Some(0.1),
+            graph: Some(0.2),
+        });
         assert_eq!(h_high.verdict, HarmonyVerdict::Disharmonious);
     }
 
     #[test]
     fn harmony_suggestion_names_strong_and_weak_pillar() {
-        let h = harmony(&Pillars { semantic: 0.9, lexical: Some(0.1), graph: Some(0.2) });
+        let h = harmony(&Pillars {
+            semantic: 0.9,
+            lexical: Some(0.1),
+            graph: Some(0.2),
+        });
         let s = h.suggestion.expect("disharmonious must explain itself");
         assert!(s.contains("semantic"), "names the strong pillar");
         assert!(s.contains("lexical"), "names the weak pillar");
-        let harmonious = harmony(&Pillars { semantic: 0.9, lexical: Some(0.85), graph: Some(0.9) });
-        assert!(harmonious.suggestion.is_none(), "harmony needs no explanation");
+        let harmonious = harmony(&Pillars {
+            semantic: 0.9,
+            lexical: Some(0.85),
+            graph: Some(0.9),
+        });
+        assert!(
+            harmonious.suggestion.is_none(),
+            "harmony needs no explanation"
+        );
     }
 }

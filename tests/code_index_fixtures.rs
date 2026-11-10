@@ -137,10 +137,7 @@ fn fixture_baseline_post_c() {
     // module_b::run), all bare-named `helper` after the scoped extraction.
     // The two (alpha → helper) pairs are the callsite-level multiplicity
     // D8 pins.
-    let helper_rows: Vec<_> = calls
-        .iter()
-        .filter(|r| r["to_name"] == "helper")
-        .collect();
+    let helper_rows: Vec<_> = calls.iter().filter(|r| r["to_name"] == "helper").collect();
     assert_eq!(
         helper_rows.len(),
         4,
@@ -158,8 +155,7 @@ fn fixture_baseline_post_c() {
     let scoped: Vec<_> = calls
         .iter()
         .filter(|r| {
-            r["to_name"] == "helper"
-                && r["from"].as_str().unwrap_or("").contains(":function:run")
+            r["to_name"] == "helper" && r["from"].as_str().unwrap_or("").contains(":function:run")
         })
         .collect();
     assert_eq!(scoped.len(), 2, "H3 flipped: super::helper rows exist");
@@ -206,7 +202,10 @@ fn fixture_baseline_post_c() {
         .filter(|r| r["relation_type"] == "implements")
         .collect();
     assert_eq!(impls.len(), 1);
-    assert!(impls[0]["to_id"].is_string(), "H4 flipped: implements resolves");
+    assert!(
+        impls[0]["to_id"].is_string(),
+        "H4 flipped: implements resolves"
+    );
 
     // The coverage harness reads the SAME store — measured post-C metrics.
     let report = code_index_coverage::measure(&conn).unwrap();

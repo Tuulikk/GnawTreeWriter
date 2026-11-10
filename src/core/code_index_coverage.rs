@@ -146,9 +146,7 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
              GROUP BY class
              ORDER BY COUNT(*) DESC, class",
         )?;
-        let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-        })?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
         for row in rows {
             let (class, count) = row?;
             source_coverage.push(SourceClass { class, count });
@@ -172,9 +170,7 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
              GROUP BY class
              ORDER BY COUNT(*) DESC, class",
         )?;
-        let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-        })?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
         for row in rows {
             let (class, count) = row?;
             target_classes.push(TargetClass { class, count });
@@ -183,7 +179,9 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
 
     let symbols_total: i64 = conn.query_row("SELECT COUNT(*) FROM symbols", [], |r| r.get(0))?;
     let symbols_external: i64 =
-        conn.query_row("SELECT COALESCE(SUM(external), 0) FROM symbols", [], |r| r.get(0))?;
+        conn.query_row("SELECT COALESCE(SUM(external), 0) FROM symbols", [], |r| {
+            r.get(0)
+        })?;
 
     let files: i64 = conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?;
 
@@ -211,12 +209,9 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
         .unwrap_or(0);
     let history_gap = files > 0 && completed_revisions == 0;
     let prose: ProseSummary = {
-        let mut stmt = conn.prepare(
-            "SELECT status, COUNT(*) FROM prose_annotations GROUP BY status",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-        })?;
+        let mut stmt =
+            conn.prepare("SELECT status, COUNT(*) FROM prose_annotations GROUP BY status")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
         let mut fresh = 0i64;
         let mut stale = 0i64;
         let mut invalid = 0i64;

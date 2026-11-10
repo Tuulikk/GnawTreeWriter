@@ -644,8 +644,7 @@ pub fn rerank_satellite_with_graphs<'a>(
         // cli.rs) make adjacency meaningless — a call to them says
         // nothing about topical kinship. Skip them as seeds AND as
         // neighbors; degree = resolved in+out edges over the graph.
-        let mut degree: std::collections::HashMap<String, usize> =
-            std::collections::HashMap::new();
+        let mut degree: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for graph in graphs {
             let fk = graph_path_key(&graph.file_path).to_string();
             *degree.entry(fk).or_insert(0) += graph.relations.len();
@@ -843,13 +842,15 @@ mod tests {
             file_path: "src/f1.rs".to_string(),
             ..Default::default()
         };
-        graph.relations.insert(crate::llm::relational_index::Relation {
-            from_file: "src/f1.rs".to_string(),
-            from_path: "f1::call".to_string(),
-            to_file: Some("src/f9_neighbor.rs".to_string()),
-            to_name: "unrelated preview text".to_string(),
-            relation_type: crate::llm::relational_index::RelationType::Call,
-        });
+        graph
+            .relations
+            .insert(crate::llm::relational_index::Relation {
+                from_file: "src/f1.rs".to_string(),
+                from_path: "f1::call".to_string(),
+                to_file: Some("src/f9_neighbor.rs".to_string()),
+                to_name: "unrelated preview text".to_string(),
+                relation_type: crate::llm::relational_index::RelationType::Call,
+            });
         let out = rerank_satellite_with_graphs("seed_fn_1", hits.clone(), 10, Some(&[graph]));
 
         let nb = out
@@ -863,7 +864,11 @@ mod tests {
             .iter()
             .find(|h| h.entry.file_path == "src/f1.rs")
             .expect("seed entry present");
-        assert_eq!(f1.graph, Some(0.0), "channel ran, seeds are not their own neighbors");
+        assert_eq!(
+            f1.graph,
+            Some(0.0),
+            "channel ran, seeds are not their own neighbors"
+        );
 
         // Absence is not agreement: no graphs → None on every hit, and the
         // pillar count drops to 2 (honest 2-pillar verdict, never faked).
