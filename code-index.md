@@ -1,10 +1,10 @@
 # CODE-INDEX — GnawTreeWriter
 
-> Genererad 2026-11-10 15:41 UTC · gnawtreewriter 0.24.0 · git `a14b245` +DIRTY
+> Genererad 2026-11-10 15:53 UTC · gnawtreewriter 0.24.0 · git `14b4e0d`
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 7035bce16bb7fcf174defa52a3f03fb6
+> Body-hash: c524418dd7d58c100d59ab80aad7bbd8
 
 ## Träd
 
@@ -62,7 +62,7 @@ src/core/
   blueprint.rs (182 rader)
   code_index.rs (678 rader)
   code_index_coverage.rs (390 rader)
-  code_index_db.rs (1246 rader)
+  code_index_db.rs (1244 rader)
   compress.rs (487 rader)
   curator.rs (709 rader)
   diagnostics.rs (1077 rader)
@@ -101,9 +101,10 @@ src/llm/
   ai_manager.rs (1401 rader)
   batch.rs (96 rader)
   gnaw_sense.rs (872 rader)
+  harmony.rs (257 rader)
   impact_analyzer.rs (197 rader)
   llm_integration.rs (266 rader)
-  mod.rs (27 rader)
+  mod.rs (28 rader)
   pipeline.rs (893 rader)
   project_indexer.rs (209 rader)
   prompts.rs (174 rader)
@@ -606,7 +607,7 @@ _(inga toppnivå-items)_
 - `pub fn measure(conn: &Connection) -> Result<CoverageReport>` :95
 - `fn relations_total(conn: &Connection) -> anyhow::Result<i64>` :258
 
-### code_index_db.rs (1246 rader)
+### code_index_db.rs (1244 rader)
 - `pub const EXTRACTOR_VERSION: &str = "2"` :30
 - `const SCHEMA_VERSION: i32 = 4` :32
 - `const BUSY_TIMEOUT_MS: u64 = 5000` :33
@@ -622,34 +623,34 @@ _(inga toppnivå-items)_
 - `fn sidecar(path: &Path, suffix: &str) -> PathBuf` :232
 - `fn open_and_migrate(path: &Path) -> Result<Connection>` :238
 - `pub(crate) fn migrate_connection(conn: &Connection) -> Result<()>` :250
-- `fn repair_prose_columns(conn: &Connection) -> Result<()>` :289
-- `pub fn open_or_recreate(root: &Path) -> Result<(Connection, bool)>` :328
-- `pub fn open_existing(root: &Path) -> Result<Connection>` :349
-- `pub struct StoreStatus` :372
-- `pub fn store_status(root: &Path) -> Option<StoreStatus>` :379
-- `fn generation_key(opts: &CodeIndexOptions) -> String` :400
-- `fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>>` :411
-- `fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()>` :420
-- `fn upsert_file(` :431
-- `pub fn refresh(` :486
-- `pub(crate) fn record_revision(` :626
-- `pub fn upsert_prose(` :668
-- `pub(crate) fn sweep_prose_freshness(conn: &mut Connection) -> Result<()>` :698
-- `pub(crate) fn load_index(conn: &Connection) -> Result<Vec<FileIndex>>` :788
-- `fn load_warnings(conn: &Connection) -> Result<Vec<String>>` :853
-- `pub fn render(` :866
-- `pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun>` :880
-- `fn store_entities_relations(` :929
-- `fn resolve_unresolved_in_db(conn: &Connection) -> Result<()>` :995
-- `pub fn mark_stale(root: &Path, file_path: &str)` :1064
-- `pub fn content_hash(path: &Path) -> Option<String>` :1086
-- `pub fn is_stale(root: &Path, file: &str) -> bool` :1095
-- `pub fn stale_files(root: &Path) -> std::collections::BTreeSet<String>` :1114
-- `pub fn load_entities(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1135
-- `pub fn load_items(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1160
-- `pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1186
-- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :1210
-- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :1232
+- `fn repair_prose_columns(conn: &Connection) -> Result<()>` :287
+- `pub fn open_or_recreate(root: &Path) -> Result<(Connection, bool)>` :326
+- `pub fn open_existing(root: &Path) -> Result<Connection>` :347
+- `pub struct StoreStatus` :370
+- `pub fn store_status(root: &Path) -> Option<StoreStatus>` :377
+- `fn generation_key(opts: &CodeIndexOptions) -> String` :398
+- `fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>>` :409
+- `fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()>` :418
+- `fn upsert_file(` :429
+- `pub fn refresh(` :484
+- `pub(crate) fn record_revision(` :624
+- `pub fn upsert_prose(` :666
+- `pub(crate) fn sweep_prose_freshness(conn: &mut Connection) -> Result<()>` :696
+- `pub(crate) fn load_index(conn: &Connection) -> Result<Vec<FileIndex>>` :786
+- `fn load_warnings(conn: &Connection) -> Result<Vec<String>>` :851
+- `pub fn render(` :864
+- `pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun>` :878
+- `fn store_entities_relations(` :927
+- `fn resolve_unresolved_in_db(conn: &Connection) -> Result<()>` :993
+- `pub fn mark_stale(root: &Path, file_path: &str)` :1062
+- `pub fn content_hash(path: &Path) -> Option<String>` :1084
+- `pub fn is_stale(root: &Path, file: &str) -> bool` :1093
+- `pub fn stale_files(root: &Path) -> std::collections::BTreeSet<String>` :1112
+- `pub fn load_entities(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1133
+- `pub fn load_items(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1158
+- `pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1184
+- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :1208
+- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :1230
 
 ### compress.rs (487 rader)
 - `pub struct CompressedOutput` :12
@@ -1381,6 +1382,19 @@ _(inga toppnivå-items)_
   - `async fn index_file(` :670
   - `fn extract_name_from_preview(&self, preview: &str) -> Option<String>` :721
 
+### harmony.rs (257 rader)
+- `pub struct Harmony` :21
+- `pub struct HarmonyPillars` :37
+- `pub enum HarmonyVerdict` :45
+- `pub const DISSONANCE_MINOR: f32 = 0.25` :51
+- `pub const DISSONANCE_HIGH: f32 = 0.50` :52
+- `pub struct Pillars` :55
+- `impl From<&Pillars> for HarmonyPillars` :61
+  - `fn from(p: &Pillars) -> Self` :62
+- `pub fn dissonance_of(scores: &[f32]) -> f32` :73
+- `pub fn harmony(p: &Pillars) -> Harmony` :84
+- `fn suggestion_for(v: HarmonyVerdict, p: &Pillars) -> Option<String>` :126
+
 ### impact_analyzer.rs (197 rader)
 - `pub struct ImpactAnalyzer` :5
 - `pub struct ImpactReport` :10
@@ -1408,7 +1422,7 @@ _(inga toppnivå-items)_
 - `pub fn create_node_map(tree: &TreeNode) -> HashMap<String, TreeNode>` :255
 - `fn build_node_map(node: &TreeNode, map: &mut HashMap<String, TreeNode>)` :261
 
-### mod.rs (27 rader)
+### mod.rs (28 rader)
 _(inga toppnivå-items)_
 
 ### pipeline.rs (893 rader)

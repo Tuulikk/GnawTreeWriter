@@ -3301,12 +3301,40 @@ or list_nodes for a flat index of this file.",
                                 ),
                                 None => String::new(),
                             };
+                            // P1 (adaptation plan §3): top hit's pillar-
+                            // agreement verdict surfaces in the prose —
+                            // harmonious stays silent, dissonance explains
+                            // itself (FileMatch.harmony carries the data).
+                            let harmony_note = matches
+                                .first()
+                                .and_then(|m| m.harmony.as_ref())
+                                .filter(|h| {
+                                    h.verdict
+                                        != crate::llm::harmony::HarmonyVerdict::Harmonious
+                                })
+                                .map(|h| {
+                                    let v = match h.verdict {
+                                        crate::llm::harmony::HarmonyVerdict::MinorDissonance => {
+                                            "minor dissonance"
+                                        }
+                                        _ => "disharmony",
+                                    };
+                                    format!(
+                                        " ⚠ harmony: {} (dissonance {:.2}, {} pillar(s) consulted) — {}",
+                                        v,
+                                        h.dissonance,
+                                        h.pillars_available,
+                                        h.suggestion.as_deref().unwrap_or("")
+                                    )
+                                })
+                                .unwrap_or_default();
                             tool_success(
                                 format!(
-                                    "Satellite search: {} match(es) — {}{}",
+                                    "Satellite search: {} match(es) — {}{}{}",
                                     matches.len(),
                                     top,
-                                    suspect_note
+                                    suspect_note,
+                                    harmony_note
                                 ),
                                 Some(json!({
                                     "level": "semantik",

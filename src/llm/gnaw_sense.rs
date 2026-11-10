@@ -183,6 +183,9 @@ pub struct FileMatch {
     pub score: f32,
     /// Raw cosine from the embedding model, verbatim (0.0..=1.0).
     pub cosine: Option<f32>,
+    /// Pillar-agreement confidence (P1, adaptation plan §3) — None when
+    /// the hit did not pass through the reranker (zoom paths).
+    pub harmony: Option<crate::llm::harmony::Harmony>,
     /// Chunk preview straight from the index (ROADMAP 9.4 nice-to-have):
     /// score + preview in one response saves an extra read_node round-trip.
     pub content_preview: String,
@@ -438,6 +441,7 @@ impl GnawSenseBroker {
                         ),
                         score: hit.adjusted,
                         cosine: Some(hit.cosine),
+                        harmony: Some(hit.harmony),
                         content_preview: hit.entry.content_preview.clone(),
                     })
                     .collect(),

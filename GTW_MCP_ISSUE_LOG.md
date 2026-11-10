@@ -1833,3 +1833,32 @@ direkt-stdio jämförelse — stats `result-keys=['content', ...]`, code_index
 `['mode', 'ok', ...]`. **Fix:** `envelope_code_index` + dispatch-wrapping —
 resultat ny `['content', 'isError']` med rapport-JSON i text (verifierat
 över stdio).
+
+---
+
+## 2026-11-10 (III) — edit-stöd: tre fynd från en hel P1-wiring-session ("bygg nu")
+
+**Klass:** förbättringsförslag (alla tre små; tysta fall i en dag med ~30
+editer). Sammanhang: P1-wiring i `semantic_index.rs`/`gnaw_sense.rs`
+(RerankedHit 3→6 fält, 5-tuppel-refactor, FileMatch + harmony_note).
+
+**(1) `search_nodes` träff-annotering + trängst-först-ordning** (se II
+ovan). Spec: varje träff bär `node_type`, `span_lines`, `depth`; sorterad
+trängst-först. Idag: bredaste (source_file) först — agenten plockar fel,
+guardian räddar, men diagnosrundan är slösad. Guardian räddade 2× idag.
+
+**(2) `read_node` storleks-metadata.** Idag: 2-raders stubb skrevs in i en
+60-raders fn — syntaktiskt giltigt → tyst truncation (endast unused-var
+avslöjade det). Spec: read_node-svaret bär `node_lines: N` (+ start/end).
+Konsumenten ser 60 och skriver 2 → vet det före edit.
+
+**(3) `edit_node` storleksschock-vakt.** Spec: shrink >70 % utan
+motsvarande krav → kräv `force: true` eller preview-bekräftelse (E-kod i
+B2:s anda: "PARTIAL REPLACEMENT"-mönstret fångar remnanter, inte
+full-truncation). Idag passerade stubben tyst (valid syntax).
+
+**Variant-logg (samma session):** alla tre hittades via *eget* arbete —
+dogfooding-provet: P1-wiringen på en 100-raders tät funktion drev fram
+span-förvirringen, dubblett-stubben och grepp-bruset. Guardarna fungerade
+(B2-anda + guardian 2 räddningar) — förslagen gör den SÄKRA vägen till
+standardvägen i stället för att kräva disciplin.

@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::harmony::{harmony, Harmony, Pillars};
+
 use crate::llm::relational_index::FileGraph;
 
 /// Vector BLOB codec: little-endian f32 sequence (768 dims = 3 KB/row).
@@ -390,6 +392,17 @@ pub struct RerankedHit<'a> {
     pub entry: &'a NodeEmbedding,
     pub cosine: f32,
     pub adjusted: f32,
+    /// Lexical overlap, 0..=1 — RAW pillar for Harmony (the rank-space
+    /// `adjusted` is not measurable by variance; pillars must be taken
+    /// BEFORE the RRF fusion — adaptation plan §3.2).
+    pub lex: f32,
+    /// Graph pillar: Some(1.0) when the file is a graph-neighbor of a
+    /// seed, Some(0.0) when the channel ran but the file is not a
+    /// neighbor, None when the channel was unavailable (no graphs /
+    /// no seeds). Absence is not agreement.
+    pub graph: Option<f32>,
+    /// Pillar-agreement confidence (P1, adaptation plan §3).
+    pub harmony: Harmony,
 }
 
 /// Index entries may be chunked (`8[chunk:2]`) — such paths do not exist
@@ -565,10 +578,15 @@ pub fn rerank_satellite_with_graphs<'a>(
 
     let rrf = |rank: usize| 1.0 / (RRF_K + rank as f32);
 
-    let mut scored: Vec<(&NodeEmbedding, f32, f32)> = entries
+    // P1 (adaptation plan §3): the scored row carries the RAW pillars
+    // (lex overlap 0..=1, graph-neighbor flag) alongside the fused score —
+    // Harmony must measure agreement on the 0..1 pillar scale, never on
+    // the reciprocal-rank scale (§3.2: the one place a naive
+    // implementation is beautifully wrong).
+    let mut scored: Vec<(&NodeEmbedding, f32, f32, bool, f32)> = entries
         .iter()
         .enumerate()
-        .map(|(i, (entry, cosine, _lex, kind))| {
+        .map(|(i, (entry, cosine, lex, kind))| {
             let mut fused = rrf(i)
                 + if lex_rank[i] == usize::MAX {
                     0.0
@@ -593,11 +611,12 @@ pub fn rerank_satellite_with_graphs<'a>(
                 PreviewKind::Other => 0.0,
             };
             fused *= 1.0 + prior;
-            (*entry, *cosine, fused)
+            (*entry, *cosine, *lex, false, fused)
         })
         .collect();
 
-    scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+    let mut graph_channel_on = false;
+    scored.sort_by(|a, b| b.4.partial_cmp(&a.4).unwrap_or(std::cmp::Ordering::Equal));
 
     // Third channel (optional): graph proximity over the two-channel
     // order. Top GRAPH_SEED_K distinct files seed a BFS over the call
@@ -611,73 +630,75 @@ pub fn rerank_satellite_with_graphs<'a>(
             let mut seen = std::collections::HashSet::new();
             scored
                 .iter()
-                .filter(|(e, _, _)| seen.insert(e.file_path.clone()))
+                .filter(|(e, _, _, _, _)| seen.insert(e.file_path.clone()))
                 .take(GRAPH_SEED_K)
-                .map(|(e, _, _)| e.file_path.clone())
+                .map(|(e, _, _, _, _)| e.file_path.clone())
                 .collect()
         };
         if !seed_files.is_empty() {
-            let seeds: std::collections::HashSet<&str> =
-                seed_files.iter().map(|s| s.as_str()).collect();
-            // Hub exclusion: files wired to everything (core/mod.rs,
-            // cli.rs) make adjacency meaningless — a call to them says
-            // nothing about topical kinship. Skip them as seeds AND as
-            // neighbors; degree = resolved in+out edges over the graph.
-            let mut degree: std::collections::HashMap<String, usize> =
-                std::collections::HashMap::new();
-            for graph in graphs {
-                let fk = graph_path_key(&graph.file_path).to_string();
-                *degree.entry(fk).or_insert(0) += graph.relations.len();
-                for rel in &graph.relations {
-                    if let Some(t) = &rel.to_file {
-                        *degree.entry(graph_path_key(t).to_string()).or_insert(0) += 1;
-                    }
+            graph_channel_on = true;
+        }
+        let seeds: std::collections::HashSet<&str> =
+            seed_files.iter().map(|s| s.as_str()).collect();
+        // Hub exclusion: files wired to everything (core/mod.rs,
+        // cli.rs) make adjacency meaningless — a call to them says
+        // nothing about topical kinship. Skip them as seeds AND as
+        // neighbors; degree = resolved in+out edges over the graph.
+        let mut degree: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for graph in graphs {
+            let fk = graph_path_key(&graph.file_path).to_string();
+            *degree.entry(fk).or_insert(0) += graph.relations.len();
+            for rel in &graph.relations {
+                if let Some(t) = &rel.to_file {
+                    *degree.entry(graph_path_key(t).to_string()).or_insert(0) += 1;
                 }
             }
-            // neighbor file -> best (lowest) seed order adjacent to it
-            let mut neighbor_rank: std::collections::HashMap<String, usize> =
-                std::collections::HashMap::new();
-            let bump =
-                |file: &str, order: usize, map: &mut std::collections::HashMap<String, usize>| {
-                    map.entry(file.to_string())
-                        .and_modify(|r| *r = (*r).min(order))
-                        .or_insert(order);
-                };
-            for (order, seed) in seed_files.iter().enumerate() {
-                for graph in graphs {
-                    let gk = graph_path_key(&graph.file_path);
-                    if degree.get(gk).copied().unwrap_or(0) > GRAPH_HUB_DEGREE {
-                        continue;
-                    }
-                    if gk == seed.as_str() {
-                        for rel in &graph.relations {
-                            if let Some(target) = &rel.to_file {
-                                let key = graph_path_key(target).to_string();
-                                if !seeds.contains(key.as_str())
-                                    && degree.get(key.as_str()).copied().unwrap_or(0)
-                                        <= GRAPH_HUB_DEGREE
-                                {
-                                    bump(&key, order, &mut neighbor_rank);
-                                }
+        }
+        // neighbor file -> best (lowest) seed order adjacent to it
+        let mut neighbor_rank: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        let bump =
+            |file: &str, order: usize, map: &mut std::collections::HashMap<String, usize>| {
+                map.entry(file.to_string())
+                    .and_modify(|r| *r = (*r).min(order))
+                    .or_insert(order);
+            };
+        for (order, seed) in seed_files.iter().enumerate() {
+            for graph in graphs {
+                let gk = graph_path_key(&graph.file_path);
+                if degree.get(gk).copied().unwrap_or(0) > GRAPH_HUB_DEGREE {
+                    continue;
+                }
+                if gk == seed.as_str() {
+                    for rel in &graph.relations {
+                        if let Some(target) = &rel.to_file {
+                            let key = graph_path_key(target).to_string();
+                            if !seeds.contains(key.as_str())
+                                && degree.get(key.as_str()).copied().unwrap_or(0)
+                                    <= GRAPH_HUB_DEGREE
+                            {
+                                bump(&key, order, &mut neighbor_rank);
                             }
                         }
-                    } else if !seeds.contains(gk)
-                        && graph.relations.iter().any(|rel| {
-                            rel.to_file.as_deref().map(graph_path_key) == Some(seed.as_str())
-                        })
-                    {
-                        bump(gk, order, &mut neighbor_rank);
                     }
+                } else if !seeds.contains(gk)
+                    && graph.relations.iter().any(|rel| {
+                        rel.to_file.as_deref().map(graph_path_key) == Some(seed.as_str())
+                    })
+                {
+                    bump(gk, order, &mut neighbor_rank);
                 }
             }
-            if !neighbor_rank.is_empty() {
-                for (entry, _, fused) in scored.iter_mut() {
-                    if let Some(&g_rank) = neighbor_rank.get(&entry.file_path) {
-                        *fused += GRAPH_CHANNEL_WEIGHT * rrf(g_rank);
-                    }
+        }
+        if !neighbor_rank.is_empty() {
+            for (entry, _, _, graph_hit, fused) in scored.iter_mut() {
+                if let Some(&g_rank) = neighbor_rank.get(&entry.file_path) {
+                    *fused += GRAPH_CHANNEL_WEIGHT * rrf(g_rank);
+                    *graph_hit = true;
                 }
-                scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
             }
+            scored.sort_by(|a, b| b.4.partial_cmp(&a.4).unwrap_or(std::cmp::Ordering::Equal));
         }
     }
 
@@ -691,35 +712,61 @@ pub fn rerank_satellite_with_graphs<'a>(
     const HEAD_ZONE: usize = 5;
     let mut per_file: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     let mut out: Vec<RerankedHit<'a>> = Vec::with_capacity(top);
-    let mut deferred: Vec<(&'a NodeEmbedding, f32, f32)> = Vec::new();
+    let mut deferred: Vec<(&'a NodeEmbedding, f32, f32, bool, f32)> = Vec::new();
     let mut iter = scored.into_iter();
     while out.len() < HEAD_ZONE.min(top) {
-        let Some((entry, cosine, fused)) = iter.next() else {
+        let Some((entry, cosine, lex, graph_hit, fused)) = iter.next() else {
             break;
         };
         let count = per_file.entry(entry.file_path.as_str()).or_insert(0);
         if *count >= MAX_PER_FILE {
-            deferred.push((entry, cosine, fused));
+            deferred.push((entry, cosine, lex, graph_hit, fused));
             continue;
         }
         *count += 1;
+        let graph_pillar = if graph_channel_on {
+            Some(if graph_hit { 1.0 } else { 0.0 })
+        } else {
+            None
+        };
+        let h = harmony(&Pillars {
+            semantic: cosine.clamp(0.0, 1.0),
+            lexical: Some(lex),
+            graph: graph_pillar,
+        });
         out.push(RerankedHit {
             entry,
             cosine,
             adjusted: fused,
+            lex,
+            graph: graph_pillar,
+            harmony: h,
         });
     }
     // Tail: the headline-deferred first (they carry the best fused
     // scores of the tail), then the remaining fused order, uncapped.
-    for (entry, cosine, fused) in deferred.into_iter().chain(iter) {
+    for (entry, cosine, lex, graph_hit, fused) in deferred.into_iter().chain(iter) {
         if out.len() >= top {
             break;
         }
         *per_file.entry(entry.file_path.as_str()).or_insert(0) += 1;
+        let graph_pillar = if graph_channel_on {
+            Some(if graph_hit { 1.0 } else { 0.0 })
+        } else {
+            None
+        };
+        let h = harmony(&Pillars {
+            semantic: cosine.clamp(0.0, 1.0),
+            lexical: Some(lex),
+            graph: graph_pillar,
+        });
         out.push(RerankedHit {
             entry,
             cosine,
             adjusted: fused,
+            lex,
+            graph: graph_pillar,
+            harmony: h,
         });
     }
     out
@@ -759,6 +806,71 @@ mod tests {
         assert_eq!(out[0].entry.node_path, "2", "impl must outrank mod decl");
         assert_eq!(out[1].entry.node_path, "1");
         assert_eq!(out[2].entry.node_path, "3");
+    }
+
+    #[test]
+    fn rerank_exposes_raw_pillars() {
+        // §3.5 (P1): the hits carry the RAW pillars — lex 0..=1, graph as
+        // Some(1.0)-neighbor / Some(0.0)-no-proximity / None-no-channel —
+        // so Harmony measures agreement, not rank-space noise.
+        //
+        // Some(1.0) requires MORE than 8 files: seeds = the top-8 distinct
+        // files, so the only honest neighbor-promotion case at unit scale
+        // is a 9th file that is a graph-neighbor of seed #1.
+        let mut embeddings: Vec<NodeEmbedding> = Vec::new();
+        for i in 1..=8usize {
+            embeddings.push(NodeEmbedding {
+                file_path: format!("src/f{}.rs", i),
+                node_path: "1".to_string(),
+                content_preview: format!("pub fn seed_fn_{}() {{}}", i),
+                vector: Vec::new(),
+            });
+        }
+        embeddings.push(NodeEmbedding {
+            file_path: "src/f9_neighbor.rs".to_string(),
+            node_path: "1".to_string(),
+            content_preview: "unrelated preview text".to_string(),
+            vector: Vec::new(),
+        });
+        let hits: Vec<(&NodeEmbedding, f32)> = embeddings
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e, if i == 8 { 0.1 } else { 0.9 - i as f32 * 0.01 }))
+            .collect();
+        // The graph's OWN file is seed #1 (f1), and f1 calls into f9 —
+        // the graph channel's exact contract.
+        let mut graph = crate::llm::relational_index::FileGraph::default();
+        graph.file_path = "src/f1.rs".to_string();
+        graph.relations.insert(crate::llm::relational_index::Relation {
+            from_file: "src/f1.rs".to_string(),
+            from_path: "f1::call".to_string(),
+            to_file: Some("src/f9_neighbor.rs".to_string()),
+            to_name: "unrelated preview text".to_string(),
+            relation_type: crate::llm::relational_index::RelationType::Call,
+        });
+        let out = rerank_satellite_with_graphs("seed_fn_1", hits.clone(), 10, Some(&[graph]));
+
+        let nb = out
+            .iter()
+            .find(|h| h.entry.file_path == "src/f9_neighbor.rs")
+            .expect("neighbor entry present");
+        assert_eq!(nb.graph, Some(1.0), "graph-neighbor: Some(1.0)");
+        assert_eq!(nb.lex, 0.0, "promoted without lexical overlap");
+        assert_eq!(nb.harmony.pillars_available, 3);
+        let f1 = out
+            .iter()
+            .find(|h| h.entry.file_path == "src/f1.rs")
+            .expect("seed entry present");
+        assert_eq!(f1.graph, Some(0.0), "channel ran, seeds are not their own neighbors");
+
+        // Absence is not agreement: no graphs → None on every hit, and the
+        // pillar count drops to 2 (honest 2-pillar verdict, never faked).
+        let out_none = rerank_satellite("seed_fn_1", hits, 10);
+        assert!(out_none.iter().all(|h| h.graph.is_none()));
+        assert!(
+            out_none.iter().all(|h| h.harmony.pillars_available == 2),
+            "2-pillar harmony, never faked 3-pillar confidence"
+        );
     }
 
     #[test]
