@@ -2,7 +2,21 @@
 
 **AI-native tree-based code editor** - Edit code files based on AST structure levels with surgical precision, avoiding the common pitfalls of LLM-generated code.
 
-## 🚀 Version 0.24.0: Code-Index Coverage & Extractor v2
+## 🚀 Version 0.25.1: parserkorrekthet, graf-frågor och CLI-hygien
+
+- **Fyra nya grammatiker** — PowerShell, CMake, Makefile, Ruby — och fyra
+  parsrar flyttade till tree-sitter (markdown, css, yaml, toml): en rubrik
+  tappar inte längre sitt `#`, css/yaml/toml går att redigera nodvis.
+- **Graf-frågor (P2)**: `code-index --cycles | --impact | --why` och MCP
+  `code_index kind=cycles|impact` — med `meta`-kuvert (`index_stale`) så ett
+  grafsvar går att lita på eller falsifiera.
+- **Sex CLI-hål stängda**: exit-koder (`--version`/`--help` 1 → 0), `analyze`
+  non-zero vid noll parsade filer, `insert`-paniken, dubblettflaggor,
+  `--expect-name` som avvisar en inaktuell path i stället för att skriva fel nod.
+- **`code-index --db` skriver `code-index.md`** i stället för ~2 300 rader
+  markdown i terminalen (`--stdout` behåller gamla beteendet).
+
+### 0.24.0 — Code-Index Coverage & Extractor v2
 
 - **`code-index --coverage`** (CLI) och **`code_index mode=coverage`** (MCP):
   grafkvalitet ur storen — upplösningsgrad per relationstyp, D7-källklasser

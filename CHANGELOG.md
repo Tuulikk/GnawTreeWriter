@@ -44,6 +44,8 @@ Verifierat mot 0.24.0-binären innan fixen:
   disk, så anroparen såg ett fel på en lyckad operation. Guard: `max(1)`
   (`visualizer.rs`, `visualizer_test.rs`).
 
+## [0.25.0] - 2026-11-10
+
 ### Added — språk
 
 - **PowerShell** (`.ps1`, `.psm1`, `.psd1`) — 20 filer i arbetsytan, ingen
@@ -137,7 +139,7 @@ stderr när binären är äldre än `Cargo.toml`/`src`.
   ytan finns 49 `.h` mot 50 `.cpp`. Heuristik (`.h` med `.cpp`-syskon → cpp) är
   en beteendeförändring på befintliga filer och kräver egna tester.
 
-
+## [0.24.0] - 2026-11-10
 
 ### Added — code-index coverage (fas 1), extraktor v2 och attribut-guard
 
@@ -608,7 +610,6 @@ MRR 0.351 → 0.437 — the pipeline now **beats raw cosine at the tail**
   vector. `sense`/MCP signatures are backward compatible (the plain
   `rerank_satellite` wrapper is kept).
 
-## [0.18.0] - 2026-10-06
 ## [0.18.0] - 2026-10-06
 
 ### Changed — Semantic search: real retrieval embedder (BGE)

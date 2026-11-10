@@ -1873,3 +1873,61 @@ dogfooding-provet: P1-wiringen på en 100-raders tät funktion drev fram
 span-förvirringen, dubblett-stubben och grepp-bruset. Guardarna fungerade
 (B2-anda + guardian 2 räddningar) — förslagen gör den SÄKRA vägen till
 standardvägen i stället för att kräva disciplin.
+
+---
+
+## 2026-11-10 — `sense` returnerade filer från ett ANNAT träd (AndroidSDK) via Cline; `code_index` såg inte repots store
+
+**Kontext:** SKILL.md-arbete i GTW-repot (cwd
+`/mnt/secret-stash2/.../GnawTreeWriter`). Jag ville bevisa att den nya
+planerings-ytan fungerar innan en paus — dvs exakt det en extern testare
+skulle prova först.
+
+| # | Anrop | Parametrar | Förväntat | Faktiskt |
+|---|---|---|---|---|
+| 1 | `code_index` | `mode=query, kind=items, path_prefix="src/core/code_graph"` | nodrader ur repots store | **fel:** `no code-index store at ./.gnawtreewriter_ai/code_index.db — run code-index --db` |
+| 2 | `sense` | `query="where are dependency cycles detected"` (satellit) | GTW-källfiler | **5/5 träffar i `/home/tuulikk/AndroidSDK/ndk/**/ndk-stack.py`**, dessutom `degraded: true` |
+
+Storen **fanns** (`.gnawtreewriter_ai/code_index.db`, 6,1 MB, 19:34) och
+`gnawtreewriter code-index . --coverage` i samma sekund svarade
+`180 files, 22652 relations`. Motorn var alltså frisk — värden var fel.
+
+**Rotorsak (bekräftad):** MCP-daemonerna körs per katalog, och **tre av åtta
+hade `cwd=/home/tuulikk`** (`readlink /proc/<pid>/cwd`), bl.a. den som Cline
+pratade med. Alla relativa sökvägar (`./.gnawtreewriter_ai/...`,
+`./graph`) löstes därför mot `$HOME`, där det inte finns någon store men väl
+en *global* `~/.gnawtreewriter_ai/graph` från 2026-11-04 — byggd när `$HOME`
+indexerades som "projektet", med AndroidSDK i sig. Den korrekt rotade
+daemonen fanns samtidigt (pid 3420505, cwd = repot) — svaret berodde på
+vilken daemon anropet träffade.
+
+**Två separata fel, båda av "tyst fel svar"-klassen:**
+
+1. `sense` **svarade** med träffar ur ett främmande träd. Degraderingsnotisen
+   fanns (bra), men ingen notis om att *projektroten* var `$HOME`. En testare
+   som söker "dependency cycles" och får NDK-kommentarer drar slutsatsen att
+   semantisk sökning är trasig — inte att servern står i fel katalog.
+2. `code_index`-felet **felmisstänker**: "no store — run `code-index --db`"
+   när sanningen är "fel rot". Följs rådet byggs en store för `$HOME` och
+   problemet blir värre.
+
+**Omväg som användes:** CLI:t med explicit cwd (`gnawtreewriter code-index .
+--coverage` → 180 filer), samt `pgrep`+`readlink /proc/*/cwd` för att hitta
+den rätt rotade daemonen.
+
+**Status:** inte åtgärdat (loggat inför paus). Två tänkbara guards:
+(a) MCP-servern vägrar starta med `$HOME` (eller katalog utan `.git`/
+`gnawtreewriter.yaml`) som implicit rot och kräver explicit `root`;
+(b) `code_index`/`sense` tar emot `root` som parameter och **ekar** vilken
+rot som användes i varje svar. (b) är den billiga halvan och gör felet
+självdiagnostiserande.
+
+**Bedömning (triage ej påbörjad):**
+- [ ] användarfel — NEJ: klienten valde cwd, verktyget valde att lita på den
+- [x] **bugg** — implicit rot = klientens cwd, utan vakt mot `$HOME`
+- [x] **saknad funktion** — inget sätt att se eller sätta roten per anrop
+- [ ] sub-funktion saknas
+- [ ] svår att nå
+- [ ] inte hittad vid behov
+- [ ] under förmåga
+
