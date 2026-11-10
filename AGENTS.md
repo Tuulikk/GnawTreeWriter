@@ -93,6 +93,13 @@ sessioner. De gäller oavsett vilket verktyg du använder.
    `cargo install --path . --features modernbert,mcp`. Kontrollera med
    `gnawtreewriter --version` mot `Cargo.toml`. Debug-bin:
    `$CARGO_TARGET_DIR/debug/gnawtreewriter`.
+   **Ett kommando räcker: `scripts/commit-build.sh "<msg>"`** — commit → test →
+   build → install → frågar om reap, och slutar med `RESULT ok` /
+   `RESULT fail:<steg>` (maskinläsbart). **Agentkontrakt:** committa själv och kör
+   sedan `scripts/commit-build.sh --skip-commit` (genererade `code-index.md`
+   räknas inte som dirty), och kör **aldrig `GTW_REAP=yes` mitt i en session** —
+   det dödar din egen MCP-anslutning och klienten återansluter inte själv
+   (mätt 2026-11-10).
 4. **MCP-daemoner lever kvar** med binären de startade med — de ägs av
    bakgrundstjänsten/klientverktyget, inte av sessionen (se OpenCode
    2.x-sektionen nedan). Symptom: "gamla beteenden trots ny version".

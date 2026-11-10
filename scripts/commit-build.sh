@@ -29,18 +29,27 @@ SKIP_COMMIT=false
 
 # 1. Commit FÖRE test/bygg (§28.1).
 if $SKIP_COMMIT; then
-    if [[ -n "$(git status --porcelain)" ]]; then
-        echo "FEL: --skip-commit men trädet har ocommittade ändringar." >&2
+    # code-index.md är en GENERERAD artefakt: hooken skriver om den vid varje
+    # commit men stage:ar den aldrig (P4), så den är alltid "dirty" direkt efter
+    # en commit. Räknas den som ocommittat arbete blir --skip-commit oanvändbar
+    # för agenter — som committar själva och sedan bara vill bygga.
+    DIRTY="$(git status --porcelain | grep -vE '^( M|\?\?) code-index\.md$' || true)"
+    if [[ -n "$DIRTY" ]]; then
+        echo "FEL: --skip-commit men trädet har ocommittade ändringar:" >&2
+        echo "$DIRTY" >&2
+        echo "[commit-build] RESULT fail:dirty" >&2
         exit 1
     fi
 else
     if [[ -z "$MSG" ]]; then
         echo "Användning: $0 \"<commit-msg>\" | $0 --skip-commit" >&2
+        echo "[commit-build] RESULT fail:usage" >&2
         exit 1
     fi
     git add -A
     if ! git commit -m "$MSG"; then
         echo "FEL: commit misslyckades (rc=$?)." >&2
+        echo "[commit-build] RESULT fail:commit" >&2
         exit 1
     fi
 fi
@@ -55,6 +64,7 @@ cargo test --release
 rc=$?
 if [[ $rc -ne 0 ]]; then
     echo "FEL: cargo test misslyckades (RC=$rc) — bygges avbruten." >&2
+    echo "[commit-build] RESULT fail:test" >&2
     exit $rc
 fi
 
@@ -63,12 +73,14 @@ cargo build --release
 rc=$?
 if [[ $rc -ne 0 ]]; then
     echo "FEL: cargo build --release misslyckades (RC=$rc)." >&2
+    echo "[commit-build] RESULT fail:build" >&2
     exit $rc
 fi
 
 BIN="$CARGO_TARGET_DIR/release/gnawtreewriter"
 if [[ ! -x "$BIN" ]]; then
     echo "FEL: binär saknas: $BIN" >&2
+    echo "[commit-build] RESULT fail:bin" >&2
     exit 1
 fi
 
@@ -82,6 +94,7 @@ cargo install --path . --features modernbert,mcp
 rc=$?
 if [[ $rc -ne 0 ]]; then
     echo "FEL: cargo install misslyckades (RC=$rc) — MCP ser fortfarande den gamla binären." >&2
+    echo "[commit-build] RESULT fail:install" >&2
     exit $rc
 fi
 
@@ -92,6 +105,9 @@ echo "[commit-build] OBS: (2) MCP-klienten (Cline/opencode) kör den binär den 
 echo "                  nya grepp når den först när daemonen bytts ut:"
 echo "                  scripts/daemon-hygiene.sh reap --yes   (dödar även din egen daemon)"
 echo "                  kör det mellan sessioner, eller starta om klienten."
+
+# Maskinläsbart facit för agenter: en rad, ett ord. Allt ovan är prosa.
+echo "[commit-build] RESULT ok"
 
 # 5. Fråga om reap — men ALDRIG när stdin inte är en terminal.
 #    En agent som kör det här skriptet skulle annars blockera på `read` för
