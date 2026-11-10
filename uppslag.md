@@ -197,3 +197,4 @@ inte. **Status:** `belagt`, oavsiktligt — vakten sattes där läckan uppstod.
 Känt och pinnat i test: `--preview` visar rå split, skarp edit tar
 `json_semantic_edit`. En agent som litar på preview-diffen får ett annat resultat
 än den fick se. Kräver designbeslut, inte en fix.
+# docs-only probe
