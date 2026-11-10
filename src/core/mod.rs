@@ -557,11 +557,7 @@ impl GnawTreeWriter {
         // abstraktion för JSON: navigera nod-pathen, ersätt värdet,
         // re-serialisera hela dokumentet (pretty 2-space; preserve_order
         // håller nyckelordningen).
-        let is_json = Path::new(&self.file_path)
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.eq_ignore_ascii_case("json"))
-            .unwrap_or(false);
+        let is_json = self.is_json_document();
 
         // B1(a): the receipt carries the addressed path — consumers diff
         // intent (expect) vs outcome (new path + hash).
@@ -969,13 +965,34 @@ impl GnawTreeWriter {
         Ok(())
     }
 
+    /// Is this document a JSON file? JSON edits navigate **key names**
+    /// (`json_semantic_edit`), everything else uses the numeric/text split.
+    ///
+    /// ONE predicate on purpose: apply and preview each had their own copy of
+    /// this test, and preview's copy was missing — so `--preview` rendered the
+    /// raw split while the apply rewrote the value semantically. A preview of a
+    /// document that will never exist is worse than no preview (field finding
+    /// 2026-11-10).
+    fn is_json_document(&self) -> bool {
+        Path::new(&self.file_path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("json"))
+            .unwrap_or(false)
+    }
+
     pub fn preview_edit(&self, operation: EditOperation) -> Result<String> {
         match operation {
             EditOperation::Edit { node_path, content } => {
                 let resolved = self
                     .resolve_path(&node_path)
                     .context(format!("Could not resolve node path: {}", node_path))?;
-                self.edit_node_at_path(&resolved.path, &content)
+                // Same branch as the real edit — see is_json_document().
+                if self.is_json_document() {
+                    self.json_semantic_edit(&resolved.path, &content)
+                } else {
+                    self.edit_node_at_path(&resolved.path, &content)
+                }
             }
             EditOperation::Insert {
                 parent_path,
@@ -1690,6 +1707,46 @@ mod tests {
     fn parse_tree(code: &str) -> TreeNode {
         let parser = crate::parser::get_parser(Path::new("x.rs")).unwrap();
         parser.parse_lenient(code).0.unwrap()
+    }
+
+    /// Field finding 2026-11-10: `--preview` for JSON rendered the raw text
+    /// split while the apply went through `json_semantic_edit` — a preview of a
+    /// document that would never exist. The invariant that pins the fix:
+    /// **after applying an edit, previewing the same edit must show no change.**
+    #[test]
+    fn json_preview_and_apply_agree() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cfg.json");
+        std::fs::write(&path, "{\n  \"name\": \"old\",\n  \"keep\": 1\n}\n").unwrap();
+
+        let op = || EditOperation::Edit {
+            node_path: "name".to_string(), // JSON navigates key names, not positions
+            content: "\"new\"".to_string(),
+        };
+
+        let writer = GnawTreeWriter::new(path.to_str().unwrap()).unwrap();
+        let before = writer.get_source().to_string();
+        let preview_before = writer.preview_edit(op()).unwrap();
+        assert_ne!(
+            preview_before, before,
+            "preview of a pending change must show a change"
+        );
+
+        let mut writer = GnawTreeWriter::new(path.to_str().unwrap()).unwrap();
+        writer.edit(op(), false).unwrap();
+        let applied = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            applied.contains("\"new\""),
+            "the apply wrote the value: {applied}"
+        );
+
+        // Fresh handle: the claim is about what a caller sees on disk.
+        let reread = GnawTreeWriter::new(path.to_str().unwrap()).unwrap();
+        let preview_after = reread.preview_edit(op()).unwrap();
+        assert_eq!(
+            preview_after, applied,
+            "preview and apply disagree for JSON — the preview showed a document that does not exist"
+        );
     }
 
     fn temp_rust_file(code: &str) -> (tempfile::TempDir, String) {

@@ -1239,6 +1239,51 @@ pub mod mcp_server {
         std::env::var_os("HOME").map(std::path::PathBuf::from)
     }
 
+    /// Directories that identify a directory as a project root.
+    const PROJECT_MARKERS: &[&str] = &[
+        ".git",
+        "Cargo.toml",
+        "package.json",
+        "pyproject.toml",
+        "gnawtreewriter.yaml",
+    ];
+
+    /// A directory that is not a project itself but holds ≥2 projects is a
+    /// workspace container (`~/dev`, `.../Gnaw-Software`). Indexing or walking
+    /// it silently answers questions about several codebases at once — one of
+    /// the eight daemons seen 2026-11-10 sat exactly there. Refused, not
+    /// warned: a wrong answer from six repos is worse than a loud no.
+    ///
+    /// "Mostly projects" is required, not just "two look like projects":
+    /// `/tmp` and other junk drawers contain a couple of build dirs and must
+    /// stay usable (the first version of this rule refused `/tmp` — caught by
+    /// `a_project_directory_is_not_too_broad`).
+    fn looks_like_workspace_container(root: &std::path::Path) -> bool {
+        if PROJECT_MARKERS.iter().any(|m| root.join(m).exists()) {
+            return false; // a project (or a monorepo root) — its own business
+        }
+        let Ok(entries) = std::fs::read_dir(root) else {
+            return false;
+        };
+        let mut dirs = 0;
+        let mut projects = 0;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with('.') {
+                continue; // .git, .cache, … say nothing about the layout
+            }
+            dirs += 1;
+            if PROJECT_MARKERS.iter().any(|m| path.join(m).exists()) {
+                projects += 1;
+            }
+        }
+        projects >= 2 && projects * 2 >= dirs
+    }
+
     /// A "project root" that is the home directory (or the filesystem root) is
     /// not a project: every relative store, model-cache lookup and lexical walk
     /// under it spans unrelated trees.
@@ -1267,10 +1312,12 @@ pub mod mcp_server {
         if root.parent().is_none() {
             return true; // "/" — everything is under it
         }
-        match home {
-            Some(h) => normalize(h) == root,
-            None => false,
+        if let Some(h) = home {
+            if normalize(h) == root {
+                return true; // the home directory
+            }
         }
+        looks_like_workspace_container(&root)
     }
 
     /// Loud refusal for a too-broad root, naming the tool, the root and a fix
@@ -1286,10 +1333,10 @@ pub mod mcp_server {
             "pass an explicit absolute root/path, or start the client in the project directory."
         };
         tool_error(format!(
-            "{tool}: refusing to use {} as a project root — it is the home directory (or the \
-             filesystem root), so any store, index or lexical walk under it covers unrelated \
-             trees (this is how a $HOME-rooted server once answered a sense query with hits from \
-             ~/AndroidSDK). {fix}",
+            "{tool}: refusing to use {} as a project root — it is the home directory, the \
+             filesystem root, or a folder that holds several projects, so any store, index or \
+             lexical walk under it covers unrelated trees (this is how a $HOME-rooted server once \
+             answered a sense query with hits from ~/AndroidSDK). {fix}",
             root.display()
         ))
     }
@@ -4149,11 +4196,54 @@ or list_nodes for a flat index of this file.",
         #[test]
         fn a_project_directory_is_not_too_broad() {
             let home = std::path::Path::new("/home/nonexistent-user");
-            assert!(!root_is_too_broad(std::path::Path::new("/tmp"), Some(home)));
+            // A junk drawer (like /tmp): several ordinary dirs plus ONE
+            // project-lookalike must stay usable — "two projects somewhere
+            // below" is not what makes a workspace.
+            let dir = tempfile::tempdir().unwrap();
+            for name in ["scratch", "logs", "builds", "one-project"] {
+                std::fs::create_dir_all(dir.path().join(name)).unwrap();
+            }
+            std::fs::write(dir.path().join("one-project").join("Cargo.toml"), "").unwrap();
+            assert!(
+                !root_is_too_broad(dir.path(), Some(home)),
+                "a junk drawer holding one project must stay usable"
+            );
+            assert!(!root_is_too_broad(
+                &dir.path().join("one-project"),
+                Some(home)
+            ));
             assert!(!root_is_too_broad(
                 std::path::Path::new("/home/nonexistent-user/proj"),
                 Some(home)
             ));
+        }
+
+        #[test]
+        fn a_workspace_holding_several_projects_is_refused() {
+            let dir = tempfile::tempdir().unwrap();
+            let ws = dir.path().join("dev");
+            std::fs::create_dir_all(ws.join("alpha")).unwrap();
+            std::fs::create_dir_all(ws.join("beta")).unwrap();
+            std::fs::write(ws.join("alpha").join("Cargo.toml"), "").unwrap();
+            std::fs::write(ws.join("beta").join("package.json"), "{}").unwrap();
+            assert!(
+                root_is_too_broad(&ws, None),
+                "a folder holding two projects is a workspace, not a project"
+            );
+
+            // A project of its own stays usable even when it contains others
+            // (monorepo): the marker on the ROOT is what decides.
+            std::fs::write(ws.join(".git"), "").unwrap();
+            assert!(
+                !root_is_too_broad(&ws, None),
+                "a repo root is its own project, whatever it contains"
+            );
+
+            // One child project is not a workspace.
+            let single = dir.path().join("single");
+            std::fs::create_dir_all(single.join("only")).unwrap();
+            std::fs::write(single.join("only").join("Cargo.toml"), "").unwrap();
+            assert!(!root_is_too_broad(&single, None));
         }
 
         #[test]
