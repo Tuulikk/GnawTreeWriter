@@ -1,5 +1,6 @@
 pub mod bash;
 pub mod c;
+pub mod cmake;
 pub mod cpp;
 pub mod csharp;
 pub mod css;
@@ -12,11 +13,14 @@ pub mod java;
 pub mod javascript;
 pub mod json;
 pub mod kotlin;
+pub mod make;
 pub mod markdown;
 pub mod php;
+pub mod powershell;
 pub mod python;
 pub mod qml;
 pub mod qml_tree_sitter;
+pub mod ruby;
 pub mod rust;
 pub mod slint;
 pub mod sql;
@@ -58,6 +62,63 @@ pub fn char_col_pair(source: &str, start_byte: usize, end_byte: usize) -> (usize
     let end_line_start = source[..end_byte].rfind('\n').map(|p| p + 1).unwrap_or(0);
     let end_col = source[end_line_start..end_byte].chars().count() + 1;
     (start_col, end_col)
+}
+
+/// Convert a tree-sitter node tree into GTW's `TreeNode`.
+///
+/// The point is the spans: `content` is the exact source slice and
+/// `start_col`/`end_col` come from [`char_col_pair`]. `edit_node` splices on
+/// exactly those values, so parsers that leave the columns at 0 force the
+/// splatter back to whole-line replacement — which silently rewrites
+/// neighbouring text (markdown lost the blank line after the edited
+/// paragraph, a CSS rule was replaced by its value).
+pub fn tree_from_ts_node(node: &tree_sitter::Node, source: &str, path: String) -> TreeNode {
+    let start_byte = node.start_byte();
+    let end_byte = node.end_byte();
+    let content = source
+        .get(start_byte..end_byte)
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+    let (start_col, end_col) = char_col_pair(source, start_byte, end_byte);
+
+    let mut children = Vec::new();
+    let mut cursor = node.walk();
+    for (i, child) in node.children(&mut cursor).enumerate() {
+        let child_path = if path.is_empty() {
+            i.to_string()
+        } else {
+            format!("{}.{}", path, i)
+        };
+        children.push(tree_from_ts_node(&child, source, child_path));
+    }
+
+    TreeNode {
+        start_col,
+        end_col,
+        id: path.clone(),
+        path,
+        node_type: node.kind().to_string(),
+        content,
+        start_line: node.start_position().row + 1,
+        end_line: node.end_position().row + 1,
+        children,
+    }
+}
+
+/// Parse `code` with a tree-sitter grammar and convert it with
+/// [`tree_from_ts_node`]. Shared by every grammar that needs no
+/// language-specific shaping (documents, config formats, scripts).
+pub fn parse_with_tree_sitter(
+    language: tree_sitter::Language,
+    name: &str,
+    code: &str,
+) -> anyhow::Result<TreeNode> {
+    let mut parser = tree_sitter::Parser::new();
+    parser.set_language(&language)?;
+    let tree = parser
+        .parse(code, None)
+        .ok_or_else(|| anyhow::anyhow!("Failed to parse {} source", name))?;
+    Ok(tree_from_ts_node(&tree.root_node(), code, String::new()))
 }
 
 impl TreeNode {
@@ -243,11 +304,19 @@ pub trait ParserEngineLegacy {
 pub fn get_parser(file_path: &Path) -> anyhow::Result<Box<dyn ParserEngine>> {
     let extension = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
+    // Some files ARE their language, and the extension is unhelpful or absent:
+    // `CMakeLists.txt` reports "txt" (a line-based text parser), `Makefile` and
+    // `.zshrc` report no extension at all. Check the name first, so those never
+    // reach the extension match below.
+    if let Some(parser) = parser_for_special_filename(file_path) {
+        return Ok(parser);
+    }
+
     match extension {
         "qml" => Ok(Box::new(LegacyParserWrapper::new(
             qml_tree_sitter::QmlTreeSitterParser::new(),
         ))),
-        "py" => Ok(Box::new(python::PythonParser::new())),
+        "py" | "pyi" => Ok(Box::new(python::PythonParser::new())),
         "rs" => Ok(Box::new(rust::RustParser::new())),
         "slint" => Ok(Box::new(slint::SlintParser::new())),
         "kt" | "kts" => Ok(Box::new(LegacyParserWrapper::new(
@@ -267,7 +336,7 @@ pub fn get_parser(file_path: &Path) -> anyhow::Result<Box<dyn ParserEngine>> {
         "js" | "jsx" | "mjs" | "cjs" => Ok(Box::new(LegacyParserWrapper::new(
             javascript::JavaScriptParser::new(),
         ))),
-        "ts" | "tsx" => Ok(Box::new(LegacyParserWrapper::new(
+        "ts" | "tsx" | "mts" | "cts" => Ok(Box::new(LegacyParserWrapper::new(
             typescript::TypeScriptParser::new(),
         ))),
         "php" => Ok(Box::new(LegacyParserWrapper::new(php::PhpParser::new()))),
@@ -279,6 +348,17 @@ pub fn get_parser(file_path: &Path) -> anyhow::Result<Box<dyn ParserEngine>> {
         }
         "sh" | "bash" => Ok(Box::new(LegacyParserWrapper::new(bash::BashParser::new()))),
         "java" => Ok(Box::new(LegacyParserWrapper::new(java::JavaParser::new()))),
+        "ps1" | "psm1" | "psd1" => Ok(Box::new(LegacyParserWrapper::new(
+            powershell::PowerShellParser::new(),
+        ))),
+        "cmake" => Ok(Box::new(
+            LegacyParserWrapper::new(cmake::CMakeParser::new()),
+        )),
+        "mk" => Ok(Box::new(LegacyParserWrapper::new(make::MakeParser::new()))),
+        // Fixes the silent fallback: get_parser_for_language maps ruby/rb -> "rb",
+        // which until now had no arm here and landed on GenericParser (one node),
+        // so `language: ruby` rules compiled against an empty tree and never matched.
+        "rb" => Ok(Box::new(LegacyParserWrapper::new(ruby::RubyParser::new()))),
         "zig" => Ok(Box::new(LegacyParserWrapper::new(zig::ZigParser::new()))),
         "css" => Ok(Box::new(LegacyParserWrapper::new(css::CssParser::new()))),
         "xml" | "svg" | "xsl" | "xsd" | "rss" | "atom" => Ok(Box::new(xml::XmlParser::new())),
@@ -290,6 +370,35 @@ pub fn get_parser(file_path: &Path) -> anyhow::Result<Box<dyn ParserEngine>> {
         "json" => Ok(Box::new(LegacyParserWrapper::new(json::JsonParser::new()))),
         "yaml" | "yml" => Ok(Box::new(LegacyParserWrapper::new(yaml::YamlParser::new()))),
         _ => Ok(Box::new(generic::GenericParser::new())),
+    }
+}
+
+/// Parsers selected by FILE NAME rather than extension.
+///
+/// Three classes share the same problem — the extension either lies or is
+/// absent, so the extension match in [`get_parser`] can never reach them:
+///
+/// - `CMakeLists.txt` → extension `txt` (would become the line-based
+///   `TextParser`, silently)
+/// - `Makefile` / `GNUmakefile` → `Path::extension()` is `None`
+/// - `.bashrc`, `.zshrc`, `.profile`, … → also `None`
+///
+/// Returning `None` keeps the caller on the normal extension path.
+fn parser_for_special_filename(file_path: &Path) -> Option<Box<dyn ParserEngine>> {
+    let name = file_path.file_name().and_then(|n| n.to_str())?;
+
+    match name {
+        "CMakeLists.txt" | "CMakeLists.txt.in" => Some(Box::new(LegacyParserWrapper::new(
+            cmake::CMakeParser::new(),
+        ))),
+        "Makefile" | "makefile" | "GNUmakefile" => {
+            Some(Box::new(LegacyParserWrapper::new(make::MakeParser::new())))
+        }
+        // The bash grammar approximates zsh well enough for structural editing;
+        // zsh-specific constructs may yield ERROR nodes (deliberate trade-off).
+        ".bashrc" | ".bash_profile" | ".bash_aliases" | ".bash_login" | ".zshrc" | ".zshenv"
+        | ".profile" => Some(Box::new(LegacyParserWrapper::new(bash::BashParser::new()))),
+        _ => None,
     }
 }
 

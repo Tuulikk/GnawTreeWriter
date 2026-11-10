@@ -54,10 +54,25 @@ tree-sitter-dart = "0.1.0"
 tree-sitter-svelte-next = "0.1.1"
 tree-sitter-sequel = "0.3.11"
 tree-sitter-qmljs = "0.3.0"
+# Verified build+parse against tree-sitter 0.26.13 (probe /tmp/gtw-lang-probe).
+# dockerfile was rejected: tree-sitter-dockerfile 0.2.0 exports no `LANGUAGE`
+# and pulls a second runtime (0.20.10) -> unusable without a rewrite.
+tree-sitter-powershell = "0.26.6"
+tree-sitter-cmake = "0.7.6"
+tree-sitter-make = "1.1.1"
+tree-sitter-ruby = "0.23.1"
+# Document/config formats: replace the position-blind serde/regex parsers.
+# Their nodes carried no byte spans (start_col/end_col were 0), so edit_node
+# fell back to whole-line replacement: a CSS declaration value replaced its
+# whole rule, a markdown heading lost its '#', a paragraph edit swallowed the
+# following blank line. Same probe run, same runtime as above.
+tree-sitter-md = "0.5.4"
+tree-sitter-css = "0.25.0"
+tree-sitter-yaml = "0.7.2"
+tree-sitter-toml-ng = "0.7.0"
 tree-sitter-language = "0.1"
 toml = "0.8"
 serde_yaml = "0.9"
-pulldown-cmark = "0.13"
 chrono = { version = "0.4", features = ["serde"] }
 xmltree = "0.12"
 serde_json = { version = "1.0", features = ["preserve_order"] }  # J1 (2026-11-08): JSON-edit re-serialiserar — nyckelordningen måste överleva (BTreeMap-sortering vore diff-brus över hela filen)
@@ -96,6 +111,14 @@ cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
 all = ["modernbert", "mcp", "cuda", "metal", "mamba"]
 
-# tree-sitter-xml = "0.7"  # Using custom parser to avoid version conflicts
-# tree-sitter-css = "0.25"  # Using custom parser to avoid version conflicts
-# tree-sitter-json = "0.23"  # Using serde_json instead of tree-sitter-json to avoid version conflicts
+# Still not tree-sitter, and why:
+#   xml  — custom parser (xmltree); no grammar added yet.
+#   json — serde + json_semantic_edit (J1). That path navigates by MAPPING KEY
+#          (paths like "namn"), not by numeric index; swapping to
+#          tree-sitter-json changes every JSON path and must be done together
+#          with that function, not before it.
+# css/json used to be disabled here citing "version conflicts". A probe against
+# tree-sitter 0.26.13 (2026-11-10) shows neither pulls a second runtime, so
+# that reason no longer holds — css is now enabled above.
+# tree-sitter-xml = "0.7"
+# tree-sitter-json = "0.24"

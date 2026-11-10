@@ -211,10 +211,8 @@ enum Commands {
         #[arg(long)]
         intro: Option<String>,
         /// Comma-separated file extensions to include
-        #[arg(
-            long,
-            default_value = "rs,py,ts,tsx,js,jsx,go,java,c,cpp,h,hpp,php,zig,css"
-        )]
+        /// (default: the built-in list from `CodeIndexOptions::default()`)
+        #[arg(long, default_value = "")]
         extensions: String,
         /// Truncate signatures at this character count
         #[arg(long, default_value = "110")]
@@ -1335,12 +1333,21 @@ impl Cli {
                 uninstall_hook,
                 coverage,
             } => {
+                // Ett tomt --extensions betyder "den inbyggda listan". Tidigare
+                // fanns listan på TVÅ ställen (denna clap-default och
+                // CodeIndexOptions::default) och de drev isär: nio
+                // ändelsegrupper hade en riktig parser men indexerades aldrig.
+                let ext_list: Vec<String> = extensions
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
                 let opts = crate::core::code_index::CodeIndexOptions {
-                    extensions: extensions
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect(),
+                    extensions: if ext_list.is_empty() {
+                        crate::core::code_index::CodeIndexOptions::default().extensions
+                    } else {
+                        ext_list
+                    },
                     max_sig,
                     intro_file: intro.map(PathBuf::from),
                     json,

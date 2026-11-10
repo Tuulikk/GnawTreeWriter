@@ -237,9 +237,14 @@ pub struct CodeIndexOptions {
 impl Default for CodeIndexOptions {
     fn default() -> Self {
         Self {
+            // Only extensions that have a REAL parser (src/parser/mod.rs).
+            // An extension without one falls to GenericParser (a single node)
+            // and would pollute the index with content-free rows — worse than
+            // skipping the file, because the row looks indexed.
             extensions: [
-                "rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "c", "cpp", "h", "hpp", "php",
-                "zig", "css",
+                "rs", "py", "pyi", "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "go",
+                "java", "kt", "kts", "c", "cc", "cpp", "cxx", "h", "hpp", "hxx", "cs", "php",
+                "zig", "swift", "dart", "css", "sql", "qml", "slint", "svelte", "sh", "bash",
             ]
             .iter()
             .map(|s| s.to_string())
