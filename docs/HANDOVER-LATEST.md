@@ -137,9 +137,14 @@ men **inte inkopplade** (0 filer i ytan).
    väntar; guard blockerar rå sqlite-skrivning) — nästa öknings-kandidat
    jämte P2.
 7. **Underhåll:** hook-reinstall (`--uninstall-hook` + `--install-hook`)
-   för env-prefixet; CHANGELOG för prosa-lagret + P1. `code-index.md` är
-   **omgenererad manuellt** i session IV (ny binär, 2275 rader) — hooken
-   skriver den inte längre automatiskt, kontrollera vid nästa commit.
+   för env-prefixet; CHANGELOG för prosa-lagret + P1.
+   `code-index.md` är **omgenererad manuellt** i session IV (ny binär, 2275
+   rader). **FÄLLA:** `post-commit`-hooken anropar `gnawtreewriter` **från
+   PATH** — dvs den *installerade* binären. Kör man en commit innan
+   `cargo install --path .` är gjord, regenererar hooken artefakten med den
+   GAMLA ändelselistan och **krymper** `code-index.md` (mätt: 2275 → 2154
+   rader; `.sh`/`.qml`/m.fl. föll bort). Kör därför `cargo install --path .`
+   före nästa commit, eller regenerera för hand efteråt med den nya binären:
 
 ### Nya öppna poster från session IV
 
