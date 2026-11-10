@@ -57,6 +57,27 @@ något, inte ännu en proxy.
 
 ---
 
+**Avgränsning (mätt 2026-11-10):** det är **GTW och gnawdriver** som byggs om
+ofta — inte memory-server/dokubase. Då kollapsar "delat system för många
+projekt" till *en wrapper, en watch-path*: båda binärerna hamnar i samma
+`$CARGO_TARGET_DIR/release/` (`gnawtreewriter` 75 MB, `gnawdriver` 21 MB), så en
+bevakning av den katalogen täcker båda.
+
+Asymmetrin som förklarar varför GTW känns värre: **gnawdrivers MCP-entry pekar
+redan på build-output** (`${CARGO_TARGET_DIR}/release/gnawdriver`) medan
+**GTW:s pekar på install-output** (`~/.cargo/bin/gnawtreewriter`). Samma kod,
+olika halveringstid — GTW kräver ett extra `cargo install` innan nästa spawn är
+färsk. Att peka GTW på `${CARGO_TARGET_DIR}/release/gnawtreewriter` (bytes-identisk
+idag, verifierat med `cmp`) tar bort det steget. **Men** det gör bara *nästa*
+spawn färsk — den körande daemonen håller fortfarande sin bild. Pointern gör
+bytet billigt; wrappern är det som gör det.
+
+`default = ["modernbert", "mcp"]` betyder att en vanlig `cargo build --release`
+är tjänsteduglig — så en swap-validering behövs inte för normalbygget (däremot
+för `--no-default-features`, som CI kör).
+
+---
+
 Om man ändå bygger egen växel (först då) är designen: se till att **ingen
 process håller en kodbild längre än koden lever**.
 
