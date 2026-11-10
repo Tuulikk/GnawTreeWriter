@@ -84,6 +84,80 @@ fn analyze_of_a_good_file_still_succeeds() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("function_item"));
 }
 
+/// 0.25.1: `--db` (refresh) writes the canonical artifact instead of dumping
+/// ~2 300 lines of markdown to stdout. Before this, three places knew the
+/// filename (`--check`'s default, the hook's `-o`, the operator) and only one
+/// made it a default — so every refresh needed `-o` repeated.
+#[test]
+fn db_refresh_writes_the_artifact_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("proj");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("a.rs"), "fn a() {}\n").unwrap();
+
+    let out = Command::new(BIN)
+        .args(["code-index", root.to_str().unwrap(), "--db"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let artifact = root.join("code-index.md");
+    assert!(
+        artifact.exists(),
+        "--db must write <root>/code-index.md without -o"
+    );
+    assert!(std::fs::read_to_string(&artifact)
+        .unwrap()
+        .contains("CODE-INDEX"));
+}
+
+#[test]
+fn db_refresh_with_stdout_prints_and_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("proj");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("a.rs"), "fn a() {}\n").unwrap();
+
+    let out = Command::new(BIN)
+        .args(["code-index", root.to_str().unwrap(), "--db", "--stdout"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("CODE-INDEX"),
+        "--stdout must print the document"
+    );
+    assert!(
+        !root.join("code-index.md").exists(),
+        "--stdout must not write the artifact"
+    );
+}
+
+#[test]
+fn plain_code_index_still_prints_to_stdout() {
+    // No --db: the renderer's pipe behaviour is unchanged (regression guard
+    // against the 0.25.1 default leaking into the plain path).
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("proj");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("a.rs"), "fn a() {}\n").unwrap();
+
+    let out = Command::new(BIN)
+        .args(["code-index", root.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("CODE-INDEX"));
+    assert!(
+        !root.join("code-index.md").exists(),
+        "the plain renderer must not start writing files"
+    );
+}
+
 #[test]
 fn expect_name_rejects_a_stale_path_instead_of_editing_the_wrong_node() {
     let path = tmp("shift.rs", "fn a() {}\n\nfn b() {}\n");

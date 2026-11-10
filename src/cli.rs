@@ -272,6 +272,10 @@ enum Commands {
         /// Hop bound for --cycles/--impact (default: 64 / 3)
         #[arg(long)]
         depth: Option<usize>,
+        /// With --db: print the document instead of writing
+        /// <root>/code-index.md (the default destination for a refresh)
+        #[arg(long)]
+        stdout: bool,
     },
     /// Compress source code by replacing function bodies with placeholders
     Compress {
@@ -1391,6 +1395,7 @@ impl Cli {
                 impact,
                 why,
                 depth,
+                stdout,
             } => {
                 // Ett tomt --extensions betyder "den inbyggda listan". Tidigare
                 // fanns listan på TVÅ ställen (denna clap-default och
@@ -1429,7 +1434,7 @@ impl Cli {
                         depth,
                     )?;
                 } else {
-                    Self::handle_code_index(&path, output.as_deref(), opts, db, check, fix)?;
+                    Self::handle_code_index(&path, output.as_deref(), opts, db, check, fix, stdout)?;
                 }
             }
             Commands::Compress {
@@ -2300,6 +2305,7 @@ Use --no-preview to write batch file"
         db: bool,
         check: bool,
         fix: bool,
+        to_stdout: bool,
     ) -> Result<()> {
         if check {
             // P6: the gate is DB-free — always the direct render.
@@ -2362,9 +2368,27 @@ Use --no-preview to write batch file"
         } else {
             crate::core::code_index::generate_index(Path::new(path), &opts)?
         };
-        match output {
+        // Destination resolution (2026-11-10):
+        //   -o <path>            explicit file, wins
+        //   --db (no -o)         <root>/code-index.md — the canonical artifact,
+        //                        and the SAME default `--check` already uses
+        //   --db --stdout        print (the pre-0.25.1 behaviour)
+        //   no --db              print (unchanged: the plain renderer pipes)
+        // Before this, `code-index . --db` printed ~2 300 lines of markdown as a
+        // side effect of refreshing the store, and the hook had to repeat the
+        // path — three places knowing the filename, one making it a default.
+        let dest: Option<PathBuf> = match output {
+            Some(file) => Some(PathBuf::from(file)),
+            None if db && !to_stdout => Some(Path::new(path).join("code-index.md")),
+            None => None,
+        };
+        match dest {
             Some(file) => {
-                std::fs::write(file, &doc).with_context(|| format!("writing {}", file))?;
+                let file = file
+                    .to_str()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "code-index.md".to_string());
+                std::fs::write(&file, &doc).with_context(|| format!("writing {file}"))?;
                 let lines = doc.lines().count();
                 println!("code-index skriven: {} ({} rader)", file, lines);
             }
@@ -2403,7 +2427,7 @@ if [ -n "$(find "$top/Cargo.toml" "$top/src" -newer "$bin" -print -quit 2>/dev/n
     echo "gnawtreewriter: $bin is older than the source — code-index refresh SKIPPED (rebuild: cargo install --path .)" >&2
     exit 0
 fi
-GTW_CODE_INDEX_SOURCE=git_hook "$bin" code-index "$top" --db -o "$top/code-index.md" >/dev/null 2>&1 || true
+GTW_CODE_INDEX_SOURCE=git_hook "$bin" code-index "$top" --db >/dev/null 2>&1 || true
 "#;
         format!("{}\n{}\n{}\n", Self::HOOK_BEGIN, body, Self::HOOK_END)
     }
