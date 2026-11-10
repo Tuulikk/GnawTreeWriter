@@ -126,6 +126,12 @@ enum Commands {
         /// pattern (rule-guided multi-edit), not just the first occurrence
         #[arg(long)]
         all: bool,
+        /// Fail instead of editing when the resolved node's name differs from
+        /// this. A numeric path is a POSITION and shifts on every
+        /// insert/delete, so a cached path can silently hit another node
+        /// (measured: one insert later, a cached path rewrote `fn a() {}`).
+        #[arg(long)]
+        expect_name: Option<String>,
         #[arg(short, long)]
         preview: bool,
         #[arg(long)]
@@ -142,7 +148,10 @@ enum Commands {
         parent_path: Option<String>,
         #[arg(long)]
         tag: Option<String>,
-        position: usize,
+        /// Optional so that no REQUIRED positional follows a conditionally
+        /// required one — clap rejects that ordering (debug builds panicked on
+        /// every `insert` invocation). Defaults to 1 at the call site.
+        position: Option<usize>,
         #[arg(required_unless_present = "source_file")]
         content: Option<String>,
         #[arg(long, conflicts_with = "content")]
@@ -247,6 +256,17 @@ enum Commands {
         /// Read-only — never creates the store. JSON to stdout.
         #[arg(long)]
         coverage: bool,
+        /// List dependency cycles in the store graph (rotation-deduped).
+        /// Read-only; needs a store (run with --db first)
+        #[arg(long)]
+        cycles: bool,
+        /// "What is affected if I change SYMBOL?" — forward reachability
+        /// from every entity that DEFINES that bare name. Read-only
+        #[arg(long)]
+        impact: Option<String>,
+        /// Hop bound for --cycles/--impact (default: 64 / 3)
+        #[arg(long)]
+        depth: Option<usize>,
     },
     /// Compress source code by replacing function bodies with placeholders
     Compress {
@@ -268,9 +288,11 @@ enum Commands {
         output: Option<String>,
         #[arg(short, long)]
         include: Option<String>,
-        #[arg(short, long)]
+        /// Long-only: `-i` is taken by --include
+        #[arg(long)]
         ignore: Option<String>,
-        #[arg(short, long)]
+        /// Long-only: `-i` belongs to --include
+        #[arg(long)]
         instructions: Option<String>,
         #[arg(long)]
         no_redact: bool,
@@ -287,7 +309,9 @@ enum Commands {
         strategy: String,
         #[arg(short, long, default_value = "8000")]
         max_tokens: usize,
-        #[arg(short, long, default_value = "20")]
+        /// Long-only: `-m` is taken by --max-tokens (clap rejects a duplicate
+        /// short flag; in a release build it silently shadowed one of them)
+        #[arg(long, default_value = "20")]
         max_files: usize,
         #[arg(short, long)]
         output: Option<String>,
@@ -326,12 +350,19 @@ enum Commands {
     Restore {
         file_path: String,
         transaction_id: String,
+        /// A bool cannot be positional: clap needs a value-taking action.
+        /// Was `preview: bool` (positional), which panics the command table.
+        #[arg(long)]
         preview: bool,
     },
     /// Simple search-and-replace
     QuickReplace {
         file: String,
+        /// Values starting with '-' need no `--` separator (allow_hyphen_values):
+        /// replacing "-1" is a normal edit, not a flag
+        #[arg(allow_hyphen_values = true)]
         search: String,
+        #[arg(allow_hyphen_values = true)]
         replace: String,
         #[arg(short, long)]
         preview: bool,
@@ -841,6 +872,7 @@ impl Cli {
                 source_file,
                 ask,
                 all,
+                expect_name,
                 preview,
                 unescape_newlines,
                 force,
@@ -882,6 +914,24 @@ impl Cli {
 
                 let content = resolve_content(content, source_file, unescape_newlines)?;
                 let mut writer = GnawTreeWriter::new(&file_path)?;
+
+                // B1 parity with MCP: a numeric path is a POSITION and shifts on
+                // every insert/delete, so a cached path can resolve to a
+                // DIFFERENT node. Without this guard the edit succeeds and
+                // silently rewrites the wrong function (exit 0) — the worst
+                // failure mode for an agent that caches paths between calls.
+                if let Some(expected) = expect_name.as_deref() {
+                    match writer.describe_node(&target_path) {
+                        Some((_path, _kind, Some(name))) if name == expected => {}
+                        Some((path, kind, name)) => anyhow::bail!(
+                            "stale path: {path} is {kind} {:?}, expected name {expected:?} — re-run list/analyze for fresh paths",
+                            name
+                        ),
+                        None => anyhow::bail!(
+                            "stale path: {target_path} no longer resolves — re-run list/analyze for fresh paths"
+                        ),
+                    }
+                }
 
                 // Capture old node for visual diff
                 let old_node = writer.analyze().clone().find_path(&target_path).cloned();
@@ -967,7 +1017,7 @@ impl Cli {
                 let mut writer = GnawTreeWriter::new(&file_path)?;
                 let op = EditOperation::Insert {
                     parent_path: insert_parent.clone(),
-                    position,
+                    position: position.unwrap_or(1),
                     content,
                 };
                 if preview {
@@ -1332,6 +1382,9 @@ impl Cli {
                 install_hook,
                 uninstall_hook,
                 coverage,
+                cycles,
+                impact,
+                depth,
             } => {
                 // Ett tomt --extensions betyder "den inbyggda listan". Tidigare
                 // fanns listan på TVÅ ställen (denna clap-default och
@@ -1360,6 +1413,9 @@ impl Cli {
                     // Phase 1 coverage harness (proposal 2026-11-09):
                     // measure the store graph — read-only, JSON out.
                     Self::handle_code_index_coverage(Path::new(&path))?;
+                } else if cycles || impact.is_some() {
+                    // P2: graph queries over the store — read-only.
+                    Self::handle_code_graph(Path::new(&path), cycles, impact.as_deref(), depth)?;
                 } else {
                     Self::handle_code_index(&path, output.as_deref(), opts, db, check, fix)?;
                 }
@@ -1970,6 +2026,45 @@ Use --no-preview to actually perform the restore"
             })?;
             let report = crate::core::code_index_coverage::measure(&conn)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
+
+        /// P2 (Comparative-Thinker-planen §4): graph queries over the store.
+        /// Read-only — never creates it (same rule as `--coverage`).
+        fn handle_code_graph(
+            path: &Path,
+            cycles: bool,
+            impact: Option<&str>,
+            depth: Option<usize>,
+        ) -> Result<()> {
+            let index_root = crate::core::code_index_db::resolve_index_root(path);
+            let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
+                anyhow::anyhow!(
+                    "code-index graph queries need a store — run `gnawtreewriter code-index <root> --db` first ({e:#})"
+                )
+            })?;
+            if cycles {
+                let found = crate::core::code_graph::cycles(&conn, depth.unwrap_or(64))?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "kind": "cycles",
+                        "count": found.len(),
+                        "cycles": found,
+                    }))?
+                );
+            }
+            if let Some(symbol) = impact {
+                let report = crate::core::code_graph::impact(&conn, symbol, depth.unwrap_or(3))?;
+                if report.seeds.is_empty() {
+                    // Empty seeds is a RESULT (the name is not in the store),
+                    // not a failure — say so instead of printing a bare zero.
+                    eprintln!(
+                        "note: no entity named '{symbol}' in the store — 0 seeds, 0 reachable (re-run code-index --db if the code is newer than the index)"
+                    );
+                }
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
             Ok(())
         }
     fn handle_diff_to_batch(diff_file: &str, output: Option<&str>, preview: bool) -> Result<()> {
@@ -4800,6 +4895,19 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
                     eprintln!("Warning: Failed to analyze {}: {}", file_path, e);
                 }
             }
+        }
+
+        if results.is_empty() {
+            // Nothing parsed. A per-file warning plus exit 0 told scripts the
+            // run had succeeded; `skeleton` and `validate` already exit
+            // non-zero, and `analyze` is the FIRST step of the diagnostic
+            // chain, so reporting success while producing nothing is the worst
+            // possible signal. Partial success keeps exit 0 (a directory scan
+            // must not fail on one unparseable fixture).
+            anyhow::bail!(
+                "analyze: no file could be parsed ({} attempted) — see the warnings above",
+                all_files.len()
+            );
         }
 
         match format {

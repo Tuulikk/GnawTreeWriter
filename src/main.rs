@@ -11,17 +11,32 @@ async fn main() -> Result<()> {
     let cli = match Cli::try_parse() {
         Ok(c) => c,
         Err(e) => {
-            // THE HELPFUL GUARD: Intercept parsing errors to provide tips
-            eprintln!("{}", e);
+            // Help and version are NOT failures. Mapping every parse error to
+            // `exit(1)` made `gnawtreewriter --version` look like a crash:
+            // `gtw --version || echo missing` reported "missing" on a working
+            // install, and `--help` text went to stderr instead of stdout.
+            // `e.exit()` uses clap's own conventions: help/version -> stdout +
+            // exit 0, real usage errors -> stderr + exit 2.
+            match e.kind() {
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion => {
+                    e.exit()
+                }
+                _ => {
+                    // THE HELPFUL GUARD: tips for the common mistakes.
+                    eprintln!("{}", e);
 
-            let err_str = e.to_string().to_lowercase();
-            if err_str.contains("unrecognized subcommand") {
-                eprintln!("\n💡 [GnawTip]: Not sure which command to use? Try 'gnawtreewriter wizard' or 'gnawtreewriter examples'.");
-            } else if err_str.contains("required arguments were not provided") {
-                eprintln!("\n💡 [GnawTip]: Every surgical edit needs a target. Use 'gnawtreewriter list <file>' to find node paths.");
+                    let err_str = e.to_string().to_lowercase();
+                    if err_str.contains("unrecognized subcommand") {
+                        eprintln!("\n💡 [GnawTip]: Not sure which command to use? Try 'gnawtreewriter wizard' or 'gnawtreewriter examples'.");
+                    } else if err_str.contains("required arguments were not provided") {
+                        eprintln!("\n💡 [GnawTip]: Every surgical edit needs a target. Use 'gnawtreewriter list <file>' to find node paths.");
+                    }
+
+                    // 2 = usage error, so a caller can distinguish "I invoked it
+                    // wrongly" from "the tool failed" (1).
+                    std::process::exit(2);
+                }
             }
-
-            std::process::exit(1);
         }
     };
 

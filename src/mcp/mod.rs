@@ -421,7 +421,14 @@ pub mod mcp_server {
                             .get("kind")
                             .and_then(Value::as_str)
                             .unwrap_or("items");
-                        Ok(envelope_code_index(handle_code_index_mcp(mode, root, intro, prefix, fix, kind)))
+                        let symbol = arguments.get("symbol").and_then(Value::as_str);
+                        let depth = arguments
+                            .get("depth")
+                            .and_then(Value::as_u64)
+                            .map(|d| d as usize);
+                        Ok(envelope_code_index(handle_code_index_mcp(
+                            mode, root, intro, prefix, fix, kind, symbol, depth,
+                        )))
                     }
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
@@ -587,7 +594,9 @@ pub mod mcp_server {
                         "root": { "type": "string", "description": "Project root (default .)" },
                         "intro_file": { "type": "string", "description": "Optional intro splice file for refresh/check renders" },
                         "path_prefix": { "type": "string", "description": "query: only paths starting with this prefix" },
-                        "kind": { "type": "string", "description": "query payload: items (default) | relations (from/to_name/to_id/type) | symbols (unresolved+external names)" },
+                        "kind": { "type": "string", "description": "query payload: items (default) | relations (from/to_name/to_id/type) | symbols (unresolved+external names) | cycles (dependency cycles, rotation-deduped) | impact (what is affected by changing `symbol`; requires symbol)" },
+                        "symbol": { "type": "string", "description": "kind=impact: the DEFINING name to analyse (e.g. parse_file). A name in several files yields several seeds, all reported" },
+                        "depth": { "type": "integer", "description": "kind=impact|cycles: hop bound (impact default 3, cycles default 64)" },
                         "fix": { "type": "boolean", "description": "check: rewrite the artifact when stale (default false)" }
                     },
                     "required": []
@@ -3055,6 +3064,10 @@ or list_nodes for a flat index of this file.",
     /// resolution rate per relation type, D7 source-identity classes,
     /// unresolved target classes). Query, check and coverage never create
     /// the store (decision #8 / P6).
+    // 8 params: prefix/kind/symbol/depth are the query knobs. They are a group,
+    // but this fn is one `match mode` — a param struct would move the noise, not
+    // remove it. The alternative (a struct) was tried in review and read worse.
+    #[allow(clippy::too_many_arguments)]
     fn handle_code_index_mcp(
         mode: &str,
         root: &str,
@@ -3062,6 +3075,8 @@ or list_nodes for a flat index of this file.",
         prefix: Option<&str>,
         fix: bool,
         kind: &str,
+        symbol: Option<&str>,
+        depth: Option<usize>,
     ) -> Value {
         use crate::core::code_index::{self as ci, CodeIndexOptions};
         use crate::core::code_index_db;
@@ -3106,6 +3121,31 @@ or list_nodes for a flat index of this file.",
                 let index_root = code_index_db::resolve_index_root(root_path);
                 match code_index_db::open_existing(&index_root) {
                     Ok(conn) => match kind {
+                        // P2 (Comparative-Thinker-planen §4): graph QUERIES over
+                        // the same store. Read-only, and they never create it —
+                        // empty store is a loud error with a refresh hint.
+                        "cycles" => match crate::core::code_graph::cycles(&conn, depth.unwrap_or(64)) {
+                            Ok(rows) => json!({
+                                "mode": "query", "kind": "cycles",
+                                "count": rows.len(), "cycles": rows
+                            }),
+                            Err(e) => tool_error(format!("code_index cycles failed: {e:#}")),
+                        },
+                        "impact" => {
+                            let Some(sym) = symbol else {
+                                return tool_error(
+                                    "code_index kind=impact requires `symbol` — a bare name like \"parse_file\", not an id"
+                                        .to_string(),
+                                );
+                            };
+                            match crate::core::code_graph::impact(&conn, sym, depth.unwrap_or(3)) {
+                                Ok(report) => json!({
+                                    "mode": "query", "kind": "impact",
+                                    "count": report.reachable.len(), "impact": report
+                                }),
+                                Err(e) => tool_error(format!("code_index impact failed: {e:#}")),
+                            }
+                        }
                         "relations" => match code_index_db::load_relations(&conn, prefix) {
                             Ok(rows) => json!({
                                 "mode": "query", "kind": "relations",
