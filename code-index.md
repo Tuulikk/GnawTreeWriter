@@ -1,10 +1,10 @@
 # CODE-INDEX — GnawTreeWriter
 
-> Genererad 2026-11-10 21:12 UTC · gnawtreewriter 0.25.1 · git `c5d9f0b`
+> Genererad 2026-11-10 21:17 UTC · gnawtreewriter 0.25.1 · git `786d86f`
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 2157c5c1ad7bf313d837e38f7b631862
+> Body-hash: b420323781635ee82c8347152c91222c
 
 ## Träd
 
@@ -65,7 +65,7 @@ scripts/
   benchmark_ai.sh (66 rader)
   build-gpu.sh (107 rader)
   check-license.sh (14 rader)
-  commit-build.sh (134 rader)
+  commit-build.sh (135 rader)
   daemon-hygiene.sh (89 rader)
   gtw_adoption_report.py (118 rader)
   mcp-client.sh (127 rader)
@@ -466,8 +466,8 @@ _(inga toppnivå-items)_
 ### check-license.sh (14 rader)
 _(inga toppnivå-items)_
 
-### commit-build.sh (134 rader)
-- `ask_reap()` :116
+### commit-build.sh (135 rader)
+- `ask_reap()` :113
 
 ### daemon-hygiene.sh (89 rader)
 _(inga toppnivå-items)_

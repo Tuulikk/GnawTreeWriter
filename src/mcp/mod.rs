@@ -1273,14 +1273,23 @@ pub mod mcp_server {
         }
     }
 
-    /// Loud refusal for a too-broad root, naming the tool, the root and the fix.
+    /// Loud refusal for a too-broad root, naming the tool, the root and a fix
+    /// the caller can ACTUALLY perform. `code_index` takes a `root`; `sense`
+    /// does not — advising "pass a root" there would be advice that cannot be
+    /// followed (found 2026-11-10 when an agent hit exactly that message).
     fn broad_root_error(tool: &str, root: &std::path::Path) -> Value {
+        let fix = if tool == "sense" {
+            "sense has no root parameter: start the client in the project directory, \
+             pass file_path for single-file zoom search, or use the CLI \
+             (`gnawtreewriter sense \"<query>\"` from the project)."
+        } else {
+            "pass an explicit absolute root/path, or start the client in the project directory."
+        };
         tool_error(format!(
             "{tool}: refusing to use {} as a project root — it is the home directory (or the \
              filesystem root), so any store, index or lexical walk under it covers unrelated \
              trees (this is how a $HOME-rooted server once answered a sense query with hits from \
-             ~/AndroidSDK). Start the MCP server in the project directory, or pass an explicit \
-             absolute root/path.",
+             ~/AndroidSDK). {fix}",
             root.display()
         ))
     }
@@ -4145,6 +4154,29 @@ or list_nodes for a flat index of this file.",
                 std::path::Path::new("/home/nonexistent-user/proj"),
                 Some(home)
             ));
+        }
+
+        #[test]
+        fn broad_root_error_advises_only_what_the_tool_can_do() {
+            let root = std::path::Path::new("/home/nonexistent-user");
+
+            let sense = broad_root_error("sense", root);
+            let s = sense["content"][0]["text"].as_str().unwrap_or_default();
+            assert!(
+                s.contains("file_path"),
+                "sense has no root parameter — the fix must name file_path/CLI: {s}"
+            );
+            assert!(
+                !s.contains("pass an explicit"),
+                "sense must not advise a root parameter it does not have: {s}"
+            );
+
+            let ci = broad_root_error("code_index", root);
+            let c = ci["content"][0]["text"].as_str().unwrap_or_default();
+            assert!(
+                c.contains("explicit absolute root"),
+                "code_index does take a root — say so: {c}"
+            );
         }
 
         #[test]
