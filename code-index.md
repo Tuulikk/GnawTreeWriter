@@ -1,10 +1,10 @@
 # CODE-INDEX — GnawTreeWriter
 
-> Genererad 2026-11-10 19:54 UTC · gnawtreewriter 0.25.1 · git `ec0a25e`
+> Genererad 2026-11-10 19:56 UTC · gnawtreewriter 0.25.1 · git `b530c50`
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 20236926b974230ba2caede089e808df
+> Body-hash: 41181fadcbeb72119aa4dd854833e490
 
 ## Träd
 
@@ -66,6 +66,7 @@ scripts/
   build-gpu.sh (107 rader)
   check-license.sh (14 rader)
   commit-build.sh (76 rader)
+  daemon-hygiene.sh (89 rader)
   gtw_adoption_report.py (118 rader)
   mcp-client.sh (127 rader)
   mcp-serve.sh (198 rader)
@@ -466,6 +467,9 @@ _(inga toppnivå-items)_
 _(inga toppnivå-items)_
 
 ### commit-build.sh (76 rader)
+_(inga toppnivå-items)_
+
+### daemon-hygiene.sh (89 rader)
 _(inga toppnivå-items)_
 
 ### gtw_adoption_report.py (118 rader)

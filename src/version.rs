@@ -63,15 +63,26 @@ fn is_stale(built_sha: &str, built_epoch: u64) -> bool {
     head_moved || src_newer
 }
 
+/// The source tree this binary was BUILT from.
+///
+/// `env!` (compile time), never `std::env::var` (runtime): a cargo-installed
+/// binary has no `CARGO_MANIFEST_DIR` in its environment, so the runtime read
+/// returned `None` → `run_git` gave up → `head_moved` was always false. The
+/// staleness check reported `stale: false` for a 0.25.0 binary against 0.25.1
+/// source (field finding 2026-11-10) — the alarm was built and its wire cut.
+/// Baked in at build time, the path is the build tree, which is exactly the
+/// thing we compare against.
+const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
+
 /// Newest mtime across `src/` and `build.rs`, relative to `built_epoch`.
 /// `None` = cannot read the tree (advisory check gives up silently).
 fn src_newer_than(built_epoch: u64) -> Option<bool> {
-    let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
+    let manifest = MANIFEST_DIR;
     let mut newest = built_epoch;
     let mut found_any = false;
-    let src_dir = std::path::Path::new(&manifest).join("src");
+    let src_dir = std::path::Path::new(manifest).join("src");
     walk(&src_dir, &mut newest, &mut found_any);
-    if let Ok(md) = std::fs::metadata(std::path::Path::new(&manifest).join("build.rs")) {
+    if let Ok(md) = std::fs::metadata(std::path::Path::new(manifest).join("build.rs")) {
         if let Ok(m) = md.modified() {
             found_any = true;
             if let Ok(s) = m.duration_since(UNIX_EPOCH) {
@@ -103,7 +114,7 @@ fn walk(dir: &std::path::Path, newest: &mut u64, found_any: &mut bool) {
 }
 
 fn run_git(args: &[&str]) -> Option<String> {
-    let manifest = std::env::var("CARGO_MANIFEST_DIR").ok()?;
+    let manifest = MANIFEST_DIR;
     let out = std::process::Command::new("git")
         .args(args)
         .current_dir(manifest)
@@ -128,6 +139,23 @@ pub fn format_epoch_utc(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression (field finding 2026-11-10): the staleness check read
+    /// `CARGO_MANIFEST_DIR` with `std::env::var` at RUNTIME, where no installed
+    /// binary has it — so `run_git` gave up and `stale` was permanently false
+    /// (0.25.0 binary reported "fresh" against 0.25.1 source). These assertions
+    /// fail if that path ever goes back to a runtime lookup.
+    #[test]
+    fn staleness_check_can_reach_git_and_the_source_tree() {
+        assert!(
+            run_git(&["rev-parse", "--short", "HEAD"]).is_some(),
+            "git unreachable from MANIFEST_DIR ({MANIFEST_DIR}) — staleness check is dead"
+        );
+        assert!(
+            src_newer_than(0).is_some(),
+            "src/ unreachable from MANIFEST_DIR ({MANIFEST_DIR}) — staleness check is dead"
+        );
+    }
 
     #[test]
     fn epoch_formatting_matches_known_instants() {

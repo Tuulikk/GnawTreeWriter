@@ -13,6 +13,61 @@
 
 ---
 
+## 2026-11-10 — Staleness-larmet var avklippt  🟥 FARLIG
+
+**Mätt:** `doctor` rapporterade `stale: false` för en **0.25.0**-binär mot
+**0.25.1**-källa. Orsak: `src/version.rs` läste `CARGO_MANIFEST_DIR` med
+`std::env::var` (**runtime**) — variabeln finns bara under bygget, så `run_git`
+gav upp (`None` → `head_moved = false`) och mtime-jämförelsen föll tillbaka på
+cwd (daemonens `$HOME`). **Larmet var byggt och tråden klippt.**
+
+**Åtgärdat:** `const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR")` på båda
+ställena + regressionstest `staleness_check_can_reach_git_and_the_source_tree`.
+Bevisat i skarp miljö: `touch src/version.rs` → doctor säger `⚠ BINARY STALE`;
+ombygge → tyst.
+
+**Notera dubbelimplementationen:** hooken har sin egen koll i bash
+(`src/cli.rs:2419`) som *fungerade* hela tiden. Två implementationer av samma
+fråga, en levande och en död — samma driftklass som extensions-listan,
+upplösningsregeln och `code-index.md`-namnet.
+
+---
+
+## 2026-11-10 — Idé: en växel så att ingen daemon KAN bli stale  🟨 förslag
+
+I stället för att upptäcka eller sopa bort stale daemoner: se till att **ingen
+process håller en kodbild längre än koden lever**.
+
+```
+klient (stdio) ⇄ relay (stabil, ~200 rader: radramning + byte-pump)
+                   ⇄ [worker]  exec:ad från disk, byts ut vid behov
+```
+
+- Relayn håller klientanslutningen och **byter worker** när binärens identitet
+  (path + inode + mtime) ändras — mellan två rader, aldrig mitt i ett anrop.
+  Den gamla workern får köra klart och avsluta.
+- Workern är disposable: kraschar den startar relayn en ny — vilket samtidigt
+  fixar "MCP-servern dog = sessionen död".
+- Staleness blir omöjligt *by construction*: ingen process lever längre än den
+  binär den startade med.
+
+**Varför inte bara självutgång:** den kräver att *någon annan* startar en ny
+process. Mätt 2026-11-10: klienten gör inte det ("MCP server is not connected"
+— kom inte tillbaka av sig själv). Växeln tar bort det beroendet, eftersom den
+aldrig släpper klientanslutningen.
+
+**Kostnader (ärliga):** en ny komponent i tillitskedjan — den kan krasha och
+måste testas för swap-mitt-i-anrop, krasch-omstart och dubbel-swap;
+modellvärme tappas vid swap (acceptabelt, swap är sällsynt — högst en gång per
+installation); och den måste vara **högljudd** (logga varje swap, exponera
+`worker_generation` i health) annars återinför den en tyst felklass.
+
+**Fasning:** 0 = `daemon-hygiene.sh` (klart) → 1 = `E_DAEMON_STALE` + exit efter
+svar (billigt, men beroende av att klienten respawnar) → 2 = växeln. Starta
+inte 2 före en paus: den rör MCP-livscykeln och behöver egna tester.
+
+---
+
 ## 2026-11-10 — Daemoner som överlever sin binär: sopa eller självutgång?  🟥 FARLIG
 
 **Mätt:** åtta `gnawtreewriter mcp`-daemoner, 95–285 minuter gamla, **alla** med
