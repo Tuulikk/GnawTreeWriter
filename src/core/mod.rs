@@ -13,6 +13,7 @@ pub mod blast;
 pub mod blueprint;
 pub mod code_index;
 pub mod code_index_coverage;
+pub mod code_graph;
 pub mod code_index_db;
 pub mod compress;
 pub mod curator;
