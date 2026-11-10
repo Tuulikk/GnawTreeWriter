@@ -14,6 +14,38 @@
 > (claim_scan, island_scan, manifest_check — `docs/CODE_INDEX_SCAN_TOOLS_PROPOSAL.md`)
 > is the accepted extension track on the structure layer.
 
+## Code-Index Extension Surfaces (2026-11-10, from phase-1 dogfooding)
+
+> Candidates born in the phase-1 session (coverage harness + extractor v2).
+> Not commitments — they enter the phase-2/3 stream only where the table
+> says so. Index stays FACTS; prose stays a CLAIM with an anchor
+> (scan-tools principle §2).
+
+| Candidate | What it does | Session pain it covers | Size / phase |
+|---|---|---|---|
+| `manifest_check` | Claims-vs-index cross-join: commands list ↔ enum, tool table ↔ tools/list, doc headers ↔ code. Designed already in `docs/CODE_INDEX_SCAN_TOOLS_PROPOSAL.md` §3.3 | Both 2026-11-10 drift finds were this class (help list 28/54 commands; instructions table 37/38) — found by luck, not tooling | Small / phase 2-adjacent |
+| `handover --draft` | Generates the handover skeleton from index data: changed files since last handover, new/changed entities, revision chain, checkpoint refs, open holes | `docs/HANDOVER-LATEST.md` was hand-written from memory; the index owns most of the facts | Small / after phase-2 I3 |
+| `brief <path>` (onboarding) | One call: "what is this module" — top entities, entry points, callers, covering tests, recent revisions, staleness | Session start read three docs + skeletons before moving; repeats for every new agent in every project | Medium / phase 3 |
+| Revision archaeology | "What happened in this code across the last N revisions?" — phase-2 deltas made queryable (CLI/MCP) | The MCP-null debug session cost ~6 calls of archaeology to answer "did anything change in this path recently?" | Free with phase-2 I3 (exposure only) |
+| `concept <term>` | Term → definition + anchor + source quote (B2, E_DUPLICATE_ATTRIBUTE, generation_key, D7 classes …), built from doc-comments + decision docs + error-code tables | Guards were built on semantics reconstructed from design docs each time | Medium |
+| API-surface watch | GTW is a path-dependency of Motor2: the pub surface lives in the index → "this change touches API Motor2 consumes" before push | §36 lesson (rusqlite bump broke Motor2 mid-pass) | Medium-large |
+| test-gap report | island_scan variant: pub fns changed in recent revisions with zero test references (`record_revision` shipped without tests — visible on day one) | Phase-1 increments | Small |
+
+### Prose enrichment — optional pass, never a gate
+
+Prose summaries (module/function/system descriptions) are part of the
+code-index foundation — `code-index.md` is the human/agent projection — but
+they are MODEL work, so they ship as an OPTIONAL enrichment layer, never a
+required pass and never a gate:
+
+- **Producers:** GTW's local model (`investigate`/`explain`), real agents
+  (working sessions), later a dedicated background-agent tool.
+- **Every prose bit carries provenance:** which model/agent wrote it, which
+  index revision it describes, CLAIM status — index facts and prose claims
+  never merge silently.
+- **Staleness surfaces, it does not punish:** a missing or stale prose
+  annotation is reported, never blocking.
+
 GnawTreeWriter is a tree-based code editor optimized for LLM-assisted editing. This roadmap outlines the evolution from a precise CLI tool to an intelligent agent-integrated platform.
 
 The roadmap is divided into two sections:
