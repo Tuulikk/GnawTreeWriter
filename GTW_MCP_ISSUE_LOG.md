@@ -1810,3 +1810,26 @@ skanning konservativt). 282/282 gröna.
 UTANFÖR item-noder. Preview + läs-diffen innan apply — båda incidenterna
 hade varit synliga i preview-diffen. Använd preview på varje edit där
 content börjar med attribut eller är avsevärt kortare än noden.
+
+---
+
+## 2026-11-10 (II) — search_nodes träff-ordning är en UX-fälla + code_index saknade MCP-kuvert
+
+**Klass:** förbättringsidé (UX) + fixad transport-avvikelse.
+**Vad som hände:** två guardian-block samma session orsakades av att
+`search_nodes` listar träffar med BREDASTE match först (ancestorer som
+innehåller texten) och TRÄNGSTA noden sist — agenten plockar första
+träffen, redigerar, och guardian stoppar massradering ("99,5 % removed,
+11 fewer unwraps"). Guardian hade rätt båda gångerna; read_node-verifiering
+av målnoden hade preventat båda.
+**Förbättringsidé (ej avbockt):** `search_nodes` annoterar varje träff med
+nod-typ + rad-span (eller sorterar trängst-först), så fel-mål-siktning
+blir svårare än rätt-mål-siktning.
+**Transport-fynd (fixad):** `handle_code_index_mcp` returnerade bar-objekt
+utan MCP-standard `content[]`-kuvertet (alla andra handlers använder
+`tool_success`). Tolererades av den gamla klienten; efter service-restart
+läser den nya klienten `result.content[]` → bar-objekt = null. Bevis:
+direkt-stdio jämförelse — stats `result-keys=['content', ...]`, code_index
+`['mode', 'ok', ...]`. **Fix:** `envelope_code_index` + dispatch-wrapping —
+resultat ny `['content', 'isError']` med rapport-JSON i text (verifierat
+över stdio).

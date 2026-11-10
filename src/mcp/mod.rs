@@ -421,7 +421,7 @@ pub mod mcp_server {
                             .get("kind")
                             .and_then(Value::as_str)
                             .unwrap_or("items");
-                        Ok(handle_code_index_mcp(mode, root, intro, prefix, fix, kind))
+                        Ok(envelope_code_index(handle_code_index_mcp(mode, root, intro, prefix, fix, kind)))
                     }
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
@@ -1300,6 +1300,23 @@ pub mod mcp_server {
 
     /// Fas 4: attach the impact report to a successful edit response —
     /// only when there IS impact data (signature change with indexed
+    /// MCP-standard-kuvert: code_index-hanteraren returnerar bar-objekt
+        /// ({mode, report|ok, ...}) — tjänstens klient läser result.content[]
+        /// och bar-objekt blir null (dogfood-fynd 2026-11-10 efter
+        /// service-omstarten: sträng-svarande verktyg fungerade, code_index
+        /// blev null). Payloaden serialiseras som content[0].text (JSON) —
+        /// samma kontrakt som övriga JSON-returnerande handlers.
+        fn envelope_code_index(payload: Value) -> Value {
+            let is_error = payload
+                .get("isError")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let text = serde_json::to_string(&payload).unwrap_or_default();
+            json!({
+                "content": [{ "type": "text", "text": text }],
+                "isError": is_error
+            })
+        }
     /// callers). Missing index ⇒ field omitted, never null noise.
     fn attach_impact(mut result: Value, w: &GnawTreeWriter) -> Value {
         if let (Some(obj), Some(impact)) = (result.as_object_mut(), w.last_edit_impact()) {
