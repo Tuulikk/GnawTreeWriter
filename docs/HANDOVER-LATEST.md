@@ -1,63 +1,86 @@
-# Handover — 2026-11-10: code-index fas 1, delmål A (coverage) levererat; B+C nästa
+# Handover — 2026-11-10 (III): v0.24.0 släppt · fas 1 KLAR · CT-plan P1 klar (wiring) · fas 2 ökning 1 klar
 
-## Bekräftat läge (UPPDATERAT efter B+C, samma dag)
+## Bekräftat läge
 
-- **Delmål A klart:** `code_index_coverage.rs` (measure + 3 tester), CLI
-  `--coverage`, MCP `mode=coverage`, instruktions-paritet. Checkpoint:
-  **phase1-coverage-harness**.
-- **Delmål B klart:** hermetisk fixtursvit `tests/code_index_fixtures.rs`
-  (tempdir + `.git`-markör) + synligt facit-projekt
-  `testprojekt/code-index-fixture/` (FACTS.md med [F1]-[F10]-markörer).
-  Fixturen HITTADE två oplanerade hål: **H3** scoped-path-anrop
-  (`super::`/`crate::` — 0 rader) och **H4** implements-upplösning död av
-  namnkollision (`impl:Speaker` vs `trait:Speaker`).
-- **Delmål C klart (extraktor v2, `EXTRACTOR_VERSION = "2"`):** metodanrop
-  (H1), makron med bang-suffix (H2), scoped-path-anrop (H3),
-  relationstyp-medveten upplösning — implements matchar bara `kind=trait`
-  (H4). **282/282 lib-tester + fixture-test grönt.** Före/efter GTW-repot:
-  relations 4 650 → 22 095; calls resolved 890 → **3 848 (4,3×)**;
-  käll-matched 49,4 % → **70,7 %**; implements 88,5 % → 39,7 % men
-  **100 % korrekt-målade** (31/31 kind=trait, SQL-join-verifierat — de
-  gamla 69 innehöll fel-mål-resolutions). Rate-tolkning: nämnaren växte
-  med ärligt olösligt (stdlib + makron) — per-konstruktion-mätning gäller.
-- **Bonus: `E_DUPLICATE_ATTRIBUTE`-guard** i edit-funneln
-  (`check_duplicate_attribute_above` + hook i `edit_node_at_path`) —
-  högljudd rejection när replacement-content åter-included attributet
-  ovanför målnoden (dubbel `#[test]`-fällan; dogfood-fynd, fixad i
-  samma session). Enhetstest: 4 fall. Loggad i `GTW_MCP_ISSUE_LOG.md`.
-- **Daemn-hygien:** 84 → 8 daemner (76 deleted-exe under cline-hub
-  dödade; kvar: 6 OpenCode per katalog + 1 Codex). OBS: gnawdrivers
-  db_surf gav motstridiga svar (stale binär, egen _build_varning) —
-  bygg om gnawdriver före nästa db-surf-diagnos; python3-sqlite3
-  (mode=ro) användes som sanningskälla.
-- **Ocommitat arbetsläge:** allt ovan + `AGENTS.md` (OpenCode 2.x-sektion),
-  `GTW_INSTRUCTIONS.md` (coverage + 38-räkning), proposal (D1–D10),
-  `GTW_MCP_ISSUE_LOG.md` (2026-11-10-posten), `docs/HANDOVER-LATEST.md`.
-  Checkpoint: **phase1-extractor-v2** (12 filer).
+- **v0.24.0 SLÄPPT** (`eaa1209`, tagg + GitHub Latest) + uppföljande commits
+  (alla pushade): kuvert-fix `21dc368`, fas 2-ökning 1 `5db65e4` (schema v4),
+  prosa-lagret `83cd3d7`, CT-planen `b860747` + rev II `a14b245`, harmony
+  steg 1 `14b4e0d`, **P1 wiring `834d390`**.
+- **Fas 1 (code-index) KLAR:** delmål A (coverage-yta: CLI `--coverage` +
+  MCP `mode=coverage`), B (hermetisk fixtursvit + facit-projekt
+  `testprojekt/code-index-fixture/`), C (extraktor v2: metodanrop H1,
+  makron H2, scoped-path H3, implements kind=trait H4).
+  Före/efter GTW-repot: relations 4 650 → 22 095; resolved call-kanter
+  890 → 3 848 (4,3×); käll-matched 49,4 % → 70,7 %; implements 31/31
+  korrekt-målade (de gamla 88,5 % innehöll fel-mål).
+- **CT-planen P1 KLART enligt S-protokollet** (S0–S5: källan läst, byggd +
+  KÖRD — 6 mätta cases pinnade; DERIVE-klassad): `src/llm/harmony.rs`
+  (ren, funktions-oberoende modul) + **P1 wiring KLART**: `RerankedHit`
+  bär råa pelare (`lex`, `graph: Option<f32>`) + `harmony` (verdict +
+  suggestion); FileMatch exponerar harmony; MCP-prosan surface:ar
+  top-träffens verdict (suspect_note-mönstret).
+  **291 lib-tester + fixtur gröna · clippy `-D warnings` ren ·
+  no-default-features 0 fel.** Studieranteckning 09.1 ifylld i planen §3.6.
+- **Prosa-lagret i DB (användarens design):** `prose_annotations` i schema
+  v4 — ankare (kind/key/hash/name), body, producer/model/language,
+  generation-revision, state machine `fresh` → `stale` ("ej färsk") →
+  `invalid` ("ej gällande", med `suggested_key` vid unik samnamnig
+  efterträdare). Deterministisk sweep per revision; producenter via
+  `upsert_prose`; aldrig grind. Coverage: `ProseSummary` +
+  `regenerate_recommended`.
+- **Migrations-helande (nytt mönster):** commit-hookens äldre binär kan
+  migrera storen med äldre ADD-sätt → `migrate_connection` kör idempotent
+  DDL (CREATE IF NOT EXISTS) vid VARJE öppning + additiv kolumn-reparation
+  (PRAGMA table_info + ALTER ADD DEFAULT). Verifierat på live-storen
+  (anchor_name reparerat).
+- **Bonus-guards:** `E_DUPLICATE_ATTRIBUTE` (dubbel-`#[test]`-fällan) —
+  4-falls enhetstest. Issue-loggen: post II (kuvert + daemner) och III
+  (edit-stöd: search_nodes-annotering, read_node storlek, storleksschock —
+  "bygg nu"-status).
+- **Daemner/hygien:** 84 → 8 daemner (76 deleted-exe under cline-hub
+  dödade). Nuvarande 5 daemner kör CPU-bin (0.24.0 med allt) — **MCP
+  coverage LIVE** (verifierat: full rapport via wrapper). libexec (GPU)
+  = 10:45-bygget, SAKNAR kuvert/schema-v4/prosa → **GPU-rebuild måste
+  köras om** (föregående avbröts av omstarten); harmlöst tills dess
+  (daemner använder bin). gnawdrivers db_surf var stale (egen varning) —
+  bygg om gnawdriver; python3-sqlite3 mode=ro användes som sanningskälla.
 
-## Nästa (i ordning)
+## Öppna poster (ordning enligt överenskommelse)
 
-1. **Install + service-restart:** `cargo install --path . --features mcp`
-   (eller `scripts/build-gpu.sh`) → `mode=coverage` live i MCP; verkliga
-   verifiering: anropa coverage-mode och lyssna på feltexten.
-2. **CHANGELOG + commit:** verktygsytan (coverage + extractor v2 + guard)
-   ropas ut; commit enligt konvention (feat(core): ...).
-3. **Fas 2-förutsättningar:** D1, D2, D5, D7–D9 låses innan
-   revisions-tabellerna (schema v4) skrivs — se proposalens
-   "Granskningsbeslut"-tabell.
-4. **Reparationsmål (största klasserna):** function_scope_unmatched 6 009
-   (from-identitetens kvalificering), unresolved_macro 3 419 (makro-
-   expanderare/domänkontrakt), db_surf-verifiering efter gnawdriver-ombygge.
+1. **P2** (CT-planen): graf-frågor `kind=cycles|impact` + `chain` i ny
+   `src/core/code_graph.rs` (SQL UNION-rekursiv reachable — UNION dedupar
+   så cykler terminerar; Rust path-stack-cykler med rotationskanonisering;
+   dokumenterad begränsning: syntetiska callsite-from_ids propagerar inte).
+2. **Fas 2 I2:** D5(a) atomisk wrap av refresh (revision+deltan+nuläge i EN
+   tx; failed-refresh-bokföring i egen tx) — benchmark på Motor2-storlek
+   fixtur.
+3. **I3:** entity/relation-deltas (aggregerade D1/D8-nycklar med counts) +
+   `changes --from --to` (CLI/MCP).
+4. **I4:** D7-källklassificering (6 009 function_scope_unmatched →
+   kvalificera from-identiteten) + git_hook-spelningens live-verifiering
+   (hooken spelar INTE revisioner idag — upptäckt; hook-scriptet behöver
+   reinstall för `GTW_CODE_INDEX_SOURCE=git_hook`-prefixet).
+5. **P3a** (complexity på riktig AST — decision_kinds-tabell per språk;
+   fixtures är riskposten) och **P4** (JSON-analysartefakt `gtw-analysis/1`
+   + triage-skript) per CT-planen.
+6. **Prosa-ytan:** `upsert_prose` har INGEN CLI/MCP-yta än (producenter
+   väntar; guard blockerar rå sqlite-skrivning) — nästa öknings-kandidat
+   jämte P2.
+7. **Underhåll:** hook-reinstall (`--uninstall-hook` + `--install-hook`)
+   för env-prefixet; CHANGELOG för prosa-lagret + P1; `code-index.md`
+   omgenererad av hook (kontrollera).
 
 ## Pekare
 
-- Plan och beslutsspår: `docs/CODE_INDEX_RELATION_HISTORY_PROPOSAL.md`
-  (sektionen "Granskningsbeslut 2026-11-09": D1–D10, T1–T5; fas 2 får
-  först börja när D1, D2, D5, D7–D9 är låsta — D3/D4/D10 styr impact-
-  fasen).
-- Checkpoint: `phase1-coverage-harness` (återställbar via checkpoint-
-  systemet).
-- Minne: `gnawtreewriter:decision:relation-history-review-d1-d6`
-  (båda granskningsomgångarna), `gnawtreewriter:lesson:opencode2x-mcp-
-  binary-pickup` (grundad MCP/binär-modell).
-- Motor2-mall för detta format: `Motor2/docs/HANDOVER-LATEST.md`.
+- Plan of record: `docs/COMPARATIVE_THINKER_ADAPTATION_PLAN.md` (rev II;
+  studieanteckning 09.1 ifylld i §3.6) +
+  `docs/CODE_INDEX_RELATION_HISTORY_PROPOSAL.md` ("Fas 2-designnoter",
+  låsta D1–D10 + design-noter från sessionen).
+- Checkpoints: `phase1-coverage-harness`, `phase1-extractor-v2`.
+- Minne: `gnawtreewriter:decision:phase2-locks`,
+  `gnawtreewriter:decision:code-index-prose-layer`,
+  `gnawtreewriter:reference:comparative-thinker-plan`,
+  `gnawtreewriter:lesson:opencode2x-mcp-binary-pickup`.
+- Facit-projekt: `testprojekt/code-index-fixture/` (FACTS.md — före/efter
+  C mätta 2026-11-10).
+- Issue-log: post II (kuvert + daemn-hygien) och III (edit-stöd, "bygg nu").

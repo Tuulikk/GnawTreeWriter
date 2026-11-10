@@ -1836,7 +1836,7 @@ resultat ny `['content', 'isError']` med rapport-JSON i text (verifierat
 
 ---
 
-## 2026-11-10 (III) — edit-stöd: tre fynd från en hel P1-wiring-session ("bygg nu")
+## 2026-11-10 (III) — edit-stöd: tre fynd från en hel P1-wiring-session (FORMALISERADE specar — status: öppna, bygg efter hand)
 
 **Klass:** förbättringsförslag (alla tre små; tysta fall i en dag med ~30
 editer). Sammanhang: P1-wiring i `semantic_index.rs`/`gnaw_sense.rs`
@@ -1856,6 +1856,17 @@ Konsumenten ser 60 och skriver 2 → vet det före edit.
 motsvarande krav → kräv `force: true` eller preview-bekräftelse (E-kod i
 B2:s anda: "PARTIAL REPLACEMENT"-mönstret fångar remnanter, inte
 full-truncation). Idag passerade stubben tyst (valid syntax).
+
+**Formaliserad acceptans (checkas av vid build):**
+
+- [ ] **T1** — varje `search_nodes`-träff bär `node_type`, `span_lines`,
+      `depth`; sortering trängst-först. Acceptans: de tre guardian-blocken
+      från 2026-11-10 hade siktat rätt nod på första träffen.
+- [ ] **T2** — `read_node`-svaret bär `node_lines: N`. Acceptans: read på
+      60-raders fn visar 60 — stubben (2 rader) syns före edit.
+- [ ] **T3** — `edit_node` shrink >70 % (nod ≥ 10 rader) → `E_SIZE_SHOCK`
+      utan `force: true`; med force → ok. Acceptans: stubben avvisas utan
+      force, släpps igenom med.
 
 **Variant-logg (samma session):** alla tre hittades via *eget* arbete —
 dogfooding-provet: P1-wiringen på en 100-raders tät funktion drev fram
