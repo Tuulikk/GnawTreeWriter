@@ -49,18 +49,46 @@ pub fn current() -> BuildInfo {
 }
 
 /// True when the running binary does not match the current source:
-/// the repo HEAD moved since the build, or a `src/` file is newer than
-/// the build. Both comparisons are advisory — read errors count as
-/// "cannot prove stale" (false), never as healthy lies about freshness.
+/// HEAD moved **for build-relevant paths** (`src/`, `Cargo.toml`,
+/// `Cargo.lock`, `build.rs`), or one of them is newer than the build.
+/// Docs-only commits do not count — see `code_head_moved`. Both comparisons
+/// are advisory: read errors count as "cannot prove stale" (false), never as
+/// healthy lies about freshness.
 fn is_stale(built_sha: &str, built_epoch: u64) -> bool {
     if built_sha == "unknown" || built_epoch == 0 {
         return true;
     }
-    let head_moved = run_git(&["rev-parse", "--short", "HEAD"])
-        .map(|rev| rev != built_sha)
-        .unwrap_or(false);
-    let src_newer = src_newer_than(built_epoch).unwrap_or(false);
-    head_moved || src_newer
+    code_head_moved(built_sha) || src_newer_than(built_epoch).unwrap_or(false)
+}
+
+/// Did HEAD move in a way that affects the BINARY?
+///
+/// A docs-only commit (CHANGELOG, README, uppslag) does not make the running
+/// binary wrong — and an alarm that fires after every documentation commit is
+/// one people learn to ignore (the failure mode `ai status` already taught us).
+/// So: compare against the paths that actually feed the build.
+fn code_head_moved(built_sha: &str) -> bool {
+    let head = match run_git(&["rev-parse", "--short", "HEAD"]) {
+        Some(h) => h,
+        None => return false, // cannot read git: advisory, never a healthy lie
+    };
+    if head == built_sha {
+        return false;
+    }
+    let range = format!("{built_sha}..HEAD");
+    match run_git(&[
+        "diff",
+        "--name-only",
+        &range,
+        "--",
+        "src",
+        "Cargo.toml",
+        "Cargo.lock",
+        "build.rs",
+    ]) {
+        Some(list) => !list.trim().is_empty(),
+        None => true, // cannot prove the range harmless → assume stale
+    }
 }
 
 /// The source tree this binary was BUILT from.
@@ -139,6 +167,20 @@ pub fn format_epoch_utc(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn current_sha_is_not_moved_but_an_unreadable_range_is() {
+        if let Some(head) = run_git(&["rev-parse", "--short", "HEAD"]) {
+            assert!(
+                !code_head_moved(&head),
+                "the current HEAD must never count as moved"
+            );
+            assert!(
+                code_head_moved("0000000"),
+                "a range git cannot evaluate must assume stale, not fresh"
+            );
+        }
+    }
 
     /// Regression (field finding 2026-11-10): the staleness check read
     /// `CARGO_MANIFEST_DIR` with `std::env::var` at RUNTIME, where no installed
