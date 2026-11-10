@@ -7,6 +7,10 @@
 > `gnawtreewriter-crush.skill` is **generated** from `SKILL.md` by
 > `scripts/pack-skill.sh` — never edit the package; run
 > `scripts/pack-skill.sh --check` to prove it is not stale.
+>
+> **Skriven mot v0.9.x.** Kommandona nedan fungerar i stort, men verktygsytan
+> har vuxit sedan dess (`code_index`, `--cycles`/`--impact`/`--why`,
+> `--expect-name`, 32 filändelser) — se `SKILL.md` för aktuell yta.
 
 ## Quick Start
 

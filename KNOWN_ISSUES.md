@@ -1,6 +1,12 @@
 # Known Issues and Limitations
 
-**Current as of GnawTreeWriter v0.9.8** *(gått igenom och verifierad mot koden 2026-10-04)*
+> **STATUS: historisk (gäller ≤ v0.9.8, verifierad mot koden 2026-10-04).**
+> Repot står på 0.25.x; punkterna nedan är **inte** omverifierade sedan dess.
+> Levande begränsningar, osäkerheter och halvbevis finns i **[`uppslag.md`](uppslag.md)**
+> (nyast först, med bevis och status) — **läs den först**. Det som bekräftas
+> fortfarande gälla flyttas dit efter hand.
+
+**Senast kända läge: GnawTreeWriter v0.9.8**
 
 This document tracks known issues, limitations, and workarounds based on real-world usage and AI agent testing feedback.
 
