@@ -99,6 +99,40 @@ fångat alla fyra argument-tabellfelen på en gång) och `tests/cli_behaviour.rs
 `analyze`-fel och `--expect-name`). **404 tester / 21 binärer gröna ·
 clippy `-D warnings` ren (lib+bin).**
 
+## Trovärdighetspaketet för planering — tre bitar KLARA
+
+Motiverat av mätningen: `to_id` sattes när ett namn var unikt **i indexet**, och
+`len`/`clone`/`is_empty`/`get` är unika bara för att std inte indexeras.
+
+**1. Målets resolution är inte längre en gissning.** Båda
+resolutionsplatserna (`index_relations::resolve_relations` OCH
+`code_index_db`-pass 2 — regeln fanns på två ställen) vägrar nu kors-fil-mål
+som är **metoder**; fria funktioner och samma-fil-metoder resolvas som förut.
+`EXTRACTOR_VERSION` 2 → 3 (resolutionen är del av `generation_key` ⇒ full
+ombyggnad; prose-lagret ligger i egen tabell och rörs inte).
+
+| Mått (GTW:s egen store) | Före | Efter |
+|---|---|---|
+| resolvade call-kanter | 3 898 | **2 064** |
+| kors-fil metodmål (= gissningarna) | 1 848 | **0** |
+| fler-nodscykler | 338 | **29** |
+| vanligaste mål | `clone` 612, `len` 284, `is_empty` 255, `get` 245 | `new` 120, `entry` 61, `context` 55 |
+
+**2. Färskhet + statisk-hederlighet i varje grafsvar** (D9/D10 i
+`CODE_INDEX_RELATION_HISTORY_PROPOSAL.md`): `meta { store_rev, worktree_rev,
+worktree_dirty, index_stale, static_only, note }`. Verifierat live:
+`index_stale: false` när rev matchar. `static_only` + noten säger rakt ut att
+kanterna är statiska (ingen dyn dispatch/trait-objekt).
+
+**3. `code-index --why <symbol>`** — per utgående kant: `resolved`, `to_id`,
+`target_defs` (hur många entiteter som delar målnamnet) och `verdict`
+(`unique_in_index` / `ambiguous_pick` / `unresolved`). Gör ett grafsvar
+**falsifierbart på ett anrop** i stället för att kräva tillit.
+
+Kvar av post 15: `from_id`-täckningen (D7) och 73 self-loops (samma-fil
+metod-self-edges, t.ex. `self.cache.lock()…len()` → `ParseCache::len`).
+**406 tester / 21 binärer gröna · clippy `-D warnings` ren.**
+
 ## Bekräftat läge
 
 - **v0.24.0 SLÄPPT** (`eaa1209`, tagg + GitHub Latest) + uppföljande commits

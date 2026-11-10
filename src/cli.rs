@@ -264,6 +264,11 @@ enum Commands {
         /// from every entity that DEFINES that bare name. Read-only
         #[arg(long)]
         impact: Option<String>,
+        /// "Why does this edge exist?" — list the outgoing edges of SYMBOL with
+        /// the resolution verdict per edge (unique_in_index / ambiguous_pick /
+        /// unresolved) and how many entities share the target name
+        #[arg(long)]
+        why: Option<String>,
         /// Hop bound for --cycles/--impact (default: 64 / 3)
         #[arg(long)]
         depth: Option<usize>,
@@ -1384,6 +1389,7 @@ impl Cli {
                 coverage,
                 cycles,
                 impact,
+                why,
                 depth,
             } => {
                 // Ett tomt --extensions betyder "den inbyggda listan". Tidigare
@@ -1413,9 +1419,15 @@ impl Cli {
                     // Phase 1 coverage harness (proposal 2026-11-09):
                     // measure the store graph — read-only, JSON out.
                     Self::handle_code_index_coverage(Path::new(&path))?;
-                } else if cycles || impact.is_some() {
+                } else if cycles || impact.is_some() || why.is_some() {
                     // P2: graph queries over the store — read-only.
-                    Self::handle_code_graph(Path::new(&path), cycles, impact.as_deref(), depth)?;
+                    Self::handle_code_graph(
+                        Path::new(&path),
+                        cycles,
+                        impact.as_deref(),
+                        why.as_deref(),
+                        depth,
+                    )?;
                 } else {
                     Self::handle_code_index(&path, output.as_deref(), opts, db, check, fix)?;
                 }
@@ -2035,6 +2047,7 @@ Use --no-preview to actually perform the restore"
             path: &Path,
             cycles: bool,
             impact: Option<&str>,
+            why: Option<&str>,
             depth: Option<usize>,
         ) -> Result<()> {
             let index_root = crate::core::code_index_db::resolve_index_root(path);
@@ -2043,6 +2056,25 @@ Use --no-preview to actually perform the restore"
                     "code-index graph queries need a store — run `gnawtreewriter code-index <root> --db` first ({e:#})"
                 )
             })?;
+
+            // Envelope (D9/D10 in the relation-history proposal): a graph
+            // answer is only as good as the store it came from, and an agent
+            // cannot see that from the edges alone. Carry the provenance:
+            // which revision was indexed, which one is on disk now, and that
+            // the edges are STATIC (no dyn dispatch, no trait-object runtime
+            // resolution). `index_stale: true` means "re-run --db before you
+            // trust this for planning".
+            let (worktree_rev, dirty) = crate::core::code_index::git_facts(&index_root);
+            let status = crate::core::code_index_db::store_status(&index_root);
+            let store_rev = status.as_ref().and_then(|s| s.last_refresh_rev.clone());
+            let meta = serde_json::json!({
+                "store_rev": store_rev,
+                "worktree_rev": worktree_rev,
+                "worktree_dirty": dirty,
+                "index_stale": store_rev.as_deref() != Some(worktree_rev.as_str()),
+                "static_only": true,
+                "note": "static call/import edges: no dyn dispatch, no trait-object resolution. Cross-file METHOD targets are left unresolved on purpose (a name unique in this index is not unique in reality — std is not indexed).",
+            });
             if cycles {
                 let found = crate::core::code_graph::cycles(&conn, depth.unwrap_or(64))?;
                 println!(
@@ -2051,6 +2083,7 @@ Use --no-preview to actually perform the restore"
                         "kind": "cycles",
                         "count": found.len(),
                         "cycles": found,
+                        "meta": meta,
                     }))?
                 );
             }
@@ -2064,6 +2097,64 @@ Use --no-preview to actually perform the restore"
                     );
                 }
                 println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+            if let Some(symbol) = why {
+                // "Why does this edge exist?" — the falsification tool. For
+                // every outgoing edge of the symbol, report HOW the target was
+                // resolved and how many entities share that name. When
+                // `target_defs` > 1 and `resolved` is true, the edge is a
+                // guess; when it is 1, the resolution is at least unique in
+                // THIS index (which still says nothing about std).
+                let seeds = crate::core::code_graph::resolve_symbols(&conn, symbol)?;
+                if seeds.is_empty() {
+                    eprintln!(
+                        "note: no entity named '{symbol}' in the store — 0 seeds (re-run code-index --db if the code is newer than the index)"
+                    );
+                }
+                let mut edges: Vec<serde_json::Value> = Vec::new();
+                for seed in &seeds {
+                    let mut stmt = conn.prepare(
+                        "SELECT to_name, to_id, relation_type, line, file FROM relations WHERE from_id = ?1 ORDER BY line, to_name",
+                    )?;
+                    let mut rows = stmt.query(rusqlite::params![seed.id])?;
+                    while let Some(row) = rows.next()? {
+                        let to_name: String = row.get(0)?;
+                        let to_id: Option<String> = row.get(1)?;
+                        let relation_type: String = row.get(2)?;
+                        let line: i64 = row.get(3)?;
+                        let file: String = row.get(4)?;
+                        let target_defs: i64 = conn.query_row(
+                            "SELECT COUNT(*) FROM entities WHERE name = ?1",
+                            rusqlite::params![to_name],
+                            |r| r.get(0),
+                        )?;
+                        edges.push(serde_json::json!({
+                            "from": seed.id,
+                            "file": file,
+                            "line": line,
+                            "relation_type": relation_type,
+                            "to_name": to_name,
+                            "resolved": to_id.is_some(),
+                            "to_id": to_id,
+                            "target_defs": target_defs,
+                            "verdict": match (to_id.is_some(), target_defs) {
+                                (false, _) => "unresolved",
+                                (true, 1) => "unique_in_index",
+                                (true, _) => "ambiguous_pick",
+                            },
+                        }));
+                    }
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "kind": "why",
+                        "symbol": symbol,
+                        "seeds": seeds,
+                        "edges": edges,
+                        "meta": meta,
+                    }))?
+                );
             }
             Ok(())
         }

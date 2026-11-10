@@ -27,7 +27,12 @@ use std::time::Duration;
 
 /// Bump on ANY change to item extraction output — part of the generation
 /// key, so stale rows never survive an extractor change silently.
-pub const EXTRACTOR_VERSION: &str = "2";
+/// Bumped to 3 (2026-11-10): the RESOLUTION RULE changed — cross-file METHOD
+/// targets are no longer resolved by name uniqueness (they were fabricated:
+/// `clone`/`len`/`is_empty`/`get` are "unique" only because std is not
+/// indexed). The version is part of `generation_key`, so existing stores
+/// rebuild instead of keeping the old, confidently-wrong edges.
+pub const EXTRACTOR_VERSION: &str = "3";
 
 const SCHEMA_VERSION: i32 = 4;
 const BUSY_TIMEOUT_MS: u64 = 5000;
@@ -621,11 +626,7 @@ pub fn refresh(
 /// stage; before/after deltas arrive with the single-tx wrap where the
 /// pre-refresh state is naturally in scope). Failed refreshes record
 /// nothing yet — the dedicated failure path lands with the wrap.
-pub(crate) fn record_revision(
-    conn: &mut Connection,
-    root: &Path,
-    source: &str,
-) -> Result<i64> {
+pub(crate) fn record_revision(conn: &mut Connection, root: &Path, source: &str) -> Result<i64> {
     let (rev, dirty) = git_facts(root);
     let now = chrono::Utc::now().timestamp();
     let gk = meta_get(conn, "generation_key")?.unwrap_or_default();
@@ -717,8 +718,12 @@ pub(crate) fn sweep_prose_freshness(conn: &mut Connection) -> Result<()> {
                 );
                 match h {
                     Ok(h) if h == *anchor_hash => {}
-                    Ok(_) => updates.push((*id, "stale", Some("content_changed".to_string()), None)),
-                    Err(_) => updates.push((*id, "invalid", Some("anchor_removed".to_string()), None)),
+                    Ok(_) => {
+                        updates.push((*id, "stale", Some("content_changed".to_string()), None))
+                    }
+                    Err(_) => {
+                        updates.push((*id, "invalid", Some("anchor_removed".to_string()), None))
+                    }
                 }
             }
             "entity" => {
@@ -736,12 +741,18 @@ pub(crate) fn sweep_prose_freshness(conn: &mut Connection) -> Result<()> {
                         );
                         match h {
                             Ok(h) if h == *anchor_hash => {}
-                            Ok(_) => {
-                                updates.push((*id, "stale", Some("content_changed".to_string()), None))
-                            }
-                            Err(_) => {
-                                updates.push((*id, "stale", Some("anchor_file_missing".to_string()), None))
-                            }
+                            Ok(_) => updates.push((
+                                *id,
+                                "stale",
+                                Some("content_changed".to_string()),
+                                None,
+                            )),
+                            Err(_) => updates.push((
+                                *id,
+                                "stale",
+                                Some("anchor_file_missing".to_string()),
+                                None,
+                            )),
                         }
                     }
                     Err(_) => {
@@ -750,7 +761,8 @@ pub(crate) fn sweep_prose_freshness(conn: &mut Connection) -> Result<()> {
                         // re-anchor when it is unique — never a guess.
                         let bare = key.rsplit(':').next().unwrap_or("");
                         let successors: Vec<String> = {
-                            let mut stmt = conn.prepare("SELECT id FROM entities WHERE name = ?1")?;
+                            let mut stmt =
+                                conn.prepare("SELECT id FROM entities WHERE name = ?1")?;
                             let rows = stmt.query_map(params![bare], |r| r.get::<_, String>(0))?;
                             rows.flatten().collect()
                         };
@@ -762,7 +774,12 @@ pub(crate) fn sweep_prose_freshness(conn: &mut Connection) -> Result<()> {
                                 Some(successors[0].clone()),
                             ));
                         } else {
-                            updates.push((*id, "invalid", Some("anchor_removed".to_string()), None));
+                            updates.push((
+                                *id,
+                                "invalid",
+                                Some("anchor_removed".to_string()),
+                                None,
+                            ));
                         }
                     }
                 }
@@ -901,8 +918,8 @@ pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun> {
     // Phase 2: one revision row per completed refresh — the chain
     // (parent = previous completed), git facts, identity version. Source
     // via GTW_CODE_INDEX_SOURCE (git_hook sets it in the installed hook).
-    let source = std::env::var("GTW_CODE_INDEX_SOURCE")
-        .unwrap_or_else(|_| "refresh_manual".to_string());
+    let source =
+        std::env::var("GTW_CODE_INDEX_SOURCE").unwrap_or_else(|_| "refresh_manual".to_string());
     if let Err(e) = record_revision(&mut conn, &index_root, &source) {
         notices.push(format!("revisionspost kunde inte skrivas: {e:#}"));
     }
@@ -1011,8 +1028,8 @@ fn resolve_unresolved_in_db(conn: &Connection) -> Result<()> {
             by_name.entry(name).or_default().push((file, id, kind));
         }
     }
-    let mut stmt = conn
-        .prepare("SELECT id, to_name, file, relation_type FROM relations WHERE to_id IS NULL")?;
+    let mut stmt =
+        conn.prepare("SELECT id, to_name, file, relation_type FROM relations WHERE to_id IS NULL")?;
     let rows = stmt.query_map([], |r| {
         Ok((
             r.get::<_, i64>(0)?,
@@ -1038,7 +1055,18 @@ fn resolve_unresolved_in_db(conn: &Connection) -> Result<()> {
             cands.iter().filter(|(f, _, _)| f == &file).collect();
         let pick = match (same_file.len(), cands.len()) {
             (1, _) => Some(same_file[0].1.clone()),
-            (0, 1) => Some(cands[0].1.clone()),
+            (0, 1) => {
+                // Same guard as `resolve_relations` (the rule lives in two
+                // places — this is the authoritative cross-file pass). A
+                // globally "unique" METHOD name is not unique in reality: std
+                // is not indexed, so `clone`/`len`/`is_empty`/`get` look
+                // singletons. Cross-file method targets stay unresolved.
+                if crate::core::index_relations::is_method_entity_id(&cands[0].1) {
+                    None
+                } else {
+                    Some(cands[0].1.clone())
+                }
+            }
             _ => None,
         };
         if let Some(id) = pick {

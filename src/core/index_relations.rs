@@ -120,9 +120,11 @@ pub fn resolve_relations(relations: &mut [Relation], entities: &[Entity]) {
         e: &Entity,
         by: &mut std::collections::HashMap<String, Vec<(String, String, String)>>,
     ) {
-        by.entry(e.name.clone())
-            .or_default()
-            .push((e.file.clone(), e.id.clone(), e.entity_type.clone()));
+        by.entry(e.name.clone()).or_default().push((
+            e.file.clone(),
+            e.id.clone(),
+            e.entity_type.clone(),
+        ));
         for c in &e.children {
             collect(c, by);
         }
@@ -151,9 +153,109 @@ pub fn resolve_relations(relations: &mut [Relation], entities: &[Entity]) {
             cands.iter().filter(|(f, _, _)| f == &rel.file).collect();
         rel.to_id = match (same_file.len(), cands.len()) {
             (1, _) => Some(same_file[0].1.clone()),
-            (0, 1) => Some(cands[0].1.clone()),
+            (0, 1) => {
+                // Global uniqueness IN OUR INDEX is not uniqueness in reality:
+                // `len` is "unique" only because std is not indexed, so every
+                // `vec.len()` / `tensor.len()` resolved to `ParseCache::len`.
+                // Measured on this repo before the guard: 1 840 resolved
+                // call-edges crossed a file boundary AND targeted a method —
+                // top names `clone` (612), `len` (284), `is_empty` (255),
+                // `get` (245), i.e. std/trait methods we can never resolve
+                // without the receiver's type. A fabricated dependency is
+                // worse than a missing one for planning, so a cross-file
+                // METHOD target stays unresolved (visible in `symbols` and
+                // in the coverage report) instead of inventing an edge.
+                if is_method_entity_id(&cands[0].1) {
+                    None
+                } else {
+                    Some(cands[0].1.clone())
+                }
+            }
             _ => None,
         };
+    }
+}
+
+/// `gtw:{file}:function:Type::name` is a method (needs a receiver type);
+/// `gtw:{file}:function:name` is a free function.
+pub(crate) fn is_method_entity_id(id: &str) -> bool {
+    id.rsplit(":function:")
+        .next()
+        .is_some_and(|tail| tail.contains("::"))
+}
+
+#[cfg(test)]
+mod resolution_guard_tests {
+    use super::*;
+    use crate::core::index_entities::Entity;
+
+    fn ent(id: &str, file: &str, name: &str) -> Entity {
+        Entity {
+            id: id.to_string(),
+            entity_type: "function".to_string(),
+            name: name.to_string(),
+            signature: format!("fn {name}()"),
+            file: file.to_string(),
+            line: 1,
+            visibility: "public".to_string(),
+            doc_comment: None,
+            tokens: 1,
+            path: "0".to_string(),
+            children: Vec::new(),
+        }
+    }
+
+    fn rel(from: &str, file: &str, to_name: &str) -> Relation {
+        Relation {
+            from: from.to_string(),
+            to_name: to_name.to_string(),
+            to_id: None,
+            relation_type: "calls".to_string(),
+            line: 2,
+            file: file.to_string(),
+        }
+    }
+
+    /// The guard this test locks: uniqueness inside our index says nothing
+    /// about a METHOD name, because std is not indexed (`len`, `clone`,
+    /// `is_empty`, `get` are "unique" there). Cross-file method targets must
+    /// stay unresolved; free functions and same-file methods still resolve.
+    #[test]
+    fn cross_file_method_targets_are_not_resolved() {
+        let entities = vec![
+            ent("gtw:src/a.rs:function:TypeA::helper", "src/a.rs", "helper"),
+            ent("gtw:src/b.rs:function:free_fn", "src/b.rs", "free_fn"),
+        ];
+
+        let mut rels = vec![
+            // cross-file, method target -> NULL (the fabricated-edge class)
+            rel("gtw:src/c.rs:function:caller", "src/c.rs", "helper"),
+            // cross-file, free function -> still resolved
+            rel("gtw:src/c.rs:function:caller", "src/c.rs", "free_fn"),
+            // same-file method -> still resolved
+            rel("gtw:src/a.rs:function:other", "src/a.rs", "helper"),
+        ];
+
+        resolve_relations(&mut rels, &entities);
+
+        assert_eq!(rels[0].to_id, None, "cross-file method must not resolve");
+        assert_eq!(
+            rels[1].to_id.as_deref(),
+            Some("gtw:src/b.rs:function:free_fn"),
+            "a free function still resolves across files"
+        );
+        assert_eq!(
+            rels[2].to_id.as_deref(),
+            Some("gtw:src/a.rs:function:TypeA::helper"),
+            "a same-file method still resolves (receiver is local)"
+        );
+    }
+
+    #[test]
+    fn method_id_detection() {
+        assert!(is_method_entity_id("gtw:src/a.rs:function:TypeA::helper"));
+        assert!(!is_method_entity_id("gtw:src/a.rs:function:helper"));
+        assert!(!is_method_entity_id("gtw:src/a.rs:struct:TypeA"));
     }
 }
 
