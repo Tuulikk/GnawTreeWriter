@@ -201,13 +201,18 @@ metod-self-edges, t.ex. `self.cache.lock()…len()` → `ParseCache::len`).
    jämte P2.
 7. **Underhåll:** hook-reinstall (`--uninstall-hook` + `--install-hook`)
    för env-prefixet; CHANGELOG för prosa-lagret + P1.
-   `code-index.md` är **omgenererad manuellt** i session IV (ny binär, 2275
-   rader). **FÄLLA:** `post-commit`-hooken anropar `gnawtreewriter` **från
-   PATH** — dvs den *installerade* binären. Kör man en commit innan
-   `cargo install --path .` är gjord, regenererar hooken artefakten med den
-   GAMLA ändelselistan och **krymper** `code-index.md` (mätt: 2275 → 2154
-   rader; `.sh`/`.qml`/m.fl. föll bort). Kör därför `cargo install --path .`
-   före nästa commit, eller regenerera för hand efteråt med den nya binären:
+   **Hook-fällan är FIXAD** (`9363bce`): den anropar inte längre blint
+   `gnawtreewriter` från PATH. Den föredrar `target/release` →
+   `target/debug` → PATH, och **hoppar över** med en rad på stderr när den
+   valda binären är äldre än `Cargo.toml`/`src`
+   ("is older than the source — code-index refresh SKIPPED"). Dessutom vägrar
+   `refresh()` köra mot en store vars `extractor_version` är **högre** än
+   binärens — en gammal binär kan alltså inte längre nedgradera storen (mätt
+   fall: v2 skrev över en v3-store och återinförde fabricerade kanter).
+   Verifierat: hooken skrev SKIPPED efter commit, `git status` rent och
+   `code-index.md` kvar på 2275 rader. **Kvar:** kör
+   `cargo install --path .` när du vill att hooken ska refresha igen; tills
+   dess är indexet fruset men aldrig fel (och `meta.index_stale` säger till).
 
 ### Nya öppna poster från session IV
 
