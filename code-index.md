@@ -1,10 +1,10 @@
 # CODE-INDEX — GnawTreeWriter
 
-> Genererad 2026-11-10 20:02 UTC · gnawtreewriter 0.25.1 · git `9f8897f`
+> Genererad 2026-11-10 20:03 UTC · gnawtreewriter 0.25.1 · git `cdff41c`
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `git`-rev ≠ HEAD — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 1ec27a91415183a3ca9df23c69e62bd9
+> Body-hash: 0da2275fdfcd13ed4625061290179aae
 
 ## Träd
 
@@ -81,7 +81,7 @@ src/
   lib.rs (11 rader)
   main.rs (77 rader)
   network.rs (14 rader)
-  version.rs (194 rader)
+  version.rs (236 rader)
 src/core/
   alf.rs (122 rader)
   anchor.rs (166 rader)
@@ -621,15 +621,16 @@ _(inga toppnivå-items)_
 - `pub struct Config` :8
 - `pub fn start()` :12
 
-### version.rs (194 rader)
+### version.rs (236 rader)
 - `pub struct BuildInfo` :19
 - `pub fn current() -> BuildInfo` :31
-- `fn is_stale(built_sha: &str, built_epoch: u64) -> bool` :55
-- `const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR")` :75
-- `fn src_newer_than(built_epoch: u64) -> Option<bool>` :79
-- `fn walk(dir: &std::path::Path, newest: &mut u64, found_any: &mut bool)` :99
-- `fn run_git(args: &[&str]) -> Option<String>` :116
-- `pub fn format_epoch_utc(secs: u64) -> String` :131
+- `fn is_stale(built_sha: &str, built_epoch: u64) -> bool` :57
+- `fn code_head_moved(built_sha: &str) -> bool` :70
+- `const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR")` :103
+- `fn src_newer_than(built_epoch: u64) -> Option<bool>` :107
+- `fn walk(dir: &std::path::Path, newest: &mut u64, found_any: &mut bool)` :127
+- `fn run_git(args: &[&str]) -> Option<String>` :144
+- `pub fn format_epoch_utc(secs: u64) -> String` :159
 
 ## src/core/
 
