@@ -366,18 +366,22 @@ When working in Crush:
 3. Practice time machine workflow
 4. Integrate GnawSense when indexed
 
-## Status
+## Status — verify it yourself
 
-✅ GnawTreeWriter v0.9.2 installed and working
-✅ ModernBERT + MCP features enabled
-✅ GnawSense AI operational (indexing required per project)
-✅ Basic operations tested (analyze, list, search, edit)
-✅ Time machine active with 2 undo steps
-✅ Skill mappings created (gnawtreewriter-crush.skill)
-✅ GnawGuard backend daemon running
-✅ MCP link registered in Gemini CLI
+This section used to be a checklist of assertions (an old version number, an
+undo count, "MCP link registered in Gemini CLI") — snapshots of one past session
+in a different host, unverifiable and wrong for a fresh install. These commands
+answer instead:
 
-**Ready for production use in Crush!**
+```bash
+gnawtreewriter --version            # must match `version` in Cargo.toml
+gnawtreewriter doctor               # parsers + backup integrity + txn log
+gnawtreewriter code-index . --db    # build/refresh the index (writes code-index.md)
+scripts/pack-skill.sh --check       # this skill package is not stale
+```
+
+If `--version` is older than `Cargo.toml` you are running a stale binary:
+`cargo install --path . --features modernbert,mcp`.
 
 ### Installation Verified
 ```bash
