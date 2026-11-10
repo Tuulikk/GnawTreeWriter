@@ -70,6 +70,35 @@ drar en andra runtime (0.20.10). `hcl 1.1.0` och `lua 0.5.0` verifierade OK
 men **inte inkopplade** (0 filer i ytan).
 
 
+## Session IV, fortsättning — P2 klar + fem CLI-hål stängda
+
+**P2 (CT-planen §4) färdigkopplad.** `src/core/code_graph.rs` (skriven av
+föregående agent, 401 rad, 10 tester) hade implementation men **ingen yta**.
+Tillagt av denna session: `impact` + `resolve_symbols` (ett bart *namn* slås upp
+mot `entities.name` → flera filer = flera seeds, alla rapporterade; okänt namn =
+**synligt tomt**, aldrig fabricerad kedja), 3 tester, samt inkoppling:
+
+- MCP: `code_index kind=cycles | kind=impact` + `symbol`/`depth` i schemat.
+- CLI: `code-index --cycles`, `--impact <namn>`, `--depth N` (read-only,
+  kräver store — samma regel som `--coverage`).
+
+**Fem CLI-hål stängda** (alla verifierade mot byggd binär före fixen):
+
+| # | Före | Efter |
+|---|---|---|
+| 1 | `--version`/`--help` → **exit 1 + stderr** (main.rs mappade *alla* clap-fel till exit 1) | `e.exit()`: help/version → stdout + 0; användningsfel → **2** |
+| 2 | `analyze` → **exit 0** när inget parsades | non-zero när 0 filer parsades (delscan behåller 0) |
+| 3 | `insert` **panikade på varje anrop** i debug (obligatorisk positional efter villkorlig) | `position: Option<usize>` (default 1) |
+| 4 | `curate` två `-m`, `pack` två `-i` (×2), `restore` bool som positional | long-only/flagga |
+| 5 | cachad numerisk path **skrev tyst fel nod** (mätt: `fn a() {}` → `fn CLOBBERED() {}`, exit 0) | `edit --expect-name <namn>` (B1-paritet med MCP) → avvisar, fil orörd |
+| 6 | `quick-replace '-1'` avvisades utan `--` | `allow_hyphen_values` |
+
+**Nya grindar:** `tests/cli_contract.rs` (`Cli::command().debug_assert()` — hade
+fångat alla fyra argument-tabellfelen på en gång) och `tests/cli_behaviour.rs`
+(kör den riktiga binären: exit-koder/strömmar för `--version`, användningsfel,
+`analyze`-fel och `--expect-name`). **404 tester / 21 binärer gröna ·
+clippy `-D warnings` ren (lib+bin).**
+
 ## Bekräftat läge
 
 - **v0.24.0 SLÄPPT** (`eaa1209`, tagg + GitHub Latest) + uppföljande commits
@@ -179,6 +208,18 @@ men **inte inkopplade** (0 filer i ytan).
     **inte inkopplade** (0 filer i ytan).
 14. **MCP-ytan:** `blast`, `graph` och `cycles` är fortfarande **CLI-only**.
     P2 i CT-planen adresserar det via `code_index kind=cycles|impact`.
+15. **EXTRACTOR-HÅL (hög prioritet, nytt i session IV): same-name-missresolution
+    fabricerar kanter.** `to_id` sätts när ett namn är unikt **i indexet** — men
+    `len` är unikt bara för att std inte indexeras, så **alla 286 `len`-anrop**
+    i repot resolvar till `ParseCache::len` (även `vec.len()`, `tensor.len()`
+    inne i `bge_embed_batched`). Följd: 73 self-loops + 338 "cykler" som
+    `len ↔ bge_embed_batched`, och `impact`/`blast` får fabricerade kanter.
+    Mätt på GTW:s egen store 2026-11-10. `code_graph` rapporterar ärligt vad
+    grafen innehåller — felet ligger i resolutionen, inte i frågorna.
+    Åtgärdsförslag: resolva inte metodanrop (`x.m()`) utan mottagartyp — lämna
+    `to_id` NULL (ärligt "unresolved", coverage redovisar det), eller lagra
+    mottagaren och matcha typ. Kräver beslut eftersom det sänker den uppmätta
+    käll-matchningsgraden (70,7 %) — men de kant­erna är i dag fabricerade.
 
 ## Pekare
 
