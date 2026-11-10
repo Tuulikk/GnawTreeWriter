@@ -19,6 +19,13 @@ jobs:
         with:
           toolchain: stable
 
+      # Skill drift guard: the Crush .skill package and the Codex symlink must
+      # both derive from the canonical SKILL.md. A stale package once shipped
+      # v0.9.2 instructions to Crush while the repo was at 0.25.x — silent,
+      # because nothing compared them. This makes that failure loud.
+      - name: Check skill package is in sync
+        run: scripts/pack-skill.sh --check
+
       - name: Run unit tests
         run: cargo test
 

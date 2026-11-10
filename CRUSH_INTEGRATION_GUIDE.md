@@ -1,8 +1,21 @@
 # GnawTreeWriter for Crush AI Agents
 
+> **How to call the tools lives in ONE place: [`SKILL.md`](SKILL.md)** — the host
+> matrix, the index surface (`code_index`/impact/cycles) and the edit workflow.
+> This guide covers Crush-specific *setup and patterns* only.
+>
+> `gnawtreewriter-crush.skill` is **generated** from `SKILL.md` by
+> `scripts/pack-skill.sh` — never edit the package; run
+> `scripts/pack-skill.sh --check` to prove it is not stale.
+
 ## Quick Start
 
-GnawTreeWriter (GTW) is now installed at v0.9.2 and ready to use in Crush.
+Install GTW and confirm the version actually on PATH:
+
+```bash
+cargo install --path . --features modernbert,mcp
+gnawtreewriter --version   # must match `version` in Cargo.toml
+```
 
 ### Basic Workflow
 

@@ -38,6 +38,10 @@ edit the codebase, the way it is meant to be used.
   `gnawtreewriter_*` tool calls do not exist any more (since 2026-10-15).
   Full recipe + fallbacks: the `gnawtreewriter` skill and
   `~/.config/opencode/instructions/gnawtreewriter.md`.
+- **In Crush**: `AGENTS.md` is the entry point that always works (Crush reads it
+  as project context). The `gnawtreewriter-crush.skill` package is **generated**
+  from `SKILL.md` by `scripts/pack-skill.sh` — never edit it by hand; run
+  `scripts/pack-skill.sh --check` to prove it is not stale.
 - **In Cline**: MCP tools surface as **native tools** named
   `gnawtreewriter__<tool>` (double underscore — `gnawtreewriter__analyze`,
   `gnawtreewriter__edit_node`, …), and Cline loads this repo's `SKILL.md`

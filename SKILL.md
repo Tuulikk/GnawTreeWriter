@@ -46,6 +46,7 @@ the tool is in your catalog, it works (no wrapper needed).
 | **VSCode / Copilot Chat** | `mcp_gnawtreewrite_<tool>` | The host truncates the server name; the suffix is the GTW tool name. |
 | **OpenCode 2.x (Code Mode)** | `await tools.gnawtreewriter.<tool>({...})` **inside `execute`** | MCP tools are not direct tools there; discover with `search({ namespace: "gnawtreewriter" })`. Recipe below. |
 | **Codex** | the `gnawtreewriter` MCP tools, if they appear in your catalog | Codex-specific variant: `.agents/skills/gnawtreewriter/SKILL.md`. A newly registered server may need a new session. |
+| **Crush** | the GTW MCP tools if you registered the server in Crush's config; otherwise `gnawtreewriter <command>` | Crush reads `AGENTS.md` as project context — that path always works. The `gnawtreewriter-crush.skill` package is **generated** from this file (`scripts/pack-skill.sh`), never edit it. |
 | **Terminal / no MCP at all** | `gnawtreewriter <command>` | Same names in CLI form. Shell escaping applies — pass content via `-` (STDIN) when it contains quotes/braces. |
 
 **OpenCode 2.x only — the `execute` recipe** (skip this block on every other host):
