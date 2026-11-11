@@ -131,5 +131,26 @@ ask_reap() {
 
 ask_reap
 
+# 6. Artifact gate: CI runs `code-index . --check`, so the tree we leave behind
+#    must pass it. The artifact is refreshed HERE (after install, with the NEW
+#    binary) because rendering it with the previous binary can differ by the
+#    version stamp and by items the new build just learned to extract.
+#    Before this step the artifact was refreshed by nothing at all in a repo
+#    without a git hook, so commits touching src/ went to CI red (2026-11-11).
+if [[ -f code-index.md && -x "$HOME/.cargo/bin/gnawtreewriter" ]]; then
+    "$HOME/.cargo/bin/gnawtreewriter" code-index . --check --fix >/dev/null 2>&1 || true
+    if [[ -n "$(git status --porcelain code-index.md)" ]]; then
+        git add code-index.md
+        if git commit -q -m "chore(code-index): refresh artifact after build"; then
+            echo "[commit-build] artefakten var inaktuell — committad separat (trädet förblir rent)."
+        fi
+    fi
+    if ! "$HOME/.cargo/bin/gnawtreewriter" code-index . --check >/dev/null 2>&1; then
+        echo "[commit-build] VARNING: code-index.md är fortfarande inaktuell — CI kommer att faila." >&2
+        echo "[commit-build] RESULT fail:code-index" >&2
+        exit 1
+    fi
+fi
+
 # Maskinläsbart facit SIST — en agent läser `tail -1`, inte prosan ovanför.
 echo "[commit-build] RESULT ok"

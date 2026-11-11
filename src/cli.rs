@@ -2519,6 +2519,13 @@ if [ -n "$(find "$top/Cargo.toml" "$top/src" -newer "$bin" -print -quit 2>/dev/n
     exit 0
 fi
 GTW_CODE_INDEX_SOURCE=git_hook "$bin" code-index "$top" --db >/dev/null 2>&1 || true
+# The DB alone is not enough: code-index.md is TRACKED and CI checks it
+# (`code-index . --check`). Refreshing only the store left every commit that
+# touched src/ with a stale artifact - green locally, red in CI (2026-11-11).
+# Only refresh an artifact that already exists, so repos without one stay clean.
+if [ -f "$top/code-index.md" ]; then
+    GTW_CODE_INDEX_SOURCE=git_hook "$bin" code-index "$top" -o "$top/code-index.md" >/dev/null 2>&1 || true
+fi
 "#;
         format!("{}\n{}\n{}\n", Self::HOOK_BEGIN, body, Self::HOOK_END)
     }

@@ -1,3 +1,25 @@
+## [Unreleased]
+
+### Fixed (CI) — två röda `Validate` var grinden som gjorde sitt jobb
+
+- **`Validate` failade på `29bb9a70` och `eaa078de`, grönt på `e28e29e8`.**
+  Orsaken var inte Actions: `code-index.md` var inaktuell i de två första
+  commitarna (jag ändrade källkod utan att regenerera artefakten) och färsk i
+  den tredje. Det nya CI-steget `code-index . --check` fångade precis det det
+  finns för — vilket betyder att det fungerar, men också att flödet saknade
+  regenereringen.
+- **Hooken** (`install-hook`) skrev bara storen (`--db`), aldrig den **spårade**
+  artefakten. Nu skriver den även `code-index.md` när filen finns — men bara då,
+  så repon utan artefakt förblir orörda.
+- **`commit-build.sh`** uppdaterar artefakten **efter** install (med den *nya*
+  binären, eftersom både versionsstämpeln och extraktionen kan skilja), committar
+  den separat om den ändrats, och avslutar med `RESULT fail:code-index` i stället
+  för `ok` om den fortfarande är inaktuell. Ett träd som lämnar skriptet kan
+  alltså inte längre pushas rött.
+- Not: `--skip-commit`-grenens kommentar om att artefakten "alltid är dirty"
+  gällde den rev-stämplade versionen och togs bort i 0.26.0 — nu är den bara
+  dirty när innehållet faktiskt ändrats, vilket är exakt när den ska committas.
+
 ## [0.26.0] - 2026-11-11
 
 ### Added (MCP) — `sense { root }`, broker per rot, och modell↔index-vakt
