@@ -6330,11 +6330,11 @@ Use without --preview to apply the clone"
 
 /// Cosine below which a satellite hit is called into question.
 ///
-/// PROVISIONAL, fitted to the 7-query calibration set of 2026-11-11: true TOP
-/// hits scored 0.71–0.79, while queries about concepts absent from the repo
-/// scored 0.62–0.63. The old 0.5 let every negative through. Re-measure before
-/// trusting it for another repo or embedder.
-const SENSE_COSINE_WARN: f32 = 0.68;
+/// ONE owner: this aliases `gnaw_sense::SENSE_ANSWERABLE_COSINE` so the CLI
+/// warning and the MCP `answerable` field cannot drift apart (they did — the
+/// constant lived only in `cli.rs` and MCP had no warning at all, 2026-11-11).
+/// Re-measure before trusting it for another repo or embedder.
+const SENSE_COSINE_WARN: f32 = crate::llm::gnaw_sense::SENSE_ANSWERABLE_COSINE;
 
 /// Confidence for a satellite hit: RAW cosine plus pillar agreement (`Harmony`).
 ///

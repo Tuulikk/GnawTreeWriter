@@ -150,6 +150,35 @@ pub struct SatelliteQuality {
     pub suspect_reason: Option<String>,
     /// Present only when expand=true was requested.
     pub expansion: Option<ExpansionInfo>,
+    /// The cosine threshold that produced `answerable`, reported verbatim so a
+    /// surface can scale the same way instead of hard-coding its own number.
+    pub cosine_threshold: f32,
+    /// `Some(false)` = the best match sits below the threshold: treat it as
+    /// unverified, not as an answer. `None` = no results at all.
+    pub answerable: Option<bool>,
+}
+
+/// Cosine below which a RESULT is implausible — explains a ranking.
+pub const SENSE_COSINE_LOW: f32 = 0.5;
+
+/// Cosine below which a QUERY is treated as not confidently answerable.
+///
+/// PROVISIONAL (7-query calibration, 2026-11-11): a query about a concept absent
+/// from the repo topped out at 0.63 while a TRUE hit sat at rank 5 with 0.65, so
+/// this number cannot separate the two on its own. That is why it is published
+/// as a LABEL plus the measured cosine (`answerable`, `cosine_threshold`) rather
+/// than as a verdict on the agent's behalf. Re-calibrate against
+/// `evals/sense_recall.json` before trusting it for another repo or embedder —
+/// a threshold fitted to bge-base means nothing for a different model.
+pub const SENSE_ANSWERABLE_COSINE: f32 = 0.68;
+
+/// Does this best-cosine clear the answerable threshold?
+///
+/// Extracted so the semantics are testable and documented by example (0.63 =
+/// absent concept in the calibration set, 0.71–0.79 = true top hits):
+/// `None` in → `None` out (no results is not the same as "unanswerable").
+pub fn answerable_from_cosine(top_cosine: Option<f32>) -> Option<bool> {
+    top_cosine.map(|c| c >= SENSE_ANSWERABLE_COSINE)
 }
 
 /// Query-expansion outcome (expand=true; LFM2.5 terms, mamba builds).
@@ -407,7 +436,7 @@ impl GnawSenseBroker {
                     .split(|c: char| !c.is_alphanumeric())
                     .filter(|w| w.len() >= 3)
                     .any(|w| hay.contains(w));
-                if top.cosine < 0.5 {
+                if top.cosine < SENSE_COSINE_LOW {
                     (Some("low_cosine".to_string()), Some(top.cosine))
                 } else if !lex_hit {
                     (Some("no_lex_overlap".to_string()), Some(top.cosine))
@@ -429,6 +458,8 @@ impl GnawSenseBroker {
                 prior_failures,
                 suspect_reason,
                 expansion: expansion_info,
+                cosine_threshold: SENSE_ANSWERABLE_COSINE,
+                answerable: answerable_from_cosine(top_cosine),
             };
 
             Ok(SenseResponse::Satelite {
@@ -871,6 +902,65 @@ mod tests {
         assert!(
             text.lines().last().unwrap().contains("new query"),
             "newest entry survives rotation"
+        );
+    }
+}
+
+/// The confidence contract must be visible to the surface the agents use.
+///
+/// The 0.68 threshold used to live in `cli.rs` only, so MCP callers — the ones
+/// with no CLI in front of them — saw no warning at all. These pin the two
+/// things that fixed it: the threshold lives with the measure, and the verdict
+/// travels in the payload.
+#[cfg(test)]
+mod answerable_contract_tests {
+    use super::*;
+
+    #[test]
+    fn the_calibration_pair_is_respected() {
+        // Both numbers from the 7-query calibration set (2026-11-11).
+        assert_eq!(
+            answerable_from_cosine(Some(0.63)),
+            Some(false),
+            "absent concept"
+        );
+        assert_eq!(
+            answerable_from_cosine(Some(0.71)),
+            Some(true),
+            "true top hit"
+        );
+        assert_eq!(
+            answerable_from_cosine(None),
+            None,
+            "no results is not 'unanswerable'"
+        );
+    }
+
+    #[test]
+    fn the_payload_carries_the_verdict_and_the_threshold() {
+        let q = SatelliteQuality {
+            prior_failures: 0,
+            suspect_reason: None,
+            expansion: None,
+            cosine_threshold: SENSE_ANSWERABLE_COSINE,
+            answerable: Some(false),
+        };
+        let v = serde_json::to_value(&q).unwrap();
+        assert_eq!(v["answerable"], serde_json::json!(false));
+        assert_eq!(
+            v["cosine_threshold"].as_f64().unwrap() as f32,
+            SENSE_ANSWERABLE_COSINE,
+            "a caller must be able to scale the same way without re-typing 0.68"
+        );
+    }
+
+    #[test]
+    fn low_result_and_unanswerable_query_are_different_numbers() {
+        assert!(
+            SENSE_COSINE_LOW < SENSE_ANSWERABLE_COSINE,
+            "a result can be plausible ({SENSE_COSINE_LOW}) while the query is \
+             still not answerable ({SENSE_ANSWERABLE_COSINE}) — collapsing them \
+             is what made one number do both jobs"
         );
     }
 }
