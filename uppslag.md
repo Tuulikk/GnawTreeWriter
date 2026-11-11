@@ -43,7 +43,7 @@ två insättningar i samma `match` i följd är vad som sprängde klammerbalanse
 
 ---
 
-## 2026-11-11 — `undo` kan inte ångra ett filskapande  🟨
+## 2026-11-11 — `undo` i en fil vs `undo` av filer är två operationer  🟨
 
 **Mätt:** `scaffold probe.rs --from …` loggar `Insert` i transaktionsloggen
 (verifierat i `history`), men `undo` svarar:
@@ -57,10 +57,33 @@ Orsak: `undo_insert` (`src/core/undo_redo.rs:247`) letar efter en backup via
 enda kommandon som skapar filer saknar återväg, vilket är precis den lucka
 scaffold-fixen skulle stänga.
 
-**Rätt fix (ej gjord):** i Insert-grenen, om `before_hash.is_none()` **och**
-filens nuvarande hash == `after_hash` → ta bort filen; om hashen avviker → neka
-("filen har ändrats sedan den skapades"). Kräver test, därför inte gjord i samma
-svep som scaffold-fixen.
+**Min första fix var fel** (skrevs samma dag, rättad av ägaren): jag föreslog att
+`undo_insert` skulle ta bort filen när `before_hash` saknas. Det blandar ihop två
+operationer som inte hör ihop:
+
+| | `undo` **i** en fil | `undo` **av** en fil |
+|---|---|---|
+| Återställer | innehåll på en position i en befintlig fil | filens **existens** |
+| Beviset | `before_hash`/`after_hash` av innehåll | fullständig innehållskopia + existens |
+| Risk | låg, kirurgisk | hög, tar bort data |
+| Frågan | "ångra den här nodändringen?" | "ta bort filen som skapades?" |
+
+Att lägga filborttagning i nod-Insert-grenen gör att `undo` kan radera filer som
+ett led i att ångra en *innehållsändring*. Det ska inte vara samma koppling.
+
+**Rätt design — separera från början:**
+
+1. `scaffold` ska logga **`OperationType::CreateFile`**, inte `Insert`. Det är
+   själva sammanblandningen, och den ska bort innan undo-logiken skrivs.
+2. Egen undo-väg för filoperationer (`undo --files` eller eget verb), aldrig
+   nåbar via nod-undo.
+3. Borttagning får bara ske om innehållet **fortfarande** matchar `after_hash`;
+   avviker det → neka och visa skillnaden.
+4. Radering av en *befintlig* fil är en egen operation som kräver en kopia i
+   backup (hash räcker inte) — samma princip, motsatt riktning.
+
+Nod-`Insert`-undon lämnas orörd: den återställer innehåll *inom* en fil och
+fungerar som den ska.
 
 ---
 
