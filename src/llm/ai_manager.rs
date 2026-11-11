@@ -995,8 +995,12 @@ impl AiManager {
     #[cfg(feature = "modernbert")]
     pub async fn generate_semantic_report(&self, file_path: &str) -> Result<SemanticReport> {
         eprintln!("[DEBUG] Starting semantic report for: {}", file_path);
-        let _model = self.load_model(AiModel::ModernBert, DeviceType::Cpu)?;
-        eprintln!("[DEBUG] Model loaded successfully");
+        // No model is loaded here on purpose: this used to be
+        // `let _model = self.load_model(AiModel::ModernBert, ...)` — bound,
+        // never read, but load-bearing as a GUARD: without the 572 MB model on
+        // disk the whole report failed, and the first call paid a cold model
+        // load (~20-30 s per MCP client timeout notes) for nothing. The report
+        // is built from labels + syntax, not from a forward pass (2026-11-11).
 
         let mut label_mgr = LabelManager::load(&self.project_root)?;
         eprintln!("[DEBUG] Label manager loaded from: {:?}", self.project_root);

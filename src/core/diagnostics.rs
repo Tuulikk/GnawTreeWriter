@@ -91,17 +91,25 @@ pub struct DoctorReport {
 
 /// The bge-base presence check shared by the doctor check and the
 /// capability level.
+///
+/// Resolved PER MODEL, in every root (2026-11-11): this used to choose the cache
+/// root by probing for `modernbert` and then look for `bge-base` inside it — so
+/// a project with a local `modernbert` but a global `bge-base` reported "struktur
+/// (no semantics)" while the embedder was in fact installed and `sense` worked.
+/// That is the same all-or-nothing-on-modernbert bug that `resolve()` already
+/// fixed; the capability level must not disagree with the resolver.
 fn semantic_model_present(project_root: &std::path::Path) -> bool {
-    let local = project_root.join(".gnawtreewriter_ai").join("models");
-    let cache_dir = if local.exists() && local.join("modernbert").exists() {
-        local
-    } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        std::path::PathBuf::from(home)
-            .join(".gnawtreewriter_ai")
-            .join("models")
-    };
-    cache_dir.join("bge-base").join("config.json").is_file()
+    let mut roots = vec![project_root.join(".gnawtreewriter_ai").join("models")];
+    if let Ok(home) = std::env::var("HOME") {
+        roots.push(
+            std::path::PathBuf::from(home)
+                .join(".gnawtreewriter_ai")
+                .join("models"),
+        );
+    }
+    roots
+        .into_iter()
+        .any(|root| root.join("bge-base").join("config.json").is_file())
 }
 
 /// The answered level of the ladder (see DoctorReport.capability).
