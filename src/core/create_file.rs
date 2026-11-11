@@ -70,7 +70,7 @@ pub fn create(path: &Path, source: ContentSource<'_>) -> Result<usize> {
         let mut meta = std::collections::HashMap::new();
         meta.insert("operation".to_string(), "scaffold".to_string());
         let _ = log.log_transaction(
-            OperationType::Insert,
+            OperationType::CreateFile,
             path.to_path_buf(),
             None,
             None,

@@ -134,6 +134,53 @@ validerade och skrev på första försöket.
 
 ---
 
+## 2026-11-11 — Guide-läge för svaga/trötta modeller  💡 PARKERAD (ägarens spånande)
+
+Ägarens idé, ordagrant i sak: **guide-läge med dialoger** för svaga, trötta och
+bekväma modeller. Ingång efter *vad som ska göras* (edit, create, plan, search,
+diagnose …), ett **"what now"**-lager som ger råd om nästa operation utifrån vad
+som just gjordes, och **fångst av operationsföljder** för att senare ge bättre
+förslag och förbättra GTW.
+
+**Status: spånande, parallellt. Ska INTE vandras innan de öppna trådarna ovan är
+stängda.**
+
+Halva idén finns redan: MCP-verktyget `guide` (katalog över situationer → rätt
+verktyg + exempelanrop) är exakt "ingång efter vad som ska göras". Det nya är
+tre saker, i stigande kostnad:
+
+1. **Ingången fyller i riktiga argument** i stället för att lämna en mall —
+   alltså `guide("byt namn på funktionen X")` → `edit_node` med fil, nodväg och
+   `expect_name` **redan uppslagna ur repot**, och ett `preview`-steg.
+2. **"What now" som kontrakt, inte som funktion.** Varje svar bär sina egna
+   nästa steg. Det är redan mönstret som bevisades i dag: `undo` → "använd
+   `undo --files`", `heal` → `--apply`, `scaffold` → "`undo --files`". Regeln är
+   testbar (varje vägran måste innehålla ett körbart nästa steg) och kostar
+   noll extra tokens jämfört med en extra tur.
+3. **Sekvensfångst.** Transaktionsloggen är redan en oföränderlig sekvens av
+   `(operation, fil, nodväg, tid)`. N-gram över den ger X→Y-transitioner utan ny
+   lagring och utan nya telemetrifiler — *härled, duplicera inte*. Det är också
+   den enda av de tre som kräver data innan den kan bli bra.
+
+**Invändningar som måste respekteras när det byggs:**
+
+- **En guide som gissar intent blir den fjärde falska buggrapporten.** Därför ska
+  guiden *eka sin tolkning* (som `insert` nu ekar föräldern) och kräva
+  `preview` innan skrivning — aldrig "jag tror du menade".
+- **Wizard är fel form för en trött modell.** Fyra turer för att nå en edit är
+  sämre än ett svar med tre rangordnade alternativ. Dialog bara vid äkta
+  tvetydighet, och tvetydighet är redan mätbar (noll träffar, flera noder,
+  `preview` som skiljer sig).
+- **Ingen andra sanning.** Katalogen bakom `guide` måste genereras ur samma
+  maskinläsbara källa som `SKILL.md`, annars får vi drift-fyndet igen (Crush
+  körde v0.9.2-instruktioner mot 0.25.x). CI-kontroll i stil med
+  `pack-skill.sh --check`.
+- **Mätbart mål:** "turer till första lyckade edit" och "antal vägran per
+  uppgift". Båda går att läsa ur loggarna som redan finns; utan de måtten blir
+  guide-läget en känsla, inte en förbättring.
+
+---
+
 ## Kvarvarande trådar (sammanställning 2026-11-11)
 
 Fyra öppna, ingen av dem tyst, ingen akut. Ordning = billigast först.

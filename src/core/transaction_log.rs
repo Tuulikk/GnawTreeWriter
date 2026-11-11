@@ -30,6 +30,11 @@ pub enum OperationType {
     AddComponent,
     Move,
     Restore,
+    /// A FILE was created (scaffold). Filesystem scope — its undo is
+    /// `undo --files`, never the in-file undo path (owner's distinction,
+    /// 2026-11-11: reverting content and deleting a file are different
+    /// operations with different risk).
+    CreateFile,
     SessionStart,
     SessionEnd,
 }

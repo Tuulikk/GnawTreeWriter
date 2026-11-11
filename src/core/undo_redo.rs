@@ -43,6 +43,10 @@ impl UndoRedoManager {
                     | OperationType::AddComponent
                     | OperationType::Move
                     | OperationType::Restore
+                    // CreateFile belongs on the stack (it must be undoable), but
+                    // it is FILESYSTEM scope: `undo` refuses it and points at
+                    // `undo --files`, which is the only path that removes it.
+                    | OperationType::CreateFile
             ) {
                 undo_stack.push(transaction.id);
             }
@@ -76,6 +80,22 @@ impl UndoRedoManager {
 
         for _ in 0..steps_to_undo {
             if let Some(transaction_id) = self.undo_stack.pop() {
+                // A FILE CREATION is filesystem scope, not content scope. A
+                // plain `undo` must never delete a file as a side effect of
+                // reverting content (owner's distinction, 2026-11-11).
+                if let Some(tx) = self.transaction_log.find_transaction(&transaction_id)? {
+                    if tx.operation == OperationType::CreateFile {
+                        self.undo_stack.push(transaction_id.clone());
+                        results.push(UndoRedoResult {
+                            transaction_id,
+                            operation: OperationType::CreateFile,
+                            file_path: tx.file_path,
+                            success: false,
+                            message: "this transaction CREATED a file — use `undo --files` to remove it; the content scope does not delete files".to_string(),
+                        });
+                        break;
+                    }
+                }
                 let result = self.undo_single_transaction(&transaction_id)?;
                 self.redo_stack.push(transaction_id);
                 results.push(result);
@@ -154,6 +174,7 @@ impl UndoRedoManager {
             OperationType::AddComponent => self.undo_add_component(&transaction),
             OperationType::Move => self.undo_move(&transaction),
             OperationType::Restore => self.undo_restore(&transaction),
+            OperationType::CreateFile => self.undo_create_file(&transaction),
             OperationType::SessionStart | OperationType::SessionEnd => Ok(UndoRedoResult {
                 transaction_id: transaction.id.clone(),
                 operation: transaction.operation.clone(),
@@ -178,6 +199,13 @@ impl UndoRedoManager {
             OperationType::AddProperty => self.redo_add_property(&transaction),
             OperationType::AddComponent => self.redo_add_component(&transaction),
             OperationType::Move => self.redo_move(&transaction),
+            OperationType::CreateFile => Ok(UndoRedoResult {
+                transaction_id: transaction.id.clone(),
+                operation: transaction.operation.clone(),
+                file_path: transaction.file_path.clone(),
+                success: false,
+                message: "redo of a file creation is not supported: the log stores a content hash, not the content — re-create it with `scaffold`".to_string(),
+            }),
             OperationType::Restore => self.redo_restore(&transaction),
             OperationType::SessionStart | OperationType::SessionEnd => Ok(UndoRedoResult {
                 transaction_id: transaction.id.clone(),
@@ -244,6 +272,92 @@ impl UndoRedoManager {
     /// Placeholder implementations for other operation types
     /// These would need to be implemented based on the specific backup format
     /// and restoration logic for each operation type
+    /// Undo the CREATION of a file: FILESYSTEM scope, not content scope.
+    ///
+    /// Deliberately separate from `undo_insert` (owner's distinction,
+    /// 2026-11-11): reverting content inside a file and deleting a file are
+    /// different operations with different risk, and a plain `undo` must not be
+    /// able to delete files as a side effect of reverting content.
+    ///
+    /// Removes the file ONLY when it still contains exactly what was written;
+    /// otherwise it refuses and says why. Never guesses.
+    fn undo_create_file(&self, transaction: &Transaction) -> Result<UndoRedoResult> {
+        let refuse = |msg: &str| UndoRedoResult {
+            transaction_id: transaction.id.clone(),
+            operation: transaction.operation.clone(),
+            file_path: transaction.file_path.clone(),
+            success: false,
+            message: msg.to_string(),
+        };
+
+        if !transaction.file_path.exists() {
+            return Ok(refuse(
+                "CreateFile undo: the file is already gone — nothing to remove",
+            ));
+        }
+        let Some(after) = transaction.after_hash.as_ref() else {
+            return Ok(refuse(
+                "CreateFile undo refused: the transaction carries no content hash, so GTW cannot prove the file is still the one it created",
+            ));
+        };
+        let current = crate::core::transaction_log::calculate_content_hash(
+            &fs::read_to_string(&transaction.file_path).unwrap_or_default(),
+        );
+        if &current != after {
+            return Ok(refuse(
+                "CreateFile undo refused: the file has changed since it was created — GTW does not delete work it did not write",
+            ));
+        }
+        match fs::remove_file(&transaction.file_path) {
+            Ok(()) => Ok(UndoRedoResult {
+                transaction_id: transaction.id.clone(),
+                operation: transaction.operation.clone(),
+                file_path: transaction.file_path.clone(),
+                success: true,
+                message: format!(
+                    "CreateFile undo: removed {} (created by this transaction, unmodified)",
+                    transaction.file_path.display()
+                ),
+            }),
+            Err(e) => Ok(refuse(&format!("CreateFile undo failed: {e}"))),
+        }
+    }
+
+    /// Undo the newest FILE-CREATION — the explicit file scope (`undo --files`).
+    ///
+    /// Returns `None` when no creation is on the stack, so the caller can say
+    /// "nothing to undo here" instead of silently doing nothing.
+    pub fn undo_file_creation(&mut self) -> Result<Option<UndoRedoResult>> {
+        let mut chosen: Option<(usize, String)> = None;
+        for (idx, id) in self.undo_stack.iter().enumerate().rev() {
+            if let Some(tx) = self.transaction_log.find_transaction(id)? {
+                // Skip creations whose file is already gone: the undo intent is
+                // already satisfied, and the stack is rebuilt from the log on
+                // every process start — without this skip a removed file would
+                // block every older creation forever (found 2026-11-11).
+                if tx.operation == OperationType::CreateFile && tx.file_path.exists() {
+                    chosen = Some((idx, id.clone()));
+                    break;
+                }
+            }
+        }
+        let Some((idx, id)) = chosen else {
+            return Ok(None);
+        };
+        self.undo_stack.remove(idx);
+        let result = self.undo_single_transaction(&id)?;
+        if result.success {
+            self.redo_stack.push(id);
+        } else {
+            // A refusal must not consume the entry: nothing was undone, so the
+            // transaction stays on the undo stack and `redo` must not be offered
+            // for it. (Found by test case 6, 2026-11-11.)
+            let back = idx.min(self.undo_stack.len());
+            self.undo_stack.insert(back, id);
+        }
+        Ok(Some(result))
+    }
+
     fn undo_insert(&self, transaction: &Transaction) -> Result<UndoRedoResult> {
         // Try to restore using before_hash first
         if let Some(backup_path) =

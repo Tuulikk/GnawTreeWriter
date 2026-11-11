@@ -171,6 +171,10 @@ enum Commands {
         /// Show what would be undone — nothing is changed
         #[arg(long)]
         preview: bool,
+        /// FILE scope: undo a file CREATION (removes it). Without this flag
+        /// `undo` only reverts content inside files and never deletes them.
+        #[arg(long)]
+        files: bool,
     },
     /// Redo previously undone operations
     Redo {
@@ -587,7 +591,7 @@ enum Commands {
         #[arg(long, conflicts_with_all = ["content", "from"])]
         schema: Option<String>,
         /// Raw content for the new file ("-" reads STDIN). Parse-validated
-        /// before the write, and logged as Insert (undo cannot delete a created file yet).
+        /// before the write, and logged as CreateFile (revert with `undo --files`).
         #[arg(long)]
         content: Option<String>,
         /// Read the content from this file instead of a literal.
@@ -1172,8 +1176,12 @@ impl Cli {
                     show_hint();
                 }
             }
-            Commands::Undo { steps, preview } => {
-                Self::handle_undo(steps, preview)?;
+            Commands::Undo {
+                steps,
+                preview,
+                files,
+            } => {
+                Self::handle_undo(steps, preview, files)?;
             }
             Commands::Redo { steps } => {
                 Self::handle_redo(steps)?;
@@ -1896,10 +1904,30 @@ impl Cli {
         Ok(())
     }
 
-    fn handle_undo(steps: usize, preview: bool) -> Result<()> {
+    fn handle_undo(steps: usize, preview: bool, files: bool) -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
         let mut undo_manager = UndoRedoManager::new(&project_root)?;
+
+        // FILE scope is a different operation, not a different step count: it
+        // undoes a file CREATION (removes the file, and only when unmodified).
+        if files {
+            if preview {
+                println!("--files preview: the newest CreateFile transaction would be reverted.");
+                println!("Run again without --preview to remove the file.");
+                return Ok(());
+            }
+            match undo_manager.undo_file_creation()? {
+                Some(result) if result.success => {
+                    println!("✓ Undone: {} ({})", result.message, result.transaction_id);
+                }
+                Some(result) => println!("✗ {} ({})", result.message, result.transaction_id),
+                None => println!(
+                    "No file creation to undo — this scope only covers files GTW created (`scaffold`)."
+                ),
+            }
+            return Ok(());
+        }
 
         if preview {
             // Preview before mutating — same core as the MCP undo preview
@@ -3882,7 +3910,7 @@ GTW_CODE_INDEX_SOURCE=git_hook "$bin" code-index "$top" --db >/dev/null 2>&1 || 
 
         let bytes = create(file_path, source)?;
         println!("✓ Created {} ({bytes} bytes, parses)", file_path.display());
-        println!("  logged as Insert — note: undo cannot delete a created file yet.");
+        println!("  logged as CreateFile — undo it with `undo --files` (plain undo never deletes files).");
         Ok(())
     }
 
@@ -6916,7 +6944,7 @@ mod tests {
         assert_eq!(after_edit, "hello bar world\n");
 
         // Preview: must be Ok(()) and must leave the file untouched.
-        Cli::handle_undo(1, true)?;
+        Cli::handle_undo(1, true, false)?;
         assert_eq!(
             fs::read_to_string(&file_path)?,
             after_edit,
@@ -6925,7 +6953,7 @@ mod tests {
 
         // The real undo (no preview) then reverts — proving the preview
         // consumed nothing from the undo stack.
-        Cli::handle_undo(1, false)?;
+        Cli::handle_undo(1, false, false)?;
         assert_eq!(
             fs::read_to_string(&file_path)?,
             "hello foo world\n",

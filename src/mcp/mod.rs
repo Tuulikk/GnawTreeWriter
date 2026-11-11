@@ -577,7 +577,11 @@ pub mod mcp_server {
                             .get("preview")
                             .and_then(Value::as_bool)
                             .unwrap_or(false);
-                        Ok(handle_undo_mcp(state.clone(), steps, preview))
+                        let files = arguments
+                            .get("files")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        Ok(handle_undo_mcp(state.clone(), steps, preview, files))
                     }
                     _ => {
                         let err = build_jsonrpc_error(
@@ -1044,7 +1048,8 @@ pub mod mcp_server {
                     "type": "object",
                     "properties": {
                         "steps": { "type": "integer", "description": "Number of operations to undo (default 1)" },
-                        "preview": { "type": "boolean", "description": "true = show what WOULD be reverted (newest first, resolved to file/op/description) and change nothing; default false" }
+                        "preview": { "type": "boolean", "description": "true = show what WOULD be reverted (newest first, resolved to file/op/description) and change nothing; default false" },
+                        "files": { "type": "boolean", "description": "FILE scope: undo the newest file CREATION (removes the file, and only when it is still byte-identical to what GTW wrote). Without this flag undo never deletes files — it only reverts content inside them." }
                     }
                 }
             }),
@@ -3006,7 +3011,7 @@ or list_nodes for a flat index of this file.",
     /// `undo`: revert the last N logged operations via the real
     /// UndoRedoManager (same engine as the CLI). A stub here once reported
     /// "Undo executed" while changing nothing — undo must never lie.
-    fn handle_undo_mcp(state: Arc<AppState>, steps: usize, preview: bool) -> Value {
+    fn handle_undo_mcp(state: Arc<AppState>, steps: usize, preview: bool, files: bool) -> Value {
         let mut mgr = match crate::core::UndoRedoManager::new(&state.project_root) {
             Ok(m) => m,
             Err(e) => {
@@ -3016,6 +3021,21 @@ or list_nodes for a flat index of this file.",
                 ))
             }
         };
+        // FILE scope: a different operation, not a different step count.
+        if files {
+            return match mgr.undo_file_creation() {
+                Ok(Some(result)) => tool_success(
+                    format!("{} ({})", result.message, result.transaction_id),
+                    Some(json!({"success": result.success, "message": result.message})),
+                ),
+                Ok(None) => tool_success(
+                    "No file creation to undo — this scope only covers files GTW created (`scaffold`)."
+                        .to_string(),
+                    Some(json!({"success": false, "reason": "no_create_file_transaction"})),
+                ),
+                Err(e) => tool_error(format!("undo --files failed: {e}")),
+            };
+        }
         if preview {
             // Preview before mutating (Phase 10): same stack order as undo,
             // resolved to human details — nothing is reverted.
