@@ -6177,6 +6177,14 @@ Use without --preview to apply the clone"
     }
 }
 
+/// Cosine below which a satellite hit is called into question.
+///
+/// PROVISIONAL, fitted to the 7-query calibration set of 2026-11-11: true TOP
+/// hits scored 0.71–0.79, while queries about concepts absent from the repo
+/// scored 0.62–0.63. The old 0.5 let every negative through. Re-measure before
+/// trusting it for another repo or embedder.
+const SENSE_COSINE_WARN: f32 = 0.68;
+
 /// Confidence for a satellite hit: RAW cosine plus pillar agreement (`Harmony`).
 ///
 /// Returns `(value_to_show, should_warn, reason)`.
@@ -6199,17 +6207,25 @@ fn sense_confidence(
 ) -> (f32, bool, String) {
     let cos = cosine.unwrap_or(adjusted);
     let verdict = harmony.map(|h| h.verdict);
-    let dissonant = matches!(verdict, Some(HarmonyVerdict::Disharmonious));
-    let reason = if dissonant {
+    let disharmonious = matches!(verdict, Some(HarmonyVerdict::Disharmonious));
+    let harmonious = matches!(verdict, Some(HarmonyVerdict::Harmonious));
+
+    // Two signals, because one cannot do both jobs. A middling cosine that the
+    // pillars AGREE on is trustworthy; a middling cosine the pillars cannot
+    // corroborate is exactly the "concept is not in this repo" case (0.62-0.63
+    // in the calibration set, where true top hits scored 0.71-0.79).
+    let low_cosine = cos < SENSE_COSINE_WARN;
+    let warn = disharmonious || (low_cosine && !harmonious);
+
+    let reason = if disharmonious {
         harmony
             .and_then(|h| h.suggestion.clone())
             .unwrap_or_else(|| format!("search channels disagree (best cosine {cos:.2})"))
-    } else if cos < 0.5 {
-        format!("best cosine {cos:.2} < 0.5")
+    } else if warn {
+        format!("best cosine {cos:.2} < {SENSE_COSINE_WARN:.2} and the channels do not agree")
     } else {
         String::new()
     };
-    let warn = dissonant || cos < 0.5;
     (cos, warn, reason)
 }
 
@@ -6411,33 +6427,50 @@ mod tests {
             "reason should carry the value: {reason}"
         );
 
-        // Decent cosine but the channels disagree (semantic high, no lexical,
-        // no graph neighbour) -> warn, in Harmony's own words.
-        let disagreeing = harmony(&Pillars {
+        // The negative-control shape: semantic-only agreement (0.63, no lexical,
+        // no graph). Harmony reads this as MINOR dissonance, not disharmonious —
+        // measured dissonance 0.397 sits between the 0.25 and 0.50 bounds, so
+        // my first expectation was wrong. The cosine gate is what catches it:
+        // 0.63 < 0.68 and the channels do not agree.
+        let semantic_only = harmony(&Pillars {
             semantic: 0.63,
             lexical: Some(0.0),
             graph: Some(0.0),
         });
         assert_eq!(
-            disagreeing.verdict,
-            HarmonyVerdict::Disharmonious,
-            "precondition: 0.63/0.0/0.0 must read as disharmonious"
+            semantic_only.verdict,
+            HarmonyVerdict::MinorDissonance,
+            "precondition: 0.63/0.0/0.0 reads as MINOR, not full, dissonance"
         );
-        let (_, warn, reason) = sense_confidence(0.0167, Some(0.63), Some(&disagreeing));
+        let (_, warn, reason) = sense_confidence(0.0167, Some(0.63), Some(&semantic_only));
         assert!(
             warn,
-            "a good cosine with disagreeing pillars must still warn — this is the 0.63 negative control"
+            "0.63 with non-agreeing channels must warn — the 'concept is absent' case"
         );
         assert!(!reason.is_empty(), "a warning must carry a reason");
 
-        // Pillars agree: silence even at a middling cosine.
+        // Outright disagreement wins at any cosine.
+        let outright = harmony(&Pillars {
+            semantic: 1.0,
+            lexical: Some(0.0),
+            graph: Some(0.0),
+        });
+        assert_eq!(outright.verdict, HarmonyVerdict::Disharmonious);
+        let (_, warn, _) = sense_confidence(0.0167, Some(1.0), Some(&outright));
+        assert!(warn, "disharmonious channels must warn even at cosine 1.0");
+
+        // Pillars agree: silence even at a middling cosine — harmony rescues.
         let agreeing = harmony(&Pillars {
             semantic: 0.66,
             lexical: Some(0.62),
             graph: Some(0.70),
         });
+        assert_eq!(agreeing.verdict, HarmonyVerdict::Harmonious);
         let (_, warn, _) = sense_confidence(0.0167, Some(0.66), Some(&agreeing));
-        assert!(!warn, "agreeing pillars at 0.66 must not warn");
+        assert!(
+            !warn,
+            "agreeing channels at 0.66 must not warn — two signals, not one"
+        );
     }
 
     /// gnawtreewriter.yaml indexing.device parsing — the flag-in-file
