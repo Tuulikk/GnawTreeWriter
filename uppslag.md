@@ -250,23 +250,30 @@ använder. Alltså pekar allt mot gammalt *innehåll*, inte fel modell.
 startar och går ifrån, inte något som hör i en snabb cykel — och docs som säger
 "kör `ai index`" bör säga det.
 
-**MÄTT 2026-11-11 — halva påståendet höll, halva föll.** Omindexering på GPU
-(276 filer, 10 398 vektorer, ~2 min):
+**MÄTT OCH ÅTGÄRDAT 2026-11-11.** Två buggar låg staplade, och de förklarade
+tillsammans varför `sense` såg trasigt ut:
 
-| | före (index 7 okt) | efter (färskt index) |
-|---|---|---|
-| topp-poäng | 0,02 | **0,02** |
-| träffar | `anchor.rs`, `curator.rs` — **fel** | `docs/…EXTENSIONS.md`, **`src/core/code_graph.rs`** — **rätt** |
+| | gammalt index (7 okt) | färskt index | + cosinus-fix |
+|---|---|---|---|
+| topp-träff | `anchor.rs` — **fel** | `docs/…EXTENSIONS.md` | samma |
+| `code_graph.rs` (äger `cycles`) | **saknas** | **rank 5 och 7** | rank 5 och 7 |
+| visad poäng | 0,02 | 0,02 | **cosine 0,63–0,73** |
+| "Low confidence"-varning | **alltid** | **alltid** | **borta** |
 
-Alltså: **innehållet var stale** (rankningen blev rätt; `code_graph.rs` äger
-`cycles`), men **poängen förklarades inte av staleness**. Skalan är en egen
-bugg: `src/cli.rs:3041` varnar när `matches[0].score < 0.5`, och en korrekt
-träff ger 0,02 → **varningen lyser på varje fråga**, vilket är exakt
-alarm-trötthetsklassen vi städat hela dagen.
+1. **Indexet var stale** → fel *svar*. Botat med `gnawtreewriter-gpu ai index
+   --gpu` (276 filer, ~2 min).
+2. **Poängen var fel mått** → fel *skala*. `score` är en RRF-fusion:
+   `1/(60+rank)` ≈ **0,017** vid rank 0, medan `src/cli.rs` jämförde den mot
+   **0,5** — en cosinus-tröskel. Koden *dokumenterade* till och med faran
+   (`semantic_index.rs`: *"Consumers must never mistake the adjusted value for a
+   cosine"*) och CLI:t gjorde det ändå. Varningen kunde aldrig utebli.
+   Fix: `sense_confidence(score, cosine)` väljer den **rå cosinus** som
+   `FileMatch` redan bar; varningen jämför nu 0,5 mot ett mått där 0,5 betyder
+   något. Test: `confidence_uses_the_raw_cosine_when_available`.
 
-**Att undersöka:** om `score` är en rå dot-produkt på onormaliserade vektorer,
-en felkonverterad distans, eller om tröskeln 0,5 är kalibrerad för ett annat
-mått. Tills dess: lita på *ordningen*, inte på siffran.
+**Läxa:** en sökning som fungerar kan se trasig ut enbart för att
+diagnostiken mäter fel storhet — och ett larm som alltid lyser lär folk
+ignorera det (samma klass som `ai status` och det avklippta stale-larmet).
 
 **Nytt fynd — `ai index` på GPU:** ~2 minuter för 276 filer (734 MiB VRAM, 97 %
 ledigt vid start, 20 %-grinden passerad) mot **>22 min utan att bli klar** på
