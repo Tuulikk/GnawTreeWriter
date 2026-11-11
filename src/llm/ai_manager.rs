@@ -14,6 +14,77 @@ use std::path::{Path, PathBuf};
 #[cfg(feature = "modernbert")]
 use tokenizers::Tokenizer;
 
+/// Which root a model was resolved from.
+///
+/// A project may pin its own model set (`<project>/.gnawtreewriter_ai/models`,
+/// shared with teammates) while the global cache is the machine-wide fallback.
+/// The source is reported, never inferred by the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelSource {
+    Local,
+    Global,
+}
+
+impl ModelSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Global => "global",
+        }
+    }
+}
+
+/// A model found on disk, with the root it came from.
+///
+/// Resolved PER MODEL (2026-11-11): the cache root used to be chosen once in
+/// `new()` by probing for `modernbert`, so a project with a local `modernbert`
+/// made `bge-base` resolve to `<project>/bge-base` — missing, even though the
+/// global cache had it. The root is a fact about a model, not about the manager.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ResolvedModel {
+    pub model: AiModel,
+    pub dir: PathBuf,
+    pub source: ModelSource,
+}
+
+impl AiModel {
+    /// Directory name inside a model root.
+    pub fn dir_name(&self) -> &'static str {
+        match self {
+            Self::ModernBert => "modernbert",
+            Self::Bge => "bge-base",
+            #[cfg(feature = "mamba")]
+            Self::Lfm25 => "lfm25",
+        }
+    }
+
+    /// The file whose presence means "this model is installed here".
+    ///
+    /// Deliberately weaker than what `load_model` requires (it also needs the
+    /// tokenizer and the weights): this answers "is there a checkpoint to point
+    /// at", so a half-downloaded directory still resolves and fails loudly at
+    /// load time instead of silently pretending the model is absent.
+    pub fn probe(&self) -> &'static str {
+        match self {
+            Self::ModernBert | Self::Bge => "config.json",
+            #[cfg(feature = "mamba")]
+            Self::Lfm25 => "model.gguf",
+        }
+    }
+
+    /// Stable id, used in status output and compared against the vector
+    /// store's `model_info` so a model switch can never silently mix vectors.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::ModernBert => "modernbert",
+            Self::Bge => "bge-base-en-v1.5",
+            #[cfg(feature = "mamba")]
+            Self::Lfm25 => "lfm25",
+        }
+    }
+}
+
 /// Supported AI models for local execution
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AiModel {
@@ -541,6 +612,10 @@ impl ModernBertModel {
 
 pub struct AiManager {
     model_cache_dir: PathBuf,
+    /// `<project>/.gnawtreewriter_ai/models` — a project may pin its own set.
+    local_cache_dir: PathBuf,
+    /// `~/.gnawtreewriter_ai/models` — machine-wide fallback.
+    global_cache_dir: PathBuf,
     #[allow(dead_code)]
     project_root: PathBuf,
     /// Cached model — loaded once, reused across all calls within this process.
@@ -559,26 +634,37 @@ impl AiManager {
     pub fn new(project_root: &Path) -> Result<Self> {
         let local_cache = project_root.join(".gnawtreewriter_ai").join("models");
 
-        // Try local first, then global home dir
-        let model_cache_dir = if local_cache.exists() && local_cache.join("modernbert").exists() {
-            local_cache
-        } else {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            let global_cache = PathBuf::from(home)
-                .join(".gnawtreewriter_ai")
-                .join("models");
+        // Both roots are kept. `new()` no longer picks ONE winner by probing a
+        // single model (that made the root a fact about `modernbert` instead of
+        // about the model actually being loaded, 2026-11-11).
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let global_cache = PathBuf::from(home)
+            .join(".gnawtreewriter_ai")
+            .join("models");
 
-            if !global_cache.exists() {
-                let _ = fs::create_dir_all(&global_cache);
-            }
-            global_cache
-        };
+        if !global_cache.exists() {
+            let _ = fs::create_dir_all(&global_cache);
+        }
+
+        // Legacy field, kept for `AiStatus.cache_dir` and the timing profile:
+        // the first root that actually holds a model directory, else global.
+        #[cfg(feature = "mamba")]
+        let dirs: &[&str] = &["modernbert", "bge-base", "lfm25"];
+        #[cfg(not(feature = "mamba"))]
+        let dirs: &[&str] = &["modernbert", "bge-base"];
+        let model_cache_dir = [&local_cache, &global_cache]
+            .into_iter()
+            .find(|root| dirs.iter().any(|d| root.join(d).is_dir()))
+            .cloned()
+            .unwrap_or_else(|| global_cache.clone());
 
         #[cfg(feature = "mamba")]
         let timing_profile = load_timing_profile(&model_cache_dir);
 
         Ok(Self {
             model_cache_dir,
+            local_cache_dir: local_cache,
+            global_cache_dir: global_cache,
             project_root: project_root.to_path_buf(),
             #[cfg(feature = "modernbert")]
             cached_model: std::sync::OnceLock::new(),
@@ -587,6 +673,58 @@ impl AiManager {
             #[cfg(feature = "mamba")]
             timing_profile: std::sync::RwLock::new(timing_profile),
         })
+    }
+
+    /// The cache roots in preference order: local (project-pinned) first, then
+    /// the global fallback. Duplicates collapsed so a project at `$HOME` does
+    /// not search the same directory twice.
+    fn roots(&self) -> Vec<(PathBuf, ModelSource)> {
+        let mut out = vec![(self.local_cache_dir.clone(), ModelSource::Local)];
+        if self.global_cache_dir != self.local_cache_dir {
+            out.push((self.global_cache_dir.clone(), ModelSource::Global));
+        }
+        out
+    }
+
+    /// Resolve ONE model across the roots. Side-effect free.
+    pub fn resolve(&self, model: &AiModel) -> Option<ResolvedModel> {
+        let probe = model.probe();
+        self.roots()
+            .into_iter()
+            .map(|(root, source)| ResolvedModel {
+                model: model.clone(),
+                dir: root.join(model.dir_name()),
+                source,
+            })
+            .find(|r| r.dir.join(probe).exists())
+    }
+
+    /// Every model that resolves, with its source — the honest answer to
+    /// "which model will run, and from where".
+    pub fn resolved_models(&self) -> Vec<ResolvedModel> {
+        #[cfg(feature = "mamba")]
+        let all = [AiModel::ModernBert, AiModel::Bge, AiModel::Lfm25];
+        #[cfg(not(feature = "mamba"))]
+        let all = [AiModel::ModernBert, AiModel::Bge];
+        all.iter().filter_map(|m| self.resolve(m)).collect()
+    }
+
+    /// Test-only constructor with explicit roots: hermetic, no `HOME` mutation
+    /// (a test that rewrites the environment races every other test thread).
+    #[cfg(test)]
+    fn for_test(local: PathBuf, global: PathBuf) -> Self {
+        Self {
+            model_cache_dir: global.clone(),
+            local_cache_dir: local,
+            global_cache_dir: global,
+            project_root: PathBuf::from("."),
+            #[cfg(feature = "modernbert")]
+            cached_model: std::sync::OnceLock::new(),
+            #[cfg(feature = "mamba")]
+            cached_lfm25: std::sync::OnceLock::new(),
+            #[cfg(feature = "mamba")]
+            timing_profile: std::sync::RwLock::new(TimingProfile::default()),
+        }
     }
 
     /// Current timing profile for this machine.
@@ -992,32 +1130,34 @@ impl AiManager {
     }
 
     pub fn get_status(&self) -> Result<AiStatus> {
-        let modern_bert_installed = self
-            .get_model_path(&AiModel::ModernBert)
-            .join("config.json")
-            .exists();
+        // Flags AND the per-model list come from the same resolution, so they
+        // cannot disagree (the old flags probed one root for every model).
+        let models = self.resolved_models();
+        let modern_bert_installed = models
+            .iter()
+            .any(|r| matches!(r.model, AiModel::ModernBert));
         #[cfg(feature = "mamba")]
-        let lfm25_installed = self
-            .get_model_path(&AiModel::Lfm25)
-            .join("model.gguf")
-            .exists();
+        let lfm25_installed = models.iter().any(|r| matches!(r.model, AiModel::Lfm25));
         #[cfg(not(feature = "mamba"))]
         let lfm25_installed = false;
+        let bge_installed = models.iter().any(|r| matches!(r.model, AiModel::Bge));
         Ok(AiStatus {
             modern_bert_installed,
             lfm25_installed,
+            bge_installed,
             cache_dir: self.model_cache_dir.clone(),
+            models,
             available_devices: vec![DeviceType::Cpu],
         })
     }
 
     fn get_model_path(&self, model: &AiModel) -> PathBuf {
-        match model {
-            AiModel::ModernBert => self.model_cache_dir.join("modernbert"),
-            AiModel::Bge => self.model_cache_dir.join("bge-base"),
-            #[cfg(feature = "mamba")]
-            AiModel::Lfm25 => self.model_cache_dir.join("lfm25"),
-        }
+        // Per-model resolution first; the legacy preferred root is only the
+        // fallback for an uninstalled model, so error messages still point at
+        // the place a download would land.
+        self.resolve(model)
+            .map(|r| r.dir)
+            .unwrap_or_else(|| self.model_cache_dir.join(model.dir_name()))
     }
 }
 
@@ -1175,7 +1315,13 @@ impl SemanticReport {
 pub struct AiStatus {
     pub modern_bert_installed: bool,
     pub lfm25_installed: bool,
+    /// The embedder `sense`/`ai index` uses. Reported explicitly so "green
+    /// status but degraded search" has one visible cause (2026-11-11).
+    pub bge_installed: bool,
     pub cache_dir: PathBuf,
+    /// Every model that resolved, with the root it came from. Additive (lib):
+    /// readers that only know the bools keep working.
+    pub models: Vec<ResolvedModel>,
     pub available_devices: Vec<DeviceType>,
 }
 
@@ -1397,5 +1543,69 @@ mod device_gate_tests {
             decide_index_device(true, Some("AUTO2"), Some(90.0)),
             DeviceType::Cpu
         );
+    }
+}
+
+/// Per-model cache resolution (2026-11-11).
+///
+/// The bug these pin: `new()` chose ONE cache root by probing for
+/// `modernbert`, so a project with a local `modernbert` made `bge-base` resolve
+/// to `<project>/bge-base` — absent, even though the global cache had it — and
+/// `sense` reported "degraded" with the model installed. The root is a fact
+/// about the model, not about the manager.
+#[cfg(test)]
+mod resolution_tests {
+    use super::*;
+
+    fn write_marker(dir: &Path, file: &str) {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(dir.join(file), "{}").unwrap();
+    }
+
+    #[test]
+    fn a_local_model_does_not_hide_a_global_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let local = tmp.path().join("proj/models");
+        let global = tmp.path().join("home/models");
+
+        write_marker(&local.join("modernbert"), "config.json");
+        write_marker(&global.join("bge-base"), "config.json");
+
+        let mgr = AiManager::for_test(local.clone(), global.clone());
+
+        let bge = mgr
+            .resolve(&AiModel::Bge)
+            .expect("bge must resolve from the global root, not <local>/bge-base");
+        assert_eq!(bge.dir, global.join("bge-base"));
+        assert_eq!(bge.source, ModelSource::Global);
+
+        let bert = mgr
+            .resolve(&AiModel::ModernBert)
+            .expect("the project-pinned modernbert must still resolve");
+        assert_eq!(bert.dir, local.join("modernbert"));
+        assert_eq!(
+            bert.source,
+            ModelSource::Local,
+            "local wins when both exist"
+        );
+    }
+
+    #[test]
+    fn status_flags_and_the_model_list_cannot_disagree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let local = tmp.path().join("proj/models");
+        let global = tmp.path().join("home/models");
+        write_marker(&global.join("bge-base"), "config.json");
+
+        let st = AiManager::for_test(local, global).get_status().unwrap();
+
+        assert!(st.bge_installed, "the embedder is installed");
+        assert!(
+            !st.modern_bert_installed,
+            "nothing pretends modernbert is present"
+        );
+        assert_eq!(st.models.len(), 1);
+        assert_eq!(st.models[0].model.id(), "bge-base-en-v1.5");
+        assert_eq!(st.models[0].source, ModelSource::Global);
     }
 }

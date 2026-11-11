@@ -4076,23 +4076,32 @@ GTW_CODE_INDEX_SOURCE=git_hook "$bin" code-index "$top" --db >/dev/null 2>&1 || 
 
         println!("\n🧠 GnawTreeWriter AI Status");
         println!("===========================");
-        println!(
-            "ModernBERT: {}",
-            if status.modern_bert_installed {
-                "✅ Installed".green()
-            } else {
-                "❌ Not found (run 'ai setup')".red()
-            }
-        );
+        // Per-model truth (2026-11-11): a model is installed HERE or it is not,
+        // and the root it came from is printed with it. The old output asked
+        // `modern_bert_installed` and could therefore say "not found" while the
+        // embedder that `sense` needs sat in the other cache root.
         #[cfg(feature = "mamba")]
-        println!(
-            "LFM2.5:     {}",
-            if status.lfm25_installed {
-                "✅ Installed".green()
-            } else {
-                "❌ Not found (run 'ai setup')".red()
+        let wanted = [
+            crate::llm::ai_manager::AiModel::Bge,
+            crate::llm::ai_manager::AiModel::ModernBert,
+            crate::llm::ai_manager::AiModel::Lfm25,
+        ];
+        #[cfg(not(feature = "mamba"))]
+        let wanted = [
+            crate::llm::ai_manager::AiModel::Bge,
+            crate::llm::ai_manager::AiModel::ModernBert,
+        ];
+        for model in wanted {
+            match status.models.iter().find(|r| r.model.id() == model.id()) {
+                Some(r) => println!(
+                    "{:<20} ✅ {} ({})",
+                    model.id(),
+                    r.dir.display(),
+                    r.source.as_str()
+                ),
+                None => println!("{:<20} ❌ not found (run 'ai setup')", model.id()),
             }
-        );
+        }
         println!("Cache Dir:  {}", status.cache_dir.display());
         println!("Device:     CPU");
         println!();
