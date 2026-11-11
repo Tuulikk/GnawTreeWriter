@@ -1,4 +1,42 @@
-## [Unreleased]
+## [0.26.0] - 2026-11-11
+
+### Added (MCP) — `sense { root }`, broker per rot, och modell↔index-vakt
+
+- **`sense` kunde bara söka i daemonens cwd**, så en klient startad någon
+  annanstans fick svar från ett främmande träd (fältfynd 2026-11-10). Vakten
+  fångade `$HOME` och `/`, men inte "en förälderkatalog med flera repon".
+  Nu: `root`-parameter (canonicaliseras, måste vara katalog, samma
+  `project_root::guard`), broker-cache **per rot**, och svaret säger vilken rot
+  som användes. Bevisat från `/tmp` → 10 träffar i repot.
+- **Modell↔index-vakten:** `AiManager::index_model()` är enda ägaren till
+  "inbäddaren som vektorindexet byggs med" (indexeraren hårdkodade `Bge` medan
+  cache-roten probades på `modernbert`). `store_model_mismatch()` jämför storens
+  `model_info` mot den upplösta modellen och `sense` skriver en högljudd rad
+  (fält `model_mismatch`) i stället för att tyst ranka inkompatibla vektorer.
+- En rot utan `.git`/`.gnawtreewriter_ai` säger nu att den saknar index och
+  pinnade modeller — bevisat: `root: /tmp` gav lexikala nodnamn som såg ut som
+  semantiska träffar.
+
+### Fixed (CI) — grinden som ingen gick igenom
+
+- `code-index --check` fanns men kördes **inte** i CI, så `code-index.md` var
+  inaktuell på ren master. Nu i `validate.yml` (DB-fri re-render + jämförelse).
+- Artefaktens titel berodde på hur roten stavades (`code-index .` gav
+  `# CODE-INDEX — .`) — roten canonicaliseras före namnet; bevisat byte-identisk
+  mellan `.` och absolut sökväg.
+- `doctor`s grafkontroll varnade permanent (13 % mot en 60 %-bar när taket är
+  ~10–13 %). Nu regressionsgolv 5 %, nämnaren utskriven och meningen säger att
+  `calls`-baserad impact är en undre gräns. `doctor` = 29 kontroller, 0 varningar.
+
+### Docs — Crush flaggad otestad; måsten i AGENTS.md
+
+- **Crush: `crush` finns inte på utvecklingsmaskinen** → guide, `SKILL.md`,
+  `KNOWN_ISSUES` och det genererade `.skill`-paketet säger nu uttryckligen att
+  ingen Crush-session någonsin kört, och att `pack-skill --check` bara bevisar
+  synk mot `SKILL.md`.
+- **`AGENTS.md` 2.3: M1–M12 som bindande måsten**, varje regel med kommandot som
+  bevisar den, de fem konkreta felfallen de finns för, och en
+  "definition of done" att skriva ut punkt för punkt.
 
 ### Fixed (AI) — modellcachen löses per modell, inte per manager
 
@@ -96,12 +134,22 @@
 - Hookens bash-koll (`src/cli.rs:2419`) fungerade hela tiden — två
   implementationer av samma fråga, en levande och en död.
 
-### Known (kvar)
+### Known (kvar) — ärligt om det som INTE är klart i 0.26.0
 
-- `AiManager::new` väljer modellcache **allt-eller-inget på `modernbert`**
-  (`src/llm/ai_manager.rs:563`): finns `modernbert` lokalt ignoreras en global
-  `bge-base` och tvärtom → `sense` kan rapporteras "degraderad" trots att
-  modellen är installerad. Bör lösas per modell.
+- **Grafens `calls`-upplösning är ~10–13 % och stannar där** tills typinferens
+  finns: `plain_name` (17 131 anrop som `self.parse()`, `x.iter()`) kräver
+  mottagarens typ. Se README "What the graph can and cannot answer"; `impact`
+  över `calls` är en **undre gräns**. Nästa steg är scoped resolution i nivåer
+  (`same_file | import | unique_global`), inte en lapp i resolveren.
+- **Cosinuströskeln (0,68) är fortfarande provisorisk** — 7 frågor. Den
+  *rapporteras* nu (`answerable` + `cosine_threshold`) i stället för att avgöra
+  tyst, vilket gör provisoriet ofarligt men inte färdigt. Kalibrera mot
+  `evals/sense_recall.json`.
+- **`core::experiment` är bibliotek-only** (CLI-koppling medvetet inte
+  applicerad; den sparade patchen är bevisat trasig — hunk 3 landar inuti en rå
+  sträng i `src/cli.rs`). Modulen kompilerar och är dokumenterad som parkerad.
+- **Crush är otestad** — ingen Crush-session har någonsin kört (se
+  `CRUSH_INTEGRATION_GUIDE.md` och `KNOWN_ISSUES.md`).
 
 ## [0.25.1] - 2026-11-10
 

@@ -3456,9 +3456,26 @@ or list_nodes for a flat index of this file.",
             use crate::llm::SenseResponse;
             // Model ↔ index agreement, checked BEFORE searching: a store built
             // by a different embedder ranks noise while every status stays green.
-            let model_mismatch = crate::llm::SemanticIndexManager::new(&root)
-                .store_model_mismatch(&root)
-                .map(|reason| format!("⚠ index/model mismatch — {reason}\n"));
+            let mut warnings = String::new();
+            if let Some(reason) =
+                crate::llm::SemanticIndexManager::new(&root).store_model_mismatch(&root)
+            {
+                warnings.push_str(&format!("⚠ index/model mismatch — {reason}\n"));
+            }
+            // A root with neither marker has no index and no model of its own:
+            // say so, or the caller reads lexical junk hits as semantic answers
+            // (proved 2026-11-11: `root: /tmp` returned node names as "hits").
+            if !root.join(".git").exists() && !root.join(".gnawtreewriter_ai").exists() {
+                warnings.push_str(&format!(
+                    "⚠ `{}` has no .git or .gnawtreewriter_ai — no index to search and no pinned models, so expect lexical matches only. Build one with `ai index` (or pass the project root you meant).\n",
+                    root.display()
+                ));
+            }
+            let model_mismatch = if warnings.is_empty() {
+                None
+            } else {
+                Some(warnings)
+            };
             let broker = match state.sense_broker_for(&root).await {
                 Ok(b) => b,
                 Err(e) => {
