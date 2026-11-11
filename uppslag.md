@@ -362,11 +362,26 @@ falska och missade kanter.
 
 ---
 
-## 2026-11-10 — CLI-vägen saknar rotvakt
+## 2026-11-10 — CLI-vägen saknar rotvakt  ✅ ÅTGÄRDAT
 
-`code-index`, `gnaw-find` och `sense` på CLI:t har ingen `root_is_too_broad`.
-Från `$HOME` indexerar eller letar de hela hemkatalogen. MCP-vakten täcker dem
-inte. **Status:** `belagt`, oavsiktligt — vakten sattes där läckan uppstod.
+**Var:** `code-index`, `gnaw-find` och `sense` på CLI:t hade ingen
+`root_is_too_broad`; från `$HOME` indexerade de hela hemkatalogen medan MCP-verktygen
+nekade. Två implementationer av samma fråga — samma driftklass som resten av dagen.
+
+**Fixat 2026-11-11:** regeln bor nu i **`src/core/project_root.rs`** (`root_is_too_broad`,
+`looks_like_workspace_container`, `guard`), och både MCP-verktygen och CLI:t
+anropar den. `Commands::CodeIndex` nekar med exit **2**.
+
+**Verifierat live:**
+
+```
+cd $HOME && gnawtreewriter code-index . --coverage   → exit 2
+   "refusing to use . as a project root — it is the home directory …"
+cd <repo> && gnawtreewriter code-index . --coverage  → exit 0, 183 filer
+```
+
+Testerna flyttade med (`core::project_root::tests`, 4 st) och MCP behåller bara
+det som är verktygsspecifikt: rådet i felmeddelandet.
 
 ---
 
