@@ -44,6 +44,9 @@ pub struct ModelInfo {
 
 pub struct SemanticIndexManager {
     storage_dir: PathBuf,
+    /// Needed to tell a stale vector from a live one: `load_project_index` and
+    /// `prune_missing_files` resolve `file_path` against it.
+    project_root: PathBuf,
 }
 
 impl SemanticIndexManager {
@@ -52,7 +55,10 @@ impl SemanticIndexManager {
         if !storage_dir.exists() {
             let _ = fs::create_dir_all(&storage_dir);
         }
-        Self { storage_dir }
+        Self {
+            storage_dir,
+            project_root: project_root.to_path_buf(),
+        }
     }
 
     pub fn get_storage_dir(&self) -> &Path {
@@ -217,19 +223,59 @@ impl SemanticIndexManager {
         let mut conn = self.open_db()?;
         Self::migrate_legacy_json(&mut conn, &self.storage_dir)?;
         let mut index = SemanticIndex::default();
+        let mut skipped = 0usize;
         let mut stmt =
             conn.prepare("SELECT file_path, node_path, content_preview, vector FROM embeddings")?;
         let mut rows = stmt.query([])?;
         while let Some(row) = rows.next()? {
+            let file_path: String = row.get(0)?;
+            // A vector outlives the file it describes: the row is only pruned by
+            // the next `ai index`. Answering from a deleted file is the same
+            // class of lie as a path hash in a content-hash column, so a hit in
+            // a file that is gone is dropped at read time too — and SAID, once,
+            // so the operator knows to prune instead of silently getting
+            // smaller results.
+            if !self.project_root.join(&file_path).exists() {
+                skipped += 1;
+                continue;
+            }
             let vector: Vec<u8> = row.get(3)?;
             index.entries.push(NodeEmbedding {
-                file_path: row.get(0)?,
+                file_path,
                 node_path: row.get(1)?,
                 content_preview: row.get(2)?,
                 vector: blob_to_vector(&vector),
             });
         }
+        if skipped > 0 {
+            eprintln!(
+                "note: {} vector row(s) belong to files that no longer exist and are ignored — run `ai index` to prune them",
+                skipped
+            );
+        }
         Ok(index)
+    }
+
+    /// Delete vectors whose file is gone. Durable counterpart to the read-time
+    /// filter in `load_project_index`: the store should not accumulate rows for
+    /// deleted files (`code-index --coverage` reports them as `orphaned`).
+    /// Returns the number of FILES pruned.
+    pub fn prune_missing_files(&self) -> Result<usize> {
+        let conn = self.open_db()?;
+        let mut stmt = conn.prepare("SELECT DISTINCT file_path FROM embeddings")?;
+        let paths: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        let mut pruned = 0usize;
+        for p in paths {
+            if self.project_root.join(&p).exists() {
+                continue;
+            }
+            conn.execute("DELETE FROM embeddings WHERE file_path = ?1", [&p])?;
+            pruned += 1;
+        }
+        Ok(pruned)
     }
 
     /// One-time import of the legacy per-file JSON storage
@@ -1209,10 +1255,21 @@ mod tests {
         }
     }
 
+    /// A vector store row is only meaningful while its file exists: the read
+    /// path drops rows for missing files (2026-11-11). Fixtures that store
+    /// vectors but never create the file would therefore assert on rows the
+    /// reader is RIGHT to hide — so every storage test materialises its file.
+    fn write_source(root: &std::path::Path, rel: &str) {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, "fn a() {}\n").unwrap();
+    }
+
     #[test]
     fn sqlite_roundtrip_preserves_entries() {
         let dir = tempfile::tempdir().unwrap();
         let mgr = SemanticIndexManager::new(dir.path());
+        write_source(dir.path(), "src/a.rs");
         let v: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         mgr.save_index(
             "src/a.rs",
@@ -1238,6 +1295,7 @@ mod tests {
     fn sqlite_upsert_deletes_stale_rows() {
         let dir = tempfile::tempdir().unwrap();
         let mgr = SemanticIndexManager::new(dir.path());
+        write_source(dir.path(), "src/a.rs");
         mgr.save_index(
             "src/a.rs",
             "fn a() {}",
@@ -1267,10 +1325,71 @@ mod tests {
     }
 
     #[test]
+    /// A vector outlives its file; a SEARCH HIT in a deleted file must not.
+    /// Same class as storing a path hash in a content-hash column: the number
+    /// looks like data and answers a question about code that is gone.
+    #[test]
+    fn rows_for_deleted_files_are_ignored_on_read() {
+        let dir = tempfile::tempdir().unwrap();
+        write_source(dir.path(), "src/live.rs");
+        write_source(dir.path(), "src/doomed.rs");
+        let mgr = SemanticIndexManager::new(dir.path());
+        mgr.save_index(
+            "src/live.rs",
+            "fn live() {}",
+            vec![sqlite_entry("src/live.rs", "1", vec![0.1])],
+        )
+        .unwrap();
+        mgr.save_index(
+            "src/doomed.rs",
+            "fn doomed() {}",
+            vec![sqlite_entry("src/doomed.rs", "1", vec![0.2])],
+        )
+        .unwrap();
+
+        std::fs::remove_file(dir.path().join("src/doomed.rs")).unwrap();
+
+        let loaded = mgr.load_project_index().unwrap();
+        let files: Vec<&str> = loaded
+            .entries
+            .iter()
+            .map(|e| e.file_path.as_str())
+            .collect();
+        assert_eq!(files, vec!["src/live.rs"], "deleted file must not answer");
+    }
+
+    /// The durable counterpart: one call removes the orphaned rows so the next
+    /// read does not even have to filter (`code-index --coverage` reports
+    /// `orphaned` and should reach 0).
+    #[test]
+    fn prune_missing_files_removes_orphans() {
+        let dir = tempfile::tempdir().unwrap();
+        write_source(dir.path(), "src/keep.rs");
+        write_source(dir.path(), "src/gone.rs");
+        let mgr = SemanticIndexManager::new(dir.path());
+        for f in ["src/keep.rs", "src/gone.rs"] {
+            mgr.save_index(f, "fn f() {}", vec![sqlite_entry(f, "1", vec![0.3])])
+                .unwrap();
+        }
+        std::fs::remove_file(dir.path().join("src/gone.rs")).unwrap();
+
+        assert_eq!(mgr.prune_missing_files().unwrap(), 1, "one file pruned");
+        assert_eq!(
+            mgr.prune_missing_files().unwrap(),
+            0,
+            "idempotent: nothing left to prune"
+        );
+        let loaded = mgr.load_project_index().unwrap();
+        assert_eq!(loaded.entries.len(), 1);
+        assert_eq!(loaded.entries[0].file_path, "src/keep.rs");
+    }
+
+    #[test]
     fn sqlite_migrates_legacy_json_idempotently() {
         let dir = tempfile::tempdir().unwrap();
         let storage = dir.path().join(".gnawtreewriter_ai").join("index");
         fs::create_dir_all(&storage).unwrap();
+        write_source(dir.path(), "src/old.rs");
         let entries = vec![sqlite_entry("src/old.rs", "7", vec![0.25, 0.75])];
         fs::write(
             storage.join("abc123.json"),

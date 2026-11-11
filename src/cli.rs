@@ -4235,8 +4235,8 @@ fi
             let report = indexer.index_all_report(&target_path).await?;
 
             println!(
-                "✨ Indexed {} file(s): {} embedded, {} unchanged (content hash).",
-                report.visited, report.embedded, report.unchanged
+                "✨ Indexed {} file(s): {} embedded, {} unchanged (content hash), {} pruned (file gone).",
+                report.visited, report.embedded, report.unchanged, report.pruned
             );
             println!("You can now use `gnawtreewriter sense \"<query>\"` without a file context to search the entire project.");
         }

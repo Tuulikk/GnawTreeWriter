@@ -22,6 +22,8 @@ pub struct IndexReport {
     pub embedded: usize,
     /// Files skipped because their vectors already match this content.
     pub unchanged: usize,
+    /// Files whose vectors were removed because the file no longer exists.
+    pub pruned: usize,
 }
 
 impl ProjectIndexer {
@@ -39,6 +41,9 @@ impl ProjectIndexer {
     /// reads as work done even when every file was skipped by hash (2026-11-11).
     pub async fn index_all_report(&self, target_path: &Path) -> Result<IndexReport> {
         let mut report = IndexReport::default();
+        // Dimension is read from the FIRST vector actually produced, so the
+        // recorded model_info describes this model rather than a constant.
+        let mut dimension: Option<usize> = None;
         // GPU only here (indexing), behind the 20%-VRAM gate; sense/query
         // paths below stay on CPU by design — see ai_manager::indexing_device.
         let model = self.broker.get_manager().load_model(
@@ -76,6 +81,7 @@ impl ProjectIndexer {
                     if already {
                         report.visited += 1;
                         report.unchanged += 1;
+                        Self::report_progress(&report);
                         continue;
                     }
 
@@ -98,6 +104,9 @@ impl ProjectIndexer {
                         if !pending.is_empty() {
                             let texts: Vec<&str> = pending.iter().map(|t| t.2.as_str()).collect();
                             let vectors = model.get_embeddings(&texts)?;
+                            if dimension.is_none() {
+                                dimension = vectors.first().map(|v| v.len());
+                            }
                             let entries = pending
                                 .into_iter()
                                 .zip(vectors)
@@ -112,17 +121,40 @@ impl ProjectIndexer {
                                 .save_index(&file_path_str, &content, entries)?;
                             report.visited += 1;
                             report.embedded += 1;
+                            Self::report_progress(&report);
                         }
                     }
                 }
             }
         }
 
-        // Save model metadata for the ecosystem
-        self.index_manager
-            .save_model_info("bge-base-en-v1.5", 768)?;
+        // Durable cleanup: vectors for files that no longer exist. Done AFTER
+        // the walk so a file that just appeared is never pruned, and reported
+        // so the operator sees the store shrink for a reason.
+        report.pruned = self.index_manager.prune_missing_files()?;
+
+        // Model metadata must name the model that ACTUALLY embedded. The old
+        // call hardcoded "bge-base-en-v1.5"/768, which would record a lie the
+        // moment another index model is configured — and `store_model_mismatch`
+        // trusts this row.
+        if let Some(dim) = dimension {
+            self.index_manager
+                .save_model_info(crate::llm::AiManager::index_model().id(), dim)?;
+        }
 
         Ok(report)
+    }
+
+    /// A 40-minute run must not be silent (measured CPU cost on this repo:
+    /// ~7 files/min, 2026-11-11). Every 25 files, to stderr so `--json`/pipes
+    /// keep working.
+    fn report_progress(report: &IndexReport) {
+        if report.visited % 25 == 0 {
+            eprintln!(
+                "  … {} file(s): {} embedded, {} unchanged",
+                report.visited, report.embedded, report.unchanged
+            );
+        }
     }
 
     /// Backwards-compatible entry point: returns the number of files VISITED.
