@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 6856c51ddb5632700dc750a45b14df14
+> Body-hash: 47209172771d4269294620dd9f0d8f61
 
 ## Träd
 
@@ -90,7 +90,7 @@ src/core/
   batch.rs (897 rader)
   blast.rs (310 rader)
   blueprint.rs (182 rader)
-  capabilities.rs (329 rader)
+  capabilities.rs (357 rader)
   code_graph.rs (579 rader)
   code_index.rs (693 rader)
   code_index_coverage.rs (604 rader)
@@ -735,7 +735,7 @@ _(inga toppnivå-items)_
   - `pub fn render_to_terminal(&self, blueprint: &ProjectBlueprint)` :103
   - `pub fn render_to_markdown(&self, blueprint: &ProjectBlueprint) -> String` :145
 
-### capabilities.rs (329 rader)
+### capabilities.rs (357 rader)
 - `pub const CAPABILITIES: &[Capability] = &[` :21
 - `pub fn first_model_row() -> usize` :115
 - `pub enum ModelNeed` :124
@@ -744,9 +744,9 @@ _(inga toppnivå-items)_
 - `pub struct Capability` :144
 - `pub struct InstalledModel` :156
 - `pub fn installed_models(project_root: &std::path::Path) -> Vec<InstalledModel>` :164
-- `fn role_of(dir: &str) -> &'static str` :197
-- `fn dir_size_mb(path: &std::path::Path) -> u64` :207
-- `pub fn render(project_root: &std::path::Path) -> String` :229
+- `fn role_of(dir: &str) -> &'static str` :205
+- `fn dir_size_mb(path: &std::path::Path) -> u64` :214
+- `pub fn render(project_root: &std::path::Path) -> String` :236
 
 ### code_graph.rs (579 rader)
 - `pub struct Reach` :27
