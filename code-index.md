@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 50d092001ca498247c22742f98c491b0
+> Body-hash: 27584d3ce1cd5c3df881e7c72c4fb3d2
 
 ## Träd
 
@@ -77,7 +77,7 @@ scripts/hooks/
   block-text-replace.py (258 rader)
 src/
   auth_demo.rs (19 rader)
-  cli.rs (6967 rader)
+  cli.rs (6976 rader)
   lib.rs (11 rader)
   main.rs (77 rader)
   network.rs (14 rader)
@@ -132,9 +132,9 @@ src/core/
   visualizer.rs (200 rader)
   visualizer_test.rs (82 rader)
 src/llm/
-  ai_manager.rs (1401 rader)
+  ai_manager.rs (1611 rader)
   batch.rs (96 rader)
-  gnaw_sense.rs (876 rader)
+  gnaw_sense.rs (966 rader)
   harmony.rs (364 rader)
   impact_analyzer.rs (197 rader)
   llm_integration.rs (266 rader)
@@ -515,7 +515,7 @@ _(inga toppnivå-items)_
 ### auth_demo.rs (19 rader)
 _(inga toppnivå-items)_
 
-### cli.rs (6967 rader)
+### cli.rs (6976 rader)
 - `enum McpSubcommands` :27
 - `pub struct Cli` :72
 - `enum Commands` :85
@@ -579,45 +579,45 @@ _(inga toppnivå-items)_
   - `fn handle_alf(` :3970
   - `async fn handle_ai_setup(force: bool) -> Result<()>` :4044
   - `fn handle_ai_status() -> Result<()>` :4071
-  - `fn handle_ai_calibrate() -> Result<()>` :4104
-  - `fn handle_ai_calibrate() -> Result<()>` :4121
-  - `fn device_mode_from_config_text(text: &str) -> Option<String>` :4129
-  - `fn resolve_index_device_from_config() -> Option<String>` :4143
-  - `async fn handle_ai_index(path: Option<PathBuf>, gpu: bool) -> Result<()>` :4149
-  - `async fn handle_ai_report(limit: usize, output: Option<PathBuf>) -> Result<()>` :4191
-  - `fn handle_session_start(name: Option<String>) -> Result<()>` :4209
-  - `fn handle_restore_project(timestamp: &str, preview: bool) -> Result<()>` :4226
-  - `fn handle_restore_files(since: &str, file_patterns: &[String], preview: bool) -> Result<()>` :4273
-  - `fn handle_restore_session(session_id: &str, preview: bool) -> Result<()>` :4338
-  - `fn handle_debug_hash(content: &str) -> Result<()>` :4383
-  - `fn handle_commands(json: bool) -> Result<()>` :4401
-  - `fn handle_examples(topic: Option<&str>) -> Result<()>` :4509
-  - `fn handle_wizard(task: Option<&str>) -> Result<()>` :4846
-  - `fn show_visual_pulse(writer: &GnawTreeWriter, focus_path: &str, narrative: Option<&str>)` :5065
-  - `fn show_visual_diff(` :5091
-  - `fn handle_analyze(paths: &[String], format: &str, recursive: bool) -> Result<()>` :5165
-  - `fn handle_quick_insert(` :5261
-  - `fn find_supported_files(dir: &std::path::Path) -> Result<Vec<String>>` :5366
-  - `fn handle_quick_replace(` :5395
-  - `fn handle_rename(` :5501
-  - `fn handle_clone(` :5513
-  - `fn handle_move(` :5590
-  - `fn find_node_by_path<'a>(tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :5669
-  - `fn handle_lint(` :5682
-  - `fn handle_rules_add(` :5807
-  - `fn handle_rules_list() -> Result<()>` :5851
-  - `fn handle_lint_discover(paths: &[String]) -> Result<()>` :5878
-  - `fn handle_lint_discover(_paths: &[String]) -> Result<()>` :6011
-  - `fn parse_rule_proposals(s: &str) -> Result<Vec<serde_json::Value>>` :6019
-  - `fn handle_doctor(format: Option<&str>) -> Result<()>` :6031
-  - `async fn handle_health_check() -> Result<()>` :6094
-- `const SENSE_COSINE_WARN: f32 = 0.68` :6328
-- `fn sense_confidence(` :6345
-- `fn print_diff(old: &str, new: &str)` :6374
-- `fn show_hint()` :6387
-- `fn list_nodes(` :6417
-- `fn resolve_content(` :6478
-- `fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>>` :6515
+  - `fn handle_ai_calibrate() -> Result<()>` :4113
+  - `fn handle_ai_calibrate() -> Result<()>` :4130
+  - `fn device_mode_from_config_text(text: &str) -> Option<String>` :4138
+  - `fn resolve_index_device_from_config() -> Option<String>` :4152
+  - `async fn handle_ai_index(path: Option<PathBuf>, gpu: bool) -> Result<()>` :4158
+  - `async fn handle_ai_report(limit: usize, output: Option<PathBuf>) -> Result<()>` :4200
+  - `fn handle_session_start(name: Option<String>) -> Result<()>` :4218
+  - `fn handle_restore_project(timestamp: &str, preview: bool) -> Result<()>` :4235
+  - `fn handle_restore_files(since: &str, file_patterns: &[String], preview: bool) -> Result<()>` :4282
+  - `fn handle_restore_session(session_id: &str, preview: bool) -> Result<()>` :4347
+  - `fn handle_debug_hash(content: &str) -> Result<()>` :4392
+  - `fn handle_commands(json: bool) -> Result<()>` :4410
+  - `fn handle_examples(topic: Option<&str>) -> Result<()>` :4518
+  - `fn handle_wizard(task: Option<&str>) -> Result<()>` :4855
+  - `fn show_visual_pulse(writer: &GnawTreeWriter, focus_path: &str, narrative: Option<&str>)` :5074
+  - `fn show_visual_diff(` :5100
+  - `fn handle_analyze(paths: &[String], format: &str, recursive: bool) -> Result<()>` :5174
+  - `fn handle_quick_insert(` :5270
+  - `fn find_supported_files(dir: &std::path::Path) -> Result<Vec<String>>` :5375
+  - `fn handle_quick_replace(` :5404
+  - `fn handle_rename(` :5510
+  - `fn handle_clone(` :5522
+  - `fn handle_move(` :5599
+  - `fn find_node_by_path<'a>(tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :5678
+  - `fn handle_lint(` :5691
+  - `fn handle_rules_add(` :5816
+  - `fn handle_rules_list() -> Result<()>` :5860
+  - `fn handle_lint_discover(paths: &[String]) -> Result<()>` :5887
+  - `fn handle_lint_discover(_paths: &[String]) -> Result<()>` :6020
+  - `fn parse_rule_proposals(s: &str) -> Result<Vec<serde_json::Value>>` :6028
+  - `fn handle_doctor(format: Option<&str>) -> Result<()>` :6040
+  - `async fn handle_health_check() -> Result<()>` :6103
+- `const SENSE_COSINE_WARN: f32 = crate::llm::gnaw_sense::SENSE_ANSWERABLE_COSINE` :6337
+- `fn sense_confidence(` :6354
+- `fn print_diff(old: &str, new: &str)` :6383
+- `fn show_hint()` :6396
+- `fn list_nodes(` :6426
+- `fn resolve_content(` :6487
+- `fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>>` :6524
 
 ### lib.rs (11 rader)
 _(inga toppnivå-items)_
@@ -1507,64 +1507,76 @@ _(inga toppnivå-items)_
 
 ## src/llm/
 
-### ai_manager.rs (1401 rader)
-- `pub enum AiModel` :19
-- `pub enum DeviceType` :33
-- `impl From<&str> for DeviceType` :39
-  - `fn from(s: &str) -> Self` :40
-- `pub fn decide_index_device(` :66
-- `fn vram_free_percent() -> Option<f32>` :94
-- `pub fn indexing_device() -> DeviceType` :120
-- `pub struct ModernBertModel` :154
-- `pub enum EmbeddingBackbone` :163
-- `pub struct Lfm25Model` :172
-- `pub struct Generation` :182
-- `pub enum Resolution` :193
-- `impl Resolution` :205
-  - `pub fn parse(s: &str) -> Self` :206
-- `pub struct TimingProfile` :222
-- `impl Default for TimingProfile` :235
-  - `fn default() -> Self` :236
-- `impl TimingProfile` :248
-  - `pub fn estimate_seconds(&self, input_tokens: usize, output_tokens: usize) -> f64` :250
-- `pub struct TokenBudget` :264
-- `impl Default for TokenBudget` :284
-  - `fn default() -> Self` :285
-- `impl TokenBudget` :300
-  - `pub fn record(&mut self, gen: &Generation)` :302
-  - `pub fn estimate_seconds(&mut self, profile: &TimingProfile)` :311
-- `impl ModernBertModel` :317
-  - `pub fn get_embedding(&self, text: &str) -> Result<Tensor>` :318
-  - `pub fn get_query_embedding(&self, text: &str) -> Result<Tensor>` :339
-  - `fn bge_embed_batched(&self, model: &BertModel, texts: &[&str]) -> Result<Vec<Vec<f32>>>` :360
-  - `fn bge_embed(&self, model: &BertModel, text: &str, is_query: bool) -> Result<Tensor>` :443
-  - `pub fn get_embeddings(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>` :469
-- `pub struct AiManager` :542
-- `impl AiManager` :558
-  - `pub fn new(project_root: &Path) -> Result<Self>` :559
-  - `pub fn timing(&self) -> TimingProfile` :594
-  - `pub fn calibrate_timing(&self) -> Result<TimingProfile>` :604
-  - `pub fn load_model(` :632
-  - `pub fn load_lfm25_model(&self) -> Result<&Lfm25Model>` :711
-  - `pub fn estimate_tokens(&self, text: &str) -> usize` :761
-  - `pub fn generate_lfm25(` :774
-  - `pub async fn generate_semantic_report(&self, file_path: &str) -> Result<SemanticReport>` :848
-  - `pub async fn setup(&self, _model: AiModel, _device: DeviceType, _force: bool) -> Result<()>` :911
-  - `pub fn get_status(&self) -> Result<AiStatus>` :994
-  - `fn get_model_path(&self, model: &AiModel) -> PathBuf` :1014
-- `fn sample_token(` :1029
-- `pub struct SemanticReport` :1080
-- `pub struct QualityFinding` :1087
-- `pub struct Source` :1098
-- `pub fn sources_from_evidence(evidence: &[(String, String)]) -> Vec<Source>` :1107
-- `impl SemanticReport` :1153
-  - `pub fn sources(&self) -> Vec<Source>` :1156
-- `pub struct AiStatus` :1175
-- `fn download_file(url: &str, dest: &std::path::Path) -> Result<()>` :1186
-- `fn timing_profile_path(cache_dir: &Path) -> PathBuf` :1199
-- `fn load_timing_profile(cache_dir: &Path) -> TimingProfile` :1205
-- `fn save_timing_profile(cache_dir: &Path, profile: &TimingProfile)` :1215
-- `fn measure_profile(` :1228
+### ai_manager.rs (1611 rader)
+- `pub enum ModelSource` :24
+- `impl ModelSource` :29
+  - `pub fn as_str(self) -> &'static str` :30
+- `pub struct ResolvedModel` :45
+- `impl AiModel` :51
+  - `pub fn dir_name(&self) -> &'static str` :53
+  - `pub fn probe(&self) -> &'static str` :68
+  - `pub fn id(&self) -> &'static str` :78
+- `pub enum AiModel` :90
+- `pub enum DeviceType` :104
+- `impl From<&str> for DeviceType` :110
+  - `fn from(s: &str) -> Self` :111
+- `pub fn decide_index_device(` :137
+- `fn vram_free_percent() -> Option<f32>` :165
+- `pub fn indexing_device() -> DeviceType` :191
+- `pub struct ModernBertModel` :225
+- `pub enum EmbeddingBackbone` :234
+- `pub struct Lfm25Model` :243
+- `pub struct Generation` :253
+- `pub enum Resolution` :264
+- `impl Resolution` :276
+  - `pub fn parse(s: &str) -> Self` :277
+- `pub struct TimingProfile` :293
+- `impl Default for TimingProfile` :306
+  - `fn default() -> Self` :307
+- `impl TimingProfile` :319
+  - `pub fn estimate_seconds(&self, input_tokens: usize, output_tokens: usize) -> f64` :321
+- `pub struct TokenBudget` :335
+- `impl Default for TokenBudget` :355
+  - `fn default() -> Self` :356
+- `impl TokenBudget` :371
+  - `pub fn record(&mut self, gen: &Generation)` :373
+  - `pub fn estimate_seconds(&mut self, profile: &TimingProfile)` :382
+- `impl ModernBertModel` :388
+  - `pub fn get_embedding(&self, text: &str) -> Result<Tensor>` :389
+  - `pub fn get_query_embedding(&self, text: &str) -> Result<Tensor>` :410
+  - `fn bge_embed_batched(&self, model: &BertModel, texts: &[&str]) -> Result<Vec<Vec<f32>>>` :431
+  - `fn bge_embed(&self, model: &BertModel, text: &str, is_query: bool) -> Result<Tensor>` :514
+  - `pub fn get_embeddings(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>` :540
+- `pub struct AiManager` :613
+- `impl AiManager` :633
+  - `pub fn new(project_root: &Path) -> Result<Self>` :634
+  - `fn roots(&self) -> Vec<(PathBuf, ModelSource)>` :681
+  - `pub fn resolve(&self, model: &AiModel) -> Option<ResolvedModel>` :690
+  - `pub fn resolved_models(&self) -> Vec<ResolvedModel>` :704
+  - `fn for_test(local: PathBuf, global: PathBuf) -> Self` :715
+  - `pub fn timing(&self) -> TimingProfile` :732
+  - `pub fn calibrate_timing(&self) -> Result<TimingProfile>` :742
+  - `pub fn load_model(` :770
+  - `pub fn load_lfm25_model(&self) -> Result<&Lfm25Model>` :849
+  - `pub fn estimate_tokens(&self, text: &str) -> usize` :899
+  - `pub fn generate_lfm25(` :912
+  - `pub async fn generate_semantic_report(&self, file_path: &str) -> Result<SemanticReport>` :986
+  - `pub async fn setup(&self, _model: AiModel, _device: DeviceType, _force: bool) -> Result<()>` :1049
+  - `pub fn get_status(&self) -> Result<AiStatus>` :1132
+  - `fn get_model_path(&self, model: &AiModel) -> PathBuf` :1154
+- `fn sample_token(` :1169
+- `pub struct SemanticReport` :1220
+- `pub struct QualityFinding` :1227
+- `pub struct Source` :1238
+- `pub fn sources_from_evidence(evidence: &[(String, String)]) -> Vec<Source>` :1247
+- `impl SemanticReport` :1293
+  - `pub fn sources(&self) -> Vec<Source>` :1296
+- `pub struct AiStatus` :1315
+- `fn download_file(url: &str, dest: &std::path::Path) -> Result<()>` :1332
+- `fn timing_profile_path(cache_dir: &Path) -> PathBuf` :1345
+- `fn load_timing_profile(cache_dir: &Path) -> TimingProfile` :1351
+- `fn save_timing_profile(cache_dir: &Path, profile: &TimingProfile)` :1361
+- `fn measure_profile(` :1374
 
 ### batch.rs (96 rader)
 - `pub struct BatchOperation` :6
@@ -1572,7 +1584,7 @@ _(inga toppnivå-items)_
 - `pub fn apply_batch(operation: BatchOperation) -> Result<BatchResult>` :29
 - `pub struct BatchResult` :90
 
-### gnaw_sense.rs (876 rader)
+### gnaw_sense.rs (966 rader)
 - `pub struct GnawSenseBroker` :12
 - `pub(crate) fn truncate_preview(s: &str, max_chars: usize) -> String` :33
 - `const MAX_EMBED_NODES: usize = 24` :47
@@ -1584,26 +1596,29 @@ _(inga toppnivå-items)_
 - `pub fn search_log_prior_failures(project_root: &std::path::Path, query: &str) -> u64` :84
 - `pub fn search_log_record_failure(` :107
 - `pub struct SatelliteQuality` :146
-- `pub struct ExpansionInfo` :157
-- `pub enum SenseResponse` :164
-- `pub struct FileMatch` :177
-- `pub struct NodeMatch` :195
-- `pub struct ImpactMatch` :202
-- `pub struct EditProposal` :208
-- `impl GnawSenseBroker` :216
-  - `pub fn new(project_root: &Path) -> Result<Self>` :217
-  - `pub fn get_manager(&self) -> &crate::llm::AiManager` :228
-  - `pub async fn sense(&self, query: &str, file_context: Option<&str>) -> Result<SenseResponse>` :233
-  - `pub async fn sense_with(` :243
-  - `pub async fn sense_with(` :458
-  - `pub async fn propose_edit(` :471
-  - `fn get_parent_path(&self, path: &str) -> String` :534
-  - `fn get_next_index(&self, path: &str) -> usize` :544
-  - `fn get_current_index(&self, path: &str) -> usize` :562
-  - `async fn index_file_cached(` :579
-  - `async fn index_file_from_content(` :624
-  - `async fn index_file(` :674
-  - `fn extract_name_from_preview(&self, preview: &str) -> Option<String>` :725
+- `pub const SENSE_COSINE_LOW: f32 = 0.5` :162
+- `pub const SENSE_ANSWERABLE_COSINE: f32 = 0.68` :173
+- `pub fn answerable_from_cosine(top_cosine: Option<f32>) -> Option<bool>` :180
+- `pub struct ExpansionInfo` :186
+- `pub enum SenseResponse` :193
+- `pub struct FileMatch` :206
+- `pub struct NodeMatch` :224
+- `pub struct ImpactMatch` :231
+- `pub struct EditProposal` :237
+- `impl GnawSenseBroker` :245
+  - `pub fn new(project_root: &Path) -> Result<Self>` :246
+  - `pub fn get_manager(&self) -> &crate::llm::AiManager` :257
+  - `pub async fn sense(&self, query: &str, file_context: Option<&str>) -> Result<SenseResponse>` :262
+  - `pub async fn sense_with(` :272
+  - `pub async fn sense_with(` :489
+  - `pub async fn propose_edit(` :502
+  - `fn get_parent_path(&self, path: &str) -> String` :565
+  - `fn get_next_index(&self, path: &str) -> usize` :575
+  - `fn get_current_index(&self, path: &str) -> usize` :593
+  - `async fn index_file_cached(` :610
+  - `async fn index_file_from_content(` :655
+  - `async fn index_file(` :705
+  - `fn extract_name_from_preview(&self, preview: &str) -> Option<String>` :756
 
 ### harmony.rs (364 rader)
 - `pub struct Harmony` :21

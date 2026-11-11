@@ -206,6 +206,35 @@ stabil. Citera det som *inte* rör sig när filen checkas in.
 
 ---
 
+## 2026-11-11 — Modell, tröskel, graf: "vilken källa avgjorde?"  ✅ GENOMFÖRT
+
+Tre ytor, en princip: varje osäkerhet ska bära sitt ursprung.
+
+1. **Modellcachen löses per modell.** `AiManager::new` valde EN rot genom att
+   söka efter `modernbert` — proben avgjorde var *alla* modeller letades.
+   Lokal `modernbert` + global `bge-base` ⇒ `sense` "degraderad" med modellen
+   installerad. Nu: `ModelSource`/`ResolvedModel`, `resolve(model)` söker
+   lokal → global, `get_status`-flaggorna och modellistan från samma
+   uppslagning. `ai status` skriver sökväg + rot per modell.
+   *Bevis:* hermetic test (markörfiler) för exakt det fall som föll.
+2. **Cosinuströskeln har en ägare.** 0,68 låg i `cli.rs` → nådde bara CLI:t;
+   MCP (där agenterna är) fick ingen varning. Dessutom två tal för en
+   bedömning (0,68 + 0,5 inline). Nu `SENSE_ANSWERABLE_COSINE` (frågan
+   besvarbar?) vs `SENSE_COSINE_LOW` (träffen rimlig?), och
+   `SatelliteQuality { answerable, cosine_threshold }`.
+   *Bevis:* live MCP-anrop → `cosine_threshold: 0.68, answerable: true`.
+3. **Grafens tak publicerat.** `calls` 10,2 % (2 166/21 304), `uses` 12,2 %,
+   `imports` ~9,7 %; dominant klass `plain_name` 17 131 ⇒ kräver typinferens,
+   alltså **inte** en resolver-bugg. README säger nu att `calls`-baserad
+   `impact` är en **undre gräns**.
+
+**Kvar på den tråden:** (b) scoped resolution i nivåer
+(`same_file | import | unique_global`) med konfidensklass per kant — först efter
+släppet. Tröskeln är fortfarande **provisorisk**: kalibrera mot
+`evals/sense_recall.json` (finns redan) innan den får styra något mer.
+
+---
+
 ## Kvarvarande trådar (sammanställning 2026-11-11)
 
 Fyra öppna, ingen av dem tyst, ingen akut. Ordning = billigast först.
