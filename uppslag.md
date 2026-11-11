@@ -206,6 +206,34 @@ stabil. Citera det som *inte* rör sig när filen checkas in.
 
 ---
 
+## 2026-11-11 — Det semantiska lagret kunde inte upptäcka en ändring  ✅ ÅTGÄRDAT
+
+**Fyndet:** `semantic_index::save_index` satte `file_hash = calculate_content_hash(file_path)`
+— en **sökvägshash** i en kolumn som heter `file_hash`. Och `project_indexer`
+hoppade över en fil om en shard-fil *fanns*, där shardens namn var just den
+sökvägshashen. Alltså: efter första indexeringen hoppades varje fil över **för
+evigt**, oavsett hur mycket innehållet ändrades. Det förklarar tre symptom på en
+gång: (1) `ai index` bäddade aldrig om något, (2) ingen konsument kunde skilja
+färsk från inaktuell, (3) min första nivåmätning rapporterade 0 % current — den
+var *korrekt*, den jämförde bara äpplen (md5) mot päron (sökvägshash).
+
+**Bevis (2-filsprov, modell via symlink, data separat):**
+första körningen `2 embedded, 0 unchanged` · andra `0 embedded, 2 unchanged` ·
+`printf`-ändring i **en** fil → `1 embedded, 1 unchanged`.
+Nivåstatus: `L1 AST 0/2 stale · L3 vectors 2/2 current (100%)`.
+
+**SidoFynd, samma klass:** `ai index <PATH>` byggde indexeraren på *cwd:s* rot, så
+ett annat träd indexerades in i **din egen** store — med **absoluta sökvägar** när
+målet låg utanför roten. Städat (2 rader) och fixat: storen följer målet, och
+`📦 Store:` skriver ut vilken som används.
+
+**Läxan:** en kolumn som heter `file_hash` men innehåller en sökvägshash är samma
+sjuka som två procent om samma sak — namnet lovar en sak, värdet en annan. Mät
+alltid vad som *faktiskt* lagras innan du bygger en signal på det.
+
+---
+
+
 ## 2026-11-11 — Modell, tröskel, graf: "vilken källa avgjorde?"  ✅ GENOMFÖRT
 
 Tre ytor, en princip: varje osäkerhet ska bära sitt ursprung.
