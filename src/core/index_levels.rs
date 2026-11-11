@@ -153,6 +153,16 @@ fn measure_vectors(root: &Path, ast_paths: &[(String, String)]) -> LevelStatus {
     let emb = embeddings_db(root);
     if !emb.exists() {
         v.note = "no vector store — `sense` satellite search has nothing to search; build with `ai index`".to_string();
+        // A LEFTOVER store anywhere else in .gnawtreewriter_ai is worse than a
+        // missing one: it exists, it opens, and it reports 0 % — a stale binary
+        // (older layout) or a second component with a different idea of the
+        // store path reads/writes there and the two never notice each other.
+        // Measured 2026-11-11: a 0-byte `.gnawtreewriter_ai/embeddings.db`
+        // appeared while the live store at `index/embeddings.db` held 276 files.
+        let legacy = embeddings_legacy_stores(root);
+        if !legacy.is_empty() {
+            v.source = format!("not built (⚠ legacy store present: {})", legacy.join(", "));
+        }
         return v;
     }
     let Ok(conn) =
@@ -204,9 +214,57 @@ fn embeddings_db(root: &Path) -> std::path::PathBuf {
         .join("embeddings.db")
 }
 
+/// Vector stores sitting where vectors do NOT live — one directory up, or in
+/// the store root. Named (not silently ignored) so a layout drift shows up as a
+/// warning in the status line instead of a plausible-looking 0 %.
+fn embeddings_legacy_stores(root: &Path) -> Vec<String> {
+    let ai = root.join(".gnawtreewriter_ai");
+    let mut found = Vec::new();
+    for candidate in [
+        ai.join("embeddings.db"),
+        ai.join("index").join("index").join("embeddings.db"),
+    ] {
+        if candidate.exists() {
+            found.push(
+                candidate
+                    .strip_prefix(root)
+                    .unwrap_or(&candidate)
+                    .display()
+                    .to_string(),
+            );
+        }
+    }
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A store in the WRONG directory is worse than no store: it exists, it
+    /// opens, and it reports 0 % — a plausible number, so nobody investigates.
+    /// Measured 2026-11-11: `.gnawtreewriter_ai/embeddings.db` (0 bytes) next to
+    /// the live 276-file store at `.gnawtreewriter_ai/index/embeddings.db`.
+    /// The layer must NAME the stray store instead of silently ignoring it.
+    #[test]
+    fn a_legacy_vector_store_is_named_not_silently_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let ai = root.join(".gnawtreewriter_ai");
+        std::fs::create_dir_all(&ai).unwrap();
+        std::fs::write(ai.join("embeddings.db"), b"").unwrap();
+
+        let report = measure(root).unwrap();
+        assert_eq!(report.vectors.total, 0, "the stray store holds no vectors");
+        assert!(
+            report.vectors.source.contains("legacy store present"),
+            "stray store must be named, got: {}",
+            report.vectors.source
+        );
+        assert!(report.vectors.source.contains("embeddings.db"));
+        // And it rides into the status line, so `--coverage` cannot look green.
+        assert!(report.status_line.contains("legacy store present"));
+    }
 
     /// The invariant this module exists for: `stale` comes from COMPARING BYTES,
     /// so a file changed by ANY tool (not just GTW) shows up.

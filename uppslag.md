@@ -206,6 +206,32 @@ stabil. Citera det som *inte* rör sig när filen checkas in.
 
 ---
 
+## 2026-11-11 — Fantomstore: en vektorstore i fel katalog  ✅ ÅTGÄRDAT
+
+**Fyndet:** `.gnawtreewriter_ai/embeddings.db` (0 byte, skapad 21:35) låg bredvid den
+levande storen `.gnawtreewriter_ai/index/embeddings.db` (43 MB, 276 filer).
+Ingen nuvarande källkod skriver till den yttre sökvägen — den kom från en äldre
+binär (MCP-daemonen levde 2 h med gammal kod). Men klassen är farlig: en store i
+fel katalog **finns, öppnar och rapporterar 0 %** — ett trovärdigt tal, så ingen
+utreder det. Exakt samma sjuka som sökvägshashen: namnet lovar en sak, innehållet
+en annan.
+
+**Åtgärd:** `index_levels::embeddings_legacy_stores()` namnger främmande stores i
+statusraden; testet `a_legacy_vector_store_is_named_not_silently_read` låser det.
+Filen borttagen.
+
+**Läxan (M-lista):** när ett mått säger 0 % ska nästa fråga vara "vilken fil läste
+jag?" — inte "varför är det 0?". Två filer med samma namn i olika kataloger är
+hur en mätning blir självsäker och fel.
+
+**Mätt CPU-kostnad (relevant för maskiner utan CUDA):** full ombäddning av
+280 filer / ~10 500 vektorer = **~40 min** på den här maskinen (329 % CPU,
+~7–10 filer/min). Det gör innehållshash-fixen till en förutsättning, inte en
+optimering: utan den betalar varje `ai index` 40 minuter i onödan.
+
+---
+
+
 ## 2026-11-11 — Det semantiska lagret kunde inte upptäcka en ändring  ✅ ÅTGÄRDAT
 
 **Fyndet:** `semantic_index::save_index` satte `file_hash = calculate_content_hash(file_path)`

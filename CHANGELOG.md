@@ -70,7 +70,25 @@
   betyder "inget påverkat" *eller* "kanterna fanns aldrig" — payloaden skiljer
   dem nu i stället för att svara självsäkert på en åttondel av grafen.
 
+### Added — modellfria lager bevisade, och en fantomstore som skulle ljugit
 
+- **Bevisat att kärnan klarar sig helt utan modell** (2-filsprov i `/tmp/gtw-nomodel`,
+  ingen `models/`-katalog alls): `code-index --db` parsar och skriver grafen,
+  `--coverage` svarar `model not built` + `L3 vectors 0/0`, och
+  `--impact alpha` returnerar `alpha → beta` (djup 1, `local_rate: 1.0`).
+  L0–L2 + täckning + graf-frågor är alltså funktionella utan ModernBERT, utan
+  CUDA och utan nät — modellen är ett tillägg, inte en förutsättning.
+- **Fantomstore-vakt:** en vektorstore i FEL katalog är farligare än ingen store
+  — den finns, den öppnar och den rapporterar 0 % (ett trovärdigt tal, så ingen
+  utreder det). Mätt 2026-11-11: `.gnawtreewriter_ai/embeddings.db` (0 byte)
+  skapad av en äldre binär medan den levande storen låg i
+  `.gnawtreewriter_ai/index/embeddings.db` (276 filer). `index_levels` namnger nu
+  främmande stores i statusraden i stället för att tiga; testet
+  `a_legacy_vector_store_is_named_not_silently_read` låser det.
+- **Mätt CPU-kostnad för L3 på den här maskinen:** 279 filer / ~10 500 vektorer
+  tar ~30 min (≈10 filer/min, 329 % CPU). Det är siffran som gör innehållshash-
+  fixen viktig: en full ombäddning är ett halvtimmesjobb i bakgrunden, så en
+  inkrementell körning måste hoppa över oförändrade filer.
 
 ## [0.26.1] - 2026-11-11
 
