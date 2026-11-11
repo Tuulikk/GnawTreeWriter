@@ -342,6 +342,11 @@ pub(crate) fn render_doc(
     };
 
     let mut head = String::new();
+    // Canonicalize BEFORE taking the name: `code-index .` and
+    // `code-index /abs/path` must render the same title, otherwise the
+    // artifact's content depends on how the root was spelled (`. ` produced
+    // "# CODE-INDEX — ."). Found 2026-11-11 while wiring `--check` into CI.
+    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let root_name = root
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
