@@ -163,14 +163,30 @@ pub const SENSE_COSINE_LOW: f32 = 0.5;
 
 /// Cosine below which a QUERY is treated as not confidently answerable.
 ///
-/// PROVISIONAL (7-query calibration, 2026-11-11): a query about a concept absent
-/// from the repo topped out at 0.63 while a TRUE hit sat at rank 5 with 0.65, so
-/// this number cannot separate the two on its own. That is why it is published
-/// as a LABEL plus the measured cosine (`answerable`, `cosine_threshold`) rather
-/// than as a verdict on the agent's behalf. Re-calibrate against
-/// `evals/sense_recall.json` before trusting it for another repo or embedder —
-/// a threshold fitted to bge-base means nothing for a different model.
-pub const SENSE_ANSWERABLE_COSINE: f32 = 0.68;
+/// **Measured, not fitted** (`ai recall-eval evals/sense_recall.json
+/// --negatives evals/sense_negatives.json`, 2026-11-11, bge-base-en-v1.5):
+///
+/// | top cosine | positives (50) | negatives (18) |
+/// |---|---|---|
+/// | min | 0.586 | 0.505 |
+/// | p50 | 0.758 | 0.622 |
+/// | max | 0.927 | **0.714** |
+///
+/// The sets **overlap** (separation −0.127), so no single number can decide.
+/// Any threshold is therefore a choice of which error to prefer, and this one
+/// prefers *"unverified"* over *"confidently wrong"*: a follow-up `read_node`
+/// costs a turn, a trusted wrong answer costs the session.
+///
+/// The old provisional 0.68 was wrong in both directions — it let 3 of 18
+/// absent-concept queries through (they scored up to 0.714) and still called 5
+/// of 50 true queries unverified. 0.72 sits above the measured negative maximum
+/// with margin: **0/18 negatives pass, 12/50 true queries read as unverified**.
+/// That 24 % is the honest price, and it is why this stays a LABEL with the
+/// cosine attached (`answerable` / `cosine_threshold`) instead of a verdict.
+///
+/// Re-run the calibration before trusting this for another repo or embedder —
+/// a threshold measured on bge-base means nothing for a different model.
+pub const SENSE_ANSWERABLE_COSINE: f32 = 0.72;
 
 /// Does this best-cosine clear the answerable threshold?
 ///
@@ -922,16 +938,17 @@ mod answerable_contract_tests {
 
     #[test]
     fn the_calibration_pair_is_respected() {
-        // Both numbers from the 7-query calibration set (2026-11-11).
+        // Values from the 2026-11-11 measurement, so this test documents the
+        // data rather than a remembered intuition.
         assert_eq!(
-            answerable_from_cosine(Some(0.63)),
+            answerable_from_cosine(Some(0.714)),
             Some(false),
-            "absent concept"
+            "the strongest absent-concept query must NOT read as answerable"
         );
         assert_eq!(
-            answerable_from_cosine(Some(0.71)),
+            answerable_from_cosine(Some(0.93)),
             Some(true),
-            "true top hit"
+            "a strong true hit must read as answerable"
         );
         assert_eq!(
             answerable_from_cosine(None),

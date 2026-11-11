@@ -1,4 +1,23 @@
-## [Unreleased]
+## [0.26.1] - 2026-11-11
+
+### Changed (sense) — tröskeln är nu MÄTT, och 0,68 föll
+
+- **`ai recall-eval --negatives <fil>`** mäter om ett enda cosinus-tal kan skilja
+  "besvarbar" från "begrepp som inte finns" — och vägrar föreslå ett tal när
+  mängderna överlappar. `evals/sense_negatives.json` (18 frågor) är negativmängden;
+  positiva sidan är den befintliga recall-samlingen (50 frågor), så *träffens*
+  cosinus mäts i stället för att minnas.
+- **Mätresultat (bge-base-en-v1.5, 2026-11-11):** positiva min 0,586 / p50 0,758 /
+  max 0,927; negativa min 0,505 / p50 0,622 / **max 0,714**. Separation
+  **−0,127** → mängderna överlappar, så inget enskilt tal kan avgöra.
+- **`SENSE_ANSWERABLE_COSINE` 0,68 → 0,72.** 0,68 var fel i *båda* riktningarna:
+  den släppte igenom 3 av 18 frånvarande begrepp (de nådde 0,714) och kallade
+  ändå 5 av 50 riktiga frågor overifierade. Vid 0,72: **0/18 negativa passerar,
+  12/50 riktiga frågor läses som overifierade (24 %)** — ett medvetet val av
+  felet "overifierad" framför "felaktigt självsäker", dokumenterat i konstantens
+  doc-kommentar med tabellen.
+- `answerable` är fortfarande en **etikett med cosinus bredvid sig**, inte en dom:
+  överlappet är bevisat, och siffran får aldrig låtsas vara en klassificerare.
 
 ### Fixed (CI) — två röda `Validate` var grinden som gjorde sitt jobb
 
