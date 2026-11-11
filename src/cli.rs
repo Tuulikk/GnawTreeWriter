@@ -594,6 +594,16 @@ enum Commands {
         #[arg(long)]
         from: Option<PathBuf>,
     },
+    /// Repair a file whose syntax is broken (unbalanced braces today), with a
+    /// preview by default and a verified write on `--apply`.
+    Heal {
+        file_path: PathBuf,
+        /// Write the repair (default: show the proposal only).
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// AI tools
     Ai {
         #[command(subcommand)]
@@ -1579,6 +1589,13 @@ impl Cli {
                     content.as_deref(),
                     from.as_deref(),
                 )?;
+            }
+            Commands::Heal {
+                file_path,
+                apply,
+                json,
+            } => {
+                Self::handle_heal(&file_path, apply, json)?;
             }
             Commands::Rules { command } => match command {
                 RuleSubcommands::Add {
@@ -3867,7 +3884,8 @@ GTW_CODE_INDEX_SOURCE=git_hook "$bin" code-index "$top" --db >/dev/null 2>&1 || 
             .unwrap_or("")
             .to_string();
         if !ext.is_empty() {
-            if let Ok(parser) = crate::parser::get_parser(std::path::Path::new(&format!("x.{ext}"))) {
+            if let Ok(parser) = crate::parser::get_parser(std::path::Path::new(&format!("x.{ext}")))
+            {
                 if let Err(e) = parser.parse(&code) {
                     anyhow::bail!(
                         "scaffold rejected: the proposed content does not parse as {ext}: {e}\n\
@@ -3918,6 +3936,126 @@ GTW_CODE_INDEX_SOURCE=git_hook "$bin" code-index "$top" --db >/dev/null 2>&1 || 
 
         Ok(())
     }
+    /// `heal` — repair a file GTW cannot parse.
+    ///
+    /// Until now GTW could SEE a broken file and refuse to touch it, which left
+    /// the agent with no way back (five brace errors were hand-repaired this
+    /// way on 2026-11-11). The healer existed in core but was not reachable.
+    ///
+    /// Rules: never "fix" a healthy file, never delete code, and never write a
+    /// repair that does not itself parse.
+    fn handle_heal(file_path: &PathBuf, apply: bool, json: bool) -> Result<()> {
+        use crate::core::healer::Healer;
+
+        let code = std::fs::read_to_string(file_path)
+            .with_context(|| format!("cannot read {}", file_path.display()))?;
+        let ext = file_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_string();
+        let parser = crate::parser::get_parser(std::path::Path::new(&format!("x.{ext}")))
+            .map_err(|_| anyhow::anyhow!("no parser for .{ext} — cannot judge or heal it"))?;
+
+        let error = match parser.parse(&code) {
+            Ok(_) => {
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({"healed": false, "reason": "file already parses"})
+                    );
+                } else {
+                    println!(
+                        "✓ {} parses cleanly — nothing to heal.",
+                        file_path.display()
+                    );
+                }
+                return Ok(());
+            }
+            Err(e) => e,
+        };
+
+        let Some(action) = Healer::new().suggest_fix(&code, &error, &ext) else {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "healed": false,
+                        "reason": "no recipe for this error",
+                        "error": error.message
+                    })
+                );
+            } else {
+                println!("✗ no repair recipe for this error: {}", error.message);
+            }
+            std::process::exit(1);
+        };
+
+        if action.fix.is_empty() {
+            println!("⚑ {} (line {})", action.description, action.line);
+            println!("  GTW does not delete code for you. Nothing was written.");
+            return Ok(());
+        }
+
+        let mut healed = format!("{code}{}", action.fix);
+        if !healed.ends_with('\n') {
+            healed.push('\n');
+        }
+        // A repair that does not parse is not a repair.
+        if let Err(e) = parser.parse(&healed) {
+            println!("✗ the proposed repair does not parse either: {e}");
+            println!("  Nothing was written.");
+            std::process::exit(1);
+        }
+
+        if !apply {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "healed": false,
+                        "preview": action.description,
+                        "append": action.fix
+                    })
+                );
+            } else {
+                println!("Proposed: {}", action.description);
+                println!("--- would append ---");
+                println!("{}", action.fix);
+                println!("--------------------");
+                println!("Nothing written. Re-run with --apply to write it.");
+            }
+            return Ok(());
+        }
+
+        std::fs::write(file_path, &healed)?;
+        let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        if let Ok(mut log) = crate::core::transaction_log::TransactionLog::new(&root) {
+            use crate::core::transaction_log::{calculate_content_hash, OperationType};
+            let mut meta = std::collections::HashMap::new();
+            meta.insert("operation".to_string(), "heal".to_string());
+            let _ = log.log_transaction(
+                OperationType::Edit,
+                file_path.clone(),
+                None,
+                Some(calculate_content_hash(&code)),
+                Some(calculate_content_hash(&healed)),
+                format!("heal: {}", action.description),
+                meta,
+            );
+        }
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"healed": true, "applied": action.description})
+            );
+        } else {
+            println!("✓ healed: {}", action.description);
+            println!("  verified: the repaired file parses.");
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn handle_alf(
         message: Option<String>,

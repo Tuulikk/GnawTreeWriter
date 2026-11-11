@@ -100,7 +100,6 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
-
 /// Blame one file, cached by content hash. A changed file re-blames; an
 /// unchanged one costs a file read.
 pub fn file_age(root: &Path, file: &str) -> Result<FileAge> {

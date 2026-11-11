@@ -110,6 +110,7 @@ Fyra öppna, ingen av dem tyst, ingen akut. Ordning = billigast först.
 
 | # | Tråd | Varför den väntar | Insats |
 |---|---|---|---|
+| 0 | **Skills för skapande och läkande** (`scaffold`, `heal`) in i SKILL.md **och** MCP | `scaffold` finns nu i SKILL.md, men `heal` är ny och får inte dokumenteras förrän kommandot finns; ingen av dem finns som MCP-verktyg | ~1 h efter att `heal` är klart |
 | 1 | `AiManager` väljer modellcache **allt-eller-inget på `modernbert`** (`ai_manager.rs:563`) | påverkar var `ai setup` installerar; ska ha test åt båda hållen | ~1 h |
 | 2 | `sense` saknar `root`-parameter | kräver broker-cache per rot — modell-laddningen är delad per process idag | ~2–3 h |
 | 3 | Grafen: 21 % (doctor) / 10,1 % (store), **imports 9,7 %** misstänkt, recall 4/5 | kräver utredning: *vilka* kanter löses inte och varför. `use crate::…` borde lösas — troligen en riktig bugg | utredning först |

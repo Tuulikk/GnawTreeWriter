@@ -5,9 +5,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod age;
 pub mod alf;
 pub mod anchor;
-pub mod age;
 
 pub mod backup;
 pub mod batch;

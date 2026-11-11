@@ -37,21 +37,124 @@ impl Healer {
         }
     }
 
-    fn heal_brace_languages(&self, _code: &str, error: &SyntaxError) -> Option<HealingAction> {
-        // Recipe A: Missing closing brace at end of file
-        if error.message.contains("Syntax error") || error.message.contains("unexpected") {
-            // Very simple heuristic for now: if we have more { than }
-            let open_braces = _code.chars().filter(|&c| c == '{').count();
-            let close_braces = _code.chars().filter(|&c| c == '}').count();
+    fn heal_brace_languages(&self, code: &str, _error: &SyntaxError) -> Option<HealingAction> {
+        /// Braces as a LEXER sees them: string literals, char literals and
+        /// comments open and close nothing.
+        ///
+        /// The first version counted raw characters, so a file containing
+        /// `"{".to_string()` looked unbalanced and the "fix" appended a stray
+        /// brace — a wrong answer that made the file worse. Returns
+        /// `(opens - closes, line of the first unmatched '}')`.
+        fn balance(code: &str) -> (i64, Option<usize>) {
+            let mut opens: i64 = 0;
+            let mut closes: i64 = 0;
+            let mut depth: i64 = 0;
+            let mut first_unmatched_close: Option<usize> = None;
+            let mut line = 1usize;
+            let mut chars = code.chars().peekable();
+            let mut in_string: Option<char> = None;
+            let mut escape = false;
+            let mut in_line_comment = false;
+            let mut in_block_comment = false;
 
-            if open_braces > close_braces {
+            while let Some(c) = chars.next() {
+                if c == '\n' {
+                    line += 1;
+                    in_line_comment = false;
+                    escape = false;
+                    continue;
+                }
+                if in_line_comment {
+                    continue;
+                }
+                if in_block_comment {
+                    if c == '*' && chars.peek() == Some(&'/') {
+                        chars.next();
+                        in_block_comment = false;
+                    }
+                    continue;
+                }
+                if let Some(quote) = in_string {
+                    if escape {
+                        escape = false;
+                    } else if c == '\\' {
+                        escape = true;
+                    } else if c == quote {
+                        in_string = None;
+                    }
+                    continue;
+                }
+                if c == '/' && chars.peek() == Some(&'/') {
+                    chars.next();
+                    in_line_comment = true;
+                    continue;
+                }
+                if c == '/' && chars.peek() == Some(&'*') {
+                    chars.next();
+                    in_block_comment = true;
+                    continue;
+                }
+                if c == '"' {
+                    in_string = Some('"');
+                    continue;
+                }
+                if c == '\'' {
+                    // A char literal only when it closes one character later
+                    // ('x' or '\n'); otherwise it is a Rust lifetime like 'a,
+                    // which opens nothing.
+                    let mut probe = chars.clone();
+                    let first = probe.next();
+                    let after = if first == Some('\\') {
+                        probe.next();
+                        probe.next()
+                    } else {
+                        probe.next()
+                    };
+                    if after == Some('\'') {
+                        let skip = if first == Some('\\') { 3 } else { 2 };
+                        for _ in 0..skip {
+                            chars.next();
+                        }
+                    }
+                    continue;
+                }
+                match c {
+                    '{' => {
+                        opens += 1;
+                        depth += 1;
+                    }
+                    '}' => {
+                        closes += 1;
+                        depth -= 1;
+                        if depth < 0 && first_unmatched_close.is_none() {
+                            first_unmatched_close = Some(line);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            (opens - closes, first_unmatched_close)
+        }
+
+        let (net, unmatched_close) = balance(code);
+        if net > 0 {
+            return Some(HealingAction {
+                description: format!("Added {} missing closing brace(s) at end of file", net),
+                fix: "}".repeat(net as usize),
+                line: code.lines().count().max(1),
+            });
+        }
+        if net < 0 {
+            if let Some(line) = unmatched_close {
                 return Some(HealingAction {
                     description: format!(
-                        "Added missing closing brace ({} missing)",
-                        open_braces - close_braces
+                        "{} closing brace(s) without an opener; the first is on line {}. \
+                         Deleting a brace is destructive, so GTW proposes but does not apply it — \
+                         inspect that line.",
+                        -net, line
                     ),
-                    fix: "}".repeat(open_braces - close_braces),
-                    line: error.line,
+                    fix: String::new(),
+                    line,
                 });
             }
         }
