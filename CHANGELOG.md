@@ -1,5 +1,37 @@
 ## [Unreleased]
 
+### Added (CLI + MCP) — `undo --files`: filskapande är en egen omfattning
+
+- **`scaffold` loggade `Insert`, så en skapad fil kunde aldrig ångras.**
+  `OperationType::CreateFile` införd; `scaffold` loggar den med innehållshash.
+  Vanlig `undo` **vägrar** den och hänvisar till `undo --files` — innehålls-
+  omfattningen raderar aldrig filer (ägarens distinktion: att återställa
+  innehåll och att radera en fil är olika operationer med olika risk).
+  `undo_file_creation()` tar den nyaste skapade filen **som fortfarande finns**
+  och bara om den är byte-identisk med det GTW skrev (hash-bevis). `redo` av ett
+  skapande vägrar ärligt: loggen bär en hash, inte innehållet.
+  Bevisat 2026-11-11: vägra → radera → uttömt → ändrad-fil-vägran → kedja.
+  Två buggar hittade av mina egna prov: en vägrad undo konsumerade stackposten,
+  och en post vars fil redan var borta blockerade stacken för evigt.
+
+### Added (validate) — heal-rådet är mätt, inte antaget
+
+- **`healer::heal_advice()`** besiktigar filen och svarar antingen *"this IS a
+  heal case"* (med kommandot) eller *"braces are balanced, so this is NOT a heal
+  case"*. Samma funktion matar CLI och MCP `validate` (kan inte drifta), pinnad
+  av `tests/heal_advice.rs` i båda riktningarna. Stänger den sista öppna delen
+  av "ingen väg tillbaka från en oparsbar fil".
+
+### Added (lib) — `core::experiment`, ej kopplad till CLI
+
+- Modulen kompilerar nu som del av craten (registrerad i `core/mod.rs`).
+  **Strukturell defekt rättad:** `git()` hade tappat sin svans (`Ok(...)` +
+  klammer), vilket nästlade `ensure_disposable`, `start`, `latest_dir`, `load`
+  och `append` inuti den. Klamrarna balanserade, så `heal` rapporterade korrekt
+  "parses cleanly" — bara kompilatorn kunde se nästlingen.
+  CLI/MCP-koppling är **medvetet inte** applicerad; den sparade patchen är
+  bevisat trasig (hunk 3 landar inuti en rå sträng i `src/cli.rs`).
+
 ### Fixed (MCP) — en `$HOME`-rot betjänade främmande träd
 
 - **`sense` och `code_index` avvisar nu en projektrot som är `$HOME` eller

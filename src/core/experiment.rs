@@ -1,7 +1,19 @@
-//! PARKED 2026-11-11: the core is written and reviewed, the CLI/MCP wiring is
-//! NOT applied (it broke bracket balance twice in one sitting — the lesson is
-//! to add the enum variant and the dispatch arm in separate verified steps).
-//! Apply with: git apply docs/wip/experiment-cli-wiring.patch
+//! PARKED 2026-11-11: the core is written and reviewed; the CLI/MCP wiring is
+//! NOT applied.
+//!
+//! **The saved patch (`docs/wip/experiment-cli-wiring.patch`) is BROKEN — do not
+//! trust it.** Proved 2026-11-11: its third hunk anchors on
+//! `GTW_CODE_INDEX_SOURCE=git_hook …`, which lives INSIDE a raw string literal
+//! in `src/cli.rs`, so applying it inserts 161 lines of Rust into that string
+//! and the file stops parsing (`unexpected closing delimiter`, cli.rs:6544).
+//! Add the enum variant, the dispatch arm and the handler as three separate
+//! AST-verified steps instead.
+//!
+//! The module itself now compiles as part of the crate (registered in
+//! `core/mod.rs`) and its structural defect is fixed: `git()` had lost its tail
+//! (`Ok(...)` + closing brace), which nested `ensure_disposable`, `start`,
+//! `latest_dir`, `load` and `append` inside it. Braces balanced, so `heal` said
+//! "parses cleanly" — only the compiler could see the mis-nesting.
 
 //! Destructive debugging: isolate a fault by gating code out, with a journal.
 //!
@@ -144,6 +156,9 @@ pub(crate) fn git(workspace: &Path, args: &[&str]) -> Result<String> {
         ));
     }
 
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
 /// Refuse to run anywhere the user's work could be lost.
 ///
 /// Returns whether the target is the PRIMARY worktree (allowed only with an
@@ -252,7 +267,11 @@ pub fn load(workspace: &Path) -> Result<Journal> {
             )
         })?);
     }
-    Ok(Journal { dir, header, events })
+    Ok(Journal {
+        dir,
+        header,
+        events,
+    })
 }
 
 pub fn append(journal: &Journal, event: &Event) -> Result<()> {
@@ -261,9 +280,6 @@ pub fn append(journal: &Journal, event: &Event) -> Result<()> {
     let mut f = std::fs::OpenOptions::new().append(true).open(&path)?;
     writeln!(f, "{}", serde_json::to_string(event)?)?;
     Ok(())
-}
-
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 pub(crate) fn file_hash(path: &Path) -> Result<String> {
@@ -276,7 +292,6 @@ pub(crate) fn file_hash(path: &Path) -> Result<String> {
 pub fn journal_root(workspace: &Path) -> PathBuf {
     workspace.join(".gnawtreewriter_ai").join("experiments")
 }
-
 
 /// Measure the structure of `node_path` in `file` — GTW's own (verified) half of
 /// the observation. Never fails on a broken file: a file that no longer parses
@@ -362,7 +377,12 @@ pub fn disable(journal: &Journal, file: &str, nodes: &[String]) -> Result<Event>
 
 /// Record what the AGENT observed. GTW cannot check behaviour; it can check
 /// whether the claim is compatible with what the structure says.
-pub fn record(journal: &Journal, outcome: &str, evidence: &str, exit: Option<i32>) -> Result<Event> {
+pub fn record(
+    journal: &Journal,
+    outcome: &str,
+    evidence: &str,
+    exit: Option<i32>,
+) -> Result<Event> {
     let known = ["gone", "same", "changed", "other"];
     if !known.contains(&outcome) {
         return Err(anyhow!(
@@ -456,7 +476,6 @@ pub fn next_batch(journal: &Journal) -> (Vec<String>, Vec<String>) {
     };
     (active.iter().take(take).cloned().collect(), active)
 }
-
 
 fn last_disabled(journal: &Journal) -> Option<(&Structure, &Structure)> {
     journal.events.iter().rev().find_map(|e| match e {

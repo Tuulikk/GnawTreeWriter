@@ -24,6 +24,7 @@ pub mod diagnostics;
 
 pub mod diff_parser;
 pub mod edit_delta;
+pub mod experiment;
 pub mod explore;
 pub mod file_walker;
 pub mod gnaw_diff;
@@ -496,6 +497,25 @@ impl GnawTreeWriter {
             .resolve_path(node_path)
             .context(format!("Node not found: {}", node_path))?;
         Ok(node.content.clone())
+    }
+
+    /// Number of nodes in the parsed tree — a STRUCTURE measurement.
+    ///
+    /// Measurement kinds are kept apart on purpose (2026-11-11): GTW measures
+    /// structure (does it parse, which nodes exist, how many); behaviour is
+    /// reported by the agent; appearance is nobody's to judge. `experiment`
+    /// depends on this split, so the counter lives here rather than in it.
+    pub fn node_count(&self) -> usize {
+        fn count(node: &TreeNode) -> usize {
+            1 + node.children.iter().map(count).sum::<usize>()
+        }
+        count(&self.tree)
+    }
+
+    /// Does a node exist at this dot-path? Structural fact, no content read —
+    /// safe to call after a destructive change to see what survived.
+    pub fn node_exists(&self, node_path: &str) -> bool {
+        self.resolve_path(node_path).is_some()
     }
 
     /// B1(b): declare the expected identity of the node at `node_path`
