@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: b5ae9fa55a95c585741e739a2fa2ddfb
+> Body-hash: 84017a1c751dedfa34454d5bec0c1f81
 
 ## Träd
 
@@ -102,7 +102,7 @@ src/core/
   edit_delta.rs (749 rader)
   experiment.rs (556 rader)
   explore.rs (567 rader)
-  file_walker.rs (143 rader)
+  file_walker.rs (158 rader)
   gnaw_diff.rs (267 rader)
   gnaw_find.rs (380 rader)
   gnaw_graph.rs (366 rader)
@@ -141,11 +141,11 @@ src/llm/
   llm_integration.rs (266 rader)
   mod.rs (28 rader)
   pipeline.rs (893 rader)
-  project_indexer.rs (233 rader)
+  project_indexer.rs (282 rader)
   prompts.rs (174 rader)
   recall_eval.rs (365 rader)
   relational_index.rs (684 rader)
-  semantic_index.rs (1315 rader)
+  semantic_index.rs (1459 rader)
 src/mcp/
   mod.rs (4387 rader)
 src/parser/
@@ -996,10 +996,11 @@ _(inga toppnivå-items)_
 - `struct FileEntry` :424
 - `fn get_file_summary(path: &Path) -> Vec<ExploreNode>` :432
 
-### file_walker.rs (143 rader)
+### file_walker.rs (158 rader)
 - `pub fn walk_source_files(root: &Path) -> Vec<PathBuf>` :15
 - `pub fn walk_source_files_filtered(root: &Path, extensions: &[&str]) -> Vec<PathBuf>` :39
-- `pub fn has_extension(path: &Path, extensions: &[&str]) -> bool` :56
+- `pub fn is_generated_artifact(path: &Path) -> bool` :63
+- `pub fn has_extension(path: &Path, extensions: &[&str]) -> bool` :71
 
 ### gnaw_diff.rs (267 rader)
 - `pub struct DiffResult` :9
@@ -1711,16 +1712,18 @@ _(inga toppnivå-items)_
 - `fn find_node_containing_line<'a>(` :836
 - `fn parse_edit_proposal(s: &str) -> Option<(usize, String)>` :864
 
-### project_indexer.rs (233 rader)
+### project_indexer.rs (282 rader)
 - `pub struct ProjectIndexer` :10
 - `pub struct IndexReport` :18
-- `impl ProjectIndexer` :27
-  - `pub fn new(project_root: &Path) -> Result<Self>` :28
-  - `pub async fn index_all_report(&self, target_path: &Path) -> Result<IndexReport>` :40
-  - `pub async fn index_all(&self, target_path: &Path) -> Result<usize>` :130
-  - `fn extract_module_doc(content: &str) -> String` :138
-  - `fn collect_pending(node: &TreeNode, acc: &mut Vec<(String, String, String)>)` :154
-  - `fn chunk_text(text: &str, size: usize, overlap: usize) -> Vec<String>` :185
+- `impl ProjectIndexer` :29
+  - `pub fn new(project_root: &Path) -> Result<Self>` :30
+  - `pub async fn index_all_report(&self, target_path: &Path) -> Result<IndexReport>` :42
+  - `fn trace_file(report: &IndexReport, file: &str)` :159
+  - `fn report_progress(report: &IndexReport)` :165
+  - `pub async fn index_all(&self, target_path: &Path) -> Result<usize>` :179
+  - `fn extract_module_doc(content: &str) -> String` :187
+  - `fn collect_pending(node: &TreeNode, acc: &mut Vec<(String, String, String)>)` :203
+  - `fn chunk_text(text: &str, size: usize, overlap: usize) -> Vec<String>` :234
 
 ### prompts.rs (174 rader)
 - `pub fn explain_prompt(file_path: &str, node_type: &str, node_content: &str) -> String` :7
@@ -1760,45 +1763,46 @@ _(inga toppnivå-items)_
   - `pub fn save_graph(&self, graph: &FileGraph) -> Result<()>` :473
   - `pub fn load_all_graphs(&self) -> Result<Vec<FileGraph>>` :481
 
-### semantic_index.rs (1315 rader)
+### semantic_index.rs (1459 rader)
 - `fn vector_to_blob(vector: &[f32]) -> Vec<u8>` :13
 - `fn blob_to_vector(blob: &[u8]) -> Vec<f32>` :17
 - `pub struct NodeEmbedding` :26
 - `pub struct SemanticIndex` :34
 - `pub struct ModelInfo` :39
 - `pub struct SemanticIndexManager` :45
-- `impl SemanticIndexManager` :49
-  - `pub fn new(project_root: &Path) -> Self` :50
-  - `pub fn get_storage_dir(&self) -> &Path` :58
-  - `pub fn has_content_hash(&self, file_path: &str, source: &str) -> Result<bool>` :67
-  - `pub fn store_model_mismatch(&self, project_root: &Path) -> Option<String>` :95
-  - `fn open_db(&self) -> Result<Connection>` :114
-  - `pub fn save_model_info(&self, model_name: &str, dimension: usize) -> Result<()>` :137
-  - `pub fn get_model_info(&self) -> Result<Option<ModelInfo>>` :148
-  - `pub fn save_index(` :180
-  - `pub fn load_project_index(&self) -> Result<SemanticIndex>` :213
-  - `fn migrate_legacy_json(conn: &mut Connection, storage_dir: &Path) -> Result<()>` :239
-- `impl SemanticIndex` :307
-  - `pub fn search(&self, query_vector: &[f32], limit: usize) -> Vec<(&NodeEmbedding, f32)>` :310
-  - `pub fn search_with_threshold(` :315
-- `pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32` :338
-- `const DECL_PENALTY: f32 = 0.15` :363
-- `const IMPL_BONUS: f32 = 0.03` :364
-- `const RRF_K: f32 = 60.0` :367
-- `const LEX_CHANNEL_WEIGHT: f32 = 0.5` :368
-- `const GRAPH_CHANNEL_WEIGHT: f32 = 0.2` :374
-- `const GRAPH_SEED_K: usize = 8` :376
-- `const GRAPH_HUB_DEGREE: usize = 100` :380
-- `enum PreviewKind` :383
-- `fn classify_preview(preview: &str) -> PreviewKind` :389
-- `pub struct RerankedHit<'a>` :456
-- `pub fn parent_node_path(path: &str) -> &str` :477
-- `fn lex_norm(word: &str) -> &str` :487
-- `const MAX_PER_FILE: usize = 4` :498
-- `pub fn fuse_by_max<'a>(` :505
-- `pub fn rerank_satellite<'a>(` :541
-- `fn graph_path_key(p: &str) -> &str` :552
-- `pub fn rerank_satellite_with_graphs<'a>(` :565
+- `impl SemanticIndexManager` :52
+  - `pub fn new(project_root: &Path) -> Self` :53
+  - `pub fn get_storage_dir(&self) -> &Path` :64
+  - `pub fn has_content_hash(&self, file_path: &str, source: &str) -> Result<bool>` :73
+  - `pub fn store_model_mismatch(&self, project_root: &Path) -> Option<String>` :101
+  - `fn open_db(&self) -> Result<Connection>` :120
+  - `pub fn save_model_info(&self, model_name: &str, dimension: usize) -> Result<()>` :143
+  - `pub fn get_model_info(&self) -> Result<Option<ModelInfo>>` :154
+  - `pub fn save_index(` :186
+  - `pub fn load_project_index(&self) -> Result<SemanticIndex>` :219
+  - `pub fn prune_missing_files(&self) -> Result<usize>` :265
+  - `fn migrate_legacy_json(conn: &mut Connection, storage_dir: &Path) -> Result<()>` :289
+- `impl SemanticIndex` :357
+  - `pub fn search(&self, query_vector: &[f32], limit: usize) -> Vec<(&NodeEmbedding, f32)>` :360
+  - `pub fn search_with_threshold(` :365
+- `pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32` :388
+- `const DECL_PENALTY: f32 = 0.15` :413
+- `const IMPL_BONUS: f32 = 0.03` :414
+- `const RRF_K: f32 = 60.0` :417
+- `const LEX_CHANNEL_WEIGHT: f32 = 0.5` :418
+- `const GRAPH_CHANNEL_WEIGHT: f32 = 0.2` :424
+- `const GRAPH_SEED_K: usize = 8` :426
+- `const GRAPH_HUB_DEGREE: usize = 100` :430
+- `enum PreviewKind` :433
+- `fn classify_preview(preview: &str) -> PreviewKind` :439
+- `pub struct RerankedHit<'a>` :506
+- `pub fn parent_node_path(path: &str) -> &str` :527
+- `fn lex_norm(word: &str) -> &str` :537
+- `const MAX_PER_FILE: usize = 4` :548
+- `pub fn fuse_by_max<'a>(` :555
+- `pub fn rerank_satellite<'a>(` :591
+- `fn graph_path_key(p: &str) -> &str` :602
+- `pub fn rerank_satellite_with_graphs<'a>(` :615
 
 ## src/mcp/
 
