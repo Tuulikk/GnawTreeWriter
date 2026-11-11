@@ -304,9 +304,24 @@ Sju frågor, facit kontrollerat i koden (två av mina första "facit" var fel oc
    döma på cosinus **ensam** är därför arkitektoniskt fel, inte bara
    okalibrerat.
 
-**Kvar:** byt confidencen till `harmony` när den finns (zoom-vägen saknar den),
-och/eller höj tröskeln till ~0,68 med vetskapen att den är grov. Recall:
-4/5 sanna träffar i topp 5 — `mcp/mod.rs` missades.
+**Kvar:** ~~byt confidencen till `harmony`~~ — **GJORT 2026-11-11**
+(`sense_confidence` i `src/cli.rs`). Två signaler, för ett tal kan inte göra
+båda jobben:
+
+| Fråga | cosinus | verdict per träff | utfall |
+|---|---|---|---|
+| "dependency cycles" (finns) | 0,73 | minor dissonance | **ingen varning** |
+| "OAuth login" (**finns inte**) | 0,63 | minor dissonance | **varning**: *"best cosine 0.63 < 0.68 and the channels do not agree"* |
+
+Regeln: `varna = disharmonious || (cosinus < 0.68 && ej harmonious)`. Alltså kan
+harmony **rädda** en medioker cosinus (pelarna är ense) och **fälla** en hög
+(utpräglad oenighet), medan cosinus-grinden tar "konceptet finns inte"-fallet.
+Tröskeln 0,68 är **provvisorisk** — fitted på de sju frågorna (sanna toppträffar
+0,71–0,79; negativa 0,62–0,63) och måste mätas om för annat repo/embedder.
+
+**Mätt under vägen:** `Pillars { semantic: 0.63, lexical: 0.0, graph: 0.0 }` ger
+**MinorDissonance**, inte Disharmonious (dissonans 0,397 mot gränserna 0,25/0,50)
+— min första förväntan var fel, och testet pinnar nu det verkliga beteendet.
 
 **Nytt fynd — `ai index` på GPU:** ~2 minuter för 276 filer (734 MiB VRAM, 97 %
 ledigt vid start, 20 %-grinden passerad) mot **>22 min utan att bli klar** på
