@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 84017a1c751dedfa34454d5bec0c1f81
+> Body-hash: 5aa57dafaa9e038560ed65d0546537bd
 
 ## Träd
 
@@ -141,7 +141,7 @@ src/llm/
   llm_integration.rs (266 rader)
   mod.rs (28 rader)
   pipeline.rs (893 rader)
-  project_indexer.rs (282 rader)
+  project_indexer.rs (323 rader)
   prompts.rs (174 rader)
   recall_eval.rs (365 rader)
   relational_index.rs (684 rader)
@@ -1712,18 +1712,19 @@ _(inga toppnivå-items)_
 - `fn find_node_containing_line<'a>(` :836
 - `fn parse_edit_proposal(s: &str) -> Option<(usize, String)>` :864
 
-### project_indexer.rs (282 rader)
+### project_indexer.rs (323 rader)
 - `pub struct ProjectIndexer` :10
 - `pub struct IndexReport` :18
 - `impl ProjectIndexer` :29
   - `pub fn new(project_root: &Path) -> Result<Self>` :30
   - `pub async fn index_all_report(&self, target_path: &Path) -> Result<IndexReport>` :42
-  - `fn trace_file(report: &IndexReport, file: &str)` :159
-  - `fn report_progress(report: &IndexReport)` :165
-  - `pub async fn index_all(&self, target_path: &Path) -> Result<usize>` :179
-  - `fn extract_module_doc(content: &str) -> String` :187
-  - `fn collect_pending(node: &TreeNode, acc: &mut Vec<(String, String, String)>)` :203
-  - `fn chunk_text(text: &str, size: usize, overlap: usize) -> Vec<String>` :234
+  - `fn trace_file(report: &IndexReport, file: &str)` :160
+  - `fn report_progress(report: &IndexReport)` :166
+  - `pub async fn index_all(&self, target_path: &Path) -> Result<usize>` :180
+  - `fn extract_module_doc(content: &str) -> String` :188
+  - `fn cap_pending(pending: &mut Vec<(String, String, String)>) -> usize` :213
+  - `fn collect_pending(node: &TreeNode, acc: &mut Vec<(String, String, String)>)` :223
+  - `fn chunk_text(text: &str, size: usize, overlap: usize) -> Vec<String>` :254
 
 ### prompts.rs (174 rader)
 - `pub fn explain_prompt(file_path: &str, node_type: &str, node_content: &str) -> String` :7
