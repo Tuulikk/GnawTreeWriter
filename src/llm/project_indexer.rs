@@ -1,7 +1,7 @@
 #![cfg(feature = "modernbert")]
 
 use crate::core::file_walker::walk_source_files;
-use crate::llm::{AiModel, GnawSenseBroker, NodeEmbedding, SemanticIndexManager};
+use crate::llm::{GnawSenseBroker, NodeEmbedding, SemanticIndexManager};
 use crate::parser::{get_parser, TreeNode};
 use anyhow::Result;
 use std::fs;
@@ -27,10 +27,10 @@ impl ProjectIndexer {
         let mut total_files = 0;
         // GPU only here (indexing), behind the 20%-VRAM gate; sense/query
         // paths below stay on CPU by design — see ai_manager::indexing_device.
-        let model = self
-            .broker
-            .get_manager()
-            .load_model(AiModel::Bge, crate::llm::ai_manager::indexing_device())?;
+        let model = self.broker.get_manager().load_model(
+            crate::llm::AiManager::index_model(),
+            crate::llm::ai_manager::indexing_device(),
+        )?;
 
         // Canonicalize target_path to ensure strip_prefix works
         let target_path = if target_path.is_relative() {

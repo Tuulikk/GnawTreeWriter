@@ -30,12 +30,16 @@ pub mod mcp_server {
     struct AppState {
         token: Option<String>,
         project_root: std::path::PathBuf,
-        /// Shared GnawSense broker so the ModernBERT model and the JIT file
-        /// index cache persist across MCP calls. Creating a fresh broker per
-        /// call reloaded the model and re-embedded files every time, blowing
-        /// client timeouts on large files.
+        /// Shared GnawSense brokers, ONE PER ROOT (see below). A daemon serves
+        /// whatever directory it was spawned in; `sense { root }` lets a caller
+        /// search a different project without inheriting the wrong one.
         #[cfg(feature = "modernbert")]
-        sense_broker: tokio::sync::OnceCell<std::sync::Arc<crate::llm::GnawSenseBroker>>,
+        sense_brokers: std::sync::Mutex<
+            std::collections::HashMap<
+                std::path::PathBuf,
+                std::sync::Arc<crate::llm::GnawSenseBroker>,
+            >,
+        >,
         /// Background semantic-index run state (index_project tool):
         /// one run at a time, last report kept for status polling.
         #[cfg(feature = "modernbert")]
@@ -52,14 +56,26 @@ pub mod mcp_server {
 
     #[cfg(feature = "modernbert")]
     impl AppState {
-        async fn sense_broker(&self) -> Result<std::sync::Arc<crate::llm::GnawSenseBroker>> {
-            let root = self.project_root.clone();
-            self.sense_broker
-                .get_or_try_init(|| async move {
-                    crate::llm::GnawSenseBroker::new(&root).map(std::sync::Arc::new)
-                })
-                .await
-                .cloned()
+        async fn sense_broker_for(
+            &self,
+            root: &std::path::Path,
+        ) -> Result<std::sync::Arc<crate::llm::GnawSenseBroker>> {
+            // Cache key is the ROOT, not "the process": the model load is what
+            // made a fresh broker per call time out, and the wrong root is what
+            // made answers come from a foreign tree (2026-11-10/11).
+            if let Some(existing) = self
+                .sense_brokers
+                .lock()
+                .ok()
+                .and_then(|m| m.get(root).cloned())
+            {
+                return Ok(existing);
+            }
+            let broker = std::sync::Arc::new(crate::llm::GnawSenseBroker::new(root)?);
+            if let Ok(mut map) = self.sense_brokers.lock() {
+                map.insert(root.to_path_buf(), broker.clone());
+            }
+            Ok(broker)
         }
     }
 
@@ -77,7 +93,7 @@ pub mod mcp_server {
                 Self {
                     token,
                     project_root,
-                    sense_broker: tokio::sync::OnceCell::new(),
+                    sense_brokers: std::sync::Mutex::new(std::collections::HashMap::new()),
                     index_run: std::sync::Arc::new(IndexRun::default()),
                 }
             }
@@ -544,7 +560,8 @@ pub mod mcp_server {
                             .get("expand")
                             .and_then(Value::as_bool)
                             .unwrap_or(false);
-                        Ok(handle_sense(state, query, fp, expand).await)
+                        let root = arguments.get("root").and_then(Value::as_str);
+                        Ok(handle_sense(state, query, fp, expand, root).await)
                     }
                     "semantic_insert" => {
                         let fp = validate_arg("file_path")?;
@@ -993,7 +1010,8 @@ pub mod mcp_server {
                     "properties": {
                         "query": { "type": "string", "description": "Semantic query (e.g., 'how is backup handled?')" },
                         "file_path": { "type": "string", "description": "Optional: Limit search to this file (Zoom mode)" },
-                        "expand": { "type": "boolean", "description": "Satellite only: expand the query via LFM2.5 and fuse a second semantic channel (mamba builds; default false — costs one LLM call + one extra embedding)" }
+                        "expand": { "type": "boolean", "description": "Satellite only: expand the query via LFM2.5 and fuse a second semantic channel (mamba builds; default false — costs one LLM call + one extra embedding)" },
+                        "root": { "type": "string", "description": "Project root to search. Omit to use the server's own root (which is the client's cwd when the daemon was spawned — the classic way to get answers from the wrong tree). The root is guarded: $HOME, / and workspace containers are refused rather than silently searched." }
                     },
                     "required": ["query"]
                 }
@@ -3409,21 +3427,43 @@ or list_nodes for a flat index of this file.",
         query: &str,
         file_path: Option<&str>,
         expand: bool,
+        root: Option<&str>,
     ) -> Value {
-        // Root guard first: a $HOME root degrades the semantic channel AND makes
-        // the lexical fallback walk the whole home directory (field finding
-        // 2026-11-10 — answers came from ~/AndroidSDK).
-        if let Err(reason) = crate::core::project_root::guard(&state.project_root) {
+        // Resolve the ROOT before anything else. A daemon inherits the client's
+        // cwd, so "the project" is whatever the client happened to be in (field
+        // finding 2026-11-10: a `sense` answer came back from ~/AndroidSDK).
+        // `root` lets a caller say which tree it means; without it we use the
+        // daemon's own root and still guard it.
+        let root = match root {
+            Some(r) => {
+                let p = std::path::PathBuf::from(r);
+                if !p.is_dir() {
+                    return tool_error(format!(
+                        "sense: root `{r}` is not a directory — pass a project root (one containing .gnawtreewriter_ai/ or .git/)."
+                    ));
+                }
+                std::fs::canonicalize(&p).unwrap_or(p)
+            }
+            None => state.project_root.clone(),
+        };
+        // Root guard: a $HOME root degrades the semantic channel AND makes the
+        // lexical fallback walk the whole home directory.
+        if let Err(reason) = crate::core::project_root::guard(&root) {
             return broad_root_error("sense", &reason);
         }
         #[cfg(feature = "modernbert")]
         {
             use crate::llm::SenseResponse;
-            let broker = match state.sense_broker().await {
+            // Model ↔ index agreement, checked BEFORE searching: a store built
+            // by a different embedder ranks noise while every status stays green.
+            let model_mismatch = crate::llm::SemanticIndexManager::new(&root)
+                .store_model_mismatch(&root)
+                .map(|reason| format!("⚠ index/model mismatch — {reason}\n"));
+            let broker = match state.sense_broker_for(&root).await {
                 Ok(b) => b,
                 Err(e) => {
                     return sense_lexical_degrade(
-                        &state.project_root,
+                        &root,
                         file_path,
                         query,
                         &format!("semantic model init failed: {}", e),
@@ -3493,7 +3533,8 @@ or list_nodes for a flat index of this file.",
                                 .unwrap_or_default();
                             tool_success(
                                 format!(
-                                    "Satellite search: {} match(es) — {}{}{}",
+                                    "{}Satellite search: {} match(es) — {}{}{}",
+                                    model_mismatch.as_deref().unwrap_or(""),
                                     matches.len(),
                                     top,
                                     suspect_note,
@@ -3502,7 +3543,8 @@ or list_nodes for a flat index of this file.",
                                 Some(json!({
                                     "level": "semantik",
                                     "matches": matches,
-                                    "search_quality": quality
+                                    "search_quality": quality,
+                                    "model_mismatch": model_mismatch
                                 })),
                             )
                         }
@@ -3545,7 +3587,7 @@ or list_nodes for a flat index of this file.",
                     }
                 },
                 Err(e) => sense_lexical_degrade(
-                    &state.project_root,
+                    &root,
                     file_path,
                     query,
                     &format!("semantic query failed: {}", e),

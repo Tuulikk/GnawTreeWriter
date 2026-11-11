@@ -2,7 +2,56 @@
 
 **Guide for AI agents contributing to the GnawTreeWriter project through dogfooding**
 
-Version: 2.2 | Last Updated: 2026-11-11
+Version: 2.3 | Last Updated: 2026-11-11
+
+---
+
+## 🚨 MÅSTEN (bindande — inte råd)
+
+Skrivna för modeller som är **bättre på att bygga än på att kontrollera**, och
+som blir mindre observanta ju längre sessionen blir. Varje regel har ett
+**kommando** som bevisar den. **Ett påstående utan kommandots utskrift är inte
+ett resultat.**
+
+| # | Måste | Beviset |
+|---|---|---|
+| **M1** | Verifiera varje skrivning innan nästa steg | `git diff --stat` + `cargo check` (eller `validate <fil>`) |
+| **M2** | Aldrig `sed -i`, `python`, `dd`, `tee` på projektfiler | — (förbjudet; använd GTW, annars `editor`) |
+| **M3** | Aldrig `git checkout`/`git restore` av GTW-edits | `undo`, `undo --files`, `restore-project --preview` |
+| **M4** | "Klart" kräver grön helhet | `scripts/commit-build.sh` → **`RESULT ok`** som sista rad (citera den) |
+| **M5** | En grind du inte kört är ingen grind | `clippy --all-targets -- -D warnings`, `code-index . --check`, `pack-skill.sh --check` |
+| **M6** | Buggrapport kräver **två** observationer | kör om kommandot, läs **hela** svaret, jämför med `--help` |
+| **M7** | Nya tal behöver ägare + nämnare | två procent om samma sak = bugg, inte nyans |
+| **M8** | Genererad fil får inte citera sin egen skapelse-rev | stämpla innehåll (body-hash), inte `git rev` |
+| **M9** | `heal` lagar **balans**, inte **struktur** | bevisa struktur med `cargo check`, inte med `heal` |
+| **M10** | Sparad patch är inte giltig patch | `git apply --check` **och** filen parsar efteråt |
+| **M11** | Lång session = avtagande observation; minnet är inte en källa | läs om `git status`, `git diff`, senaste testloggen, `uppslag.md` |
+| **M12** | Mät ytan innan du rör den | `--help`, `doctor`, ett litet prov i en temp-katalog |
+
+**Konkreta fel dessa regler finns för** (imitera inte mönstret):
+
+- *"`insert` ignorerar positionen"* — fel: `0` är **första barnet**, inte roten.
+  Felet var en enda grep på första `+`-raden i diffen. (M6)
+- *"GTW kan inte skapa filer"* — fel: `scaffold` fanns hela tiden. (M6, M12)
+- *"13 % vs 10,2 % — grafens resolver är trasig"* — fel: olika nämnare, samma
+  graf. (M7)
+- *"patchen applicerar, alltså är den giltig"* — fel: hunk 3 landade inuti en rå
+  sträng; 161 rader Rust hamnade i en strängliteral. (M10)
+- *"`heal` säger att filen är frisk"* — fel: fem funktioner låg nästlade inuti
+  `git()` med balanserade klamrar. (M9)
+
+### Definition of done — skriv ut den punkt för punkt innan du säger klart
+
+1. `cargo fmt` körd; `clippy --all-targets -- -D warnings` ren
+2. tester gröna — **ange antalet**
+3. beteendet bevisat på **båda** ytorna (CLI **och** MCP), eller skriv varför inte
+4. `code-index . --check` grön
+5. `git status` rent och pushat
+6. `uppslag.md`/`CHANGELOG` säger vad som är ogjort eller provisoriskt
+
+> M1–M12 gäller **även** när du är trött och kontexten är lång — särskilt då.
+> Under ~300k tokens tappar modeller observationen först och självförtroendet
+> sist: det är där M11 räddar sessionen.
 
 ---
 

@@ -631,6 +631,16 @@ pub struct AiManager {
 }
 
 impl AiManager {
+    /// The embedder the VECTOR INDEX is built with — one owner.
+    ///
+    /// `project_indexer` used to hardcode `AiModel::Bge` while the cache root was
+    /// probed on `modernbert`: two different answers to "which model is in play"
+    /// (2026-11-11). Anything that compares a store against a model must ask
+    /// here, or the two answers drift again.
+    pub fn index_model() -> AiModel {
+        AiModel::Bge
+    }
+
     pub fn new(project_root: &Path) -> Result<Self> {
         let local_cache = project_root.join(".gnawtreewriter_ai").join("models");
 

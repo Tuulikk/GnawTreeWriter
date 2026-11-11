@@ -59,6 +59,31 @@ impl SemanticIndexManager {
         &self.storage_dir
     }
 
+    /// Does the store's recorded model differ from the one `sense` will run?
+    ///
+    /// The store already persists `model_info(name, dim)`; until 2026-11-11 only
+    /// the recall harness compared it, so a model switch silently mixed vectors
+    /// from two embedders — which ranks noise while every check stays green.
+    /// Returns `Some(reason)` when a mismatch is PROVEN (store says one thing,
+    /// resolution says another); `None` when there is nothing to compare or they
+    /// agree.
+    pub fn store_model_mismatch(&self, project_root: &Path) -> Option<String> {
+        let stored = self.get_model_info().ok().flatten()?;
+        let manager = crate::llm::AiManager::new(project_root).ok()?;
+        let resolved = manager.resolve(&crate::llm::AiManager::index_model())?;
+        let expected = crate::llm::AiManager::index_model().id();
+        if stored.model_name == expected {
+            return None;
+        }
+        Some(format!(
+            "the vector store was built with `{}` (dim {}) but `{}` is the embedder that will run now — the vectors are not comparable, so cosine ranking would be noise. Re-index (`ai index` / index_project) or restore the original model. Store: {}",
+            stored.model_name,
+            stored.dimension,
+            expected,
+            resolved.dir.display()
+        ))
+    }
+
     /// Open (and initialize) the embeddings DB. One file
     /// (`embeddings.db`, WAL mode) replaces the per-file JSON shards.
     fn open_db(&self) -> Result<Connection> {
