@@ -1,5 +1,30 @@
 ## [Unreleased]
 
+### Added (docs) — `docs/LOCAL_MODEL_BAKEOFF.md`: LFM2.5 vs LFM3 vs Qwen3.5
+
+Planen för att välja L4-modell med **mätta** tal i stället för magkänsla:
+
+- **Baslinjen**, mätt på den här maskinen: `explain src/core/age.rs` = **96 s**,
+  1203 in / 90 out, ~1 tok/s (LFM2.5-1.2B Q4_K_M, `general.file_type = 15`,
+  Q4_K ×82 + Q6_K ×11 + F32 ×55, 1,17 B param, 697 MB).
+- **Blockeraren är motorn:** Candle 0.9 har `quantized_lfm2` men **ingen qwen** —
+  alltså kan ingen av kandidaterna köras utan Cera, som täcker `lfm2`, `lfm3`
+  och `qwen35`. Motorbytet spelas in en gång, modellvalet mäts efteråt.
+- **Exakta storlekar** (utgivarnas fil-listningar, inte estimat):
+  Qwen3.5-0.8B Q4_K_M **508 MB** (−27 % mot i dag), LFM3-1.7B **1 049 MB**
+  (+51 %). Min egen 0,62 B/param-uppskattning låg 2–4 % lågt och är rättad i
+  dokumentet.
+- **Text-only-GGUF slår runtime-flaggor** (principen skriven in): Qwen3.5:s
+  synprojektor ligger i **separata** `mmproj`-filer på 195/198/384 MB som aldrig
+  hämtas — kvantfilen innehåller ingen vision alls. Runtime-switcharna är
+  därmed nödlösning, inte design. `vl-preprocess` är dock på i Ceras default
+  features, så integreringen anger features explicit.
+- **Objektivt kvalitetsmått för kod:** andel `propose_edit` vars resultat
+  **parsar** — det enda måttet som inte är en smaksak, och den enda uppgiften
+  där fel är dyrt. Abortvillkor bestäms före mätningen.
+
+
+
 ### Changed (build) — feature-flaggan `modernbert` heter nu **`ai`**
 
 Flaggan gatar hela AI-stacken (candle + tokenizers + hf-hub), inte en modell:
