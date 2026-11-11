@@ -12,8 +12,9 @@ räcker**, och den viktigaste förutsättningen för hela metoden är underdimen
 **observationen**.
 
 Rekommendation: bygg **en** kommandofamilj (`experiment start|candidates|disable|
-record|restore|report`), inte sju förmågor. GTW **kör inga observationer** — den
-tar emot dem från agenten, verifierar sina egna ingrepp och sköter journalen.
+record|restore|report`), inte sju förmågor. GTW **observerar struktur själv**
+(AST + code index), **tar emot beteende** från agenten, och **dömer aldrig
+utseende**.
 
 ## Vad som redan finns (mappning)
 
@@ -32,43 +33,57 @@ observerbar orakelkanal och ett journalschema — inte en experimentmotor.
 
 ## Vad som måste ändras i förslaget
 
-### a) Oraklet kommer UTIFRÅN — GTW tar emot observationen (reviderat 2026-11-11)
+### a) Tre sorters observation — GTW äger struktur, tar emot beteende, rör inte utseende
 
 Första utkastet föreslog att GTW skulle köra observationen (`--observe "<cmd>"`).
-Ägarens invändning är riktig: **GTW behöver inte äta observationerna.** Agenten
-har redan ett skal, och observationen är ofta något ett kommando inte kan fånga
-(en människa ser att layouten är fel). GTW ska ta **emot** observationen och göra
-det enkelt att logga den.
+Ägarens invändning är riktig: **GTW behöver inte äta beteendeobservationerna.**
+Men den var också för vid i andra riktningen: **kodstruktur är observation, och den
+är GTW:s egen.** Uppdelningen är trevägs:
 
-Det flyttar ansvaret dit det hör:
-
-| | Agenten | GTW |
+| Sort | Exempel | Vem |
 |---|---|---|
-| Observera (köra testet, titta på UI:t) | **ja** | nej |
-| Veta vad som förväntades | ja | nej |
-| Nedmontera kirurgiskt | nej | **ja** (`batch`, validerar före skrivning) |
-| Bevisa att nedmonteringen verkligen skedde | nej | **ja** (parsa om noden) |
-| Bevisa att återställningen är byte-identisk | nej | **ja** (hash före/efter) |
-| Journal, budget, halveringsförslag, rapport | nej | **ja** |
+| **Strukturell** | noden finns/inte, filen parsar, antal noder, symboltabell, `impact`/`imports`-kanter, storlek före/efter | **GTW** — deterministiskt, ur AST och code index |
+| **Beteende** | testfall rött/grönt, exitkod, krasch, loggrad, "fönstret fryser" | **agenten** — rapporteras via `record` |
+| **Utseende** | "layouten ser fel ut", färg, placering, subjektiv bedömning | **ingen** — utanför; agent/människa rapporterar i fritext, GTW dömer aldrig |
 
-Vinsten är stor: ingen kommandoexekvering i GTW, ingen timeout- eller
-shell-injektionsyta, och metoden fungerar även när observationen är visuell eller
-mänsklig.
+Det gör att varje experiment får en **verifierad** halva även när agentens utfall är
+ett påstående:
 
-### b) Konsekvensen som måste sägas högt: GTW kan inte verifiera observationen
+- `structure`: före/efter per nedmontering — `parse_ok`, `nodes`, `node_path_exists`,
+  `symbols`, `impact_edges`, `file_bytes`. GTW mäter den själv, inget skal behövs.
+- `behaviour`: agentens `gone|same|changed|other` + bevis.
+- `appearance`: bara fritext, aldrig ett betyg.
 
-Om agenten rapporterar "symptomet försvann" kan GTW bara **registrera** det, inte
-kontrollera det. Därför måste journalen skilja på två sorters fakta, annars
-återupprepar vi dagens felsort: en rapport som ser ut som en mätning men är ett
-påstående.
+Och det ger **motsägelsedetektion** som ingen av parterna kan göra ensam:
+
+| Utfall | Struktur | GTW:s slutsats |
+|---|---|---|
+| agent: "borta" | noden är kvar | `inconclusive_not_disabled` — nedmonteringen tog inte |
+| agent: "oförändrat" | filen parsar inte längre | `changed_more_than_reported` |
+| agent: "borta" | noden borta, inga konsumenter kvar | `unused_not_cause` (förslagets egen fälla) |
+
+Code index har flera **former** för samma struktur (AST-nodpath, `items` med
+kategori/signatur, relationskanter, entiteter). Journalen ska registrera *vilken
+form* som användes, så en senare agent kan återverifiera på samma granularitet.
+
+
+### b) Den strukturella halvan är GTW:s; beteendehalvan kan den inte kontrollera
+
+Om agenten rapporterar "symptomet försvann" kan GTW bara **registrera beteendet**.
+Men strukturen mäter den själv (se a), så ett påstående utan strukturell täckning
+går att upptäcka: nedmonteringen kanske aldrig tog.
+
+Därför måste journalen skilja på två sorters fakta, annars återupprepar vi dagens
+felsort: en rapport som ser ut som en mätning men är ett påstående.
 
 - `verified: true` — det GTW själv kontrollerat: parsen är giltig, noden finns
-  inte längre, återställningen gav samma hash som före.
+  inte längre, återställningen gav samma hash som före, strukturdeltan är mätt.
 - `reported: "agent"` — det agenten uppgav: utfall, bevis (kommando + exitkod om
   den finns), fritext.
 
-Rapporten ska aldrig blanda dem. Ett experiment vars utfall bara är *reported* är
-en hypotes med stöd, inte ett mätvärde.
+Rapporten ska aldrig blanda dem. Ett experiment vars *beteendeutfall* bara är
+`reported` är en hypotes med stöd, inte ett mätvärde — men dess *struktur* är
+alltid verifierad.
 
 
 ### c) UI-observation hör inte i GTW
@@ -143,12 +158,12 @@ hitta på en.
 3. `candidates`: GTW föreslår subträd ur `code_index` sorterade på `impact`.
    `strategy: bisect` halverar listan mekaniskt; annars väljer agenten.
 4. `disable`: GTW nedmonterar med `batch` (atomisk, validerar före skrivning) och
-   **verifierar** att noden inte längre går att läsa → `verified: true`.
+   **registrerar struktur före** (nodpath, nodantal, parse-status, `impact`-kanter).
 5. Agenten observerar (test, skärmbild, egen bedömning) och anropar `record`
-   med utfall + bevis.
-6. `restore`: GTW återställer och **hash-jämför** mot tillståndet före
-   nedmonteringen → `verified: true/false`. Reversibiliteten kräver aldrig att
-   modellen minns något.
+   med utfall + bevis. Beteendet är agentens; strukturen har GTW redan mätt.
+6. `restore`: GTW återställer, **hash-jämför** mot före nedmonteringen och
+   **registrerar struktur efter** → `verified: true/false` plus strukturdeltan.
+   Reversibiliteten kräver aldrig att modellen minns något.
 7. Upprepa 3–6 tills budgeten tar slut eller utfallet är stabilt.
 8. `report`: minsta avgränsning, experimenten (`verified` vs `reported`),
    `impact`-beroenden per nedmonterad nod, `unused_not_cause`-flaggor,
@@ -159,12 +174,25 @@ hitta på en.
 ```json
 { "reproduced": true,
   "minimal_scope": ["src/ui/render.rs 24.3"],
-  "experiments": [ { "n": 1, "disabled": "src/ui/render.rs 24.3", "expected": "symptom gone",
-                     "observed": "symptom gone", "exit": 0, "duration_ms": 4210,
-                     "impact": ["Widget::draw"], "verdict": "candidate" } ],
+  "experiments": [
+    { "n": 1,
+      "disabled": "src/ui/render.rs 24.3",
+      "structure": { "verified": true, "form": "node_path",
+                     "node_path_exists": false, "parse_ok": true,
+                     "nodes_before": 412, "nodes_after": 401,
+                     "impact_edges": ["Widget::draw"] },
+      "behaviour": { "reported": "agent", "outcome": "gone",
+                     "evidence": "cargo test --test ui → exit 0", "exit": 0 },
+      "contradiction": null,
+      "verdict": "candidate" } ],
   "dependencies": ["Widget::draw -> Renderer::present"],
   "uncertainties": ["symptomet kan ha flyttat till annan widget — ej observerat"] }
 ```
+
+Lägg märke till att `structure` är ifyllt av GTW och `behaviour` av agenten:
+rapporten kan läsas av en människa som inte var med, och en misstänkt
+nedmontering syns som `contradiction: "inconclusive_not_disabled"` i stället för
+att drunkna i en fritext.
 
 ## Vad som INTE ska byggas
 
@@ -182,11 +210,16 @@ hitta på en.
 Förslaget frågar hur en liten lokal modell ska kunna använda metoden utan att
 förstå projektet. Svaret: **den behöver inte**. Dela upp det:
 
-- **Modellen** observerar och rapporterar (den kan köra ett test eller titta på en
-  skärmbild) samt väljer startpunkt. Det kräver domänförståelse men inget
-  projektsammanhang — och inget skal-kommando behöver gå genom GTW.
-- **Verktyget** gör resten mekaniskt: halvering, nedmontering, verifiering,
-  återställning (hash), journal, budget.
+- **Modellen** observerar **beteende** och rapporterar det (den kan köra ett test
+  eller titta på en skärmbild) samt väljer startpunkt. Det kräver domänförståelse
+  men inget projektsammanhang — och inget skal-kommando behöver gå genom GTW.
+- **Verktyget** observerar **struktur** (noden borta? parsar filen? hur många
+  noder/konsumenter återstår?) och gör resten mekaniskt: halvering, nedmontering,
+  hash-verifiering, journal, budget.
+
+Det är därför en liten modell kan bära metoden: den behöver aldrig hålla
+projektets struktur i huvudet — GTW mäter den åt den, och säger till när
+påståendet och strukturen inte stämmer.
 
 Med `strategy: "bisect"` är loopen deterministisk givet att agenten kan säga
 `gone|same|changed` — vilket är precis vad en 7B-modell klarar och en 70B-modell
