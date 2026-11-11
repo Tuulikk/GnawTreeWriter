@@ -18,7 +18,7 @@ path = "src/main.rs"
 # regression: cargo check --no-default-features --all-targets must pass).
 [[example]]
 name = "debug_loading"
-required-features = ["modernbert"]
+required-features = ["ai"]
 
 [dependencies]
 tree-sitter = "0.26.3"
@@ -103,13 +103,18 @@ tower = "0.5"
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 
 [features]
-default = ["modernbert", "mcp"]
-modernbert = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "ureq", "tokenizers"]
+# `ai` gates the whole AI stack (candle + tokenizers + hf-hub), not one model.
+# It used to be called `modernbert` — a name that described neither the index
+# embedder (bge-base) nor the generative model (lfm2.5), and made "what needs a
+# model?" unanswerable. Renamed 2026-11-11; `gnawtreewriter capabilities` is the
+# table that answers it now.
+default = ["ai", "mcp"]
+ai = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "ureq", "tokenizers"]
 mamba = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "ureq", "tokenizers", "dep:fastrand"]
 mcp = ["dep:reqwest", "hyper", "axum", "tokio-stream", "tower-http"]
 cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
-all = ["modernbert", "mcp", "cuda", "metal", "mamba"]
+all = ["ai", "mcp", "cuda", "metal", "mamba"]
 
 # Still not tree-sitter, and why:
 #   xml  — custom parser (xmltree); no grammar added yet.

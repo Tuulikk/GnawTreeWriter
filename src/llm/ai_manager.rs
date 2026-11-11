@@ -1,17 +1,17 @@
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 use crate::core::LabelManager;
 use anyhow::Result;
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 use candle_core::{DType, Device, IndexOp, Tensor};
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 use candle_nn::{self, VarBuilder};
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 use candle_transformers::models::bert::{BertModel, Config as BertEmbeddingConfig};
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 use candle_transformers::models::modernbert::{Config, ModernBert};
 use std::fs;
 use std::path::{Path, PathBuf};
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 use tokenizers::Tokenizer;
 
 /// Which root a model was resolved from.
@@ -221,7 +221,7 @@ pub fn indexing_device() -> DeviceType {
     dev
 }
 
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 pub struct ModernBertModel {
     pub backbone: EmbeddingBackbone,
     pub tokenizer: Tokenizer,
@@ -230,7 +230,7 @@ pub struct ModernBertModel {
 
 /// See AiModel::Bge docs. Kept as an enum so old indexes can still be
 /// inspected with the legacy MLM path while retrieval uses BGE.
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 pub enum EmbeddingBackbone {
     ModernBertMlm(ModernBert),
     Bge(BertModel),
@@ -384,7 +384,7 @@ impl TokenBudget {
     }
 }
 
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 impl ModernBertModel {
     pub fn get_embedding(&self, text: &str) -> Result<Tensor> {
         match &self.backbone {
@@ -620,7 +620,7 @@ pub struct AiManager {
     project_root: PathBuf,
     /// Cached model — loaded once, reused across all calls within this process.
     /// Uses OnceLock for thread-safety (MCP server is async multi-threaded).
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     cached_model: std::sync::OnceLock<ModernBertModel>,
     /// Separate cache for the LFM2.5 model (each model gets its own slot).
     #[cfg(feature = "mamba")]
@@ -676,7 +676,7 @@ impl AiManager {
             local_cache_dir: local_cache,
             global_cache_dir: global_cache,
             project_root: project_root.to_path_buf(),
-            #[cfg(feature = "modernbert")]
+            #[cfg(feature = "ai")]
             cached_model: std::sync::OnceLock::new(),
             #[cfg(feature = "mamba")]
             cached_lfm25: std::sync::OnceLock::new(),
@@ -728,7 +728,7 @@ impl AiManager {
             local_cache_dir: local,
             global_cache_dir: global,
             project_root: PathBuf::from("."),
-            #[cfg(feature = "modernbert")]
+            #[cfg(feature = "ai")]
             cached_model: std::sync::OnceLock::new(),
             #[cfg(feature = "mamba")]
             cached_lfm25: std::sync::OnceLock::new(),
@@ -776,7 +776,7 @@ impl AiManager {
         Ok(profile)
     }
 
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     pub fn load_model(
         &self,
         model_type: AiModel,
@@ -992,7 +992,7 @@ impl AiManager {
         })
     }
 
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     pub async fn generate_semantic_report(&self, file_path: &str) -> Result<SemanticReport> {
         eprintln!("[DEBUG] Starting semantic report for: {}", file_path);
         // No model is loaded here on purpose: this used to be
@@ -1061,7 +1061,7 @@ impl AiManager {
     }
 
     pub async fn setup(&self, _model: AiModel, _device: DeviceType, _force: bool) -> Result<()> {
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         {
             // Retrieval embedder (default since recall@5=0 with the MLM
             // checkpoint): BAAI/bge-base-en-v1.5, CLS-pooled, 768-dim.
@@ -1165,6 +1165,7 @@ impl AiManager {
         })
     }
 
+    #[cfg(feature = "ai")]
     fn get_model_path(&self, model: &AiModel) -> PathBuf {
         // Per-model resolution first; the legacy preferred root is only the
         // fallback for an uninstalled model, so error messages still point at

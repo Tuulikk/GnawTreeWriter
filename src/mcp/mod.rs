@@ -33,7 +33,7 @@ pub mod mcp_server {
         /// Shared GnawSense brokers, ONE PER ROOT (see below). A daemon serves
         /// whatever directory it was spawned in; `sense { root }` lets a caller
         /// search a different project without inheriting the wrong one.
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         sense_brokers: std::sync::Mutex<
             std::collections::HashMap<
                 std::path::PathBuf,
@@ -42,19 +42,19 @@ pub mod mcp_server {
         >,
         /// Background semantic-index run state (index_project tool):
         /// one run at a time, last report kept for status polling.
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         index_run: std::sync::Arc<IndexRun>,
     }
 
     /// Shared state for the background `index_project` tool.
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     #[derive(Default)]
     struct IndexRun {
         running: std::sync::atomic::AtomicBool,
         last: std::sync::Mutex<Option<Value>>,
     }
 
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     impl AppState {
         async fn sense_broker_for(
             &self,
@@ -81,14 +81,14 @@ pub mod mcp_server {
 
     impl AppState {
         fn new(token: Option<String>, project_root: std::path::PathBuf) -> Self {
-            #[cfg(not(feature = "modernbert"))]
+            #[cfg(not(feature = "ai"))]
             {
                 Self {
                     token,
                     project_root,
                 }
             }
-            #[cfg(feature = "modernbert")]
+            #[cfg(feature = "ai")]
             {
                 Self {
                     token,
@@ -355,7 +355,7 @@ pub mod mcp_server {
                         Ok(handle_history_mcp(state.clone(), limit))
                     }
                     "stats" => Ok(handle_stats_mcp(state.clone())),
-                    #[cfg(feature = "modernbert")]
+                    #[cfg(feature = "ai")]
                     "index_project" => {
                         let action = arguments
                             .get("action")
@@ -1170,7 +1170,7 @@ pub mod mcp_server {
 
         // modernbert-only: builds the vector index satellite sense searches
         // (index_entities extracts the knowledge graph instead).
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         tools.push(json!({
             "name": "index_project",
             "title": "Build the semantic search index (background)",
@@ -1975,7 +1975,7 @@ or list_nodes for a flat index of this file.",
     }
 
     async fn handle_get_semantic_report(state: Arc<AppState>, file_path: &str) -> Value {
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         {
             let mgr = match crate::llm::ai_manager::AiManager::new(&state.project_root) {
                 Ok(m) => m,
@@ -1989,11 +1989,11 @@ or list_nodes for a flat index of this file.",
                 Err(e) => tool_error(format!("Semantic report failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to read_node + your own review and log it in GTW_MCP_ISSUE_LOG.md", e)),
             }
         }
-        #[cfg(not(feature = "modernbert"))]
+        #[cfg(not(feature = "ai"))]
         {
             let _ = state;
             let _ = file_path;
-            tool_error_code("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into(), "E_MODEL_UNAVAILABLE")
+            tool_error_code("AI features not enabled — rebuild with the AI features: cargo install --path . --features ai,mcp (README: Full power), then retry this call.".into(), "E_MODEL_UNAVAILABLE")
         }
     }
 
@@ -2056,7 +2056,7 @@ or list_nodes for a flat index of this file.",
         file_path: Option<&str>,
         max_results: usize,
     ) -> Value {
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         {
             let _mgr = match crate::llm::ai_manager::AiManager::new(&state.project_root) {
                 Ok(m) => m,
@@ -2134,13 +2134,13 @@ or list_nodes for a flat index of this file.",
                 ),
             }
         }
-        #[cfg(not(feature = "modernbert"))]
+        #[cfg(not(feature = "ai"))]
         {
             let _ = state;
             let _ = query;
             let _ = file_path;
             let _ = max_results;
-            tool_error("ModernBERT feature not enabled. Install with --features modernbert.".into())
+            tool_error("AI features not enabled. Install with --features ai.".into())
         }
     }
 
@@ -3451,7 +3451,7 @@ or list_nodes for a flat index of this file.",
         if let Err(reason) = crate::core::project_root::guard(&root) {
             return broad_root_error("sense", &reason);
         }
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         {
             use crate::llm::SenseResponse;
             // Model ↔ index agreement, checked BEFORE searching: a store built
@@ -3611,10 +3611,10 @@ or list_nodes for a flat index of this file.",
                 ),
             }
         }
-        #[cfg(not(feature = "modernbert"))]
+        #[cfg(not(feature = "ai"))]
         {
             let _ = (state, query, file_path);
-            tool_error_code("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into(), "E_MODEL_UNAVAILABLE")
+            tool_error_code("AI features not enabled — rebuild with the AI features: cargo install --path . --features ai,mcp (README: Full power), then retry this call.".into(), "E_MODEL_UNAVAILABLE")
         }
     }
 
@@ -3625,7 +3625,7 @@ or list_nodes for a flat index of this file.",
         content: &str,
         intent: &str,
     ) -> Value {
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         {
             use crate::llm::GnawSenseBroker;
             let broker = match GnawSenseBroker::new(&state.project_root) {
@@ -3683,10 +3683,10 @@ or list_nodes for a flat index of this file.",
                 Err(e) => tool_error_code(format!("sense failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md", e), "E_MODEL_UNAVAILABLE"),
             }
         }
-        #[cfg(not(feature = "modernbert"))]
+        #[cfg(not(feature = "ai"))]
         {
             let _ = (state, file_path, anchor_query, content, intent);
-            tool_error_code("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into(), "E_MODEL_UNAVAILABLE")
+            tool_error_code("AI features not enabled — rebuild with the AI features: cargo install --path . --features ai,mcp (README: Full power), then retry this call.".into(), "E_MODEL_UNAVAILABLE")
         }
     }
 
@@ -3696,7 +3696,7 @@ or list_nodes for a flat index of this file.",
         query: &str,
         content: &str,
     ) -> Value {
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         {
             use crate::llm::{GnawSenseBroker, SenseResponse};
             let broker = match GnawSenseBroker::new(&state.project_root) {
@@ -3783,10 +3783,10 @@ or list_nodes for a flat index of this file.",
                 Err(e) => tool_error(format!("sense failed: {} — `gnawtreewriter ai status` checks the model; on repeat fall back to search_nodes/grep and log it in GTW_MCP_ISSUE_LOG.md", e)),
             }
         }
-        #[cfg(not(feature = "modernbert"))]
+        #[cfg(not(feature = "ai"))]
         {
             let _ = (state, file_path, query, content);
-            tool_error_code("ModernBERT feature not enabled — rebuild with the AI features: cargo install --path . --features modernbert,mcp (README: Full power), then retry this call.".into(), "E_MODEL_UNAVAILABLE")
+            tool_error_code("AI features not enabled — rebuild with the AI features: cargo install --path . --features ai,mcp (README: Full power), then retry this call.".into(), "E_MODEL_UNAVAILABLE")
         }
     }
 

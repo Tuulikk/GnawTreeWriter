@@ -1,35 +1,35 @@
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 use crate::llm::{
     AiManager, AiModel, DeviceType, NodeEmbedding, RelationType, RelationalIndexer, SemanticIndex,
 };
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 use crate::parser::TreeNode;
 use anyhow::Result;
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub struct GnawSenseBroker {
     #[allow(dead_code)]
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     ai_manager: AiManager,
     #[allow(dead_code)]
-    #[cfg(not(feature = "modernbert"))]
+    #[cfg(not(feature = "ai"))]
     ai_manager: crate::llm::AiManager,
     #[allow(dead_code)]
     project_root: PathBuf,
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     relational_indexer: RelationalIndexer,
     /// JIT cache: file_path -> (SemanticIndex, content_hash).
     /// Avoids re-embedding unchanged files on repeated Zoom queries.
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     jit_cache: std::sync::Mutex<std::collections::HashMap<String, CachedFileIndex>>,
 }
 
 /// Truncate a string to at most `max_chars` characters (char-boundary safe),
 /// appending `...` when truncated. Byte slicing panics on multibyte UTF-8
 /// (e.g. `—`, emoji, CJK), so previews must always go through this helper.
-#[cfg_attr(not(feature = "modernbert"), allow(dead_code))]
+#[cfg_attr(not(feature = "ai"), allow(dead_code))]
 pub(crate) fn truncate_preview(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         return s.to_string();
@@ -43,7 +43,7 @@ pub(crate) fn truncate_preview(s: &str, max_chars: usize) -> String {
 /// length); without a cap, large files (1000+ nodes) take minutes and blow
 /// the MCP client timeout. Zoom search is for localization — the biggest
 /// definitions are enough; `ai index` builds the full project index.
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 const MAX_EMBED_NODES: usize = 24;
 
 /// Maximum characters of a node's content fed to the embedding model.
@@ -52,17 +52,17 @@ const MAX_EMBED_NODES: usize = 24;
 /// ~1 s while 4000-char nodes push single-file indexing past the MCP client
 /// timeout. Truncation also avoids the hard rope-context crash on huge
 /// nodes ("inconsistent last dim size in rope").
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 const MAX_EMBED_CHARS: usize = 1200;
 
 /// Maximum number of files kept in the JIT cache. Embeddings are large
 /// (vector per node); an unbounded cache grows to hundreds of MB in
 /// long-lived MCP sessions.
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 const MAX_JIT_CACHE_FILES: usize = 32;
 
 /// Cached file index with content hash for invalidation.
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 struct CachedFileIndex {
     index: SemanticIndex,
     content_hash: String,
@@ -267,9 +267,9 @@ impl GnawSenseBroker {
         Ok(Self {
             ai_manager: crate::llm::AiManager::new(project_root)?,
             project_root: project_root.to_path_buf(),
-            #[cfg(feature = "modernbert")]
+            #[cfg(feature = "ai")]
             relational_indexer: RelationalIndexer::new(project_root),
-            #[cfg(feature = "modernbert")]
+            #[cfg(feature = "ai")]
             jit_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
     }
@@ -278,7 +278,7 @@ impl GnawSenseBroker {
         &self.ai_manager
     }
 
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     pub async fn sense(&self, query: &str, file_context: Option<&str>) -> Result<SenseResponse> {
         self.sense_with(query, file_context, false).await
     }
@@ -288,7 +288,7 @@ impl GnawSenseBroker {
     /// fuse both searches by max cosine, and give the reranker the
     /// expanded text for its lexical side. One extra embedding (+ one LLM
     /// call when mamba is present) — opt-in per call.
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     pub async fn sense_with(
         &self,
         query: &str,
@@ -505,7 +505,7 @@ impl GnawSenseBroker {
     /// 2026-10-05): the real sense_with body needs ModernBERT. Callers
     /// get a clean runtime error instead of a compile failure — external
     /// path-dependents may call this directly.
-    #[cfg(not(feature = "modernbert"))]
+    #[cfg(not(feature = "ai"))]
     pub async fn sense_with(
         &self,
         query: &str,
@@ -514,11 +514,11 @@ impl GnawSenseBroker {
     ) -> Result<SenseResponse> {
         let _ = (query, file_context, expand);
         anyhow::bail!(
-            "sense_with requires the 'modernbert' feature — rebuild with --features modernbert (README: Full power)"
+            "sense_with requires the 'modernbert' feature — rebuild with --features ai (README: Full power)"
         )
     }
 
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     pub async fn propose_edit(
         &self,
         anchor_query: &str,
@@ -581,7 +581,7 @@ impl GnawSenseBroker {
     }
 
     #[allow(dead_code)]
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     fn get_parent_path(&self, path: &str) -> String {
         if let Some(last_dot) = path.rfind('.') {
             path[..last_dot].to_string()
@@ -591,7 +591,7 @@ impl GnawSenseBroker {
     }
 
     #[allow(dead_code)]
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     fn get_next_index(&self, path: &str) -> usize {
         let last_part = if let Some(last_dot) = path.rfind('.') {
             &path[last_dot + 1..]
@@ -609,7 +609,7 @@ impl GnawSenseBroker {
     /// Returns 0 (top of parent) if anchor is the first child, otherwise
     /// inserts after the previous sibling.
     #[allow(dead_code)]
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     fn get_current_index(&self, path: &str) -> usize {
         let last_part = if let Some(last_dot) = path.rfind('.') {
             &path[last_dot + 1..]
@@ -626,7 +626,7 @@ impl GnawSenseBroker {
         }
     }
 
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     async fn index_file_cached(
         &self,
         file_path: &str,
@@ -671,7 +671,7 @@ impl GnawSenseBroker {
         Ok(index)
     }
 
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     async fn index_file_from_content(
         &self,
         file_path: &str,
@@ -721,7 +721,7 @@ impl GnawSenseBroker {
         Ok(index)
     }
 
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     async fn index_file(
         &self,
         file_path: &str,
@@ -772,7 +772,7 @@ impl GnawSenseBroker {
         Ok(index)
     }
 
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     fn extract_name_from_preview(&self, preview: &str) -> Option<String> {
         // Multi-language name extraction from AST node content preview.
         // Returns the first identifier that looks like a definition name.

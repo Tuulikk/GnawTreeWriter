@@ -139,7 +139,7 @@ sessioner. De gäller oavsett vilket verktyg du använder.
 3. **Källkod ≠ installerad binär.** Efter kodändringar är PATH:ens
    `gnawtreewriter` ofta gammal (nytt flagga → "unrecognized subcommand",
    fixar saknas). Bygg om: `scripts/build-gpu.sh` (GPU, podman) eller
-   `cargo install --path . --features modernbert,mcp`. Kontrollera med
+   `cargo install --path . --features ai,mcp`. Kontrollera med
    `gnawtreewriter --version` mot `Cargo.toml`. Debug-bin:
    `$CARGO_TARGET_DIR/debug/gnawtreewriter`.
    **Ett kommando räcker: `scripts/commit-build.sh "<msg>"`** — commit → test →
@@ -159,11 +159,13 @@ sessioner. De gäller oavsett vilket verktyg du använder.
    att döda den kopplar ner sessionens MCP — mätt 2026-11-10, den kom inte
    tillbaka av sig själv ("MCP server is not connected"). Reapa helst mellan
    sessioner. (Åtta daemoner i 95–285 minuter körde samma döda binär den dagen.)
-5. **Feature-matrisen:** default OCH `mamba` båda har `modernbert` på —
-   cfg-hål utanför modernbert syns BARA i
+5. **Feature-matrisen:** `default` OCH `mamba` båda har `ai` på (flaggan hette
+   `modernbert` före 2026-11-11 — den gatar hela AI-stacken, inte en modell).
+   cfg-hål utanför `ai` syns BARA i
    `cargo check --no-default-features --all-targets` (CI kör det;
    kör det lokalt om du rört `#[cfg]`/kommandon). LLM-vägar kräver
-   `--features mamba`.
+   `--features mamba`. Vilka funktioner som kräver modell alls:
+   `gnawtreewriter capabilities`.
 6. **Integrationstester MÅSTE vara hermetiska.** Aldrig operera på
    repo-root-state (transaktionslogg/git-rötter): CI-checkoutar har
    gitignorerade loggar, och lokalt korrumperade test ens eget repo (det
@@ -215,11 +217,13 @@ sessioner. De gäller oavsett vilket verktyg du använder.
     `.gnawtreewriter_ai/code_index.db` ligger där. Kontrollera med
     `readlink /proc/<pid>/cwd` på daemonen.
 14. **`ai status` grön betyder INTE att `sense` fungerar.** Tre oberoende saker
-    kan fela samtidigt: modellcachen väljs **allt-eller-inget på `modernbert`**
-    (`ai_manager.rs:563`, så en global `bge-base` ignoreras när `modernbert`
-    finns lokalt), `ai setup` laddar modeller medan `ai index` bygger vektorn,
-    och `~/.gnawtreewriter_ai/models` är en annan katalog än
-    `<projekt>/.gnawtreewriter_ai/models`. Mät i stället: `sense` med
+    kan fela samtidigt: `ai setup` laddar modeller medan `ai index` bygger
+    vektorn, `~/.gnawtreewriter_ai/models` är en annan katalog än
+    `<projekt>/.gnawtreewriter_ai/models`, och modellcachen kan innehålla
+    föråldrade rader. **Fixat 2026-11-11:** cache-roten väljs inte längre
+    allt-eller-inget på `modernbert` — `resolve()` prövar varje rot **per
+    modell**, och `doctor`s nivå gör detsamma (den buggen levde kvar i
+    `diagnostics.rs` till i dag). Mät i stället: `sense` med
     topp-poäng under ~0.5 är oanvändbar oavsett grön bock.
 15. **Bevisa MCP-beteende utan att starta om daemoner.** Pipa JSON-RPC
     (`initialize` → `notifications/initialized` → `tools/call`) in i

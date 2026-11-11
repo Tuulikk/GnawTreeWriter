@@ -1328,7 +1328,6 @@ mod tests {
         assert_eq!(nodes, vec!["2", "3"], "no orphans from the old node set");
     }
 
-    #[test]
     /// `code-index.md` is a rendered artifact: every symbol in it is already
     /// embedded from source, and it is rewritten by every build. Embedding it
     /// measured 1 684 of 10 619 vectors here — noise in search, minutes in the

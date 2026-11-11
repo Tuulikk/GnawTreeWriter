@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test-modernbert:
+  test-ai:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -28,4 +28,4 @@ jobs:
             ${{ runner.os }}-cargo-registry-
 
       - name: Run AI integration tests
-        run: cargo test --test ai_modernbert_tests --features modernbert --quiet
+        run: cargo test --test ai_modernbert_tests --features ai --quiet

@@ -1,5 +1,45 @@
 ## [Unreleased]
 
+### Changed (build) — feature-flaggan `modernbert` heter nu **`ai`**
+
+Flaggan gatar hela AI-stacken (candle + tokenizers + hf-hub), inte en modell:
+index-embeddern är **bge-base** (768 dim, 418 MB) och den generativa är
+**lfm2.5**. Att den hette `modernbert` var därför en namnfel som gjorde frågan
+"vad kräver modell?" omöjlig att besvara — och modellen ModernBERT visade sig
+inte användas alls (se nedan).
+
+- `default = ["ai", "mcp"]`, `ai = [candle-*, hf-hub, ureq, tokenizers]`,
+  `all = ["ai", …]`, `[[test]] required-features = ["ai"]`.
+- 86 `#[cfg(feature = "ai")]` i 7 källfiler + 7 i `tests/`; felmeddelandena
+  säger nu `--features ai,mcp`.
+- `scripts/commit-build.sh`, `.github/workflows/{validate,test-ai}.yml`, README,
+  AGENTS.md och CRUSH-guiden uppdaterade. Historiska release-notes och
+  `GTW_MCP_ISSUE_LOG.md` är **orörda** — de beskriver vad som gällde då.
+- **`#![deny]`-rent i båda konfigurationerna:** `cargo check --features ai,mcp`
+  = 0 varningar, `cargo check --no-default-features --all-targets` = 0
+  varningar (förut 3 döda-symboler; nu `#[cfg(any(feature = "ai", test))]`, som
+  är sanningen om varför de finns).
+- `AGENTS.md` läxa #14 rättad: cache-roten väljs inte längre allt-eller-inget på
+  `modernbert` — det var fixat i `resolve()` men levde kvar i `diagnostics.rs`
+  till i dag.
+
+### BREAKING (build)
+
+`cargo install --path . --features modernbert,mcp` slutar fungera. Använd
+`--features ai,mcp` (eller `--features mamba` för L4). `--features mcp` ensamt
+fungerar som förut och ger en binär utan AI-lager.
+
+### Fixed (AI) — en 572 MB-modell laddades utan att användas
+
+`generate_semantic_report` gjorde `let _model = load_model(AiModel::ModernBert)`
+och läste den aldrig. Bindningen var en **vakt**: utan vikterna på disk
+misslyckades hela rapporten, och första anropet betalade en kall laddning
+(~20–30 s) för noll framåtpass. Borttagen — rapporten byggs av etiketter och
+syntax. Därmed kan `modernbert`-katalogen (572 MB) tas bort utan att något går
+sönder; `ai status` rapporterar den då korrekt som icke installerad.
+
+
+
 ### Fixed (semantic index) — `file_hash` var en **sökvägshash**, så inget kunde upptäckas
 
 - **`semantic_index::save_index` satte `file_hash = calculate_content_hash(file_path)`**

@@ -88,9 +88,9 @@ fi
 #    ~/.cargo/bin/gnawtreewriter, inte target-katalogen. Utan detta steg
 #    bygger vi en binär som ingen klient någonsin startar (uppmätt 2026-11-10:
 #    en hel session där "fixen inte tog" berodde på exakt detta glapp).
-#    Ingen omkompilering — samma features (default = modernbert + mcp) och
+#    Ingen omkompilering — samma features (default = ai + mcp) och
 #    samma CARGO_TARGET_DIR, så det är en kopiering.
-cargo install --path . --features modernbert,mcp
+cargo install --path . --features ai,mcp
 rc=$?
 if [[ $rc -ne 0 ]]; then
     echo "FEL: cargo install misslyckades (RC=$rc) — MCP ser fortfarande den gamla binären." >&2

@@ -566,7 +566,7 @@ impl DoctorReport {
     /// away without the bge-base model files; one doctor run should
     /// reveal that state instead of a sense call discovering it. Mirrors
     /// AiManager's cache resolution: project-local first, then $HOME.
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     pub fn check_semantic_model(&mut self, project_root: &std::path::Path) {
         let cfg = semantic_model_present(project_root);
         self.record_check(DoctorCheck {
@@ -977,7 +977,7 @@ pub fn run_full_doctor(project_root: &std::path::Path) -> DoctorReport {
     // T5: semantic-channel availability (bge-base present / degraded
     // mode). Feature-gated: no sense exists in feature-light builds, so
     // there is nothing to degrade or report there.
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     report.check_semantic_model(project_root);
     report.check_binary_freshness(project_root);
     report

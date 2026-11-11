@@ -1,4 +1,4 @@
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 mod tests {
     use gnawtreewriter::llm::{AiManager, AiModel, DeviceType, GnawSenseBroker};
     use std::fs;

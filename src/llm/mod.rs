@@ -6,11 +6,11 @@ pub mod impact_analyzer;
 pub mod llm_integration;
 #[cfg(feature = "mamba")]
 pub mod pipeline;
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 pub mod project_indexer;
 #[cfg(feature = "mamba")]
 pub mod prompts;
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 pub mod recall_eval;
 pub mod relational_index;
 pub mod semantic_index;
@@ -20,9 +20,9 @@ pub use batch::*;
 pub use gnaw_sense::*;
 pub use impact_analyzer::*;
 pub use llm_integration::*;
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 pub use project_indexer::*;
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 pub use recall_eval::*;
 pub use relational_index::*;
 pub use semantic_index::*;

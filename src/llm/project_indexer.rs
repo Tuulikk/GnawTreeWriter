@@ -1,4 +1,4 @@
-#![cfg(feature = "modernbert")]
+#![cfg(feature = "ai")]
 
 use crate::core::file_walker::walk_source_files;
 use crate::llm::{GnawSenseBroker, NodeEmbedding, SemanticIndexManager};

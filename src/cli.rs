@@ -7,8 +7,9 @@ use crate::core::{
     visualizer::TreeVisualizer, EditOperation, GnawTreeWriter, OperationType, RestorationEngine,
     TagManager, TransactionLog, UndoRedoManager,
 };
+#[cfg(any(feature = "ai", test))]
 use crate::llm::harmony::{Harmony, HarmonyVerdict};
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 use crate::llm::{GnawSenseBroker, SemanticIndexManager, SenseResponse};
 use crate::parser::TreeNode;
 use anyhow::{Context, Result};
@@ -795,7 +796,7 @@ enum AiSubcommands {
     /// Measure semantic-search quality: run an eval set of queries
     /// against the current index and report recall@1 / recall@k / MRR.
     /// Measurement only — the baseline for model and storage decisions.
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     RecallEval {
         /// Path to the eval set (JSON array of {query, expect_file, expect_preview?})
         eval_path: PathBuf,
@@ -1671,7 +1672,7 @@ impl Cli {
                 AiSubcommands::Report { limit, output } => {
                     Self::handle_ai_report(limit, output).await?;
                 }
-                #[cfg(feature = "modernbert")]
+                #[cfg(feature = "ai")]
                 AiSubcommands::RecallEval {
                     eval_path,
                     k,
@@ -2983,7 +2984,7 @@ fi
     }
 
     async fn handle_semantic_report(file_path: &str) -> Result<()> {
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         {
             let current_dir = std::env::current_dir()?;
             let project_root = find_project_root(&current_dir);
@@ -3008,7 +3009,7 @@ fi
                 }
             }
         }
-        #[cfg(not(feature = "modernbert"))]
+        #[cfg(not(feature = "ai"))]
         {
             let _ = file_path;
             Self::err_modernbert_disabled()?;
@@ -3020,7 +3021,7 @@ fi
     /// labels, answers in the output mode the caller chose (GNAW_JSON
     /// gets structured degraded JSON), nothing crashes on a missing
     /// embedding model. Same lexical core as the MCP degrade helper.
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     fn sense_degraded_cli(
         project_root: &std::path::Path,
         file_path: Option<&str>,
@@ -3079,7 +3080,7 @@ fi
         deep: bool,
         auto_index: bool,
     ) -> Result<()> {
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         {
             let json_mode = std::env::var("GNAW_JSON").is_ok();
             let current_dir = std::env::current_dir()?;
@@ -3250,7 +3251,7 @@ fi
                 }
             }
         }
-        #[cfg(not(feature = "modernbert"))]
+        #[cfg(not(feature = "ai"))]
         {
             let _ = (query, file_path, deep, auto_index);
             Self::err_modernbert_disabled()?;
@@ -3265,7 +3266,7 @@ fi
         intent: String,
         preview: bool,
     ) -> Result<()> {
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         {
             let current_dir = std::env::current_dir()?;
             let project_root = find_project_root(&current_dir);
@@ -3323,7 +3324,7 @@ fi
                 );
             }
         }
-        #[cfg(not(feature = "modernbert"))]
+        #[cfg(not(feature = "ai"))]
         {
             let _ = (file, anchor, content, intent, preview);
             Self::err_modernbert_disabled()?;
@@ -3344,12 +3345,12 @@ fi
         if json_mode {
             let err = serde_json::json!({
                 "error": "modernbert_disabled",
-                "message": "ModernBERT feature not enabled. Recompile with: cargo build --release --features modernbert"
+                "message": "AI features not enabled. Recompile with: cargo build --release --features ai"
             });
             println!("{}", serde_json::to_string(&err)?);
         } else {
             println!("Error: GnawSense requires the 'modernbert' feature.");
-            println!("Recompile with: cargo build --release --features modernbert");
+            println!("Recompile with: cargo build --release --features ai");
         }
         Ok(())
     }
@@ -3692,7 +3693,7 @@ fi
         narrative: Option<String>,
         force: bool,
     ) -> Result<()> {
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         {
             let current_dir = std::env::current_dir()?;
             let project_root = find_project_root(&current_dir);
@@ -3739,7 +3740,7 @@ fi
                 file_path
             );
         }
-        #[cfg(not(feature = "modernbert"))]
+        #[cfg(not(feature = "ai"))]
         {
             let _ = (file_path, query, content, source_file, narrative, force);
             return Self::err_modernbert_disabled();
@@ -4190,7 +4191,7 @@ fi
     /// Resolve the indexing device mode: `--gpu` flag > `indexing.device`
     /// in gnawtreewriter.yaml > conservative default (no setting = CPU).
     /// Pure YAML parser separated for testing.
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     fn device_mode_from_config_text(text: &str) -> Option<String> {
         #[derive(serde::Deserialize)]
         struct Cfg {
@@ -4204,7 +4205,7 @@ fi
     }
 
     /// Read the optional project config (gnawtreewriter.yaml) for indexing.device.
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     fn resolve_index_device_from_config() -> Option<String> {
         let root = find_project_root(&std::env::current_dir().ok()?);
         let text = std::fs::read_to_string(root.join("gnawtreewriter.yaml")).ok()?;
@@ -4214,9 +4215,9 @@ fi
     async fn handle_ai_index(path: Option<PathBuf>, gpu: bool) -> Result<()> {
         // gpu läses bara med modernbert-featuren (device-val nedan) —
         // cfg-noop i stället för allow-maskering.
-        #[cfg(not(feature = "modernbert"))]
+        #[cfg(not(feature = "ai"))]
         let _ = gpu;
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         {
             // Device mode for this run: --gpu (transient) > gnawtreewriter.yaml
             // (persistent) > default (unset = CPU, conservative). The mode is
@@ -4253,7 +4254,7 @@ fi
             );
             println!("You can now use `gnawtreewriter sense \"<query>\"` without a file context to search the entire project.");
         }
-        #[cfg(not(feature = "modernbert"))]
+        #[cfg(not(feature = "ai"))]
         {
             let _ = path;
             Self::err_modernbert_disabled()?;
@@ -5075,7 +5076,7 @@ Use --no-preview to perform the restoration"
                 println!("Step 1: Semantic Quality Report");
                 println!("  gnawtreewriter semantic-report src/main.rs");
                 println!("  # Uses ModernBERT to find structural anomalies");
-                println!("  # Requires: --features modernbert at compile time");
+                println!("  # Requires: --features ai at compile time");
                 println!();
                 println!("Step 2: Search nodes by pattern");
                 println!("  gnawtreewriter search main.rs \"database connection\"");
@@ -6280,7 +6281,7 @@ Use without --preview to apply the clone"
         }
 
         // 2. AI Engine (GnawSense & HRM2)
-        #[cfg(feature = "modernbert")]
+        #[cfg(feature = "ai")]
         {
             println!(
                 "\n    {}",
@@ -6343,13 +6344,13 @@ Use without --preview to apply the clone"
                 ),
             }
         }
-        #[cfg(not(feature = "modernbert"))]
+        #[cfg(not(feature = "ai"))]
         {
             println!("\n    {}", "🧠 GnawSense AI Ecosystem".bold());
             println!("  Status:       {}", "❌ Disabled".red());
             println!(
                 "  Note:         {}",
-                "Recompile with --features modernbert to enable semantic intelligence."
+                "Recompile with --features ai to enable semantic intelligence."
                     .italic()
                     .bright_black()
             );
@@ -6426,6 +6427,7 @@ Use without --preview to apply the clone"
 /// warning and the MCP `answerable` field cannot drift apart (they did — the
 /// constant lived only in `cli.rs` and MCP had no warning at all, 2026-11-11).
 /// Re-measure before trusting it for another repo or embedder.
+#[cfg(any(feature = "ai", test))]
 const SENSE_COSINE_WARN: f32 = crate::llm::gnaw_sense::SENSE_ANSWERABLE_COSINE;
 
 /// Confidence for a satellite hit: RAW cosine plus pillar agreement (`Harmony`).
@@ -6443,6 +6445,7 @@ const SENSE_COSINE_WARN: f32 = crate::llm::gnaw_sense::SENSE_ANSWERABLE_COSINE;
 ///   no graph neighbour, so the pillars disagree.
 /// - No harmony (zoom paths never rerank): fall back to cosine alone, and say
 ///   so rather than pretending the pillars agreed.
+#[cfg(any(feature = "ai", test))]
 fn sense_confidence(
     adjusted: f32,
     cosine: Option<f32>,
@@ -6719,7 +6722,7 @@ mod tests {
     /// gnawtreewriter.yaml indexing.device parsing — the flag-in-file
     /// mechanism AGENTS.md points agents/devs at (ROADMAP: conservative
     /// default, opt-in GPU).
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     #[test]
     fn config_device_mode_parses() {
         assert_eq!(
@@ -6736,7 +6739,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     #[test]
     fn config_device_mode_absent_or_invalid_is_none() {
         // No file / no setting = conservative default (CPU path).

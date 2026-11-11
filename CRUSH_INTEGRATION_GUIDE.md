@@ -35,7 +35,7 @@
 Install GTW and confirm the version actually on PATH:
 
 ```bash
-cargo install --path . --features modernbert,mcp
+cargo install --path . --features ai,mcp
 gnawtreewriter --version   # must match `version` in Cargo.toml
 ```
 
@@ -403,7 +403,7 @@ scripts/pack-skill.sh --check       # this skill package is not stale
 ```
 
 If `--version` is older than `Cargo.toml` you are running a stale binary:
-`cargo install --path . --features modernbert,mcp`.
+`cargo install --path . --features ai,mcp`.
 
 ### Installation Verified
 ```bash

@@ -182,7 +182,7 @@ GnawTreeWriter officially supports and enforces the **TCARV 1.0 (Text-Centric Ar
 cargo install --path .
 
 # Full power (Recommended: includes GnawSense and MCP)
-cargo install --path . --features modernbert,mcp
+cargo install --path . --features ai,mcp
 ```
 
 ### GPU-accelerated indexing (optional, off by default)

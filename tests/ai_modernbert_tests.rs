@@ -1,10 +1,10 @@
 use anyhow::Result;
 use gnawtreewriter::llm::AiManager;
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 use std::path::Path;
 
 /// Helper to check if ModernBERT is actually installed before running heavy tests
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 fn is_modernbert_installed(project_root: &Path) -> bool {
     project_root
         .join(".gnawtreewriter_ai/models/modernbert/model.safetensors")
@@ -30,7 +30,7 @@ fn test_ai_status_detection() -> Result<()> {
         status.cache_dir
     );
 
-    #[cfg(feature = "modernbert")]
+    #[cfg(feature = "ai")]
     {
         if is_modernbert_installed(&project_root) {
             assert!(status.modern_bert_installed);
@@ -49,7 +49,7 @@ fn test_ai_status_detection() -> Result<()> {
 /// `#[ignore]`: debug-mode ModernBERT forwards cost ~200 s — run
 /// explicitly when touching get_embeddings:
 ///   cargo test --test ai_modernbert_tests -- --ignored --nocapture
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 #[test]
 #[ignore = "heavy: debug ModernBERT forwards (~3 min); run when touching get_embeddings"]
 fn batch_embeddings_match_singles() -> Result<()> {
@@ -119,7 +119,7 @@ fn batch_embeddings_match_singles() -> Result<()> {
 ///
 /// `#[ignore]`: heavy BGE forwards in debug mode — run explicitly:
 ///   cargo test --test ai_modernbert_tests -- --ignored --nocapture
-#[cfg(feature = "modernbert")]
+#[cfg(feature = "ai")]
 #[test]
 #[ignore = "heavy: debug BGE forwards; run when touching bge_embed_batched"]
 fn bge_batch_embeddings_match_singles() -> Result<()> {
