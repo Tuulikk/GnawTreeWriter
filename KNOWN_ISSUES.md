@@ -180,6 +180,17 @@ gnawtreewriter analyze file.py
 - Expected vs actual behavior
 - Impact on your workflow
 
+### **`heal` fixes brace BALANCE, not brace STRUCTURE (by design)**
+
+`heal` reports "parses cleanly" for a file whose braces balance but whose nesting
+is wrong — a function that lost its closing brace swallows every function after
+it, and the stray brace further down restores the balance. Proved 2026-11-11 on
+`src/core/experiment.rs`: `git()` had lost `Ok(...)` + `}`, nesting five
+functions inside it; the file balanced, so `heal` (correctly, within its own
+contract) said there was nothing to heal. Only the compiler or an AST check sees
+this class. **Use `validate` + a build (or `analyze` and look at node depth) for
+structure; use `heal` for balance.**
+
 ---
 
 *This document is maintained based on real user feedback, particularly from AI agent testing. Last reviewed against code: 2026-10-04 (v0.9.8)*
