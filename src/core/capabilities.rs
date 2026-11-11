@@ -194,13 +194,20 @@ pub fn installed_models(project_root: &std::path::Path) -> Vec<InstalledModel> {
     out
 }
 
+/// Role of a directory in the model tree.
+///
+/// RULE: only directories that an `AiModel` variant maps to (`dir_name()`) may
+/// claim a role. A directory is not a model. `mamba3/` sits in the tree with
+/// 6.4 GB of weights — twice, as safetensors and pytorch_model.bin — and NO
+/// loader: this table called it "L4 generative (largest; opt-in)" because that
+/// is what the folder was named, which is the same lie as a path hash in a
+/// content-hash column (2026-11-11).
 fn role_of(dir: &str) -> &'static str {
     match dir {
         "bge-base" => "L3 embedder (ai index / sense)",
-        "modernbert" => "encoder/classifier — NOT the L3 index embedder",
-        "lfm25" | "lfm2.5" => "L4 generative (explain / summarize)",
-        "mamba3" => "L4 generative (largest; opt-in)",
-        _ => "unrecognised",
+        "modernbert" => "no reader since 2026-11-11 — its only load was removed",
+        "lfm25" | "lfm2.5" => "L4 generative (explain / summarize / investigate)",
+        _ => "no loader in this build — not referenced by AiModel",
     }
 }
 
@@ -309,6 +316,27 @@ mod tests {
         let label = ModelNeed::Embedder.label();
         assert!(label.contains("bge-base"), "{label}");
         assert!(!label.to_lowercase().contains("modernbert"), "{label}");
+    }
+
+    /// The rule `role_of` exists for: a directory name is not a model. Only the
+    /// three dirs an `AiModel` maps to may claim a role; anything else must say
+    /// "no loader". `mamba3/` held 6.4 GB of unloadable weights while this table
+    /// described it as "L4 generative".
+    #[test]
+    fn only_known_model_dirs_claim_a_role() {
+        for known in ["bge-base", "modernbert", "lfm25", "lfm2.5"] {
+            assert!(
+                !role_of(known).contains("no loader"),
+                "{known} is a real model and must have a role"
+            );
+        }
+        for unknown in ["mamba3", "whatever", ""] {
+            assert_eq!(
+                role_of(unknown),
+                "no loader in this build — not referenced by AiModel",
+                "{unknown} is not an AiModel dir and must not claim a role"
+            );
+        }
     }
 
     #[test]
