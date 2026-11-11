@@ -202,7 +202,8 @@ gör en konsument oanvänd. Prototypen kan köras utan (manuell kandidatlista), 
 ## Rekommendation
 
 1. **Prototypen är värd att bygga** — den är ~en dags arbete eftersom 5 av 7
-   delar redan finns, och den enda nya ytan (`--observe`) är medvetet smal.
+   delar redan finns, och **ingen ny exekveryta behövs**: observationen kommer
+   från agenten, GTW verifierar bara sina egna ingrepp.
 2. **Börja med `single` + manuell kandidatlista**; lägg `bisect` när oraklet
    bevisat sig stabilt. `rebuild` sist — det är samma loop baklänges.
 3. **Skriv journalen först.** Utan den är varje experiment en engångsobservation
