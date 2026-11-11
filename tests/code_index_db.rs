@@ -45,7 +45,7 @@ fn make_repo(dir: &Path) {
 /// (timestamp header in markdown, generated_at in JSON).
 fn normalize(doc: &str) -> String {
     doc.lines()
-        .filter(|l| !l.starts_with("> Genererad"))
+        .filter(|l| !l.starts_with("> "))
         .filter(|l| !l.contains("\"generated_at_utc\""))
         .map(|l| format!("{l}\n"))
         .collect()
