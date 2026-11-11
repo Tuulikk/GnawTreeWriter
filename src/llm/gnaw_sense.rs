@@ -181,6 +181,10 @@ pub fn answerable_from_cosine(top_cosine: Option<f32>) -> Option<bool> {
     top_cosine.map(|c| c >= SENSE_ANSWERABLE_COSINE)
 }
 
+// Compile-time guard: the two questions must stay DISTINCT. Collapsing them is
+// what made one number do both jobs and kept the warning off MCP (2026-11-11).
+const _: () = assert!(SENSE_COSINE_LOW < SENSE_ANSWERABLE_COSINE);
+
 /// Query-expansion outcome (expand=true; LFM2.5 terms, mamba builds).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ExpansionInfo {
@@ -951,16 +955,6 @@ mod answerable_contract_tests {
             v["cosine_threshold"].as_f64().unwrap() as f32,
             SENSE_ANSWERABLE_COSINE,
             "a caller must be able to scale the same way without re-typing 0.68"
-        );
-    }
-
-    #[test]
-    fn low_result_and_unanswerable_query_are_different_numbers() {
-        assert!(
-            SENSE_COSINE_LOW < SENSE_ANSWERABLE_COSINE,
-            "a result can be plausible ({SENSE_COSINE_LOW}) while the query is \
-             still not answerable ({SENSE_ANSWERABLE_COSINE}) — collapsing them \
-             is what made one number do both jobs"
         );
     }
 }

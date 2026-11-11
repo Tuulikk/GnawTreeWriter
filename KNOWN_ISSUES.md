@@ -180,6 +180,19 @@ gnawtreewriter analyze file.py
 - Expected vs actual behavior
 - Impact on your workflow
 
+### **Crush integration is UNTESTED (no Crush session has ever run)**
+
+`crush` is not installed on the development machine, so nothing in
+`CRUSH_INTEGRATION_GUIDE.md` has been executed end-to-end, and the generated
+`gnawtreewriter-crush.skill` package has never been loaded by Crush.
+`scripts/pack-skill.sh --check` (run in CI) proves only that the package matches
+`SKILL.md` — **not** that Crush accepts it.
+
+What *is* proven and host-independent: the MCP wire protocol (piped JSON-RPC into
+`gnawtreewriter mcp stdio`), the CLI, and that `AGENTS.md` is read as project
+context. Anything Crush-specific in this repo should be treated as a proposal
+until someone runs it and writes the result into `GTW_MCP_ISSUE_LOG.md`.
+
 ### **`heal` fixes brace BALANCE, not brace STRUCTURE (by design)**
 
 `heal` reports "parses cleanly" for a file whose braces balance but whose nesting

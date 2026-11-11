@@ -597,13 +597,19 @@ impl DoctorReport {
                 } else {
                     0
                 };
-                let status = if pct >= 60 { "pass" } else { "warn" };
+                // The ceiling is structural: `plain_name` calls need the
+                // receiver's TYPE, so name-based matching cannot exceed it (see
+                // README "What the graph can and cannot answer" and
+                // `code-index --coverage`). A 60 % bar warned on a HEALTHY store
+                // forever, which trains people to ignore doctor — the same
+                // disease the cosine warning had. Warn only on a regression.
+                let status = if pct >= 5 { "pass" } else { "warn" };
                 self.record_check(DoctorCheck {
                     category: "knowledge_graph".to_string(),
                     name: "resolution".to_string(),
                     status: status.to_string(),
                     message: format!(
-                        "{}/{} call relations unambiguously resolved ({}%). {} ambiguous symbol name(s){}.",
+                        "{}/{} call relations resolved BY NAME ({}% of stored call rows) — the remainder need the receiver's type, i.e. type inference (roadmap), so a calls-based impact result is a LOWER BOUND. Regression floor 5%; per-type rates: `code-index --coverage`. {} ambiguous symbol name(s){}.",
                         stats.calls_resolved,
                         stats.calls_total,
                         pct,

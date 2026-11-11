@@ -1,5 +1,23 @@
 # GnawTreeWriter for Crush AI Agents
 
+> ## ⚠️ STATUS 2026-11-11: **NEVER RUN — untested**
+>
+> `crush` is not installed on the development machine (`which crush` → nothing),
+> so **nothing in this guide has been executed end-to-end**. It is written from
+> Crush's documented behaviour and this project's own surfaces, not from a
+> session. Until someone runs it:
+>
+> - treat every command and every config snippet here as **unverified**;
+> - the parts that *are* proven are the generic ones — the MCP wire protocol
+>   (piped JSON-RPC, `gnawtreewriter mcp stdio`), the CLI, and that `AGENTS.md`
+>   is read as project context;
+> - if you run it, record what happened in `GTW_MCP_ISSUE_LOG.md` (tool, exact
+>   parameters, reply) and drop this banner.
+>
+> The generated package `gnawtreewriter-crush.skill` is likewise **untested in
+> Crush** — `scripts/pack-skill.sh --check` proves only that it matches
+> `SKILL.md`, not that Crush loads it.
+
 > **How to call the tools lives in ONE place: [`SKILL.md`](SKILL.md)** — the host
 > matrix, the index surface (`code_index`/impact/cycles) and the edit workflow.
 > This guide covers Crush-specific *setup and patterns* only.
