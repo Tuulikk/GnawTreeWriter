@@ -74,9 +74,10 @@ en hypotes med stöd, inte ett mätvärde.
 ### c) UI-observation hör inte i GTW
 
 Rendering, skärmbilder och layout är **gnawdriver/Motor2:s** domän (de har redan
-screenshot, DOM-observation och `verify`). GTW ska definiera **kontraktet**
-(exitkod + artefaktvägar) och låta `--observe` peka på deras verktyg. Att bygga
-skärmdumpsstöd i GTW är exakt det "parallella system" förslaget varnar för.
+screenshot, DOM-observation och `verify`). GTW ska bara ta emot **utfallet** —
+`record --outcome changed --evidence "<vad agenten såg>"` — och aldrig själv försöka
+avgöra hur något ser ut. Att bygga skärmdumpsstöd i GTW är exakt det "parallella
+system" förslaget varnar för.
 
 ### d) Slå ihop 2 och 3
 
