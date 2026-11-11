@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: c8f1819d7bfeb46bb3a729be55884592
+> Body-hash: 5267418453053a06458633470630c4a5
 
 ## Träd
 
@@ -65,7 +65,7 @@ scripts/
   benchmark_ai.sh (66 rader)
   build-gpu.sh (113 rader)
   check-license.sh (14 rader)
-  commit-build.sh (156 rader)
+  commit-build.sh (160 rader)
   daemon-hygiene.sh (89 rader)
   gtw_adoption_report.py (118 rader)
   mcp-client.sh (127 rader)
@@ -471,7 +471,7 @@ _(inga toppnivå-items)_
 ### check-license.sh (14 rader)
 _(inga toppnivå-items)_
 
-### commit-build.sh (156 rader)
+### commit-build.sh (160 rader)
 - `ask_reap()` :113
 
 ### daemon-hygiene.sh (89 rader)

@@ -35,6 +35,10 @@
   den separat om den ändrats, och avslutar med `RESULT fail:code-index` i stället
   för `ok` om den fortfarande är inaktuell. Ett träd som lämnar skriptet kan
   alltså inte längre pushas rött.
+- **`Cargo.lock` tas nu med i samma eftercommit.** Versionsbumpen lämnade den
+  osmutsad-i-kommitten, så `v0.26.1`-taggen pekade först på ett träd vars
+  lockfil fortfarande sa `0.26.0`. Taggen flyttades när det upptäcktes — en tagg
+  som namnger fel version är ett tyst löfte om något som inte finns.
 - Not: `--skip-commit`-grenens kommentar om att artefakten "alltid är dirty"
   gällde den rev-stämplade versionen och togs bort i 0.26.0 — nu är den bara
   dirty när innehållet faktiskt ändrats, vilket är exakt när den ska committas.
