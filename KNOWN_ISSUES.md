@@ -206,4 +206,4 @@ structure; use `heal` for balance.**
 
 ---
 
-*This document is maintained based on real user feedback, particularly from AI agent testing. Last reviewed against code: 2026-10-04 (v0.9.8)*
+*This document is maintained based on real user feedback, particularly from AI agent testing. Last reviewed against code: 2026-11-11 (v0.25.1 + unreleased master). Each entry carries its own date — a header date is not evidence that a specific entry was re-checked.*

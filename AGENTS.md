@@ -2,7 +2,7 @@
 
 **Guide for AI agents contributing to the GnawTreeWriter project through dogfooding**
 
-Version: 2.1 | Last Updated: 2026-10-06
+Version: 2.2 | Last Updated: 2026-11-11
 
 ---
 
@@ -182,6 +182,29 @@ sessioner. De gäller oavsett vilket verktyg du använder.
     `gnawtreewriter-crush.skill` är ett zip-paket som `scripts/pack-skill.sh`
     bygger. `--check` (körs i CI) failar på drift — utan den hade Crush fått
     v0.9.2-instruktioner medan repot stod på 0.25.x.
+
+17. **En genererad fil får inte citera sin egen skapelse-rev.** `code-index.md`
+    stämplade `git <rev>`; committen flyttade HEAD, alltså var filen smutsig
+    efter varje commit — ett spår som aldrig blev rent. Stämpla det som *inte*
+    rör sig när filen checkas in (body-hash), och lägg `--check` i CI. **En grind
+    ingen går igenom är dekoration:** `code-index --check` fanns men kördes inte
+    i `validate.yml`, och artefakten var inaktuell på ren master (2026-11-11).
+18. **`heal` lagar klammerBALANS, inte klammerSTRUKTUR.** En funktion som tappat
+    sin svans (`Ok(...)` + `}`) sväljer alla funktioner efter sig, och en
+    kvarbliven `}` längre ner återställer balansen — filen parsar, `heal` säger
+    korrekt "nothing to heal", och fem funktioner ligger inuti `git()`. Bara
+    kompilatorn eller en AST-kontroll ser den klassen. Mät nästning (depth per
+    funktion), inte bara balans.
+19. **En sparad patch är inte en giltig patch.** Vår `docs/wip/*.patch` verifierades
+    med `git apply --check` — den gick igenom — men dess tredje hunk ankrade
+    inuti en **rå sträng** i `cli.rs` (git-hookens skript), så 161 rader Rust
+    hamnade i en strängliteral och filen slutade parsa. Kör alltid `git apply
+    --check` **och** `validate`/`cargo check` efter, och lägg aldrig en patch
+    vars ankare är ett kodfragment som kan förekomma i strängar.
+20. **Läs nämnaren innan du jämför två procent.** `doctor` sa 13 % och
+    `code-index --coverage` 10,2 % om samma graf — olika nämnare (lagrade
+    relationsrader vs extraherade per typ). Två tal för en bedömning är samma
+    sjuka som två trösklar för ett mått: ge talet en ägare och skriv ut nämnaren.
 
 ### OpenCode 2.x — arkitektur, MCP-livscykel, binär-pickup (2026-11-10)
 

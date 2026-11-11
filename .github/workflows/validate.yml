@@ -37,3 +37,10 @@ jobs:
       # in the no-default-features build (path-dependents like motor2-gtw).
       - name: Check no-default-features build
         run: cargo check --no-default-features --all-targets
+
+      # The committed code-index.md is a GENERATED artifact with a content
+      # stamp; `--check` re-renders and compares (DB-free). The gate existed
+      # but nothing ran it, so the artifact went stale unnoticed (2026-11-11:
+      # it failed on a clean master). A gate nobody walks through is decoration.
+      - name: Check code-index.md is fresh
+        run: cargo run --quiet -- code-index . --check
