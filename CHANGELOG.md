@@ -90,6 +90,37 @@
   fixen viktig: en full ombäddning är ett halvtimmesjobb i bakgrunden, så en
   inkrementell körning måste hoppa över oförändrade filer.
 
+### Added — `capabilities`: vad som kräver modell och vad som inte gör det
+
+Frågan *"vad görs med och utan ModernBERT?"* gick inte att besvara ur binären —
+`doctor`s gröna bock säger inget om det, och `ai status` grön betyder inte att
+`sense` fungerar. Nu finns en statisk tabell, modellfri att läsa, på **10 ms**:
+
+```
+$ gnawtreewriter capabilities
+feature                                    layer  needs           without it
+analyze / list / read_node                 L1     none            full function
+code-index --coverage                      L2     none            full function (reports L3 as 'not built')
+code-index --impact/--cycles/--chain       L2     none            full function over RESOLVED edges, graph_coverage reported
+------------------------------------------- ^ everything ABOVE this line works with no model at all
+ai index                                   L3     bge-base 768    unavailable — L3 stays empty, L0-L2 unaffected
+sense (satellite / zoom)                   L3     bge-base 768    unavailable; use search (literal) or code-index --impact
+explain / summarize                        L4     lfm2.5          unavailable; read_node / get_skeleton give the same facts
+```
+
+- **9 av 14 funktioner är modellfria**; gränsen ritas ut i tabellen och samma
+  siffra skrivs av `doctor` (en implementation, två ytor).
+- **Indexet kör `bge-base` (768 dim, 418 MB) — inte ModernBERT.** De ligger i
+  samma modellträd, och att blanda ihop dem är hur frågan blev obesvarlig.
+  `modernbert` (572 MB) används inte av indexet; `mamba3` (6,2 GB) bara av L4.
+- De installerade modellerna listas **med storlek och roll**, så kostnaden för
+  L3/L4 är synlig där valet görs.
+- Endast verifierade rader finns i tabellen — en funktion som inte står där är
+  *inte mätt*, inte gratis. Testet `every_row_states_what_happens_without_the_model`
+  kräver att varje rad säger vad som händer utan modell.
+
+
+
 ### Added — indexeringen städar, syns och mäter rätt binär
 
 - **`code-index.md` bäddades in.** Den är en *genererad* artefakt (spårad med flit,

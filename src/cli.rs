@@ -643,6 +643,16 @@ enum Commands {
         #[arg(short, long)]
         format: Option<String>,
     },
+    /// Show which features need a model and which work without one
+    ///
+    /// A static, model-free table: where the model-free floor ends, which model
+    /// each L3/L4 feature needs, and what happens without it. Also prints the
+    /// installed models with their size on disk (the cost side of that choice).
+    Capabilities {
+        /// Machine-readable output
+        #[arg(long)]
+        json: bool,
+    },
     /// Generate a project blueprint
     Blueprint {
         #[arg(short, long)]
@@ -1691,6 +1701,9 @@ impl Cli {
             }
             Commands::Doctor { format } => {
                 Self::handle_doctor(format.as_deref())?;
+            }
+            Commands::Capabilities { json } => {
+                Self::handle_capabilities(json)?;
             }
             Commands::Blueprint { output } => {
                 Self::handle_blueprint(output.as_deref())?;
@@ -6088,6 +6101,22 @@ Use without --preview to apply the clone"
         Ok(json.as_array().cloned().unwrap_or_default())
     }
 
+    fn handle_capabilities(json: bool) -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        if json {
+            let body = serde_json::json!({
+                "capabilities": crate::core::capabilities::CAPABILITIES,
+                "first_model_row": crate::core::capabilities::first_model_row(),
+                "installed_models": crate::core::capabilities::installed_models(&project_root),
+            });
+            println!("{}", serde_json::to_string_pretty(&body)?);
+        } else {
+            print!("{}", crate::core::capabilities::render(&project_root));
+        }
+        Ok(())
+    }
+
     fn handle_doctor(format: Option<&str>) -> Result<()> {
         use colored::*;
 
@@ -6105,6 +6134,18 @@ Use without --preview to apply the clone"
             "Nivå: {} (bas alltid; struktur = store/graf; semantik = bge-base installerad — verktyg degraderar och namnger sin nivå)",
             report.capability
         );
+        // Which features the model actually gates — the single question users
+        // could not answer from a green checkmark (2026-11-11). One table, two
+        // surfaces: the numbers here come from the same constant as
+        // `gnawtreewriter capabilities`.
+        {
+            let free = crate::core::capabilities::first_model_row();
+            let total = crate::core::capabilities::CAPABILITIES.len();
+            println!(
+                "Modellgräns: {} av {} funktioner körs helt utan modell (L3-embedder = bge-base 768, inte ModernBERT) — `gnawtreewriter capabilities` för tabellen",
+                free, total
+            );
+        }
 
         // --- Print results ---
         match format {

@@ -22,6 +22,7 @@ pub mod create_file;
 pub mod curator;
 pub mod diagnostics;
 
+pub mod capabilities;
 pub mod diff_parser;
 pub mod edit_delta;
 pub mod experiment;
