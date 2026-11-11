@@ -587,7 +587,7 @@ enum Commands {
         #[arg(long, conflicts_with_all = ["content", "from"])]
         schema: Option<String>,
         /// Raw content for the new file ("-" reads STDIN). Parse-validated
-        /// before the write, and logged so the creation can be reverted.
+        /// before the write, and logged as Insert (undo cannot delete a created file yet).
         #[arg(long)]
         content: Option<String>,
         /// Read the content from this file instead of a literal.
