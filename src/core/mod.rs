@@ -34,6 +34,7 @@ pub mod gnaw_refactor;
 pub mod guardian;
 pub mod healer;
 pub mod index_entities;
+pub mod index_levels;
 pub mod index_relations;
 pub mod inspect;
 pub mod label_manager;

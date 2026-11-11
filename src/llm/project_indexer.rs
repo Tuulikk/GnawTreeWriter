@@ -13,6 +13,17 @@ pub struct ProjectIndexer {
     index_manager: SemanticIndexManager,
 }
 
+/// Outcome of an index run — three numbers that must add up.
+#[derive(Debug, Default, Clone, Copy, serde::Serialize)]
+pub struct IndexReport {
+    /// Files the walker reached and read.
+    pub visited: usize,
+    /// Files whose vectors were (re)built this run.
+    pub embedded: usize,
+    /// Files skipped because their vectors already match this content.
+    pub unchanged: usize,
+}
+
 impl ProjectIndexer {
     pub fn new(project_root: &Path) -> Result<Self> {
         Ok(Self {
@@ -23,8 +34,11 @@ impl ProjectIndexer {
     }
 
     /// Crawl the project and index supported source files starting from target_path
-    pub async fn index_all(&self, target_path: &Path) -> Result<usize> {
-        let mut total_files = 0;
+    /// What an index run actually did. `visited == embedded + unchanged` — the
+    /// old code reported only `visited` as "Successfully indexed N files", which
+    /// reads as work done even when every file was skipped by hash (2026-11-11).
+    pub async fn index_all_report(&self, target_path: &Path) -> Result<IndexReport> {
+        let mut report = IndexReport::default();
         // GPU only here (indexing), behind the 20%-VRAM gate; sense/query
         // paths below stay on CPU by design — see ai_manager::indexing_device.
         let model = self.broker.get_manager().load_model(
@@ -50,16 +64,18 @@ impl ProjectIndexer {
 
                 if let Ok(content) = fs::read_to_string(path) {
                     // SMART RE-INDEXING: Check if file changed
-                    let file_hash =
-                        crate::core::transaction_log::calculate_content_hash(&file_path_str);
-                    let index_path = self
+                    // SMART RE-INDEXING, done honestly: ask the store whether
+                    // these vectors were built from THIS content. The old check
+                    // asked whether a shard file existed — its name was a hash of
+                    // the PATH, so it existed from the first run onward and every
+                    // later edit was silently skipped (2026-11-11).
+                    let already = self
                         .index_manager
-                        .get_storage_dir()
-                        .join(format!("{}.json", file_hash));
-
-                    if index_path.exists() {
-                        // File already indexed and hasn't changed (hash is part of filename)
-                        total_files += 1;
+                        .has_content_hash(&file_path_str, &content)
+                        .unwrap_or(false);
+                    if already {
+                        report.visited += 1;
+                        report.unchanged += 1;
                         continue;
                     }
 
@@ -92,8 +108,10 @@ impl ProjectIndexer {
                                     vector,
                                 })
                                 .collect();
-                            self.index_manager.save_index(&file_path_str, entries)?;
-                            total_files += 1;
+                            self.index_manager
+                                .save_index(&file_path_str, &content, entries)?;
+                            report.visited += 1;
+                            report.embedded += 1;
                         }
                     }
                 }
@@ -104,7 +122,13 @@ impl ProjectIndexer {
         self.index_manager
             .save_model_info("bge-base-en-v1.5", 768)?;
 
-        Ok(total_files)
+        Ok(report)
+    }
+
+    /// Backwards-compatible entry point: returns the number of files VISITED.
+    /// Kept so existing callers (and path-dependents) keep compiling.
+    pub async fn index_all(&self, target_path: &Path) -> Result<usize> {
+        Ok(self.index_all_report(target_path).await?.visited)
     }
 
     /// Walk the tree collecting (node_path, preview, text) triples for

@@ -59,6 +59,31 @@ impl SemanticIndexManager {
         &self.storage_dir
     }
 
+    /// Are this file's vectors already built from THIS content?
+    ///
+    /// The one question "smart re-indexing" needs to ask, and the one the old
+    /// code answered with "does a shard file exist" (it did — for the path's
+    /// hash — so nothing was ever re-embedded).
+    pub fn has_content_hash(&self, file_path: &str, source: &str) -> Result<bool> {
+        if !self.storage_dir.join("embeddings.db").exists() {
+            return Ok(false);
+        }
+        let want = crate::core::transaction_log::calculate_content_hash(source);
+        let conn = self.open_db()?;
+        let found: Option<String> = conn
+            .query_row(
+                "SELECT file_hash FROM embeddings WHERE file_path = ?1 LIMIT 1",
+                [file_path],
+                |r| r.get::<_, String>(0),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })?;
+        Ok(found.as_deref() == Some(want.as_str()))
+    }
+
     /// Does the store's recorded model differ from the one `sense` will run?
     ///
     /// The store already persists `model_info(name, dim)`; until 2026-11-11 only
@@ -142,8 +167,23 @@ impl SemanticIndexManager {
         Ok(None)
     }
 
-    pub fn save_index(&self, file_path: &str, entries: Vec<NodeEmbedding>) -> Result<()> {
-        let file_hash = crate::core::transaction_log::calculate_content_hash(file_path);
+    /// Persist one file's vectors, keyed by the CONTENT hash of its source.
+    ///
+    /// `file_hash` used to be `calculate_content_hash(file_path)` — a hash of the
+    /// PATH in a column named `file_hash`. Consequence: nothing could ever tell
+    /// whether a file had changed, and the "smart re-indexing" shard check
+    /// skipped every file forever after the first run (proved 2026-11-11).
+    ///
+    /// # Breaking (lib)
+    /// Takes `source` so the hash can describe the content. Callers that only
+    /// have a path must read the file — that IS the information needed.
+    pub fn save_index(
+        &self,
+        file_path: &str,
+        source: &str,
+        entries: Vec<NodeEmbedding>,
+    ) -> Result<()> {
+        let file_hash = crate::core::transaction_log::calculate_content_hash(source);
         let mut conn = self.open_db()?;
         // Upsert semantics: a re-indexed file REPLACES all its previous
         // rows. The per-file JSON storage kept stale rows forever whenever
@@ -1176,6 +1216,7 @@ mod tests {
         let v: Vec<f32> = (0..768).map(|i| i as f32 * 0.001).collect();
         mgr.save_index(
             "src/a.rs",
+            "fn a() {}",
             vec![
                 sqlite_entry("src/a.rs", "1", v.clone()),
                 sqlite_entry("src/a.rs", "2", vec![0.5]),
@@ -1199,6 +1240,7 @@ mod tests {
         let mgr = SemanticIndexManager::new(dir.path());
         mgr.save_index(
             "src/a.rs",
+            "fn a() {}",
             vec![
                 sqlite_entry("src/a.rs", "1", vec![0.1]),
                 sqlite_entry("src/a.rs", "2", vec![0.2]),
@@ -1208,6 +1250,7 @@ mod tests {
         // File re-indexed with a DIFFERENT node set: old node 1 must die.
         mgr.save_index(
             "src/a.rs",
+            "fn a() {}",
             vec![
                 sqlite_entry("src/a.rs", "2", vec![0.2]),
                 sqlite_entry("src/a.rs", "3", vec![0.3]),

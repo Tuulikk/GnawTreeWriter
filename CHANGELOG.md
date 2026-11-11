@@ -1,3 +1,53 @@
+## [Unreleased]
+
+### Fixed (semantic index) — `file_hash` var en **sökvägshash**, så inget kunde upptäckas
+
+- **`semantic_index::save_index` satte `file_hash = calculate_content_hash(file_path)`**
+  — en hash av *sökvägen* i en kolumn som utger sig för att beskriva innehållet.
+  Följden: vektorstoren kunde aldrig säga om en fil ändrats, och
+  "SMART RE-INDEXING" i `project_indexer` frågade om en shard-fil *fanns* (dess
+  namn var sökvägshashen) — alltså hoppades varje fil över **för evigt** efter
+  första körningen, oavsett hur mycket den ändrades.
+- Nu hashas **innehållet**: `save_index(file_path, source, entries)`, och
+  `has_content_hash()` är den enda frågan re-indexeringen ställer.
+- **Bevisat** (2-filsprov, modell delad via symlink, data separat): första
+  körningen `2 embedded, 0 unchanged`; andra `0 embedded, 2 unchanged`; en
+  `printf`-ändring i **en** fil → `1 embedded, 1 unchanged`.
+- `IndexReport { visited, embedded, unchanged }` + `index_all_report()`:
+  "Successfully indexed 2 files" räknade även överhoppade filer som arbete.
+  `index_all()` finns kvar (returnerar `visited`) så path-dep:ar kompilerar.
+
+### Fixed (`ai index`) — storen hamnade i cwd, inte i målet
+
+- `ai index <PATH>` byggde indexeraren på `find_project_root(cwd)` men målade
+  `PATH`: indexerade man ett annat träd skrevs raderna i **sin egen** store, med
+  **absoluta sökvägar** när målet låg utanför roten (samma felrot-klass som
+  `sense` vaktades mot 2026-11-11). Nu används målets rot, och raden
+  `📦 Store:` skriver ut vilken store som faktiskt används.
+
+### Added — nivåstatus utan modell (granskning först)
+
+- **`core::index_levels`**: L1 (AST, md5 i `files.hash`) och L3 (vektorer,
+  `embeddings.file_hash`) mäts **utan att ladda modellen** — `code-index
+  --coverage` får `levels` i JSON *och* en statusrad på stderr (så `--json`
+  förblir ren):
+  `L1 AST 2/187 stale · L3 vectors … current (%) [stale, uncovered, orphaned] · model …`.
+- Regeln modulen finns för: **det billiga lagret definierar det dyras arbetskö**
+  (L1:s hash-diff är exakt det L3 måste bädda om), och det dyra lagret får aldrig
+  blockera en läsning — bara rapportera sin täckning.
+- `staleness_queue` kan inte bära svaret: den fylls **bara** av GTW:s edit-väg
+  (`mark_stale`, `queued_by = 'gtw-edit'`), så en ändring med annat verktyg såg
+  färsk ut för alltid. Nivåmätningen jämför bytes i stället — bevisat i testet
+  `a_tool_agnostic_change_is_visible_in_the_ast_level`.
+
+### BREAKING (lib)
+
+- `SemanticIndexManager::save_index(file_path, source, entries)` — `source` är ny
+  och obligatorisk, eftersom hashen måste beskriva innehållet. Path-dependents
+  (Motor2) måste skicka filens text; att bara ha en sökväg är precis den
+  information som saknades.
+
+
 ## [0.26.1] - 2026-11-11
 
 ### Changed (sense) — tröskeln är nu MÄTT, och 0,68 föll

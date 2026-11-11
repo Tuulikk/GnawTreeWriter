@@ -2145,7 +2145,16 @@ Use --no-preview to actually perform the restore"
                 )
             })?;
         let report = crate::core::code_index_coverage::measure(&conn)?;
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        // Level status rides along: which tier is stale, how much, and which
+        // model the vectors came from — computed WITHOUT the model, because
+        // reviewing the index must never require one (2026-11-11).
+        let levels = crate::core::index_levels::measure(path)?;
+        eprintln!("index levels: {}", levels.status_line);
+        let mut body = serde_json::to_value(&report)?;
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("levels".to_string(), serde_json::to_value(&levels)?);
+        }
+        println!("{}", serde_json::to_string_pretty(&body)?);
         Ok(())
     }
 
@@ -4196,16 +4205,24 @@ fi
 
             use crate::llm::ProjectIndexer;
             let current_dir = std::env::current_dir()?;
-            let project_root = find_project_root(&current_dir);
-            let target_path = path.unwrap_or(project_root.clone());
+            let target_path = path.unwrap_or_else(|| find_project_root(&current_dir));
+            // The store belongs to the tree being indexed, NOT to the shell's
+            // cwd. `ai index /other/project` used to write into the cwd's store
+            // (and stored absolute paths when the target sat outside it) —
+            // foreign rows in your own index, the same wrong-root class of bug
+            // that `sense` was guarded against (2026-11-11).
+            let target_root = find_project_root(&target_path);
+            let indexer = ProjectIndexer::new(&target_root)?;
 
             println!("🚀 Starting project-wide semantic indexing...");
             println!("📂 Target: {}", target_path.display());
+            println!("📦 Store:  {}", target_root.display());
+            let report = indexer.index_all_report(&target_path).await?;
 
-            let indexer = ProjectIndexer::new(&project_root)?;
-            let total = indexer.index_all(&target_path).await?;
-
-            println!("✨ Successfully indexed {} files.", total);
+            println!(
+                "✨ Indexed {} file(s): {} embedded, {} unchanged (content hash).",
+                report.visited, report.embedded, report.unchanged
+            );
             println!("You can now use `gnawtreewriter sense \"<query>\"` without a file context to search the entire project.");
         }
         #[cfg(not(feature = "modernbert"))]
