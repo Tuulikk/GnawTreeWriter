@@ -87,16 +87,46 @@ fungerar som den ska.
 
 ---
 
-## 2026-11-11 — Ingen väg tillbaka för en fil GTW inte kan parsa  🟨
+## 2026-11-11 — Falsk buggrapport: `insert` "ignorerade positionen"  ✅ rättad
+
+**Vad jag påstod:** att `insert <file> 0 <position>` gav samma resultat för varje
+position, och att positionen ignorerades på rotnivå.
+
+**Vad som var sant:** positionerna fungerar. Jag hade två fel i mätningen:
+(1) jag grep:ade bara första `+`-raden i diffen, som är `+MARK` oavsett var den
+hamnar; (2) **`0` är första barnet, inte roten** — så `insert t.rs 0 4` satte
+innehållet *inuti* `fn a`, precis som dokumenterat.
+
+**Åtgärden blev inte en logikfix utan en synlighetsfix:** `insert` skriver nu
+`parent: function_item 'a' (path 0)` före varje insättning (även i `--preview`).
+Det hade avslöjat mitt misstag direkt.
+
+**Läxan (tredje samma dag):** "GTW kan inte skapa filer" (`scaffold` fanns) och
+den här posten var samma mönster — en slutsats om verktyget dragen ur **en**
+observation. Verktygets tolkade indata ska därför eka det, inte bara verka.
+
+---
+
+## 2026-11-11 — Ingen väg tillbaka för en fil GTW inte kan parsa  ✅ ÅTGÄRDAT
 
 `gnawtreewriter validate` och `analyze` vägrar rätteligen en trasig fil
-(`syntax error … line 234`), men det finns **ingen heal/repair** i CLI:t
-(`healer.rs` finns i core, oexponerad). Alltså: när en redigering väl spräckt
-klammerbalansen kan GTW inte laga filen — den måste repareras för hand, utanför
-GTW, vilket är motsatsen till verktygets syfte.
+(`syntax error … line 234`), och det fanns **ingen heal/repair** i CLI:t
+(`healer.rs` låg oexponerad i core). Alltså: när en redigering väl spräckt
+klammerbalansen kunde GTW inte laga filen.
 
-**Rätt fix:** exponera `healer` som `gnawtreewriter heal <file> [--preview]`
-(minsta patch för att återställa klammerbalans), och låt `validate` föreslå det.
+**ÅTGÄRDAT 2026-11-11:** `gnawtreewriter heal <file> [--apply]` + MCP-verktyget
+`heal`. Båda går genom `core::healer::repair_file` (en implementation).
+
+- Klammerräkningen är **lexer-medveten** (strängar, teckenliteraler/livstider,
+  rad- och blockkommentarer räknas inte) — den gamla räknade råa tecken och
+  kunde föreslå ett överflödigt `}` för en fil som bara *såg* obalanserad ut.
+- Båda riktningarna: för få → appenderar; **för många → rapporterar radnummer
+  och raderar aldrig**.
+- Skrivning sker först efter att reparationen **bevisats parsa**, och loggas så
+  `undo` fungerar.
+
+**Kvar:** `validate` föreslår ännu inte `heal` när den nekar en fil — det var en
+del av den ursprungliga fixen och är ogjord.
 
 **Fältbevis 2026-11-11:** fem klammerfel producerades med redigerarverktyget
 (cli.rs ×2, experiment.rs, age.rs ×2) och **noll** med GTW:s `edit` — som
