@@ -92,16 +92,22 @@ pub const CAPABILITIES: &[Capability] = &[
         without: "unavailable (it measures the embedder)",
     },
     Capability {
-        feature: "explain / summarize",
+        feature: "explain / summarize / investigate",
         layer: "L4",
         needs: ModelNeed::Llm,
         without: "unavailable; read_node / get_skeleton give the same facts",
     },
     Capability {
-        feature: "investigate / edit_ask",
+        feature: "edit_ask / propose_edit",
         layer: "L4",
         needs: ModelNeed::Llm,
-        without: "unavailable; investigate is a synthesis, not a fact",
+        without: "unavailable; edit_node applies a change you wrote yourself",
+    },
+    Capability {
+        feature: "sense --expand (query expansion)",
+        layer: "L4→L3",
+        needs: ModelNeed::Llm,
+        without: "skipped with a note; the plain embedding channel still runs",
     },
 ];
 
