@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 15d5b8f7317046e98e783375ae619575
+> Body-hash: b5ae9fa55a95c585741e739a2fa2ddfb
 
 ## Träd
 
@@ -110,7 +110,7 @@ src/core/
   guardian.rs (332 rader)
   healer.rs (297 rader)
   index_entities.rs (1011 rader)
-  index_levels.rs (254 rader)
+  index_levels.rs (312 rader)
   index_relations.rs (839 rader)
   inspect.rs (514 rader)
   label_manager.rs (90 rader)
@@ -1114,7 +1114,7 @@ _(inga toppnivå-items)_
 - `fn extract_static(` :749
 - `fn extract_module(` :779
 
-### index_levels.rs (254 rader)
+### index_levels.rs (312 rader)
 - `pub struct LevelStatus` :26
 - `pub struct LevelsReport` :46
 - `fn content_fingerprint(text: &str) -> String` :57
@@ -1122,7 +1122,8 @@ _(inga toppnivå-items)_
 - `fn disk_fingerprint(path: &Path) -> Option<String>` :69
 - `pub fn measure(root: &Path) -> Result<LevelsReport>` :77
 - `fn measure_vectors(root: &Path, ast_paths: &[(String, String)]) -> LevelStatus` :142
-- `fn embeddings_db(root: &Path) -> std::path::PathBuf` :201
+- `fn embeddings_db(root: &Path) -> std::path::PathBuf` :211
+- `fn embeddings_legacy_stores(root: &Path) -> Vec<String>` :220
 
 ### index_relations.rs (839 rader)
 - `pub struct Relation` :14
