@@ -139,10 +139,14 @@ ask_reap
 #    without a git hook, so commits touching src/ went to CI red (2026-11-11).
 if [[ -f code-index.md && -x "$HOME/.cargo/bin/gnawtreewriter" ]]; then
     "$HOME/.cargo/bin/gnawtreewriter" code-index . --check --fix >/dev/null 2>&1 || true
-    if [[ -n "$(git status --porcelain code-index.md)" ]]; then
+    # Cargo.lock is generated too, and a version bump dirties it: leaving it
+    # behind produced a tag whose lockfile still named the previous version
+    # (2026-11-11). Stage both, commit once, keep the tree clean.
+    if [[ -n "$(git status --porcelain code-index.md Cargo.lock)" ]]; then
         git add code-index.md
-        if git commit -q -m "chore(code-index): refresh artifact after build"; then
-            echo "[commit-build] artefakten var inaktuell — committad separat (trädet förblir rent)."
+        [[ -f Cargo.lock ]] && git add Cargo.lock
+        if git commit -q -m "chore(code-index): refresh artifact + lockfile after build"; then
+            echo "[commit-build] artefakten/lockfilen var inaktuell — committad separat (trädet förblir rent)."
         fi
     fi
     if ! "$HOME/.cargo/bin/gnawtreewriter" code-index . --check >/dev/null 2>&1; then
