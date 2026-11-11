@@ -97,6 +97,7 @@ impl ProjectIndexer {
                         // (16 nodes per forward instead of one per node).
                         let mut pending: Vec<(String, String, String)> = Vec::new();
                         Self::collect_pending(&tree, &mut pending);
+                        Self::cap_pending(&mut pending);
                         // The file's own //! description bridges agent
                         // queries ("avoid reparsing unchanged files") to
                         // implementation symbols (get_or_parse) — prepend it
@@ -200,6 +201,25 @@ impl ProjectIndexer {
         }
         doc.trim().to_string()
     }
+    /// A single file may not own the run. `src/cli.rs` (7 027 lines) produced
+    /// 485 chunks — ~248k tokens, about six minutes at the ~700 tok/s this CPU
+    /// manages — which is what turned a full rebuild into a 40-minute job.
+    /// Same policy as `gnaw_sense::MAX_EMBED_NODES`: keep the LARGEST units,
+    /// because size correlates with "has something worth finding"; a huge file
+    /// is then represented by its biggest definitions instead of by all of them.
+    const MAX_CHUNKS_PER_FILE: usize = 96;
+
+    /// Keep the biggest `MAX_CHUNKS_PER_FILE` units (in place).
+    fn cap_pending(pending: &mut Vec<(String, String, String)>) -> usize {
+        if pending.len() <= Self::MAX_CHUNKS_PER_FILE {
+            return 0;
+        }
+        let before = pending.len();
+        pending.sort_by_key(|t| std::cmp::Reverse(t.2.len()));
+        pending.truncate(Self::MAX_CHUNKS_PER_FILE);
+        before - Self::MAX_CHUNKS_PER_FILE
+    }
+
     fn collect_pending(node: &TreeNode, acc: &mut Vec<(String, String, String)>) {
         // Index functions, classes, and important definitions
         if node.node_type.contains("definition") || node.node_type.contains("item") {
@@ -254,6 +274,27 @@ impl ProjectIndexer {
 #[cfg(test)]
 mod tests {
     use super::ProjectIndexer;
+
+    /// The cap this module exists for: one huge file must not own the run.
+    /// `src/cli.rs` produced 485 chunks (≈248k tokens ≈ 6 min on CPU); the cap
+    /// keeps the 96 largest and drops the rest, so the worst case per file is
+    /// bounded regardless of file size.
+    #[test]
+    fn cap_pending_bounds_one_file() {
+        let mut pending: Vec<(String, String, String)> = (0..500)
+            .map(|i| (format!("{i}"), "p".to_string(), "x".repeat(i + 1)))
+            .collect();
+        let dropped = ProjectIndexer::cap_pending(&mut pending);
+        assert_eq!(pending.len(), ProjectIndexer::MAX_CHUNKS_PER_FILE);
+        assert_eq!(dropped, 500 - ProjectIndexer::MAX_CHUNKS_PER_FILE);
+        // Largest kept: the first element is the longest text in the input.
+        assert_eq!(pending[0].2.len(), 500);
+
+        // Under the cap nothing moves or disappears.
+        let mut small: Vec<(String, String, String)> = vec![("a".into(), "p".into(), "t".into())];
+        assert_eq!(ProjectIndexer::cap_pending(&mut small), 0);
+        assert_eq!(small.len(), 1);
+    }
 
     /// Regression: byte-based chunking (`text[start..end]`) panicked on
     /// multibyte UTF-8 at chunk boundaries.
