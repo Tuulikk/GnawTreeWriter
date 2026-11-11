@@ -3821,6 +3821,7 @@ GTW_CODE_INDEX_SOURCE=git_hook "$bin" code-index "$top" --db >/dev/null 2>&1 || 
             }
             Err(e) => {
                 eprintln!("✗ {} does NOT parse: {}", file.display(), e);
+                eprintln!("  {}", crate::core::healer::heal_advice(file));
                 eprintln!(
                     "  hint: read paths still work — `analyze`/`skeleton` return a partial tree with the error position (syntax_warning); fix the file before editing."
                 );

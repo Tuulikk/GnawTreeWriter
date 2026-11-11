@@ -3862,8 +3862,10 @@ or list_nodes for a flat index of this file.",
             ),
             Err(e) => tool_error_code(
                 format!(
-                    "validate: {} does NOT parse: {} — read paths (analyze/get_skeleton/read_node) still return partial trees with syntax_warning and the error position; fix the file before editing (nothing was written).",
-                    file_path, e
+                    "validate: {} does NOT parse: {} — {}. Read paths (analyze/get_skeleton/read_node) still return partial trees with syntax_warning and the error position; fix the file before editing (nothing was written).",
+                    file_path,
+                    e,
+                    crate::core::healer::heal_advice(path)
                 ),
                 "E_STRICT_PARSE",
             ),

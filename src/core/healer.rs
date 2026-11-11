@@ -108,6 +108,24 @@ pub fn repair_file(path: &Path, apply: bool) -> anyhow::Result<HealOutcome> {
     })
 }
 
+/// Measured advice for a file that failed to parse: IS this a `heal` case?
+///
+/// Shared by `validate` (CLI and MCP) so the two surfaces cannot drift, and
+/// measured rather than assumed — telling a model to run `heal` on a parse
+/// error that is *not* a brace problem wastes the turn (the failure mode this
+/// project keeps paying for: a conclusion drawn from one observation).
+pub fn heal_advice(path: &Path) -> String {
+    match repair_file(path, false) {
+        Ok(HealOutcome::Preview { description, .. })
+        | Ok(HealOutcome::ProposalOnly { description, .. }) => format!(
+            "brace balance is off ({description}) — this IS a heal case: `gnawtreewriter heal {}` previews the repair, `--apply` writes it after proving the result parses",
+            path.display()
+        ),
+        Ok(_) => "braces are balanced, so this is NOT a heal case — the error is somewhere else; read the position above".to_string(),
+        Err(e) => format!("heal could not inspect the file ({e})"),
+    }
+}
+
 impl Default for Healer {
     fn default() -> Self {
         Self::new()

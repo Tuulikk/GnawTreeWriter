@@ -125,8 +125,10 @@ klammerbalansen kunde GTW inte laga filen.
 - Skrivning sker först efter att reparationen **bevisats parsa**, och loggas så
   `undo` fungerar.
 
-**Kvar:** `validate` föreslår ännu inte `heal` när den nekar en fil — det var en
-del av den ursprungliga fixen och är ogjord.
+**Kvar:** inget — `validate` föreslår nu `heal`, men **mätt**: `healer::heal_advice`
+kör healer-besiktningen först och säger antingen *"this IS a heal case"* med
+kommandot, eller *"braces are balanced, so this is NOT a heal case"*. Samma
+funktion matar CLI och MCP (kan inte drifta), pinnad av `tests/heal_advice.rs`.
 
 **Fältbevis 2026-11-11:** fem klammerfel producerades med redigerarverktyget
 (cli.rs ×2, experiment.rs, age.rs ×2) och **noll** med GTW:s `edit` — som
