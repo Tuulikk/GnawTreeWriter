@@ -63,6 +63,8 @@ The project structure index grew into a full **structure layer** (capability lad
 
 **The gate**: `--check` verifies the committed `code-index.md` against a fresh render via a body content-hash (fast tier: header vs body; full tier: re-render compare) — DB-free, non-zero exit on mismatch, `--fix` rewrites.
 
+**What the graph can and cannot answer** (measured 2026-11-11: 187 files, 23 588 relations): name-based resolution resolves **10,2 % of `calls`** (2 166 / 21 304), 12,2 % of `uses` and ~9,7 % of `imports`. That ceiling is not a resolver bug — the dominant unresolved class is *plain names* (17 131: `self.parse()`, `x.iter()`), and resolving those requires the receiver's **type**, i.e. type inference (LSP-grade, on the roadmap; see "Symbol resolution toward LSP-grade"). So: trust `impl`/`trait`/`struct`-member edges and file-level imports; treat a `calls`-based **impact** result as a *lower bound*, not a complete answer set. `code-index --coverage` prints these numbers for any repo, and `resolution_rate` is resolved/extracted — never recall.
+
 **Self-running**: edits mark the store stale (`doctor` shows the queue); `--install-hook` adds a post-commit refresh (per clone, explicit, never auto-stages).
 
 ```bash

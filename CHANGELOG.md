@@ -1,5 +1,45 @@
 ## [Unreleased]
 
+### Fixed (AI) — modellcachen löses per modell, inte per manager
+
+- **`AiManager::new` valde EN cache-rot genom att söka efter `modernbert`.**
+  Den proben avgjorde därför var *alla* modeller letades: ett projekt med lokal
+  `modernbert` gjorde att `bge-base` slogs upp i `<projekt>/bge-base` — som inte
+  finns — trots att den globala cachen hade den, och `sense` rapporterades
+  "degraderad" med modellen installerad.
+- `ModelSource`/`ResolvedModel`; `AiModel::{dir_name, probe, id}` är enda sanningen
+  (sökvägar och probe-filer uppfanns tidigare på tre ställen).
+  `resolve(model)` söker lokal → global, sidoeffektfri.
+- `get_status`-flaggorna och modellistan kommer från **samma** uppslagning och
+  kan inte längre säga emot varandra. `AiStatus` får `bge_installed` och
+  `models` (additivt — `### BREAKING (lib)` gäller inte läsare).
+- `ai status` skriver varje modell med sökväg och rot (`local`/`global`).
+- Tester (hermetiska, markörfiler): en lokal `modernbert` gömmer inte en global
+  `bge-base` — exakt det fall som föll förut.
+
+### Fixed (sense) — en ägare till cosinuströskeln, och domen följer med svaret
+
+- **Tröskeln 0,68 låg i `cli.rs`** och nådde därför bara CLI:t: MCP-anropare —
+  ytan agenterna använder — fick ingen varning alls. Dessutom fanns **två tal för
+  en bedömning** (0,68 i `cli.rs`, 0,5 inline i `gnaw_sense.rs`).
+- `SENSE_ANSWERABLE_COSINE` (*är frågan besvarbar?*) och `SENSE_COSINE_LOW`
+  (*är träffen rimlig?*) är nu separata, namngivna och bor hos måttet;
+  `cli.rs` aliasar konstanten i stället för att definiera ett eget tal.
+- `SatelliteQuality` får `answerable` + `cosine_threshold`, så en MCP-anropare kan
+  skala likadant i stället för att hitta på egen tröskel. `answerable=false`
+  betyder *overifierad ledtråd*, inte *svar*.
+- `answerable_from_cosine()` utbruten och pinnad: 0,63 → false (frånvarande
+  begrepp), 0,71 → true (sann toppträff), `None` → `None` (inga träffar är inte
+  "obesvarbart").
+
+### Docs — grafens tak publicerat, inte bortförklarat
+
+- README säger nu vad grafen kan svara på: **10,2 % av `calls`** löses
+  (2 166 / 21 304; `uses` 12,2 %, `imports` ~9,7 %), att taket beror på att
+  `plain_name` (17 131) kräver **typinferens**, och att `calls`-baserad
+  `impact` därför är en **undre gräns**. Samma siffror går att mäta per repo med
+  `code-index --coverage`.
+
 ### Added (CLI + MCP) — `undo --files`: filskapande är en egen omfattning
 
 - **`scaffold` loggade `Insert`, så en skapad fil kunde aldrig ångras.**
