@@ -7,6 +7,7 @@ use crate::core::{
     visualizer::TreeVisualizer, EditOperation, GnawTreeWriter, OperationType, RestorationEngine,
     TagManager, TransactionLog, UndoRedoManager,
 };
+use crate::llm::harmony::{Harmony, HarmonyVerdict};
 #[cfg(feature = "modernbert")]
 use crate::llm::{GnawSenseBroker, SemanticIndexManager, SenseResponse};
 use crate::parser::TreeNode;
@@ -3037,21 +3038,36 @@ GTW_CODE_INDEX_SOURCE=git_hook "$bin" code-index "$top" --db >/dev/null 2>&1 || 
                         return Ok(());
                     }
 
-                    // Low confidence warning — on the RAW cosine, never on the
-                    // display score. `score` is an RRF fusion on the
-                    // 1/(60+rank) scale (≈0.017 at rank 0), so comparing it to
-                    // 0.5 warned on EVERY query and trained users to ignore the
-                    // warning (field finding 2026-11-11).
-                    let best = sense_confidence(matches[0].score, matches[0].cosine);
-                    if best < 0.5 {
-                        println!("\n⚠️  Low confidence: best cosine {:.2} (< 0.5). Results may not be relevant.", best);
+                    // Confidence = raw cosine + pillar agreement (see
+                    // sense_confidence). Harmony supplies its own one-sentence
+                    // reason when the channels disagree.
+                    let (_cos, warn, reason) = sense_confidence(
+                        matches[0].score,
+                        matches[0].cosine,
+                        matches[0].harmony.as_ref(),
+                    );
+                    if warn {
+                        println!(
+                            "\n⚠️  Low confidence: {}. Results may not be relevant.",
+                            reason
+                        );
                     }
 
                     println!("\n🛰️ Satelite View: I found these relevant areas in the project:");
                     for (i, m) in matches.iter().enumerate() {
-                        match m.cosine {
-                            Some(c) => println!("  {}. {} (cosine: {:.2})", i + 1, m.file_path, c),
-                            None => {
+                        let verdict = m.harmony.as_ref().map(|h| match h.verdict {
+                            HarmonyVerdict::Harmonious => "harmonious",
+                            HarmonyVerdict::MinorDissonance => "minor dissonance",
+                            HarmonyVerdict::Disharmonious => "disharmonious",
+                        });
+                        match (m.cosine, verdict) {
+                            (Some(c), Some(v)) => {
+                                println!("  {}. {} (cosine: {:.2}, {})", i + 1, m.file_path, c, v)
+                            }
+                            (Some(c), None) => {
+                                println!("  {}. {} (cosine: {:.2})", i + 1, m.file_path, c)
+                            }
+                            (None, _) => {
                                 println!("  {}. {} (score: {:.2})", i + 1, m.file_path, m.score)
                             }
                         }
@@ -6161,15 +6177,40 @@ Use without --preview to apply the clone"
     }
 }
 
-/// Confidence for a satellite hit must be judged on the RAW cosine.
+/// Confidence for a satellite hit: RAW cosine plus pillar agreement (`Harmony`).
 ///
-/// The display `score` is a reciprocal-rank-fusion value: `1/(60+rank)`, i.e.
-/// ≈0.017 for the best hit — three orders of magnitude below any cosine
-/// threshold. The CLI compared it to 0.5 and therefore warned on EVERY query,
-/// which is how an always-on alarm teaches people to ignore it (field finding
-/// 2026-11-11). `FileMatch` carries the cosine; this picks it when present.
-fn sense_confidence(score: f32, cosine: Option<f32>) -> f32 {
-    cosine.unwrap_or(score)
+/// Returns `(value_to_show, should_warn, reason)`.
+///
+/// - `adjusted` is an RRF fusion on the 1/(60+rank) scale (≈0.017 at rank 0);
+///   comparing it to a cosine threshold made the warning fire on every query
+///   (field finding 2026-11-11).
+/// - Cosine ALONE cannot separate answerable from unanswerable: in the same
+///   day's calibration set a query about something absent from the repo scored
+///   0.63, while a true hit on rank 5 scored 0.65.
+/// - Pillar DISAGREEMENT is the discriminator: a concept that is not in the
+///   repo can still look semantically close, but it has no lexical overlap and
+///   no graph neighbour, so the pillars disagree.
+/// - No harmony (zoom paths never rerank): fall back to cosine alone, and say
+///   so rather than pretending the pillars agreed.
+fn sense_confidence(
+    adjusted: f32,
+    cosine: Option<f32>,
+    harmony: Option<&Harmony>,
+) -> (f32, bool, String) {
+    let cos = cosine.unwrap_or(adjusted);
+    let verdict = harmony.map(|h| h.verdict);
+    let dissonant = matches!(verdict, Some(HarmonyVerdict::Disharmonious));
+    let reason = if dissonant {
+        harmony
+            .and_then(|h| h.suggestion.clone())
+            .unwrap_or_else(|| format!("search channels disagree (best cosine {cos:.2})"))
+    } else if cos < 0.5 {
+        format!("best cosine {cos:.2} < 0.5")
+    } else {
+        String::new()
+    };
+    let warn = dissonant || cos < 0.5;
+    (cos, warn, reason)
 }
 
 fn print_diff(old: &str, new: &str) {
@@ -6347,19 +6388,56 @@ mod tests {
     use super::*;
     use crate::core::transaction_log::OperationType;
 
-    /// Field finding 2026-11-11: the confidence warning compared the RRF
-    /// display score (`1/(60+rank)` ≈ 0.017) against a 0.5 COSINE threshold,
-    /// so it fired on every satellite query — even when the top hit was the
-    /// file that actually owns the concept. The cosine is carried separately;
-    /// use it.
+    /// Field finding 2026-11-11, twice over. First the warning compared the
+    /// RRF display score (~0.017) against a 0.5 COSINE threshold, so it fired on
+    /// every query. Then, with the cosine in place, the calibration set showed
+    /// cosine alone cannot separate answerable from unanswerable (a concept
+    /// absent from the repo scored 0.63; a true hit on rank 5 scored 0.65).
+    /// Pillar disagreement is the discriminator — that is what this pins.
     #[test]
-    fn confidence_uses_the_raw_cosine_when_available() {
-        // rank-0 RRF score with a strong cosine: confident, no warning
-        assert_eq!(sense_confidence(0.0167, Some(0.72)), 0.72);
-        // ...and a genuinely weak match still warns
-        assert_eq!(sense_confidence(0.0167, Some(0.21)), 0.21);
-        // no cosine (non-reranked paths): fall back to whatever we have
-        assert_eq!(sense_confidence(0.0167, None), 0.0167);
+    fn confidence_uses_cosine_and_pillar_agreement() {
+        use crate::llm::harmony::{harmony, Pillars};
+
+        // Strong cosine, no harmony available (zoom path): no warning.
+        let (cos, warn, _) = sense_confidence(0.0167, Some(0.73), None);
+        assert_eq!(cos, 0.73);
+        assert!(!warn, "a 0.73 cosine must not warn");
+
+        // Weak cosine: warn, and say the number.
+        let (_, warn, reason) = sense_confidence(0.0167, Some(0.21), None);
+        assert!(warn);
+        assert!(
+            reason.contains("0.21"),
+            "reason should carry the value: {reason}"
+        );
+
+        // Decent cosine but the channels disagree (semantic high, no lexical,
+        // no graph neighbour) -> warn, in Harmony's own words.
+        let disagreeing = harmony(&Pillars {
+            semantic: 0.63,
+            lexical: Some(0.0),
+            graph: Some(0.0),
+        });
+        assert_eq!(
+            disagreeing.verdict,
+            HarmonyVerdict::Disharmonious,
+            "precondition: 0.63/0.0/0.0 must read as disharmonious"
+        );
+        let (_, warn, reason) = sense_confidence(0.0167, Some(0.63), Some(&disagreeing));
+        assert!(
+            warn,
+            "a good cosine with disagreeing pillars must still warn — this is the 0.63 negative control"
+        );
+        assert!(!reason.is_empty(), "a warning must carry a reason");
+
+        // Pillars agree: silence even at a middling cosine.
+        let agreeing = harmony(&Pillars {
+            semantic: 0.66,
+            lexical: Some(0.62),
+            graph: Some(0.70),
+        });
+        let (_, warn, _) = sense_confidence(0.0167, Some(0.66), Some(&agreeing));
+        assert!(!warn, "agreeing pillars at 0.66 must not warn");
     }
 
     /// gnawtreewriter.yaml indexing.device parsing — the flag-in-file
