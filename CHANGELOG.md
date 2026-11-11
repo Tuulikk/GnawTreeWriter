@@ -90,6 +90,44 @@
   fixen viktig: en full ombäddning är ett halvtimmesjobb i bakgrunden, så en
   inkrementell körning måste hoppa över oförändrade filer.
 
+### Added — indexeringen städar, syns och mäter rätt binär
+
+- **`code-index.md` bäddades in.** Den är en *genererad* artefakt (spårad med flit,
+  för `--check`-grinden) och innehöll **1 684 av 10 619 vektorer** — varje symbol
+  duplicerad från källkoden, och filen skrivs om vid varje bygge. En definition
+  (`file_walker::is_generated_artifact`) används nu både av walkern och av
+  städningen, så ett namn aldrig kan undantas på ett ställe och bäddas in på ett
+  annat. Test: `prune_drops_generated_artifacts_even_though_the_file_exists`.
+- **Vektorer överlever inte sina filer.** `prune_missing_files()` körs efter
+  walken och rapporteras som `N pruned (file gone)`; `load_project_index` filtrerar
+  dessutom bort rader för försvunna filer vid läsning och **säger det en gång**.
+  En sökträff i en borttagen fil var samma klass av lögn som en sökvägshash i en
+  innehållshash-kolumn. Två tester låser det.
+- **En 40-minuterskörning kan inte vara tyst.** Progress var 25:e fil
+  (`… 25 file(s): 0 embedded, 25 unchanged`) och `GTW_INDEX_TRACE=1` namnger
+  **varje** fil *före* den bearbetas — den enda sättet att se vilken fil en
+  körning sitter på. (Spårning *efteråt* visade fel fil; jag letade på fel ställe
+  i två steg innan radens placering blev rätt.)
+- **`model_info` namnger modellen som faktiskt bäddade.** Förut stod
+  `"bge-base-en-v1.5", 768` hårdkodat — en lögn så fort en annan indexmodell
+  konfigureras, och `store_model_mismatch` litar på just den raden.
+- **Nivåernas urval skiljer sig åt och det ska stå:** L1 (AST) indexerar
+  källkodsändelser (188 filer, ingen `.md`), L3 indexerar även prosa (283 filer).
+  Därför skiljer `uncovered`/`orphaned` mellan nivåerna — inte en bugg, men
+  osynligt utan den här anteckningen.
+
+### Läxa — jag mätte en debug-binär och kallade det kodfel
+
+Under felsökningen påstod jag att en 36 KB prose-fil "äger hela körningen"
+(8 kärnor, minuter). **Det var debug-binären.** Samma fil med den installerade
+release-binären: klar på under 26 s. ONNX-inferens i `target/debug` är 10–50×
+långsammare, så varje "långsamt"-påstående måste namnge vilken binär som mättes.
+Prose-ändringen jag byggde på mätfelet är **backad**. Kvar står det som bevisades
+oberoende av binär: artefakt-undantaget (1 684 rader), städningen, progressraden
+och `model_info`-fixen.
+
+
+
 ## [0.26.1] - 2026-11-11
 
 ### Changed (sense) — tröskeln är nu MÄTT, och 0,68 föll

@@ -59,6 +59,11 @@ impl ProjectIndexer {
         };
 
         for path in walk_source_files(&target_path) {
+            // A generated artifact duplicates the source it was rendered from:
+            // embedding it doubles the noise floor and re-embeds on every build.
+            if crate::core::file_walker::is_generated_artifact(&path) {
+                continue;
+            }
             if let Ok(parser) = get_parser(&path) {
                 // Try to strip prefix safely
                 let file_path_str = path
@@ -67,7 +72,8 @@ impl ProjectIndexer {
                     .to_string_lossy()
                     .to_string();
 
-                if let Ok(content) = fs::read_to_string(path) {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    Self::trace_file(&report, &file_path_str);
                     // SMART RE-INDEXING: Check if file changed
                     // SMART RE-INDEXING, done honestly: ask the store whether
                     // these vectors were built from THIS content. The old check
@@ -147,8 +153,19 @@ impl ProjectIndexer {
 
     /// A 40-minute run must not be silent (measured CPU cost on this repo:
     /// ~7 files/min, 2026-11-11). Every 25 files, to stderr so `--json`/pipes
-    /// keep working.
+    /// keep working. `GTW_INDEX_TRACE=1` names every file BEFORE it is processed
+    /// — the only way to see which file a run is sitting on rather than which
+    /// one it just finished.
+    fn trace_file(report: &IndexReport, file: &str) {
+        if std::env::var_os("GTW_INDEX_TRACE").is_some() {
+            eprintln!("  → [{}] {}", report.visited + 1, file);
+        }
+    }
+
     fn report_progress(report: &IndexReport) {
+        if std::env::var_os("GTW_INDEX_TRACE").is_some() {
+            return;
+        }
         if report.visited % 25 == 0 {
             eprintln!(
                 "  … {} file(s): {} embedded, {} unchanged",

@@ -256,9 +256,11 @@ impl SemanticIndexManager {
         Ok(index)
     }
 
-    /// Delete vectors whose file is gone. Durable counterpart to the read-time
+    /// Delete vectors whose file is gone, or which GTW now excludes from
+    /// indexing (generated artifacts). Durable counterpart to the read-time
     /// filter in `load_project_index`: the store should not accumulate rows for
-    /// deleted files (`code-index --coverage` reports them as `orphaned`).
+    /// deleted files (`code-index --coverage` reports them as `orphaned`) or for
+    /// `code-index.md`'s 1 684 duplicate symbols.
     /// Returns the number of FILES pruned.
     pub fn prune_missing_files(&self) -> Result<usize> {
         let conn = self.open_db()?;
@@ -269,7 +271,9 @@ impl SemanticIndexManager {
             .collect();
         let mut pruned = 0usize;
         for p in paths {
-            if self.project_root.join(&p).exists() {
+            let excluded =
+                crate::core::file_walker::is_generated_artifact(std::path::Path::new(&p));
+            if !excluded && self.project_root.join(&p).exists() {
                 continue;
             }
             conn.execute("DELETE FROM embeddings WHERE file_path = ?1", [&p])?;
@@ -1325,6 +1329,27 @@ mod tests {
     }
 
     #[test]
+    /// `code-index.md` is a rendered artifact: every symbol in it is already
+    /// embedded from source, and it is rewritten by every build. Embedding it
+    /// measured 1 684 of 10 619 vectors here — noise in search, minutes in the
+    /// rebuild. The prune must remove those rows even though the FILE exists.
+    #[test]
+    fn prune_drops_generated_artifacts_even_though_the_file_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        write_source(dir.path(), "src/live.rs");
+        write_source(dir.path(), "code-index.md");
+        let mgr = SemanticIndexManager::new(dir.path());
+        for f in ["src/live.rs", "code-index.md"] {
+            mgr.save_index(f, "fn f() {}", vec![sqlite_entry(f, "1", vec![0.1])])
+                .unwrap();
+        }
+
+        assert_eq!(mgr.prune_missing_files().unwrap(), 1, "artifact pruned");
+        let loaded = mgr.load_project_index().unwrap();
+        assert_eq!(loaded.entries.len(), 1);
+        assert_eq!(loaded.entries[0].file_path, "src/live.rs");
+    }
+
     /// A vector outlives its file; a SEARCH HIT in a deleted file must not.
     /// Same class as storing a path hash in a content-hash column: the number
     /// looks like data and answers a question about code that is gone.

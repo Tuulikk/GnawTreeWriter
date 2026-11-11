@@ -52,6 +52,21 @@ pub fn walk_source_files_filtered(root: &Path, extensions: &[&str]) -> Vec<PathB
         .collect()
 }
 
+/// Files GTW itself GENERATES. They are tracked on purpose (`code-index.md`
+/// carries a body stamp so `code-index --check` can gate CI), but they must
+/// never be embedded: every symbol in them is already embedded from the real
+/// source, they are rewritten by every build, and here they were 1 684 of
+/// 10 619 vectors — the bulk of a 40-minute rebuild (measured 2026-11-11).
+///
+/// One definition, used by the indexer's walk filter AND by the vector prune,
+/// so a name can never be excluded in one place and re-embedded in the other.
+pub fn is_generated_artifact(path: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(|n| n.to_str()),
+        Some("code-index.md")
+    )
+}
+
 /// Check if a path matches a set of extensions (case-insensitive).
 pub fn has_extension(path: &Path, extensions: &[&str]) -> bool {
     path.extension()
