@@ -11,9 +11,9 @@ exakt vad verktyget redan är byggt för. Men förslaget har **sju förmågor d�
 räcker**, och den viktigaste förutsättningen för hela metoden är underdimensionerad:
 **observationen**.
 
-Rekommendation: bygg **en** kommandoyta (`experiment <spec.json>`), inte sju
-förmågor, och låt allt som inte är kodkirurgi eller journal komma utifrån
-(`--observe`).
+Rekommendation: bygg **en** kommandofamilj (`experiment start|candidates|disable|
+record|restore|report`), inte sju förmågor. GTW **kör inga observationer** — den
+tar emot dem från agenten, verifierar sina egna ingrepp och sköter journalen.
 
 ## Vad som redan finns (mappning)
 
@@ -32,31 +32,44 @@ observerbar orakelkanal och ett journalschema — inte en experimentmotor.
 
 ## Vad som måste ändras i förslaget
 
-### a) Oraklet är hela metoden — och det är underdimensionerat
+### a) Oraklet kommer UTIFRÅN — GTW tar emot observationen (reviderat 2026-11-11)
 
-Förslaget säger "observera rendering och beteende" utan att definiera vad som
-avgör ett utfall. Utan en **maskinavgörbar** observation urartar destruktiv
-felsökning till gissningar med extra steg, och en liten modell kan inte alls
-avgöra om något förändrades.
+Första utkastet föreslog att GTW skulle köra observationen (`--observe "<cmd>"`).
+Ägarens invändning är riktig: **GTW behöver inte äta observationerna.** Agenten
+har redan ett skal, och observationen är ofta något ett kommando inte kan fånga
+(en människa ser att layouten är fel). GTW ska ta **emot** observationen och göra
+det enkelt att logga den.
 
-Kravet: observationen ska vara ett **kommando** med ett **predikat**:
+Det flyttar ansvaret dit det hör:
 
-```json
-"observe": { "cmd": "cargo test --test ui 2>&1 | tail -40",
-             "expect": { "exit": null, "absent": "SIGSEGV", "present": "rendered" } }
-```
+| | Agenten | GTW |
+|---|---|---|
+| Observera (köra testet, titta på UI:t) | **ja** | nej |
+| Veta vad som förväntades | ja | nej |
+| Nedmontera kirurgiskt | nej | **ja** (`batch`, validerar före skrivning) |
+| Bevisa att nedmonteringen verkligen skedde | nej | **ja** (parsa om noden) |
+| Bevisa att återställningen är byte-identisk | nej | **ja** (hash före/efter) |
+| Journal, budget, halveringsförslag, rapport | nej | **ja** |
 
-GTW ska **inte** tolka "felet" — bara köra, fånga exitkod/stdout-hash och jämföra
-mot predikatet. Det håller GTW utanför domänlogik och gör metoden användbar för
-vilket språk som helst.
+Vinsten är stor: ingen kommandoexekvering i GTW, ingen timeout- eller
+shell-injektionsyta, och metoden fungerar även när observationen är visuell eller
+mänsklig.
 
-### b) Observation är en ny, säkerhetskänslig förmåga
+### b) Konsekvensen som måste sägas högt: GTW kan inte verifiera observationen
 
-GTW kör i dag **endast** `git`. Att köra godtyckliga kommandon kräver, utöver
-ovanstående: explicit opt-in i specen, **ingen shell-expansion av nodinnehåll**,
-timeout per körning, och att kommandot körs i experimentytan — aldrig i
-användarens arbetsträd. Detta är den enda riktigt nya attackytan i förslaget och
-bör vara medvetet smal.
+Om agenten rapporterar "symptomet försvann" kan GTW bara **registrera** det, inte
+kontrollera det. Därför måste journalen skilja på två sorters fakta, annars
+återupprepar vi dagens felsort: en rapport som ser ut som en mätning men är ett
+påstående.
+
+- `verified: true` — det GTW själv kontrollerat: parsen är giltig, noden finns
+  inte längre, återställningen gav samma hash som före.
+- `reported: "agent"` — det agenten uppgav: utfall, bevis (kommando + exitkod om
+  den finns), fritext.
+
+Rapporten ska aldrig blanda dem. Ett experiment vars utfall bara är *reported* är
+en hypotes med stöd, inte ett mätvärde.
+
 
 ### c) UI-observation hör inte i GTW
 
@@ -98,40 +111,47 @@ utfallet **"symptomet försvann samtidigt som konsumenterna slutade anropas"** s
 
 ## Minimal prototyp (förslag)
 
-**En** kommandoyta och **ett** MCP-verktyg — inte sju.
+**En** kommandofamilj och **ett** MCP-verktyg — inte sju. Tillståndet lever i
+`.gnawtreewriter_ai/experiments/<id>.jsonl`, så agenten kan göra observationen
+mellan anropen (och till och med byta agent mitt i — journalen bär kontexten).
 
-```
-gnawtreewriter experiment <spec.json> [--dry-run] [--json]
-```
-
-```json
-{
-  "workspace": "/tmp/gtw-exp-42",          // MÅSTE vara en git worktree (annars: vägra)
-  "observe": { "cmd": "cargo test --test ui 2>&1 | tail -40",
-               "expect": { "exit": null, "absent": "SIGSEGV", "present": "rendered" } },
-  "baseline": "must_reproduce",            // annars avbryt: inget att isolera
-  "candidates": ["1.2", "1.3.1"],          // eller "auto" -> code_index-subträd
-  "strategy": "bisect | single | rebuild",
-  "budget": { "max_runs": 12, "max_seconds": 900 },
-  "journal": "experiments.jsonl"
-}
+```bash
+gnawtreewriter experiment start  --workspace <worktree> --symptom "UI fryser vid klick"
+gnawtreewriter experiment candidates            # code_index-subträd + impact-sortering
+gnawtreewriter experiment disable <path> <node> # via batch; VERIFIERAR att noden är borta
+gnawtreewriter experiment record  --outcome gone|same|changed|other \
+                                  --evidence "cargo test --test ui → exit 0" [--exit 0]
+gnawtreewriter experiment restore               # hash-jämför mot före nedmonteringen
+gnawtreewriter experiment report [--json]
 ```
 
-**Loop (åtta steg, exakt förslagets prototyp):**
+MCP-motsvarighet: **ett** verktyg `experiment {action, ...}` med samma sex lägen —
+inte sex verktyg, och ingen kommandoexekvering någonstans.
 
-1. Vägra om `workspace` inte är en worktree med rent träd (annars kan experiment
-   förstöra användarens arbete — förslagets viktigaste säkerhetskrav).
-2. Kör `observe` → **baslinje**. Upprepas inte felet: avbryt med
-   `{"reproduced": false}`. Ett icke-reproducerbart fel går inte att isolera.
-3. Välj kandidat(er) enligt `strategy`; `bisect` halverar listan mekaniskt.
-4. Nedmontera med befintlig `batch` (atomisk, validerar före skrivning) —
-   `edit_node` till tom kropp, eller `insert` av en `cfg(any())`-grind.
-5. Kör `observe` igen. Registrera exit, stdout-hash, diff mot baslinjen.
-6. `git -C <workspace> checkout -- .` (reversibilitet utan att modellen minns
-   något), sedan nästa kandidat.
-7. Upprepa tills budgeten tar slut eller utfallet är stabilt.
-8. Skriv rapport: minsta avgränsning, experimenten, `impact`-beroenden för varje
-   nedmonterad nod, `unused_not_cause`-flaggor, kvarvarande osäkerheter.
+`record` ska vara **billigt att anropa**: bara `--outcome` är obligatoriskt, allt
+annat är fritt och får saknas. En agent som inte har en exitkod ska inte behöva
+hitta på en.
+
+## Loop (åtta steg, förslagets prototyp — med observationen utflyttad)
+
+1. `start`: vägra om `--workspace` inte är en **git worktree** med rent träd
+   (annars kan experiment förstöra användarens arbete).
+2. Agenten observerar **själv** och rapporterar baslinjen via
+   `record --outcome same`. GTW registrerar den som `reported`, inte `verified`.
+   Upprepas inte symptomet: `report` säger `{"reproduced": false}` och avbryter.
+3. `candidates`: GTW föreslår subträd ur `code_index` sorterade på `impact`.
+   `strategy: bisect` halverar listan mekaniskt; annars väljer agenten.
+4. `disable`: GTW nedmonterar med `batch` (atomisk, validerar före skrivning) och
+   **verifierar** att noden inte längre går att läsa → `verified: true`.
+5. Agenten observerar (test, skärmbild, egen bedömning) och anropar `record`
+   med utfall + bevis.
+6. `restore`: GTW återställer och **hash-jämför** mot tillståndet före
+   nedmonteringen → `verified: true/false`. Reversibiliteten kräver aldrig att
+   modellen minns något.
+7. Upprepa 3–6 tills budgeten tar slut eller utfallet är stabilt.
+8. `report`: minsta avgränsning, experimenten (`verified` vs `reported`),
+   `impact`-beroenden per nedmonterad nod, `unused_not_cause`-flaggor,
+   kvarvarande osäkerheter.
 
 **Rapportformatet** ska vara det som förs vidare till reparationsfasen:
 
@@ -149,8 +169,9 @@ gnawtreewriter experiment <spec.json> [--dry-run] [--json]
 
 | Inte | I stället |
 |---|---|
-| Egen skärmdumps-/UI-observation | `--observe` pekar på gnawdriver/Motor2 |
-| Egen testkörare | `--observe` **är** testkörningen |
+| Egen **kommandoexekvering** (test, skärmdump, `sh -c`) | observationen kommer från agenten via `record` |
+| Egen skärmdumps-/UI-observation | agenten/gnawdriver observerar, GTW loggar |
+| Egen testkörare | agenten kör; `record --evidence` bär beviset |
 | Egen isoleringsmekanism | `git worktree` (en rad, beprövat, gratis återställning) |
 | Egen agent/loop med egen kontext | MCP-verktyget; agenten äger strategin |
 | Auto-val av försök | kandidatförslag från `code_index` + människa/agent väljer |
@@ -160,14 +181,15 @@ gnawtreewriter experiment <spec.json> [--dry-run] [--json]
 Förslaget frågar hur en liten lokal modell ska kunna använda metoden utan att
 förstå projektet. Svaret: **den behöver inte**. Dela upp det:
 
-- **Modellen** gör två saker: formulerar oraklet (vilket kommando, vilket
-  predikat) och väljer startpunkt. Det kräver domänförståelse men inget
-  projektsammanhang.
-- **Verktyget** gör resten mekaniskt: halvering, nedmontering, observation,
-  återställning, journal, budget.
+- **Modellen** observerar och rapporterar (den kan köra ett test eller titta på en
+  skärmbild) samt väljer startpunkt. Det kräver domänförståelse men inget
+  projektsammanhang — och inget skal-kommando behöver gå genom GTW.
+- **Verktyget** gör resten mekaniskt: halvering, nedmontering, verifiering,
+  återställning (hash), journal, budget.
 
-Med `strategy: "bisect"` är loopen deterministisk givet oraklet — vilket är
-precis vad en 7B-modell klarar och en 70B-modell inte behöver.
+Med `strategy: "bisect"` är loopen deterministisk givet att agenten kan säga
+`gone|same|changed` — vilket är precis vad en 7B-modell klarar och en 70B-modell
+inte behöver.
 
 ## Koppling till öppna trådar
 
