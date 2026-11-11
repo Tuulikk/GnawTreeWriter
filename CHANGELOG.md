@@ -108,6 +108,12 @@
   **varje** fil *före* den bearbetas — den enda sättet att se vilken fil en
   körning sitter på. (Spårning *efteråt* visade fel fil; jag letade på fel ställe
   i två steg innan radens placering blev rätt.)
+- **Tak per fil — en fil får inte äga körningen.** `src/cli.rs` (7 027 rader)
+  gav **485 chunks** ≈ 248 000 tokens ≈ 6 min på den här CPU:n, och indexeraren
+  hade inget tak medan `sense` har `MAX_EMBED_NODES` för samma store. Nu behålls
+  de **96 största** enheterna per fil (samma princip som `sense`: storlek
+  korrelerar med "finns något att hitta"). **Mätt A/B på samma fil:**
+  485 → 96 chunks, ~6 min → **154 s**. Test: `cap_pending_bounds_one_file`.
 - **`model_info` namnger modellen som faktiskt bäddade.** Förut stod
   `"bge-base-en-v1.5", 768` hårdkodat — en lögn så fort en annan indexmodell
   konfigureras, och `store_model_mismatch` litar på just den raden.
