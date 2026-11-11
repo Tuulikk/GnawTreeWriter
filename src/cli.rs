@@ -3037,14 +3037,24 @@ GTW_CODE_INDEX_SOURCE=git_hook "$bin" code-index "$top" --db >/dev/null 2>&1 || 
                         return Ok(());
                     }
 
-                    // Low confidence warning
-                    if matches[0].score < 0.5 {
-                        println!("\n⚠️  Low confidence: Best match has score {:.2} (< 0.5). Results may not be relevant.", matches[0].score);
+                    // Low confidence warning — on the RAW cosine, never on the
+                    // display score. `score` is an RRF fusion on the
+                    // 1/(60+rank) scale (≈0.017 at rank 0), so comparing it to
+                    // 0.5 warned on EVERY query and trained users to ignore the
+                    // warning (field finding 2026-11-11).
+                    let best = sense_confidence(matches[0].score, matches[0].cosine);
+                    if best < 0.5 {
+                        println!("\n⚠️  Low confidence: best cosine {:.2} (< 0.5). Results may not be relevant.", best);
                     }
 
                     println!("\n🛰️ Satelite View: I found these relevant areas in the project:");
                     for (i, m) in matches.iter().enumerate() {
-                        println!("  {}. {} (score: {:.2})", i + 1, m.file_path, m.score);
+                        match m.cosine {
+                            Some(c) => println!("  {}. {} (cosine: {:.2})", i + 1, m.file_path, c),
+                            None => {
+                                println!("  {}. {} (score: {:.2})", i + 1, m.file_path, m.score)
+                            }
+                        }
                     }
                     println!(
                         "\nTip: Use `gnawtreewriter sense \"{}\" --file {}` to zoom in.",
@@ -6151,6 +6161,17 @@ Use without --preview to apply the clone"
     }
 }
 
+/// Confidence for a satellite hit must be judged on the RAW cosine.
+///
+/// The display `score` is a reciprocal-rank-fusion value: `1/(60+rank)`, i.e.
+/// ≈0.017 for the best hit — three orders of magnitude below any cosine
+/// threshold. The CLI compared it to 0.5 and therefore warned on EVERY query,
+/// which is how an always-on alarm teaches people to ignore it (field finding
+/// 2026-11-11). `FileMatch` carries the cosine; this picks it when present.
+fn sense_confidence(score: f32, cosine: Option<f32>) -> f32 {
+    cosine.unwrap_or(score)
+}
+
 fn print_diff(old: &str, new: &str) {
     let diff = TextDiff::from_lines(old, new);
     println!("\x1b[1m--- Preview of changes ---\x1b[0m");
@@ -6325,6 +6346,21 @@ Supported formats:
 mod tests {
     use super::*;
     use crate::core::transaction_log::OperationType;
+
+    /// Field finding 2026-11-11: the confidence warning compared the RRF
+    /// display score (`1/(60+rank)` ≈ 0.017) against a 0.5 COSINE threshold,
+    /// so it fired on every satellite query — even when the top hit was the
+    /// file that actually owns the concept. The cosine is carried separately;
+    /// use it.
+    #[test]
+    fn confidence_uses_the_raw_cosine_when_available() {
+        // rank-0 RRF score with a strong cosine: confident, no warning
+        assert_eq!(sense_confidence(0.0167, Some(0.72)), 0.72);
+        // ...and a genuinely weak match still warns
+        assert_eq!(sense_confidence(0.0167, Some(0.21)), 0.21);
+        // no cosine (non-reranked paths): fall back to whatever we have
+        assert_eq!(sense_confidence(0.0167, None), 0.0167);
+    }
 
     /// gnawtreewriter.yaml indexing.device parsing — the flag-in-file
     /// mechanism AGENTS.md points agents/devs at (ROADMAP: conservative
