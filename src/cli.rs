@@ -583,8 +583,16 @@ enum Commands {
     /// Scaffold a new file
     Scaffold {
         file_path: PathBuf,
+        /// Structural schema, e.g. `rust:mod(name:security, fn:validate)`.
+        #[arg(long, conflicts_with_all = ["content", "from"])]
+        schema: Option<String>,
+        /// Raw content for the new file ("-" reads STDIN). Parse-validated
+        /// before the write, and logged so the creation can be reverted.
         #[arg(long)]
-        schema: String,
+        content: Option<String>,
+        /// Read the content from this file instead of a literal.
+        #[arg(long)]
+        from: Option<PathBuf>,
     },
     /// AI tools
     Ai {
@@ -1559,8 +1567,18 @@ impl Cli {
             } => {
                 Self::handle_investigate(&question, &resolution)?;
             }
-            Commands::Scaffold { file_path, schema } => {
-                Self::handle_scaffold(&file_path, &schema)?;
+            Commands::Scaffold {
+                file_path,
+                schema,
+                content,
+                from,
+            } => {
+                Self::handle_scaffold(
+                    &file_path,
+                    schema.as_deref(),
+                    content.as_deref(),
+                    from.as_deref(),
+                )?;
             }
             Commands::Rules { command } => match command {
                 RuleSubcommands::Add {
@@ -3803,26 +3821,95 @@ GTW_CODE_INDEX_SOURCE=git_hook "$bin" code-index "$top" --db >/dev/null 2>&1 || 
         Ok(())
     }
 
-    fn handle_scaffold(file_path: &PathBuf, schema: &str) -> Result<()> {
+    fn handle_scaffold(
+        file_path: &PathBuf,
+        schema: Option<&str>,
+        content: Option<&str>,
+        from: Option<&Path>,
+    ) -> Result<()> {
         use crate::core::ScaffoldEngine;
         use std::fs;
 
         if file_path.exists() {
             anyhow::bail!(
-                "File already exists: {}. Scaffolding only works for new files.",
+                "File already exists: {}. Scaffold only creates NEW files — use `insert` or `edit` on it instead.",
                 file_path.display()
             );
         }
 
-        let engine = ScaffoldEngine::new();
-        let code = engine.generate(schema)?;
+        // Content precedence: --from, --content ("-" = STDIN), --schema.
+        // The schema DSL is now OPTIONAL: agents can hand over any code they
+        // can produce, which is simpler than learning a second syntax.
+        let code = if let Some(src) = from {
+            fs::read_to_string(src)
+                .with_context(|| format!("cannot read --from {}", src.display()))?
+        } else if let Some(lit) = content {
+            if lit == "-" {
+                use std::io::Read;
+                let mut buf = String::new();
+                std::io::stdin().read_to_string(&mut buf)?;
+                buf
+            } else {
+                lit.to_string()
+            }
+        } else if let Some(s) = schema {
+            ScaffoldEngine::new().generate(s)?
+        } else {
+            anyhow::bail!("one of --schema, --content or --from is required");
+        };
 
-        // Create parent directories if they don't exist
+        // Validate with the REAL parser before writing: a scaffold that does not
+        // parse is a broken file with a friendly message (edit_node has had this
+        // gate all along; scaffold did not).
+        let ext = file_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_string();
+        if !ext.is_empty() {
+            if let Ok(parser) = crate::parser::get_parser(std::path::Path::new(&format!("x.{ext}"))) {
+                if let Err(e) = parser.parse(&code) {
+                    anyhow::bail!(
+                        "scaffold rejected: the proposed content does not parse as {ext}: {e}\n\
+                         Nothing was written."
+                    );
+                }
+            }
+        }
+
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent)?;
         }
+        fs::write(file_path, &code)?;
 
-        fs::write(file_path, code)?;
+        // Log the CREATION for the record. UNDO CANNOT DELETE IT YET (measured
+        // 2026-11-11: "no suitable backup or previous state found") — see uppslag.md.
+        let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        match crate::core::transaction_log::TransactionLog::new(&root) {
+            Ok(mut log) => {
+                use crate::core::transaction_log::OperationType;
+                let after = crate::core::transaction_log::calculate_content_hash(&code);
+                let mut meta = std::collections::HashMap::new();
+                meta.insert("operation".to_string(), "scaffold".to_string());
+                if let Err(e) = log.log_transaction(
+                    OperationType::Insert,
+                    file_path.clone(),
+                    None,
+                    None,
+                    Some(after),
+                    format!(
+                        "scaffold: created {} ({} bytes)",
+                        file_path.display(),
+                        code.len()
+                    ),
+                    meta,
+                ) {
+                    eprintln!("warning: the file was created but not logged for undo: {e}");
+                }
+            }
+            Err(e) => eprintln!("warning: no transaction log — undo cannot revert this: {e}"),
+        }
+
         println!(
             "✓ Successfully scaffolded new file: {}",
             file_path.display()

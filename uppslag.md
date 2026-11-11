@@ -43,6 +43,44 @@ två insättningar i samma `match` i följd är vad som sprängde klammerbalanse
 
 ---
 
+## 2026-11-11 — `undo` kan inte ångra ett filskapande  🟨
+
+**Mätt:** `scaffold probe.rs --from …` loggar `Insert` i transaktionsloggen
+(verifierat i `history`), men `undo` svarar:
+
+```
+✗ Failed to undo: Insert undo failed: no suitable backup or previous state found
+```
+
+Orsak: `undo_insert` (`src/core/undo_redo.rs:247`) letar efter en backup via
+`before_hash` — och en **skapad** fil har ingen före-hash. Följden är att den
+enda kommandon som skapar filer saknar återväg, vilket är precis den lucka
+scaffold-fixen skulle stänga.
+
+**Rätt fix (ej gjord):** i Insert-grenen, om `before_hash.is_none()` **och**
+filens nuvarande hash == `after_hash` → ta bort filen; om hashen avviker → neka
+("filen har ändrats sedan den skapades"). Kräver test, därför inte gjord i samma
+svep som scaffold-fixen.
+
+---
+
+## 2026-11-11 — Ingen väg tillbaka för en fil GTW inte kan parsa  🟨
+
+`gnawtreewriter validate` och `analyze` vägrar rätteligen en trasig fil
+(`syntax error … line 234`), men det finns **ingen heal/repair** i CLI:t
+(`healer.rs` finns i core, oexponerad). Alltså: när en redigering väl spräckt
+klammerbalansen kan GTW inte laga filen — den måste repareras för hand, utanför
+GTW, vilket är motsatsen till verktygets syfte.
+
+**Rätt fix:** exponera `healer` som `gnawtreewriter heal <file> [--preview]`
+(minsta patch för att återställa klammerbalans), och låt `validate` föreslå det.
+
+**Fältbevis 2026-11-11:** fem klammerfel producerades med redigerarverktyget
+(cli.rs ×2, experiment.rs, age.rs ×2) och **noll** med GTW:s `edit` — som
+validerade och skrev på första försöket.
+
+---
+
 ## Kvarvarande trådar (sammanställning 2026-11-11)
 
 Fyra öppna, ingen av dem tyst, ingen akut. Ordning = billigast först.
