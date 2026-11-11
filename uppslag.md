@@ -50,7 +50,7 @@ bild) — därför sitter rotvakten serverside och skyddar båda.
 
 ---
 
-## 2026-11-10 — Staleness-larmet var avklippt  🟥 FARLIG
+## 2026-11-10 — Staleness-larmet var avklippt  ✅ ÅTGÄRDAT
 
 **Mätt:** `doctor` rapporterade `stale: false` för en **0.25.0**-binär mot
 **0.25.1**-källa. Orsak: `src/version.rs` läste `CARGO_MANIFEST_DIR` med
@@ -149,7 +149,7 @@ den rör MCP-livscykeln och behöver egna tester.
 
 ---
 
-## 2026-11-10 — Daemoner som överlever sin binär: sopa eller självutgång?  🟥 FARLIG
+## 2026-11-10 — Daemoner som överlever sin binär: sopa eller självutgång?  🟨
 
 **Mätt:** åtta `gnawtreewriter mcp`-daemoner, 95–285 minuter gamla, **alla** med
 `readlink /proc/<pid>/exe` → `(deleted)`. De betjänade kod som inte längre finns
@@ -230,7 +230,7 @@ användaren.
 
 ---
 
-## 2026-11-10 — `sense`-poäng ~0,01–0,02: gammalt index eller fel embedder?  🟨
+## 2026-11-10 — `sense`-poäng ~0,01–0,02: gammalt index eller fel embedder?  ✅ ÅTGÄRDAT
 
 **Påstående (obesvisat):** de låga poängen beror på att `embeddings.db` är
 daterad 2026-10-07, och att `gnawtreewriter ai index` höjer dem.
@@ -382,8 +382,8 @@ inte. **Status:** `belagt`, oavsiktligt — vakten sattes där läckan uppstod.
 
 ---
 
-## 2026-11-10 — JSON: `--preview` och apply är oense
+## 2026-11-10 — JSON: `--preview` och apply är oense  ✅ ÅTGÄRDAT
 
-Känt och pinnat i test: `--preview` visar rå split, skarp edit tar
-`json_semantic_edit`. En agent som litar på preview-diffen får ett annat resultat
-än den fick se. Kräver designbeslut, inte en fix.
+*Dubblett av posten ovan; behållen som pekare eftersom den gamla texten felaktigt
+sa "kräver designbeslut, inte en fix". Det var en fix: `is_json_document()`
+används nu av både preview och apply, låst av `json_preview_and_apply_agree`.*
