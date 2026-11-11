@@ -275,6 +275,39 @@ tillsammans varför `sense` såg trasigt ut:
 diagnostiken mäter fel storhet — och ett larm som alltid lyser lär folk
 ignorera det (samma klass som `ai status` och det avklippta stale-larmet).
 
+### Är 0,5 rätt tröskel? NEJ — mätt med kalibreringsset
+
+Sju frågor, facit kontrollerat i koden (två av mina första "facit" var fel och
+är korrigerade nedan):
+
+| Fråga | topp-cosinus | facit |
+|---|---|---|
+| batch apply atomic | 0,79 | ✅ `batch.rs` i listan |
+| dependency cycles | 0,73 | ✅ `code_graph.rs` |
+| markdown parser | 0,73 | ✅ `markdown.rs` |
+| transaction log | 0,72 | ✅ `transaction_log.rs` |
+| mcp tool dispatch | 0,71 | ❌ **miss** (`mcp/mod.rs` finns, `tools/call` där) |
+| *"OAuth login"* (finns ej) | **0,63** | — negativ |
+| *"backup rotation"* (finns ej) | **0,62** | — negativ |
+
+**Tre slutsatser:**
+
+1. **0,5 släpper igenom negativa frågor.** En fråga om något som inte finns i
+   repot får 0,62–0,63 — över tröskeln. "Ingen varning" betyder alltså **inte**
+   "svaret finns".
+2. **Höjning till ~0,7 löser det inte heller:** sanna träffar på rank 5 låg på
+   0,65–0,66, så en 0,7-grind skulle varna trots att rätt fil låg i listan.
+   Ett enda cosinus-tal kan inte göra båda jobben (gate för "finns svar" vs
+   "toppträffen är rätt").
+3. **Rätt signal finns redan:** `Harmony` bär cosinus + lexikal överlappning +
+   graf-pelare, och en negativ fråga har typiskt låg lexikal överlappning. Att
+   döma på cosinus **ensam** är därför arkitektoniskt fel, inte bara
+   okalibrerat.
+
+**Kvar:** byt confidencen till `harmony` när den finns (zoom-vägen saknar den),
+och/eller höj tröskeln till ~0,68 med vetskapen att den är grov. Recall:
+4/5 sanna träffar i topp 5 — `mcp/mod.rs` missades.
+
 **Nytt fynd — `ai index` på GPU:** ~2 minuter för 276 filer (734 MiB VRAM, 97 %
 ledigt vid start, 20 %-grinden passerad) mot **>22 min utan att bli klar** på
 CPU. GPU-vägen kräver `gnawtreewriter-gpu` (eget namn sedan 2026-11-11, så
