@@ -795,6 +795,12 @@ enum AiSubcommands {
         /// Emit the full report as JSON instead of a table
         #[arg(long)]
         json: bool,
+        /// CALIBRATE instead of evaluating: a JSON array of query strings about
+        /// concepts this repo does NOT contain. Together with the eval set this
+        /// measures whether any single cosine can separate "answerable" from
+        /// "absent concept" — and says so when it cannot.
+        #[arg(long)]
+        negatives: Option<PathBuf>,
     },
 }
 
@@ -1656,9 +1662,15 @@ impl Cli {
                     Self::handle_ai_report(limit, output).await?;
                 }
                 #[cfg(feature = "modernbert")]
-                AiSubcommands::RecallEval { eval_path, k, json } => {
-                    crate::llm::recall_eval::run_recall_eval(&eval_path, k, json)?;
-                }
+                AiSubcommands::RecallEval {
+                    eval_path,
+                    k,
+                    json,
+                    negatives,
+                } => match negatives {
+                    Some(neg) => crate::llm::recall_eval::run_calibration(&eval_path, &neg, json)?,
+                    None => crate::llm::recall_eval::run_recall_eval(&eval_path, k, json)?,
+                },
             },
 
             Commands::Alf {

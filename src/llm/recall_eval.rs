@@ -238,3 +238,128 @@ pub fn run_recall_eval(eval_path: &Path, k: usize, json_out: bool) -> Result<()>
     }
     Ok(())
 }
+
+/// Calibrate the `answerable` cosine threshold from DATA, not intuition.
+///
+/// Positives come from the recall set (each case names its expected entry), so
+/// the hit cosine is measured rather than remembered. Negatives are queries
+/// about concepts the repo does not contain — the set the threshold must reject.
+///
+/// The output that matters is the **separation**: if the weakest positive scores
+/// below the strongest negative, no single number can decide, and the honest
+/// behaviour stays a label (`answerable: false`) instead of a verdict. This is
+/// exactly what a 7-query hand calibration could not answer (2026-11-11).
+pub fn run_calibration(positives_path: &Path, negatives_path: &Path, json_out: bool) -> Result<()> {
+    let raw = std::fs::read_to_string(positives_path)
+        .with_context(|| format!("Failed to read eval set {}", positives_path.display()))?;
+    let cases: Vec<RecallCase> = serde_json::from_str(&raw)
+        .context("Failed to parse eval set — expected [{query, expect_file, expect_preview?}]")?;
+    let raw_neg = std::fs::read_to_string(negatives_path).with_context(|| {
+        format!(
+            "Failed to read negatives set {} — expected a JSON array of query strings",
+            negatives_path.display()
+        )
+    })?;
+    let negatives: Vec<String> = serde_json::from_str(&raw_neg)
+        .context("Failed to parse negatives — expected [\"query\", ...]")?;
+    if cases.is_empty() || negatives.is_empty() {
+        anyhow::bail!("Calibration needs at least one positive and one negative query.");
+    }
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let project_root = find_project_root(&cwd);
+    let index_manager = SemanticIndexManager::new(&project_root);
+    let index = index_manager.load_project_index()?;
+    if index.entries.is_empty() {
+        anyhow::bail!("Semantic index is empty — run `gnawtreewriter ai index` first.");
+    }
+    let manager = AiManager::new(&project_root)?;
+    let model = manager.load_model(crate::llm::AiManager::index_model(), indexing_device())?;
+    let model_id = crate::llm::AiManager::index_model().id().to_string();
+
+    // The number the served pipeline reports: cosine of the TOP hit.
+    let top_cosine = |query: &str| -> Result<f32> {
+        let v = model.get_query_embedding(query)?.to_vec1()?;
+        Ok(index.search(&v, 1).first().map(|(_, s)| *s).unwrap_or(0.0))
+    };
+
+    let mut pos: Vec<f32> = Vec::with_capacity(cases.len());
+    for c in &cases {
+        pos.push(top_cosine(&c.query)?);
+    }
+    let mut neg: Vec<f32> = Vec::with_capacity(negatives.len());
+    for q in &negatives {
+        neg.push(top_cosine(q)?);
+    }
+
+    let mut sorted_pos = pos.clone();
+    sorted_pos.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mut sorted_neg = neg.clone();
+    sorted_neg.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let pct = |v: &[f32], p: f64| -> f32 {
+        if v.is_empty() {
+            return 0.0;
+        }
+        let idx = ((v.len() - 1) as f64 * p).round() as usize;
+        v[idx]
+    };
+    let pos_min = sorted_pos.first().copied().unwrap_or(0.0);
+    let pos_p50 = pct(&sorted_pos, 0.5);
+    let neg_p50 = pct(&sorted_neg, 0.5);
+    let neg_max = sorted_neg.last().copied().unwrap_or(0.0);
+    let separation = pos_min - neg_max;
+    let suggested = (neg_max + pos_min) / 2.0;
+    let current = crate::llm::gnaw_sense::SENSE_ANSWERABLE_COSINE;
+
+    if json_out {
+        let report = serde_json::json!({
+            "model": model_id,
+            "positives": {
+                "count": pos.len(),
+                "min": pos_min,
+                "p50": pos_p50,
+                "max": sorted_pos.last().copied().unwrap_or(0.0)
+            },
+            "negatives": {
+                "count": neg.len(),
+                "p50": neg_p50,
+                "max": neg_max
+            },
+            "separation": separation,
+            "separates": separation > 0.0,
+            "suggested_threshold": suggested,
+            "current_threshold": current,
+            "positives_detail": cases.iter().zip(pos.iter())
+                .map(|(c, s)| serde_json::json!({"query": c.query, "expect_file": c.expect_file, "top_cosine": s}))
+                .collect::<Vec<_>>(),
+            "negatives_detail": negatives.iter().zip(neg.iter())
+                .map(|(q, s)| serde_json::json!({"query": q, "top_cosine": s}))
+                .collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    println!("\nCalibration — embedder {model_id}");
+    println!(
+        "  positives ({}): min {pos_min:.3}  p50 {pos_p50:.3}  max {:.3}",
+        pos.len(),
+        sorted_pos.last().copied().unwrap_or(0.0)
+    );
+    println!(
+        "  negatives ({}): p50 {neg_p50:.3}  max {neg_max:.3}",
+        neg.len()
+    );
+    if separation > 0.0 {
+        println!("  separation: +{separation:.3} — the sets are separable");
+        println!("  suggested threshold: {suggested:.3}   (current: {current:.3})");
+        println!("  → set SENSE_ANSWERABLE_COSINE = {suggested:.2}, or document why {current:.2} is kept.");
+    } else {
+        println!("  separation: {separation:.3} — the sets OVERLAP");
+        println!("  → no single cosine separates an absent concept from a near miss.");
+        println!("    Keep publishing the label + cosine (answerable/cosine_threshold) and");
+        println!("    do NOT turn this into a verdict; a threshold would be a guess.");
+    }
+    println!();
+    Ok(())
+}

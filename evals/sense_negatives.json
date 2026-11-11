@@ -1,0 +1,20 @@
+[
+  "how is the kubernetes ingress controller configured",
+  "where is the stripe webhook signature verified",
+  "how does the grpc reflection service work",
+  "where is the react redux store initialized",
+  "how is the postgres connection pool tuned",
+  "where is the terraform module for the s3 bucket defined",
+  "how are websocket connections authenticated in the chat server",
+  "where is the oauth device flow implemented",
+  "how does the celery worker retry failed tasks",
+  "where is the redis cache invalidated after a write",
+  "how is the protobuf schema versioned between services",
+  "where does the android notification channel get created",
+  "how is the docker compose healthcheck configured",
+  "where is the graphql schema stitched together",
+  "how are feature flags rolled out per tenant",
+  "where is the kafka consumer group offset committed",
+  "how is the elasticsearch index mapping migrated",
+  "where is the s3 multipart upload resumed after a failure"
+]
