@@ -1398,6 +1398,13 @@ impl Cli {
                 depth,
                 stdout,
             } => {
+                // Same guard as the MCP tools (core::project_root, one rule):
+                // indexing or walking $HOME / a workspace folder from the CLI
+                // would answer questions about several codebases at once.
+                if let Err(reason) = crate::core::project_root::guard(Path::new(&path)) {
+                    eprintln!("{reason}");
+                    std::process::exit(2);
+                }
                 // Ett tomt --extensions betyder "den inbyggda listan". Tidigare
                 // fanns listan på TVÅ ställen (denna clap-default och
                 // CodeIndexOptions::default) och de drev isär: nio

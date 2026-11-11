@@ -35,6 +35,7 @@ pub mod label_manager;
 pub mod macro_dispatcher;
 pub mod pack;
 pub mod parse_cache;
+pub mod project_root;
 pub mod report;
 pub mod restoration_engine;
 pub mod rules;

@@ -1234,97 +1234,15 @@ pub mod mcp_server {
         json!({"content": [{ "type": "text", "text": msg }], "isError": true})
     }
 
-    /// The user's home directory, used only to detect an unusable root.
-    fn home_dir() -> Option<std::path::PathBuf> {
-        std::env::var_os("HOME").map(std::path::PathBuf::from)
-    }
+    /// The rule itself lives in `core::project_root` so the CLI and the MCP
+    /// tools apply exactly one predicate (they drifted once: the CLI could
+    /// index `$HOME` while these tools refused it).
 
-    /// Directories that identify a directory as a project root.
-    const PROJECT_MARKERS: &[&str] = &[
-        ".git",
-        "Cargo.toml",
-        "package.json",
-        "pyproject.toml",
-        "gnawtreewriter.yaml",
-    ];
-
-    /// A directory that is not a project itself but holds ≥2 projects is a
-    /// workspace container (`~/dev`, `.../Gnaw-Software`). Indexing or walking
-    /// it silently answers questions about several codebases at once — one of
-    /// the eight daemons seen 2026-11-10 sat exactly there. Refused, not
-    /// warned: a wrong answer from six repos is worse than a loud no.
-    ///
-    /// "Mostly projects" is required, not just "two look like projects":
-    /// `/tmp` and other junk drawers contain a couple of build dirs and must
-    /// stay usable (the first version of this rule refused `/tmp` — caught by
-    /// `a_project_directory_is_not_too_broad`).
-    fn looks_like_workspace_container(root: &std::path::Path) -> bool {
-        if PROJECT_MARKERS.iter().any(|m| root.join(m).exists()) {
-            return false; // a project (or a monorepo root) — its own business
-        }
-        let Ok(entries) = std::fs::read_dir(root) else {
-            return false;
-        };
-        let mut dirs = 0;
-        let mut projects = 0;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let name = entry.file_name();
-            if name.to_string_lossy().starts_with('.') {
-                continue; // .git, .cache, … say nothing about the layout
-            }
-            dirs += 1;
-            if PROJECT_MARKERS.iter().any(|m| path.join(m).exists()) {
-                projects += 1;
-            }
-        }
-        projects >= 2 && projects * 2 >= dirs
-    }
-
-    /// A "project root" that is the home directory (or the filesystem root) is
-    /// not a project: every relative store, model-cache lookup and lexical walk
-    /// under it spans unrelated trees.
-    ///
-    /// Field finding 2026-11-10 (GTW_MCP_ISSUE_LOG): an MCP daemon started with
-    /// `cwd=$HOME` answered `sense` with 5/5 hits from `~/AndroidSDK`, reported
-    /// the caller's own store as absent, and degraded the semantic channel —
-    /// all three from this one wrong root. Such roots are refused loudly now.
-    fn root_is_too_broad(root: &std::path::Path, home: Option<&std::path::Path>) -> bool {
-        fn normalize(p: &std::path::Path) -> std::path::PathBuf {
-            if let Ok(c) = std::fs::canonicalize(p) {
-                return c;
-            }
-            // Relative paths that do not exist yet resolve against the cwd.
-            if p.is_relative() {
-                if let Ok(cwd) = std::env::current_dir() {
-                    if let Ok(c) = std::fs::canonicalize(cwd.join(p)) {
-                        return c;
-                    }
-                }
-            }
-            p.to_path_buf()
-        }
-
-        let root = normalize(root);
-        if root.parent().is_none() {
-            return true; // "/" — everything is under it
-        }
-        if let Some(h) = home {
-            if normalize(h) == root {
-                return true; // the home directory
-            }
-        }
-        looks_like_workspace_container(&root)
-    }
-
-    /// Loud refusal for a too-broad root, naming the tool, the root and a fix
-    /// the caller can ACTUALLY perform. `code_index` takes a `root`; `sense`
-    /// does not — advising "pass a root" there would be advice that cannot be
-    /// followed (found 2026-11-10 when an agent hit exactly that message).
-    fn broad_root_error(tool: &str, root: &std::path::Path) -> Value {
+    /// Loud refusal for a too-broad root: the REASON comes from
+    /// `core::project_root::guard` (one rule for CLI and MCP), the ADVICE is
+    /// tool-specific because the tools differ in what they can do about it —
+    /// `code_index` takes a `root`, `sense` does not.
+    fn broad_root_error(tool: &str, reason: &str) -> Value {
         let fix = if tool == "sense" {
             "sense has no root parameter: start the client in the project directory, \
              pass file_path for single-file zoom search, or use the CLI \
@@ -1332,13 +1250,7 @@ pub mod mcp_server {
         } else {
             "pass an explicit absolute root/path, or start the client in the project directory."
         };
-        tool_error(format!(
-            "{tool}: refusing to use {} as a project root — it is the home directory, the \
-             filesystem root, or a folder that holds several projects, so any store, index or \
-             lexical walk under it covers unrelated trees (this is how a $HOME-rooted server once \
-             answered a sense query with hits from ~/AndroidSDK). {fix}",
-            root.display()
-        ))
+        tool_error(format!("{tool}: {reason}. {fix}"))
     }
 
     /// Duplex-loop metrics (Motor2 plan #23): propose/validate/apply counts
@@ -3190,8 +3102,8 @@ or list_nodes for a flat index of this file.",
         let root_path = std::path::Path::new(root);
         // A daemon rooted at $HOME reported this project's store as absent and
         // pointed the caller at `--db`, which would have built a store FOR $HOME.
-        if root_is_too_broad(root_path, home_dir().as_deref()) {
-            return broad_root_error("code_index", root_path);
+        if let Err(reason) = crate::core::project_root::guard(root_path) {
+            return broad_root_error("code_index", &reason);
         }
         let mut opts = CodeIndexOptions::default();
         if let Some(i) = intro {
@@ -3410,8 +3322,8 @@ or list_nodes for a flat index of this file.",
         // Root guard first: a $HOME root degrades the semantic channel AND makes
         // the lexical fallback walk the whole home directory (field finding
         // 2026-11-10 — answers came from ~/AndroidSDK).
-        if root_is_too_broad(&state.project_root, home_dir().as_deref()) {
-            return broad_root_error("sense", &state.project_root);
+        if let Err(reason) = crate::core::project_root::guard(&state.project_root) {
+            return broad_root_error("sense", &reason);
         }
         #[cfg(feature = "modernbert")]
         {
@@ -4182,76 +4094,26 @@ or list_nodes for a flat index of this file.",
     /// saw bare "Found N ..." headers and could not target edit_node.
     /// Root-guard tests (field finding 2026-11-10): a home/root cwd must be
     /// refused, a real project directory must pass. Pure — no filesystem setup.
+    /// The rule itself is tested in `core::project_root` (it lives there so the
+    /// CLI and the MCP tools cannot drift). What belongs HERE is the thing that
+    /// is tool-specific: the advice appended to the refusal.
     #[cfg(test)]
     mod root_guard_tests {
         use super::*;
 
-        #[test]
-        fn home_and_filesystem_root_are_too_broad() {
-            let home = std::path::Path::new("/home/nonexistent-user");
-            assert!(root_is_too_broad(home, Some(home)));
-            assert!(root_is_too_broad(std::path::Path::new("/"), None));
-        }
-
-        #[test]
-        fn a_project_directory_is_not_too_broad() {
-            let home = std::path::Path::new("/home/nonexistent-user");
-            // A junk drawer (like /tmp): several ordinary dirs plus ONE
-            // project-lookalike must stay usable — "two projects somewhere
-            // below" is not what makes a workspace.
-            let dir = tempfile::tempdir().unwrap();
-            for name in ["scratch", "logs", "builds", "one-project"] {
-                std::fs::create_dir_all(dir.path().join(name)).unwrap();
-            }
-            std::fs::write(dir.path().join("one-project").join("Cargo.toml"), "").unwrap();
-            assert!(
-                !root_is_too_broad(dir.path(), Some(home)),
-                "a junk drawer holding one project must stay usable"
-            );
-            assert!(!root_is_too_broad(
-                &dir.path().join("one-project"),
-                Some(home)
-            ));
-            assert!(!root_is_too_broad(
-                std::path::Path::new("/home/nonexistent-user/proj"),
-                Some(home)
-            ));
-        }
-
-        #[test]
-        fn a_workspace_holding_several_projects_is_refused() {
-            let dir = tempfile::tempdir().unwrap();
-            let ws = dir.path().join("dev");
-            std::fs::create_dir_all(ws.join("alpha")).unwrap();
-            std::fs::create_dir_all(ws.join("beta")).unwrap();
-            std::fs::write(ws.join("alpha").join("Cargo.toml"), "").unwrap();
-            std::fs::write(ws.join("beta").join("package.json"), "{}").unwrap();
-            assert!(
-                root_is_too_broad(&ws, None),
-                "a folder holding two projects is a workspace, not a project"
-            );
-
-            // A project of its own stays usable even when it contains others
-            // (monorepo): the marker on the ROOT is what decides.
-            std::fs::write(ws.join(".git"), "").unwrap();
-            assert!(
-                !root_is_too_broad(&ws, None),
-                "a repo root is its own project, whatever it contains"
-            );
-
-            // One child project is not a workspace.
-            let single = dir.path().join("single");
-            std::fs::create_dir_all(single.join("only")).unwrap();
-            std::fs::write(single.join("only").join("Cargo.toml"), "").unwrap();
-            assert!(!root_is_too_broad(&single, None));
+        fn text_of(v: &Value) -> String {
+            v["content"][0]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
         }
 
         #[test]
         fn broad_root_error_advises_only_what_the_tool_can_do() {
-            let root = std::path::Path::new("/home/nonexistent-user");
+            let reason = crate::core::project_root::guard(std::path::Path::new("/"))
+                .expect_err("the filesystem root must be refused");
 
-            let sense = broad_root_error("sense", root);
-            let s = sense["content"][0]["text"].as_str().unwrap_or_default();
+            let s = text_of(&broad_root_error("sense", &reason));
             assert!(
                 s.contains("file_path"),
                 "sense has no root parameter — the fix must name file_path/CLI: {s}"
@@ -4261,23 +4123,15 @@ or list_nodes for a flat index of this file.",
                 "sense must not advise a root parameter it does not have: {s}"
             );
 
-            let ci = broad_root_error("code_index", root);
-            let c = ci["content"][0]["text"].as_str().unwrap_or_default();
+            let c = text_of(&broad_root_error("code_index", &reason));
             assert!(
                 c.contains("explicit absolute root"),
                 "code_index does take a root — say so: {c}"
             );
-        }
-
-        #[test]
-        fn the_actual_home_dir_is_detected() {
-            if let Some(h) = home_dir() {
-                assert!(
-                    root_is_too_broad(&h, Some(&h)),
-                    "HOME={} must be refused as a project root",
-                    h.display()
-                );
-            }
+            assert!(
+                c.contains("refusing to use"),
+                "the reason must be carried through: {c}"
+            );
         }
     }
 
