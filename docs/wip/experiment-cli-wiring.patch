@@ -1,0 +1,249 @@
+diff --git a/src/cli.rs b/src/cli.rs
+index 4536d2f..d5e29ff 100644
+--- a/src/cli.rs
++++ b/src/cli.rs
+@@ -309,6 +309,46 @@ enum Commands {
+         #[arg(long, default_value = "0")]
+         compress_threshold: usize,
+     },
++    /// Destructive debugging in a DISPOSABLE worktree: gate code out, let the
++    /// agent observe, record outcomes, restore byte-identically.
++    ///
++    /// GTW measures structure itself (node present, file parses, node count);
++    /// behaviour is reported by the agent (`record --outcome`); appearance is
++    /// never judged here. See docs/DESTRUCTIVE_DEBUGGING_ASSESSMENT.md.
++    Experiment {
++        /// start | next | disable | record | restore | report
++        action: String,
++        /// Worktree to experiment in. Must be a LINKED git worktree with a
++        /// clean tree (see --allow-primary to override the first rule only).
++        #[arg(long)]
++        workspace: Option<PathBuf>,
++        /// What you are chasing, in one sentence (required for `start`).
++        #[arg(long)]
++        symptom: Option<String>,
++        /// single (one node at a time) or bisect (halve the set)
++        #[arg(long, default_value = "single")]
++        strategy: String,
++        /// File relative to the workspace, for `disable` (v1: .rs only).
++        #[arg(long)]
++        file: Option<String>,
++        /// Node path to gate, or a candidate at `start` (repeatable).
++        #[arg(long = "node")]
++        nodes: Vec<String>,
++        /// gone | same | changed | other (required for `record`)
++        #[arg(long)]
++        outcome: Option<String>,
++        /// What the agent observed, in its own words or as a command + result.
++        #[arg(long)]
++        evidence: Option<String>,
++        /// Exit code of the observing command, when there was one.
++        #[arg(long)]
++        exit: Option<i32>,
++        /// Allow experimenting in the repository's primary worktree.
++        #[arg(long)]
++        allow_primary: bool,
++        #[arg(long)]
++        json: bool,
++    },
+     /// Curate context for an AI agent based on task description
+     Curate {
+         /// Task description (what the agent is working on)
+@@ -1482,6 +1522,35 @@ impl Cli {
+                     !no_redact,
+                     compress_threshold,
+                 )?;
++            }
++            Commands::Experiment {
++                action,
++                workspace,
++                symptom,
++                strategy,
++                file,
++                nodes,
++                outcome,
++                evidence,
++                exit,
++                allow_primary,
++                json,
++            } => {
++                Self::handle_experiment(
++                    &action,
++                    workspace,
++                    symptom,
++                    &strategy,
++                    file,
++                    nodes,
++                    outcome,
++                    evidence,
++                    exit,
++                    allow_primary,
++                    json,
++                )?;
++            }
++
+             }
+             Commands::Curate {
+                 task,
+@@ -2448,6 +2517,161 @@ GTW_CODE_INDEX_SOURCE=git_hook "$bin" code-index "$top" --db >/dev/null 2>&1 ||
+         format!("{}\n{}\n{}\n", Self::HOOK_BEGIN, body, Self::HOOK_END)
+     }
+ 
++    /// `experiment` — destructive debugging with a journal.
++    ///
++    /// The owner's own method (gate code out, look, restore) made safe: GTW
++    /// refuses non-disposable workspaces, proves restores by hash, and records
++    /// what was tried so a second agent can pick it up.
++    fn handle_experiment(
++        action: &str,
++        workspace: Option<PathBuf>,
++        symptom: Option<String>,
++        strategy: &str,
++        file: Option<String>,
++        nodes: Vec<String>,
++        outcome: Option<String>,
++        evidence: Option<String>,
++        exit: Option<i32>,
++        allow_primary: bool,
++        json: bool,
++    ) -> Result<()> {
++        use crate::core::experiment as exp;
++        let ws = workspace.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
++
++        match action {
++            "start" => {
++                let symptom = symptom
++                    .ok_or_else(|| anyhow::anyhow!("--symptom is required for `start`"))?;
++                let strat = exp::Strategy::parse(strategy)?;
++                let header =
++                    exp::start(&ws, &symptom, strat, nodes, allow_primary, exp::Budget::default())?;
++                if json {
++                    println!("{}", serde_json::to_string_pretty(&header)?);
++                } else {
++                    println!("✓ experiment {} started in {}", header.id, header.workspace);
++                    println!("  symptom:    {}", header.symptom);
++                    println!("  strategy:   {:?}", header.strategy);
++                    println!("  head:       {}", header.head_sha);
++                    println!("  candidates: {}", header.candidates.len());
++                    if header.primary_worktree {
++                        println!("  ⚠ PRIMARY worktree (allowed by --allow-primary)");
++                    }
++                }
++                Ok(())
++            }
++            "next" => {
++                let journal = exp::load(&ws)?;
++                let (batch, active) = exp::next_batch(&journal);
++                if json {
++                    println!("{}", serde_json::json!({ "batch": batch, "remaining": active }));
++                } else {
++                    println!("remaining: {} candidate(s)", active.len());
++                    if batch.is_empty() {
++                        println!("nothing left to gate — run `report`");
++                    } else {
++                        println!("gate these next:");
++                        for n in &batch {
++                            println!("  {n}");
++                        }
++                    }
++                }
++                Ok(())
++            }
++            "disable" => {
++                let file =
++                    file.ok_or_else(|| anyhow::anyhow!("--file is required for `disable`"))?;
++                if nodes.is_empty() {
++                    return Err(anyhow::anyhow!("--node is required for `disable`"));
++                }
++                let journal = exp::load(&ws)?;
++                let event = exp::disable(&journal, &file, &nodes)?;
++                if let exp::Event::Disabled {
++                    nodes,
++                    before,
++                    after,
++                    verified,
++                    ..
++                } = &event
++                {
++                    if json {
++                        println!("{}", serde_json::to_string_pretty(&event)?);
++                    } else {
++                        println!("✓ gated {} node(s) in {}", nodes.len(), file);
++                        println!(
++                            "  structure: {} → {} nodes, parses: {}",
++                            before.nodes, after.nodes, after.parse_ok
++                        );
++                        println!(
++                            "  verified (file changed): {}",
++                            if *verified { "yes" } else { "NO — this is a bug" }
++                        );
++                        println!("\n  now observe (your job), then `experiment record --outcome …`");
++                    }
++                }
++                Ok(())
++            }
++            "record" => {
++                let outcome =
++                    outcome.ok_or_else(|| anyhow::anyhow!("--outcome is required for `record`"))?;
++                let journal = exp::load(&ws)?;
++                let event =
++                    exp::record(&journal, &outcome, evidence.as_deref().unwrap_or(""), exit)?;
++                if let exp::Event::Recorded {
++                    outcome,
++                    contradiction,
++                    ..
++                } = &event
++                {
++                    if json {
++                        println!("{}", serde_json::to_string_pretty(&event)?);
++                    } else {
++                        println!("✓ recorded: {outcome} (reported by agent)");
++                        if let Some(c) = contradiction {
++                            println!("  ⚠ contradiction: {c} — the claim and the structure disagree");
++                        }
++                    }
++                }
++                Ok(())
++            }
++            "restore" => {
++                let journal = exp::load(&ws)?;
++                let event = exp::restore(&journal)?;
++                if let exp::Event::Restored { verified, .. } = &event {
++                    if json {
++                        println!("{}", serde_json::to_string_pretty(&event)?);
++                    } else if *verified {
++                        println!("✓ restored — file hash matches the pre-experiment state");
++                    } else {
++                        println!(
++                            "✗ restore could NOT be proven byte-identical — check `git status` in {}",
++                            ws.display()
++                        );
++                    }
++                }
++                Ok(())
++            }
++            "report" => {
++                let journal = exp::load(&ws)?;
++                let report = exp::report(&journal);
++                if json {
++                    println!("{}", serde_json::to_string_pretty(&report)?);
++                } else {
++                    println!("experiment {} · {}", report["experiment"], report["symptom"]);
++                    println!("  runs:            {} / {}", report["runs"], report["max_runs"]);
++                    println!("  remaining:       {}", report["remaining_candidates"]);
++                    println!("  minimal scope:   {}", report["minimal_scope"]);
++                    println!("  restore verified:{}", report["restore_verified"]);
++                    println!("  (structure = GTW-verified, behaviour = agent-reported: use --json)");
++                }
++                Ok(())
++            }
++            other => Err(anyhow::anyhow!(
++                "unknown action '{other}' — use start | next | disable | record | restore | report"
++            )),
++        }
++    }
++
++
+     fn handle_code_index_hook(path: &Path, install: bool, uninstall: bool) -> Result<()> {
+         let out = std::process::Command::new("git")
+             .args(["rev-parse", "--absolute-git-dir"])
