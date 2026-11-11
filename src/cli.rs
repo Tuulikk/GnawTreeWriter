@@ -2150,6 +2150,21 @@ Use --no-preview to actually perform the restore"
         // reviewing the index must never require one (2026-11-11).
         let levels = crate::core::index_levels::measure(path)?;
         eprintln!("index levels: {}", levels.status_line);
+        // Graph reading in one line, so the JSON's rates cannot be quoted
+        // without their denominator (M7). Walks traverse RESOLVED edges only.
+        if let Some(calls) = report
+            .local_resolution
+            .iter()
+            .find(|t| t.relation_type == "calls")
+        {
+            eprintln!(
+                "graph: calls {}/{} local resolved ({:.0}%) · {} external/field targets · walks see resolved edges only",
+                calls.resolved,
+                calls.with_local_candidate,
+                calls.rate * 100.0,
+                calls.external
+            );
+        }
         let mut body = serde_json::to_value(&report)?;
         if let Some(obj) = body.as_object_mut() {
             obj.insert("levels".to_string(), serde_json::to_value(&levels)?);

@@ -60,6 +60,40 @@ pub struct SymbolSummary {
 /// FACTS about prose claims — freshness counts + the regenerate
 /// recommendation. The prose TEXT lives in prose_annotations; producers
 /// (model / agents / background tools) read the queue and rewrite.
+/// Honest split of the UNRESOLVED targets, per relation type.
+///
+/// `resolution_rate` alone reads as a quality score, but 82 % of this repo's
+/// unresolved call edges target std/prelude (`to_string`, `unwrap`, `clone`,
+/// `format!`) — names that cannot resolve without indexing std *and* inferring
+/// every receiver type. Lumping those in with a repo-local miss makes the
+/// number unreadable and invites a fabricated fix (resolving `len()` to the one
+/// method named `len`, which is exactly the bug `resolve_relations` guards).
+/// So the denominator is stated explicitly:
+///
+/// * `external` — no entity of that name in the project; not our bug.
+/// * `module_path` — `Type::name` / `super::x`: the resolver does not walk
+///   module paths yet (a real, tractable gap).
+/// * `needs_receiver` — the name exists exactly once and is a method, so it
+///   needs the receiver's type (`self.x → foo.method()`).
+/// * `ambiguous` — the name exists several times; scope/imports would decide.
+///
+/// `rate` is resolved / (resolved + module_path + needs_receiver + ambiguous):
+/// the share of edges that HAVE a local candidate and were actually resolved.
+#[derive(Serialize)]
+pub struct LocalResolution {
+    pub relation_type: String,
+    pub resolved: i64,
+    pub module_path: i64,
+    pub needs_receiver: i64,
+    pub ambiguous: i64,
+    pub external: i64,
+    pub macros: i64,
+    pub with_local_candidate: i64,
+    /// resolved / with_local_candidate — 1.0 means "every edge that could
+    /// possibly point into this project does".
+    pub rate: f64,
+}
+
 #[derive(Serialize)]
 pub struct ProseSummary {
     pub fresh: i64,
@@ -77,6 +111,12 @@ pub struct CoverageReport {
     pub types: Vec<TypeCoverage>,
     pub source_coverage: Vec<SourceClass>,
     pub target_classes: Vec<TargetClass>,
+    /// The denominator `resolution_rate` needs to be readable: per type, how
+    /// much of the unresolved mass is external (std/prelude) vs repo-local.
+    pub local_resolution: Vec<LocalResolution>,
+    /// One-line reading instruction, so no consumer has to infer which number
+    /// means what (a rate without its denominator is the M7 mistake).
+    pub reading_note: String,
     pub symbols: SymbolSummary,
     /// D9 read-time signals: staleness queue non-empty at measure time.
     pub index_stale: bool,
@@ -88,6 +128,33 @@ pub struct CoverageReport {
     pub extractor_version: String,
     pub generation_key: Option<String>,
     pub last_refresh_rev: Option<String>,
+}
+
+/// D7 source-identity classes (extracted unchanged, one function so the
+/// measure() body stays readable).
+fn source_coverage_for(conn: &Connection) -> Result<Vec<SourceClass>> {
+    let mut source_coverage = Vec::new();
+    let mut stmt = conn.prepare(
+        "SELECT CASE
+            WHEN e.id IS NOT NULL THEN 'matched'
+            WHEN r.from_id LIKE '%:callsite:%' THEN 'synthetic_callsite'
+            WHEN r.from_id LIKE '%:function:%' THEN 'function_scope_unmatched'
+            WHEN r.from_id LIKE '%:impl:%' THEN 'impl_scope_unmatched'
+            WHEN r.from_id LIKE '%:file:%' THEN 'file_scope_unmatched'
+            ELSE 'other_unmatched'
+         END AS class,
+         COUNT(*)
+         FROM relations r
+         LEFT JOIN entities e ON e.id = r.from_id
+         GROUP BY class
+         ORDER BY COUNT(*) DESC, class",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    for row in rows {
+        let (class, count) = row?;
+        source_coverage.push(SourceClass { class, count });
+    }
+    Ok(source_coverage)
 }
 
 /// Measure graph quality from the store. Deterministic: same DB bytes →
@@ -129,29 +196,112 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
     // and the GROUP BY totals stay equal to relations_total. `matched`
     // is checked first; the identity classes follow the gtw id format
     // (`gtw:{file}:callsite:{line}` etc., index_relations.rs).
-    let mut source_coverage = Vec::new();
+    // The denominator that makes every other number readable (M7): classify
+    // each UNRESOLVED target by whether the project even defines that name.
+    // One name table (entities) + one pass over the unresolved rows.
+    let mut local_resolution = Vec::new();
     {
-        let mut stmt = conn.prepare(
-            "SELECT CASE
-                WHEN e.id IS NOT NULL THEN 'matched'
-                WHEN r.from_id LIKE '%:callsite:%' THEN 'synthetic_callsite'
-                WHEN r.from_id LIKE '%:function:%' THEN 'function_scope_unmatched'
-                WHEN r.from_id LIKE '%:impl:%' THEN 'impl_scope_unmatched'
-                WHEN r.from_id LIKE '%:file:%' THEN 'file_scope_unmatched'
-                ELSE 'other_unmatched'
-             END AS class,
-             COUNT(*)
-             FROM relations r
-             LEFT JOIN entities e ON e.id = r.from_id
-             GROUP BY class
-             ORDER BY COUNT(*) DESC, class",
-        )?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
-        for row in rows {
-            let (class, count) = row?;
-            source_coverage.push(SourceClass { class, count });
+        use std::collections::HashMap;
+        // name -> (total entities, method entities)
+        let mut names: HashMap<String, (i64, i64)> = HashMap::new();
+        {
+            let mut stmt = conn.prepare(
+                "SELECT name, COUNT(*), COALESCE(SUM(id LIKE '%:function:%::%'), 0)
+                 FROM entities GROUP BY name",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
+            })?;
+            for row in rows {
+                let (name, count, methods) = row?;
+                names.insert(name, (count, methods));
+            }
+        }
+        #[derive(Default)]
+        struct Acc {
+            resolved: i64,
+            module_path: i64,
+            needs_receiver: i64,
+            ambiguous: i64,
+            external: i64,
+            macros: i64,
+        }
+        let mut acc: HashMap<String, Acc> = HashMap::new();
+        {
+            let mut stmt = conn.prepare("SELECT relation_type, to_name, to_id FROM relations")?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                ))
+            })?;
+            for row in rows {
+                let (rtype, to_name, to_id) = row?;
+                let a = acc.entry(rtype).or_default();
+                if to_id.is_some() {
+                    a.resolved += 1;
+                    continue;
+                }
+                if to_name.ends_with('!') {
+                    a.macros += 1;
+                    continue;
+                }
+                let bare = to_name.rsplit("::").next().unwrap_or(&to_name);
+                match names.get(bare) {
+                    // No entity carries this name: std, a prelude type, another
+                    // crate, or a field. Nothing in this store can resolve it.
+                    None => a.external += 1,
+                    Some(&(count, methods)) => {
+                        if to_name.contains("::") {
+                            // A path we were TOLD: the resolver simply does not
+                            // walk module paths yet. Tractable, not external.
+                            a.module_path += 1;
+                        } else if count > 1 {
+                            a.ambiguous += 1;
+                        } else if methods > 0 {
+                            a.needs_receiver += 1;
+                        } else {
+                            // Unique free function that should have resolved —
+                            // a genuine miss worth a test if it ever appears.
+                            a.needs_receiver += 1;
+                        }
+                    }
+                }
+            }
+        }
+        let mut entries: Vec<(String, Acc)> = acc.into_iter().collect();
+        entries.sort_by(|a, b| {
+            let ta = a.1.resolved + a.1.module_path + a.1.needs_receiver + a.1.ambiguous;
+            let tb = b.1.resolved + b.1.module_path + b.1.needs_receiver + b.1.ambiguous;
+            tb.cmp(&ta).then_with(|| a.0.cmp(&b.0))
+        });
+        for (relation_type, a) in entries {
+            let local = a.resolved + a.module_path + a.needs_receiver + a.ambiguous;
+            let rate = if local > 0 {
+                a.resolved as f64 / local as f64
+            } else {
+                1.0
+            };
+            local_resolution.push(LocalResolution {
+                relation_type,
+                resolved: a.resolved,
+                module_path: a.module_path,
+                needs_receiver: a.needs_receiver,
+                ambiguous: a.ambiguous,
+                external: a.external,
+                macros: a.macros,
+                with_local_candidate: local,
+                rate: (rate * 1000.0).round() / 1000.0,
+            });
         }
     }
+
+    let source_coverage = source_coverage_for(conn)?;
 
     // Target classes: macro targets carry a `!` suffix (increment C
     // convention), qualified paths hint at module paths the resolver
@@ -231,12 +381,29 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
         }
     };
     let relations_total: i64 = relations_total(conn)?;
+    let reading_note = match local_resolution.iter().find(|t| t.relation_type == "calls") {
+        Some(c) => format!(
+                "resolution_rate counts external targets as failures. Of calls: {} of {} local-candidate edges resolved ({:.0} %); {} target std/prelude or fields and cannot resolve without indexing std + inferring receiver types; {} need a receiver type, {} are ambiguous names, {} carry a module path the resolver does not walk. Graph walks (impact/cycles/chain) traverse RESOLVED edges only.",
+                c.resolved,
+                c.with_local_candidate,
+                c.rate * 100.0,
+                c.external,
+                c.needs_receiver,
+                c.ambiguous,
+                c.module_path
+            ),
+        None => {
+            "resolution_rate counts external targets as failures; see local_resolution for the per-type split.".to_string()
+        }
+    };
     Ok(CoverageReport {
         files,
         relations_total,
         types,
         source_coverage,
         target_classes,
+        local_resolution,
+        reading_note,
         symbols: SymbolSummary {
             total: symbols_total,
             external: symbols_external,
@@ -356,6 +523,58 @@ mod tests {
         // history_gap must be true; the queue is empty → not stale.
         assert!(report.history_gap, "files without revision history = gap");
         assert!(!report.index_stale);
+    }
+
+    /// The M7 lock: a rate without its denominator is a number two people can
+    /// read as the same fact. `resolution_rate` counts external targets as
+    /// failures, so `local_resolution` must keep them apart — otherwise the
+    /// only way to "improve" the rate is to resolve `len()` to the one method
+    /// named `len`, which is the fabricated edge `resolve_relations` refuses.
+    #[test]
+    fn local_resolution_states_the_denominator() {
+        let conn = mem_store();
+        seed(&conn);
+        // Two unresolved calls that LOOK alike but are not:
+        //   `unwrap` -> no entity anywhere: std, unrecoverable
+        //   `render` -> the project defines it once, as a bare-named METHOD
+        //               (the real convention: 574/574 method names are bare)
+        conn.execute_batch(
+            r#"
+            INSERT INTO entities(id, file, kind, name, line, node_path) VALUES
+              ('gtw:src/a.rs:function:Widget::render', 'src/a.rs', 'function', 'render', 9, '9');
+            INSERT INTO relations(from_id, to_name, to_id, relation_type, line, file) VALUES
+              ('gtw:src/a.rs:function:alpha', 'unwrap', NULL, 'calls', 3, 'src/a.rs'),
+              ('gtw:src/a.rs:function:alpha', 'render', NULL, 'calls', 4, 'src/a.rs');
+            "#,
+        )
+        .unwrap();
+
+        let report = measure(&conn).unwrap();
+        let calls = report
+            .local_resolution
+            .iter()
+            .find(|t| t.relation_type == "calls")
+            .expect("calls row");
+
+        assert_eq!(calls.resolved, 2, "the two seeded resolved calls");
+        assert_eq!(calls.external, 1, "unwrap has no entity: external");
+        assert_eq!(calls.needs_receiver, 1, "render is a unique method");
+        assert_eq!(calls.macros, 1, "cfg! is a macro, not an external call");
+        assert_eq!(calls.with_local_candidate, 3);
+        assert!((calls.rate - 0.667).abs() < 1e-3);
+        assert!(report.reading_note.contains("RESOLVED edges only"));
+
+        // The parts must reconstruct the whole: nothing silently dropped.
+        assert_eq!(
+            calls.resolved
+                + calls.module_path
+                + calls.needs_receiver
+                + calls.ambiguous
+                + calls.external
+                + calls.macros,
+            5,
+            "every calls edge lands in exactly one class"
+        );
     }
 
     #[test]

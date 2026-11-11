@@ -47,6 +47,30 @@
   (Motor2) måste skicka filens text; att bara ha en sökväg är precis den
   information som saknades.
 
+### Added — grafen redovisar sin nämnare (upplösningsgraden var aldrig fel, bara oläsbar)
+
+- **Fyndet:** `resolution_rate` räknade std/anrop till icke-existerande namn som
+  misslyckanden. Av 19 427 oupplösta `calls` är **12 284 std/prelude/fält**
+  (`to_string` 982, `unwrap` 850, `clone` 639 …) och **3 659 makron** — de kan
+  aldrig lösas utan att indexera std *och* inferera varje mottagartyp. Att
+  "förbättra" siffran genom att lösa `len()` mot enda metoden `len` är exakt
+  den fabricerade kant `resolve_relations` vaktar mot.
+- **Ny nämnare i `code-index --coverage`:** `local_resolution` per relationstyp
+  med `resolved / module_path / needs_receiver / ambiguous / external / macros`
+  och `rate = resolved / (resolved + de lokala klasserna)`. Klasserna summerar
+  till alla kanter (testet `local_resolution_states_the_denominator` låser det).
+- **Mätt på det här repot:** `calls` 2 212 / 5 696 lokala kandidater = **39 %**
+  · `uses` 53 % · `imports` 47 % · `implements` 42 %. Kvar att vinna är
+  2 056 `needs_receiver` + 1 428 `ambiguous` — det är typinferens, inte en
+  bättre namnsökning.
+- **`reading_note`** i rapporten och en rad på stderr:
+  `graph: calls 2212/5696 local resolved (39%) · 12284 external/field targets · walks see resolved edges only`.
+- **`impact` bär nu `graph_coverage`** (resolved/unresolved/local-candidate +
+  rate). En grafvandring följer bara upplösta kanter, så ett tomt `reachable`
+  betyder "inget påverkat" *eller* "kanterna fanns aldrig" — payloaden skiljer
+  dem nu i stället för att svara självsäkert på en åttondel av grafen.
+
+
 
 ## [0.26.1] - 2026-11-11
 

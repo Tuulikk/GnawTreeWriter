@@ -221,6 +221,56 @@ pub struct SymbolSeed {
     pub file: String,
 }
 
+/// What a graph walk could SEE at the moment it ran. `traverse` only follows
+/// resolved edges, so a small `reachable` list has two possible explanations —
+/// nothing is affected, or the edges were never resolvable (std, fields,
+/// unresolved receivers). Reporting the denominator is what separates them:
+/// on this repo `calls` is ~12 % resolved, i.e. `impact` sees roughly one edge
+/// in eight, and silently returning "3 files" would be a confident half-truth.
+#[derive(Debug, Clone, Serialize)]
+pub struct GraphCoverage {
+    pub resolved_edges: i64,
+    pub unresolved_edges: i64,
+    /// Unresolved targets whose name the project DOES define — the genuinely
+    /// recoverable part (see `code-index --coverage`).
+    pub unresolved_with_local_candidate: i64,
+    /// resolved / (resolved + local-candidate), 0.0..=1.0
+    pub local_rate: f64,
+    pub note: &'static str,
+}
+
+/// Measure what a walk can see. One pass; the name table is built inline so a
+/// caller needs nothing but the connection.
+pub fn graph_coverage(conn: &Connection) -> Result<GraphCoverage> {
+    let (resolved, local): (i64, i64) = conn.query_row(
+        "SELECT COALESCE(SUM(r.to_id IS NOT NULL), 0),
+                COALESCE(SUM(r.to_id IS NULL AND nc.name IS NOT NULL), 0)
+         FROM relations r
+         LEFT JOIN (SELECT name, COUNT(*) FROM entities GROUP BY name) nc
+                ON nc.name = r.to_name",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let total = resolved
+        + conn.query_row(
+            "SELECT COUNT(*) FROM relations WHERE to_id IS NULL",
+            [],
+            |r| r.get::<_, i64>(0),
+        )?;
+    let local_rate = if resolved + local > 0 {
+        resolved as f64 / (resolved + local) as f64
+    } else {
+        0.0
+    };
+    Ok(GraphCoverage {
+        resolved_edges: resolved,
+        unresolved_edges: total - resolved,
+        unresolved_with_local_candidate: local,
+        local_rate: (local_rate * 1000.0).round() / 1000.0,
+        note: "A walk follows RESOLVED edges only. unresolved_edges includes std/prelude calls that cannot resolve without indexing std; unresolved_with_local_candidate is the recoverable remainder (run `code-index --coverage`).",
+    })
+}
+
 /// Result of `impact`. `seeds` is empty when the name is not in the store —
 /// reported as-is, never fabricated into an impact chain (same honesty rule
 /// as `ImpactReport::unresolved_calls`).
@@ -229,6 +279,9 @@ pub struct ImpactReport {
     pub symbol: String,
     pub seeds: Vec<SymbolSeed>,
     pub reachable: Vec<Reach>,
+    /// Which edges the walk could have followed. Never omit this: an empty
+    /// `reachable` plus a 12 % rate is a coverage statement, not a verdict.
+    pub graph_coverage: GraphCoverage,
 }
 
 /// Entity ids that define `symbol` (a bare name like `parse_file`, not an id).
@@ -269,6 +322,7 @@ pub fn impact(conn: &Connection, symbol: &str, max_depth: usize) -> Result<Impac
         symbol: symbol.to_string(),
         seeds,
         reachable: reachable_out,
+        graph_coverage: graph_coverage(conn)?,
     })
 }
 
