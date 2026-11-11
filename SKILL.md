@@ -123,8 +123,8 @@ column is the fallback when the MCP namespace is missing.
 | Can I trust this graph answer? | the `meta` block on every graph answer | `meta.index_stale: true` ⇒ run `code-index <root> --db` before planning |
 | Which files should I read FIRST for this task? | `curate` → `gnawtreewriter curate "<task>"` | `curate {"task": "auth flow", "max_tokens": 5000}` |
 | Give me the whole project condensed | `pack` → `gnawtreewriter pack . --compress` | `pack {"path": ".", "compress": true, "format": "markdown"}` |
-| **Create a NEW file** (CLI only — no MCP tool yet) | `scaffold` → `gnawtreewriter scaffold <file>` | `gnawtreewriter scaffold src/new.rs --content - < body.rs` **or** `--from body.rs` **or** `--schema "rust:mod(name:auth)"`. Parse-validated before the write and logged as `Insert`. Note: `undo` **cannot** delete a created file yet. |
-| **Repair a file GTW cannot parse** (CLI only — no MCP tool yet) | `heal` → `gnawtreewriter heal <file>` | `gnawtreewriter heal src/x.rs` = proposal; `--apply` = write, re-verified against the parser and logged. Handles unbalanced braces both ways; **never deletes code** (an extra `}` is reported with its line, not removed). |
+| **Create a NEW file** (CLI + MCP) | `scaffold` → `gnawtreewriter scaffold <file>` | `gnawtreewriter scaffold src/new.rs --content - < body.rs` **or** `--from body.rs` **or** `--schema "rust:mod(name:auth)"`. Parse-validated before the write and logged as `Insert`. Note: `undo` **cannot** delete a created file yet. |
+| **Repair a file GTW cannot parse** (CLI + MCP) | `heal` → `gnawtreewriter heal <file>` | `gnawtreewriter heal src/x.rs` = proposal; `--apply` = write, re-verified against the parser and logged. Handles unbalanced braces both ways; **never deletes code** (an extra `}` is reported with its line, not removed). |
 | Who calls this function? (CLI impact answer) | (CLI) `gnaw-blast` — no MCP tool yet | `gnawtreewriter gnaw-blast <file> <node_path> --recursive` |
 
 **Diagnostic chain** (editing one file): `analyze`/`get_skeleton` → `sense`/`search_nodes` → `read_node` → `preview_edit` → `edit_node`/`semantic_edit` → verify (`cargo check`/tests) → `undo` if wrong.

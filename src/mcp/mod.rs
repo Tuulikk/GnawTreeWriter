@@ -286,6 +286,53 @@ pub mod mcp_server {
                         let fp = validate_arg("file_path")?;
                         Ok(handle_validate_mcp(fp))
                     }
+                    "scaffold" => {
+                        let fp = validate_arg("file_path")?;
+                        let content = arguments.get("content").and_then(Value::as_str);
+                        let from = arguments.get("from").and_then(Value::as_str);
+                        let schema = arguments.get("schema").and_then(Value::as_str);
+                        let source = if let Some(c) = content {
+                            crate::core::create_file::ContentSource::Literal(c)
+                        } else if let Some(f) = from {
+                            crate::core::create_file::ContentSource::File(std::path::Path::new(f))
+                        } else if let Some(s) = schema {
+                            crate::core::create_file::ContentSource::Schema(s)
+                        } else {
+                            return Ok(tool_error(
+                                "scaffold: one of content, from or schema is required".to_string(),
+                            ));
+                        };
+                        Ok(
+                            match crate::core::create_file::create(std::path::Path::new(fp), source)
+                            {
+                                Ok(bytes) => tool_success(
+                                    format!("✓ created {fp} ({bytes} bytes, parses)"),
+                                    Some(json!({"created": true, "file": fp, "bytes": bytes})),
+                                ),
+                                Err(e) => tool_error(format!("scaffold failed: {e}")),
+                            },
+                        )
+                    }
+                    "heal" => {
+                        let fp = validate_arg("file_path")?;
+                        let apply = arguments
+                            .get("apply")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        Ok(
+                            match crate::core::healer::repair_file(std::path::Path::new(fp), apply)
+                            {
+                                Ok(outcome) => tool_success(
+                                    format!(
+                                        "heal: {}",
+                                        serde_json::to_string(&outcome).unwrap_or_default()
+                                    ),
+                                    Some(serde_json::to_value(&outcome).unwrap_or(Value::Null)),
+                                ),
+                                Err(e) => tool_error(format!("heal failed: {e}")),
+                            },
+                        )
+                    }
                     "history" => {
                         let limit =
                             arguments.get("limit").and_then(Value::as_u64).unwrap_or(10) as usize;
@@ -1048,6 +1095,34 @@ pub mod mcp_server {
             }
         }));
         tools.push(json!({
+            "name": "scaffold",
+            "title": "Create ONE new file (validated, logged)",
+            "description": "Create a NEW file; everything else is refused: an existing file is rejected (use edit_node/insert on those). The content is parse-validated against the real parser BEFORE the write, so a scaffold cannot leave a broken file. Provide exactly one source: `content` (literal), `from` (read an existing file) or `schema` (structural DSL, e.g. \"rust:mod(name:auth, fn:validate)\"). RETURNS {created, file, bytes}. NOTE: the creation is logged as an Insert, but undo cannot delete a created file yet — that is a separate operation (see uppslag.md).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string", "description": "Path of the file to create" },
+                    "content": { "type": "string", "description": "Literal content for the new file" },
+                    "from": { "type": "string", "description": "Read the content from this existing file" },
+                    "schema": { "type": "string", "description": "Structural DSL, e.g. rust:mod(name:auth)" }
+                },
+                "required": ["file_path"]
+            }
+        }));
+        tools.push(json!({
+            "name": "heal",
+            "title": "Repair a syntax-broken file (proposal by default)",
+            "description": "Repair a file GTW cannot parse (unbalanced braces today) — the dead end where validate/analyze/read all refuse. DEFAULT = proposal only, nothing written. apply=true writes the repair, and only after re-parsing proves the repaired text is valid; the write is logged so undo works. GTW never deletes code: an EXTRA closing brace is reported with its line number instead. RETURNS {outcome: already_parses|no_recipe|proposal_only|preview|applied, ...}.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string", "description": "Path to the file to repair" },
+                    "apply": { "type": "boolean", "description": "Write the repair (default: proposal only)" }
+                },
+                "required": ["file_path"]
+            }
+        }));
+        tools.push(json!({
             "name": "history",
             "title": "Recent edit history (transaction log)",
             "description": "Recent transactions from the project transaction log — the MCP view of `gnawtreewriter history`: what changed, in which order, with stable ids. WHEN: after a series of edits, before deciding what to undo, or when asked \"what did GTW change here?\". RETURNS: {transactions: [{id, timestamp, operation, file, node_path, description}], count}, newest first; empty history is reported as a normal state with setup guidance. Example: {\"limit\": 5}.",
@@ -1233,10 +1308,6 @@ pub mod mcp_server {
     fn tool_error(msg: String) -> Value {
         json!({"content": [{ "type": "text", "text": msg }], "isError": true})
     }
-
-    /// The rule itself lives in `core::project_root` so the CLI and the MCP
-    /// tools apply exactly one predicate (they drifted once: the CLI could
-    /// index `$HOME` while these tools refused it).
 
     /// Loud refusal for a too-broad root: the REASON comes from
     /// `core::project_root::guard` (one rule for CLI and MCP), the ADVICE is

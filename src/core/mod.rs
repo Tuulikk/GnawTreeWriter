@@ -18,8 +18,10 @@ pub mod code_index;
 pub mod code_index_coverage;
 pub mod code_index_db;
 pub mod compress;
+pub mod create_file;
 pub mod curator;
 pub mod diagnostics;
+
 pub mod diff_parser;
 pub mod edit_delta;
 pub mod explore;
