@@ -135,7 +135,11 @@ impl ModelNeed {
         match self {
             ModelNeed::None => "none",
             ModelNeed::Embedder => "bge-base 768",
-            ModelNeed::Llm => "lfm2.5",
+            // The build gate belongs in the label: the default build has NO
+            // generative path at all, and `explain` fails with "requires the
+            // 'mamba' feature" (verified 2026-11-11). A table that says only
+            // "lfm2.5" hides that.
+            ModelNeed::Llm => "lfm2.5 +mamba",
         }
     }
 }
@@ -258,6 +262,11 @@ pub fn render(project_root: &std::path::Path) -> String {
         ));
     }
     s.push('\n');
+    s.push_str(
+        "note: L4 rows additionally need a build with `--features mamba`; the\n\
+         default build has no generative path (`explain` errors out). Disk/RAM\n\
+         cost is the installed model, not the binary.\n\n",
+    );
     let models = installed_models(project_root);
     if models.is_empty() {
         s.push_str("installed models: none — L0-L2 fully usable, L3/L4 unavailable\n");
