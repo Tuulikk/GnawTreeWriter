@@ -1043,6 +1043,18 @@ impl Cli {
                 };
 
                 let mut writer = GnawTreeWriter::new(&file_path)?;
+                // Say WHICH node the path addressed. `0` is the first CHILD, not
+                // the root — and getting that wrong is invisible otherwise.
+                // Field finding 2026-11-11: three false bug reports in one day
+                // came from misreading an insert that was behaving correctly.
+                if let Some((path, node_type, name)) = writer.describe_node(&insert_parent) {
+                    println!(
+                        "parent: {node_type} '{}' (path {path})",
+                        name.unwrap_or_else(|| "unnamed".to_string())
+                    );
+                } else {
+                    println!("parent: (path {insert_parent} does not resolve — insert will fail)");
+                }
                 let op = EditOperation::Insert {
                     parent_path: insert_parent.clone(),
                     position: position.unwrap_or(1),
