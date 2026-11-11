@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: cc35ae44226b2b446dbfdb361e4a79fa
+> Body-hash: 854b5ecc4a1bfb07519cef1c67dea66b
 
 ## Träd
 
@@ -90,7 +90,7 @@ src/core/
   batch.rs (897 rader)
   blast.rs (310 rader)
   blueprint.rs (182 rader)
-  capabilities.rs (323 rader)
+  capabilities.rs (329 rader)
   code_graph.rs (579 rader)
   code_index.rs (693 rader)
   code_index_coverage.rs (604 rader)
@@ -98,7 +98,7 @@ src/core/
   compress.rs (487 rader)
   create_file.rs (88 rader)
   curator.rs (709 rader)
-  diagnostics.rs (1083 rader)
+  diagnostics.rs (1091 rader)
   diff_parser.rs (586 rader)
   edit_delta.rs (749 rader)
   experiment.rs (556 rader)
@@ -134,7 +134,7 @@ src/core/
   visualizer.rs (200 rader)
   visualizer_test.rs (82 rader)
 src/llm/
-  ai_manager.rs (1621 rader)
+  ai_manager.rs (1625 rader)
   batch.rs (96 rader)
   gnaw_sense.rs (977 rader)
   harmony.rs (364 rader)
@@ -735,18 +735,18 @@ _(inga toppnivå-items)_
   - `pub fn render_to_terminal(&self, blueprint: &ProjectBlueprint)` :103
   - `pub fn render_to_markdown(&self, blueprint: &ProjectBlueprint) -> String` :145
 
-### capabilities.rs (323 rader)
+### capabilities.rs (329 rader)
 - `pub const CAPABILITIES: &[Capability] = &[` :21
-- `pub fn first_model_row() -> usize` :109
-- `pub enum ModelNeed` :118
-- `impl ModelNeed` :127
-  - `pub fn label(self) -> &'static str` :128
-- `pub struct Capability` :138
-- `pub struct InstalledModel` :150
-- `pub fn installed_models(project_root: &std::path::Path) -> Vec<InstalledModel>` :158
-- `fn role_of(dir: &str) -> &'static str` :191
-- `fn dir_size_mb(path: &std::path::Path) -> u64` :201
-- `pub fn render(project_root: &std::path::Path) -> String` :223
+- `pub fn first_model_row() -> usize` :115
+- `pub enum ModelNeed` :124
+- `impl ModelNeed` :133
+  - `pub fn label(self) -> &'static str` :134
+- `pub struct Capability` :144
+- `pub struct InstalledModel` :156
+- `pub fn installed_models(project_root: &std::path::Path) -> Vec<InstalledModel>` :164
+- `fn role_of(dir: &str) -> &'static str` :197
+- `fn dir_size_mb(path: &std::path::Path) -> u64` :207
+- `pub fn render(project_root: &std::path::Path) -> String` :229
 
 ### code_graph.rs (579 rader)
 - `pub struct Reach` :27
@@ -868,7 +868,7 @@ _(inga toppnivå-items)_
 - `fn score_by_dependencies(files: &[PathBuf], root: &Path, target: &str) -> Vec<CuratedFile>` :303
 - `fn check_if_definition(tree: &TreeNode, target: &str) -> bool` :382
 
-### diagnostics.rs (1083 rader)
+### diagnostics.rs (1091 rader)
 - `pub struct DiagnosticReport` :7
 - `pub struct DiagnosticError` :22
 - `pub struct VerboseTrace` :36
@@ -876,53 +876,53 @@ _(inga toppnivå-items)_
 - `pub struct AstDiff` :51
 - `pub struct StructuralChange` :63
 - `pub struct DoctorReport` :76
-- `fn semantic_model_present(project_root: &std::path::Path) -> bool` :94
-- `pub fn capability_level(project_root: &std::path::Path) -> &'static str` :108
-- `pub struct DoctorCheck` :117
-- `pub fn run_parser_smoke(extension: &str, code: &str) -> DoctorCheck` :129
-- `impl DiagnosticReport` :159
-  - `pub fn ok(tool: &str, file: &str, language: &str) -> Self` :160
-  - `pub fn err(tool: &str, file: &str, language: &str, error: DiagnosticError) -> Self` :173
-  - `pub fn with_verbose(&mut self, trace: VerboseTrace) -> &mut Self` :186
-  - `pub fn with_ast_diff(&mut self, diff: AstDiff) -> &mut Self` :191
-- `impl DiagnosticError` :197
-  - `pub fn from_anyhow(err: &anyhow::Error, language: &str) -> Self` :198
-  - `pub fn with_context_line(mut self, source: &str) -> Self` :233
-- `impl Default for VerboseTrace` :244
-  - `fn default() -> Self` :245
-- `impl VerboseTrace` :250
-  - `pub fn new() -> Self` :251
-  - `pub fn step(&mut self, phase: &str, message: &str) -> &mut Self` :255
-  - `pub fn step_with_detail(&mut self, phase: &str, message: &str, detail: &str) -> &mut Self` :265
-- `impl AstDiff` :276
-  - `pub fn compare(before: &TreeNode, after: &TreeNode) -> Self` :278
-  - `fn compare_children(before: &TreeNode, after: &TreeNode, changes: &mut Vec<StructuralChange>)` :347
-- `impl Default for DoctorReport` :386
-  - `fn default() -> Self` :387
-- `impl DoctorReport` :392
-  - `pub fn new() -> Self` :393
-  - `pub fn pass(&mut self, category: &str, name: &str, message: &str)` :405
-  - `pub fn fail(&mut self, category: &str, name: &str, message: &str)` :417
-  - `pub fn warn(&mut self, category: &str, name: &str, message: &str)` :430
-  - `pub fn record_check(&mut self, check: DoctorCheck)` :445
-  - `pub fn check_parser(&mut self, extension: &str, code: &str)` :460
-  - `pub fn check_backups(&mut self, project_root: &std::path::Path)` :465
-  - `pub fn check_transaction_log(&mut self, project_root: &std::path::Path)` :529
-  - `pub fn check_semantic_model(&mut self, project_root: &std::path::Path)` :562
-  - `pub fn check_knowledge_graph(&mut self, project_root: &std::path::Path)` :582
-  - `pub fn check_code_index_store(&mut self, project_root: &std::path::Path)` :657
-  - `pub fn check_binary_freshness(&mut self, project_root: &std::path::Path)` :695
-- `fn extract_line_number(msg: &str) -> Option<usize>` :738
-- `fn generate_suggestion(error_type: &str, language: &str, _msg: &str) -> Option<String>` :760
-- `fn collect_node_types(node: &TreeNode) -> std::collections::HashMap<String, usize>` :793
-- `fn count_nodes(node: &TreeNode) -> usize` :805
-- `fn max_depth(node: &TreeNode, current: usize) -> usize` :809
-- `fn is_important_node_type(ntype: String) -> bool` :821
-- `fn is_gnawtreewriter_manifest(text: &str) -> bool` :840
-- `fn cargo_toml_version(text: &str) -> Option<String>` :851
-- `fn compare_version_triples(a: &str, b: &str) -> std::cmp::Ordering` :878
-- `fn installed_binary_date() -> String` :901
-- `pub fn run_full_doctor(project_root: &std::path::Path) -> DoctorReport` :914
+- `fn semantic_model_present(project_root: &std::path::Path) -> bool` :101
+- `pub fn capability_level(project_root: &std::path::Path) -> &'static str` :116
+- `pub struct DoctorCheck` :125
+- `pub fn run_parser_smoke(extension: &str, code: &str) -> DoctorCheck` :137
+- `impl DiagnosticReport` :167
+  - `pub fn ok(tool: &str, file: &str, language: &str) -> Self` :168
+  - `pub fn err(tool: &str, file: &str, language: &str, error: DiagnosticError) -> Self` :181
+  - `pub fn with_verbose(&mut self, trace: VerboseTrace) -> &mut Self` :194
+  - `pub fn with_ast_diff(&mut self, diff: AstDiff) -> &mut Self` :199
+- `impl DiagnosticError` :205
+  - `pub fn from_anyhow(err: &anyhow::Error, language: &str) -> Self` :206
+  - `pub fn with_context_line(mut self, source: &str) -> Self` :241
+- `impl Default for VerboseTrace` :252
+  - `fn default() -> Self` :253
+- `impl VerboseTrace` :258
+  - `pub fn new() -> Self` :259
+  - `pub fn step(&mut self, phase: &str, message: &str) -> &mut Self` :263
+  - `pub fn step_with_detail(&mut self, phase: &str, message: &str, detail: &str) -> &mut Self` :273
+- `impl AstDiff` :284
+  - `pub fn compare(before: &TreeNode, after: &TreeNode) -> Self` :286
+  - `fn compare_children(before: &TreeNode, after: &TreeNode, changes: &mut Vec<StructuralChange>)` :355
+- `impl Default for DoctorReport` :394
+  - `fn default() -> Self` :395
+- `impl DoctorReport` :400
+  - `pub fn new() -> Self` :401
+  - `pub fn pass(&mut self, category: &str, name: &str, message: &str)` :413
+  - `pub fn fail(&mut self, category: &str, name: &str, message: &str)` :425
+  - `pub fn warn(&mut self, category: &str, name: &str, message: &str)` :438
+  - `pub fn record_check(&mut self, check: DoctorCheck)` :453
+  - `pub fn check_parser(&mut self, extension: &str, code: &str)` :468
+  - `pub fn check_backups(&mut self, project_root: &std::path::Path)` :473
+  - `pub fn check_transaction_log(&mut self, project_root: &std::path::Path)` :537
+  - `pub fn check_semantic_model(&mut self, project_root: &std::path::Path)` :570
+  - `pub fn check_knowledge_graph(&mut self, project_root: &std::path::Path)` :590
+  - `pub fn check_code_index_store(&mut self, project_root: &std::path::Path)` :665
+  - `pub fn check_binary_freshness(&mut self, project_root: &std::path::Path)` :703
+- `fn extract_line_number(msg: &str) -> Option<usize>` :746
+- `fn generate_suggestion(error_type: &str, language: &str, _msg: &str) -> Option<String>` :768
+- `fn collect_node_types(node: &TreeNode) -> std::collections::HashMap<String, usize>` :801
+- `fn count_nodes(node: &TreeNode) -> usize` :813
+- `fn max_depth(node: &TreeNode, current: usize) -> usize` :817
+- `fn is_important_node_type(ntype: String) -> bool` :829
+- `fn is_gnawtreewriter_manifest(text: &str) -> bool` :848
+- `fn cargo_toml_version(text: &str) -> Option<String>` :859
+- `fn compare_version_triples(a: &str, b: &str) -> std::cmp::Ordering` :886
+- `fn installed_binary_date() -> String` :909
+- `pub fn run_full_doctor(project_root: &std::path::Path) -> DoctorReport` :922
 
 ### diff_parser.rs (586 rader)
 - `pub struct DiffHunk` :20
@@ -1539,7 +1539,7 @@ _(inga toppnivå-items)_
 
 ## src/llm/
 
-### ai_manager.rs (1621 rader)
+### ai_manager.rs (1625 rader)
 - `pub enum ModelSource` :24
 - `impl ModelSource` :29
   - `pub fn as_str(self) -> &'static str` :30
@@ -1594,22 +1594,22 @@ _(inga toppnivå-items)_
   - `pub fn estimate_tokens(&self, text: &str) -> usize` :909
   - `pub fn generate_lfm25(` :922
   - `pub async fn generate_semantic_report(&self, file_path: &str) -> Result<SemanticReport>` :996
-  - `pub async fn setup(&self, _model: AiModel, _device: DeviceType, _force: bool) -> Result<()>` :1059
-  - `pub fn get_status(&self) -> Result<AiStatus>` :1142
-  - `fn get_model_path(&self, model: &AiModel) -> PathBuf` :1164
-- `fn sample_token(` :1179
-- `pub struct SemanticReport` :1230
-- `pub struct QualityFinding` :1237
-- `pub struct Source` :1248
-- `pub fn sources_from_evidence(evidence: &[(String, String)]) -> Vec<Source>` :1257
-- `impl SemanticReport` :1303
-  - `pub fn sources(&self) -> Vec<Source>` :1306
-- `pub struct AiStatus` :1325
-- `fn download_file(url: &str, dest: &std::path::Path) -> Result<()>` :1342
-- `fn timing_profile_path(cache_dir: &Path) -> PathBuf` :1355
-- `fn load_timing_profile(cache_dir: &Path) -> TimingProfile` :1361
-- `fn save_timing_profile(cache_dir: &Path, profile: &TimingProfile)` :1371
-- `fn measure_profile(` :1384
+  - `pub async fn setup(&self, _model: AiModel, _device: DeviceType, _force: bool) -> Result<()>` :1063
+  - `pub fn get_status(&self) -> Result<AiStatus>` :1146
+  - `fn get_model_path(&self, model: &AiModel) -> PathBuf` :1168
+- `fn sample_token(` :1183
+- `pub struct SemanticReport` :1234
+- `pub struct QualityFinding` :1241
+- `pub struct Source` :1252
+- `pub fn sources_from_evidence(evidence: &[(String, String)]) -> Vec<Source>` :1261
+- `impl SemanticReport` :1307
+  - `pub fn sources(&self) -> Vec<Source>` :1310
+- `pub struct AiStatus` :1329
+- `fn download_file(url: &str, dest: &std::path::Path) -> Result<()>` :1346
+- `fn timing_profile_path(cache_dir: &Path) -> PathBuf` :1359
+- `fn load_timing_profile(cache_dir: &Path) -> TimingProfile` :1365
+- `fn save_timing_profile(cache_dir: &Path, profile: &TimingProfile)` :1375
+- `fn measure_profile(` :1388
 
 ### batch.rs (96 rader)
 - `pub struct BatchOperation` :6
