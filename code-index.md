@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 930a6631338d8b102e873c710fa162d6
+> Body-hash: 24801d220f6bcd55af14bfd6963d8553
 
 ## Träd
 
@@ -93,7 +93,7 @@ src/core/
   capabilities.rs (366 rader)
   code_graph.rs (579 rader)
   code_index.rs (693 rader)
-  code_index_coverage.rs (604 rader)
+  code_index_coverage.rs (610 rader)
   code_index_db.rs (1333 rader)
   compress.rs (487 rader)
   create_file.rs (88 rader)
@@ -786,7 +786,7 @@ _(inga toppnivå-items)_
 - `pub struct CheckResult` :527
 - `pub fn check_index(` :538
 
-### code_index_coverage.rs (604 rader)
+### code_index_coverage.rs (610 rader)
 - `pub struct TypeCoverage` :27
 - `pub struct SourceClass` :40
 - `pub struct TargetClass` :48
@@ -794,9 +794,9 @@ _(inga toppnivå-items)_
 - `pub struct LocalResolution` :83
 - `pub struct ProseSummary` :98
 - `pub struct CoverageReport` :108
-- `fn source_coverage_for(conn: &Connection) -> Result<Vec<SourceClass>>` :135
-- `pub fn measure(conn: &Connection) -> Result<CoverageReport>` :162
-- `fn relations_total(conn: &Connection) -> anyhow::Result<i64>` :420
+- `fn source_coverage_for(conn: &Connection) -> Result<Vec<SourceClass>>` :141
+- `pub fn measure(conn: &Connection) -> Result<CoverageReport>` :168
+- `fn relations_total(conn: &Connection) -> anyhow::Result<i64>` :426
 
 ### code_index_db.rs (1333 rader)
 - `pub const EXTRACTOR_VERSION: &str = "4"` :46
