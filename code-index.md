@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: b4fea6b562606d5495931e46402b2eff
+> Body-hash: 3e1b8bb39c88d8d74f379ca42a65d01f
 
 ## Träd
 
@@ -77,7 +77,7 @@ scripts/hooks/
   block-text-replace.py (258 rader)
 src/
   auth_demo.rs (19 rader)
-  cli.rs (7071 rader)
+  cli.rs (7075 rader)
   lib.rs (11 rader)
   main.rs (77 rader)
   network.rs (14 rader)
@@ -517,7 +517,7 @@ _(inga toppnivå-items)_
 ### auth_demo.rs (19 rader)
 _(inga toppnivå-items)_
 
-### cli.rs (7071 rader)
+### cli.rs (7075 rader)
 - `enum McpSubcommands` :28
 - `pub struct Cli` :73
 - `enum Commands` :86
@@ -581,46 +581,46 @@ _(inga toppnivå-items)_
   - `fn handle_alf(` :4027
   - `async fn handle_ai_setup(force: bool) -> Result<()>` :4101
   - `fn handle_ai_status() -> Result<()>` :4128
-  - `fn handle_ai_calibrate() -> Result<()>` :4170
-  - `fn handle_ai_calibrate() -> Result<()>` :4187
-  - `fn device_mode_from_config_text(text: &str) -> Option<String>` :4195
-  - `fn resolve_index_device_from_config() -> Option<String>` :4209
-  - `async fn handle_ai_index(path: Option<PathBuf>, gpu: bool) -> Result<()>` :4215
-  - `async fn handle_ai_report(limit: usize, output: Option<PathBuf>) -> Result<()>` :4265
-  - `fn handle_session_start(name: Option<String>) -> Result<()>` :4283
-  - `fn handle_restore_project(timestamp: &str, preview: bool) -> Result<()>` :4300
-  - `fn handle_restore_files(since: &str, file_patterns: &[String], preview: bool) -> Result<()>` :4347
-  - `fn handle_restore_session(session_id: &str, preview: bool) -> Result<()>` :4412
-  - `fn handle_debug_hash(content: &str) -> Result<()>` :4457
-  - `fn handle_commands(json: bool) -> Result<()>` :4475
-  - `fn handle_examples(topic: Option<&str>) -> Result<()>` :4583
-  - `fn handle_wizard(task: Option<&str>) -> Result<()>` :4920
-  - `fn show_visual_pulse(writer: &GnawTreeWriter, focus_path: &str, narrative: Option<&str>)` :5139
-  - `fn show_visual_diff(` :5165
-  - `fn handle_analyze(paths: &[String], format: &str, recursive: bool) -> Result<()>` :5239
-  - `fn handle_quick_insert(` :5335
-  - `fn find_supported_files(dir: &std::path::Path) -> Result<Vec<String>>` :5440
-  - `fn handle_quick_replace(` :5469
-  - `fn handle_rename(` :5575
-  - `fn handle_clone(` :5587
-  - `fn handle_move(` :5664
-  - `fn find_node_by_path<'a>(tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :5743
-  - `fn handle_lint(` :5756
-  - `fn handle_rules_add(` :5881
-  - `fn handle_rules_list() -> Result<()>` :5925
-  - `fn handle_lint_discover(paths: &[String]) -> Result<()>` :5952
-  - `fn handle_lint_discover(_paths: &[String]) -> Result<()>` :6085
-  - `fn parse_rule_proposals(s: &str) -> Result<Vec<serde_json::Value>>` :6093
-  - `fn handle_capabilities(json: bool) -> Result<()>` :6105
-  - `fn handle_doctor(format: Option<&str>) -> Result<()>` :6121
-  - `async fn handle_health_check() -> Result<()>` :6196
-- `const SENSE_COSINE_WARN: f32 = crate::llm::gnaw_sense::SENSE_ANSWERABLE_COSINE` :6431
-- `fn sense_confidence(` :6449
-- `fn print_diff(old: &str, new: &str)` :6478
-- `fn show_hint()` :6491
-- `fn list_nodes(` :6521
-- `fn resolve_content(` :6582
-- `fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>>` :6619
+  - `fn handle_ai_calibrate() -> Result<()>` :4174
+  - `fn handle_ai_calibrate() -> Result<()>` :4191
+  - `fn device_mode_from_config_text(text: &str) -> Option<String>` :4199
+  - `fn resolve_index_device_from_config() -> Option<String>` :4213
+  - `async fn handle_ai_index(path: Option<PathBuf>, gpu: bool) -> Result<()>` :4219
+  - `async fn handle_ai_report(limit: usize, output: Option<PathBuf>) -> Result<()>` :4269
+  - `fn handle_session_start(name: Option<String>) -> Result<()>` :4287
+  - `fn handle_restore_project(timestamp: &str, preview: bool) -> Result<()>` :4304
+  - `fn handle_restore_files(since: &str, file_patterns: &[String], preview: bool) -> Result<()>` :4351
+  - `fn handle_restore_session(session_id: &str, preview: bool) -> Result<()>` :4416
+  - `fn handle_debug_hash(content: &str) -> Result<()>` :4461
+  - `fn handle_commands(json: bool) -> Result<()>` :4479
+  - `fn handle_examples(topic: Option<&str>) -> Result<()>` :4587
+  - `fn handle_wizard(task: Option<&str>) -> Result<()>` :4924
+  - `fn show_visual_pulse(writer: &GnawTreeWriter, focus_path: &str, narrative: Option<&str>)` :5143
+  - `fn show_visual_diff(` :5169
+  - `fn handle_analyze(paths: &[String], format: &str, recursive: bool) -> Result<()>` :5243
+  - `fn handle_quick_insert(` :5339
+  - `fn find_supported_files(dir: &std::path::Path) -> Result<Vec<String>>` :5444
+  - `fn handle_quick_replace(` :5473
+  - `fn handle_rename(` :5579
+  - `fn handle_clone(` :5591
+  - `fn handle_move(` :5668
+  - `fn find_node_by_path<'a>(tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :5747
+  - `fn handle_lint(` :5760
+  - `fn handle_rules_add(` :5885
+  - `fn handle_rules_list() -> Result<()>` :5929
+  - `fn handle_lint_discover(paths: &[String]) -> Result<()>` :5956
+  - `fn handle_lint_discover(_paths: &[String]) -> Result<()>` :6089
+  - `fn parse_rule_proposals(s: &str) -> Result<Vec<serde_json::Value>>` :6097
+  - `fn handle_capabilities(json: bool) -> Result<()>` :6109
+  - `fn handle_doctor(format: Option<&str>) -> Result<()>` :6125
+  - `async fn handle_health_check() -> Result<()>` :6200
+- `const SENSE_COSINE_WARN: f32 = crate::llm::gnaw_sense::SENSE_ANSWERABLE_COSINE` :6435
+- `fn sense_confidence(` :6453
+- `fn print_diff(old: &str, new: &str)` :6482
+- `fn show_hint()` :6495
+- `fn list_nodes(` :6525
+- `fn resolve_content(` :6586
+- `fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>>` :6623
 
 ### lib.rs (11 rader)
 _(inga toppnivå-items)_
