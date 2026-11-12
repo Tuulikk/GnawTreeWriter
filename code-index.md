@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 85921d0dc2d19e39caa1ad8d8df78c39
+> Body-hash: 23c0b487190a93abef8ef680bb929cb2
 
 ## Träd
 
@@ -126,7 +126,7 @@ src/core/
   scaffold.rs (274 rader)
   secrets.rs (401 rader)
   state.rs (164 rader)
-  state_head.rs (449 rader)
+  state_head.rs (461 rader)
   stats.rs (335 rader)
   tag_manager.rs (297 rader)
   token_count.rs (150 rader)
@@ -1446,16 +1446,16 @@ _(inga toppnivå-items)_
   - `pub fn file_hash(&self, path: &str) -> Option<&str>` :89
 - `fn get_git_head(project_root: &Path) -> String` :95
 
-### state_head.rs (449 rader)
+### state_head.rs (461 rader)
 - `pub const HEAD_FILE: &str = ".gnawtreewriter_head.json"` :27
 - `const SCHEMA: u32 = 1` :28
 - `pub struct HeadEntry` :31
 - `pub struct Head` :46
 - `pub enum Discrepancy` :61
 - `pub fn project(history: &[Transaction]) -> Head` :94
-- `pub fn load(project_root: &Path) -> Result<(Head, bool)>` :167
-- `pub fn save(head: &Head, project_root: &Path) -> Result<()>` :193
-- `pub fn verify(head: &Head, project_root: &Path) -> Vec<Discrepancy>` :208
+- `pub fn load(project_root: &Path) -> Result<(Head, bool)>` :175
+- `pub fn save(head: &Head, project_root: &Path) -> Result<()>` :201
+- `pub fn verify(head: &Head, project_root: &Path) -> Vec<Discrepancy>` :216
 
 ### stats.rs (335 rader)
 - `pub struct LanguageStats` :12
