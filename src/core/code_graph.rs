@@ -271,6 +271,171 @@ pub fn graph_coverage(conn: &Connection) -> Result<GraphCoverage> {
     })
 }
 
+/// One aggregated file→file dependency.
+#[derive(Debug, Clone, Serialize)]
+pub struct FileEdge {
+    pub from: String,
+    pub to: String,
+    /// How many entity edges this file pair stands for.
+    pub edges: i64,
+}
+
+/// The entity graph projected onto FILES.
+///
+/// No new nodes are involved and none are needed: every `relations` row already
+/// carries the file it occurs in, and the target's file comes from the resolved
+/// entity. So "which files depend on which" is a GROUP BY, not a schema change
+/// (measured 2026-11-12: 303 file→file edges across 114 files, while 1 826
+/// relation rows still had an unmatched *source* — source identity is
+/// irrelevant to this projection).
+///
+/// What DOES limit it is target resolution, so the coverage is reported next to
+/// the edges rather than left to be inferred.
+#[derive(Debug, Clone, Serialize)]
+pub struct FileGraph {
+    pub files: i64,
+    pub edges: Vec<FileEdge>,
+    /// Relation rows with a resolved target (same-file included).
+    pub attributed_edges: i64,
+    /// Relation rows whose target never resolved — invisible in this graph.
+    pub unattributed_edges: i64,
+    /// attributed / (attributed + unattributed)
+    pub coverage: f64,
+    pub note: &'static str,
+}
+
+/// Distinct file→file pairs, strongest first. Deterministic ordering.
+fn file_adjacency(conn: &Connection) -> Result<HashMap<String, Vec<String>>> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT r.file, e.file
+         FROM relations r JOIN entities e ON e.id = r.to_id
+         WHERE r.file <> e.file
+         ORDER BY r.file, e.file",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut adj: HashMap<String, Vec<String>> = HashMap::new();
+    for row in rows {
+        let (a, b) = row?;
+        adj.entry(a).or_default().push(b);
+    }
+    for v in adj.values_mut() {
+        v.sort();
+        v.dedup();
+    }
+    Ok(adj)
+}
+
+pub fn file_graph(conn: &Connection) -> Result<FileGraph> {
+    let mut stmt = conn.prepare(
+        "SELECT r.file, e.file, COUNT(*)
+         FROM relations r JOIN entities e ON e.id = r.to_id
+         WHERE r.file <> e.file
+         GROUP BY r.file, e.file
+         ORDER BY COUNT(*) DESC, r.file, e.file",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(FileEdge {
+            from: r.get(0)?,
+            to: r.get(1)?,
+            edges: r.get(2)?,
+        })
+    })?;
+    let mut edges = Vec::new();
+    let mut files: std::collections::BTreeSet<String> = Default::default();
+    for row in rows {
+        let e = row?;
+        files.insert(e.from.clone());
+        files.insert(e.to.clone());
+        edges.push(e);
+    }
+
+    let (attributed, unattributed): (i64, i64) = conn.query_row(
+        "SELECT COALESCE(SUM(to_id IS NOT NULL), 0), COALESCE(SUM(to_id IS NULL), 0)
+         FROM relations",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let total = attributed + unattributed;
+    let coverage = if total > 0 {
+        attributed as f64 / total as f64
+    } else {
+        0.0
+    };
+
+    Ok(FileGraph {
+        files: files.len() as i64,
+        edges,
+        attributed_edges: attributed,
+        unattributed_edges: unattributed,
+        coverage: (coverage * 1000.0).round() / 1000.0,
+        note: "Cross-file dependencies only, aggregated over ALL relation types. Derived from relations.file (source) and entities.file (resolved target), so an unresolved target contributes no edge. coverage = attributed / all relation rows and therefore includes std/prelude calls that can never resolve — read it next to `code-index --coverage`, where the local-candidate denominator separates 'external' from 'missed'.",
+    })
+}
+
+/// Files that sit in a dependency cycle with each other: mutual reachability,
+/// grouped. Reads better than 29 entity-level cycles because a project-scale
+/// cycle is almost always "these N modules reference each other".
+pub fn file_cycles(conn: &Connection) -> Result<Vec<Vec<String>>> {
+    let adj = file_adjacency(conn)?;
+    let mut nodes: std::collections::BTreeSet<String> = adj.keys().cloned().collect();
+    for vs in adj.values() {
+        nodes.extend(vs.iter().cloned());
+    }
+
+    // reach[n] = every file n can reach (BFS). 114 nodes × a few hundred edges,
+    // so the simple loop beats the complexity of Tarjan here.
+    let mut reach: HashMap<&str, std::collections::HashSet<&str>> = HashMap::new();
+    for n in &nodes {
+        let mut seen: std::collections::HashSet<&str> = Default::default();
+        let mut stack = vec![n.as_str()];
+        while let Some(cur) = stack.pop() {
+            if let Some(next) = adj.get(cur) {
+                for t in next {
+                    if seen.insert(t.as_str()) {
+                        stack.push(t.as_str());
+                    }
+                }
+            }
+        }
+        reach.insert(n.as_str(), seen);
+    }
+
+    // Same component iff each reaches the other. A file that can reach itself
+    // is in a cycle; group those by mutual reachability.
+    let cyclic: Vec<&str> = nodes
+        .iter()
+        .map(|n| n.as_str())
+        .filter(|n| reach.get(n).is_some_and(|r| r.contains(n)))
+        .collect();
+
+    let mut groups: Vec<std::collections::BTreeSet<&str>> = Vec::new();
+    for a in &cyclic {
+        let mut placed = false;
+        for g in groups.iter_mut() {
+            let b = *g.iter().next().unwrap();
+            if reach.get(a).is_some_and(|r| r.contains(b))
+                && reach.get(b).is_some_and(|r| r.contains(a))
+            {
+                g.insert(a);
+                placed = true;
+                break;
+            }
+        }
+        if !placed {
+            let mut g = std::collections::BTreeSet::new();
+            g.insert(*a);
+            groups.push(g);
+        }
+    }
+
+    let mut out: Vec<Vec<String>> = groups
+        .into_iter()
+        .map(|g| g.into_iter().map(|s| s.to_string()).collect())
+        .collect();
+    out.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+    Ok(out)
+}
+
 /// Result of `impact`. `seeds` is empty when the name is not in the store —
 /// reported as-is, never fabricated into an impact chain (same honesty rule
 /// as `ImpactReport::unresolved_calls`).
@@ -575,5 +740,63 @@ mod impact_tests {
         let r = impact(&conn, "beta", 0).unwrap();
         assert_eq!(r.seeds.len(), 2);
         assert!(r.reachable.is_empty());
+    }
+
+    // ── File-level projection ────────────────────────────────────────────
+    //
+    // Three files: a.rs -> b.rs (two edges), b.rs -> a.rs (one, so a<->b is a
+    // cycle), b.rs -> c.rs (one, one-way), and one edge whose target never
+    // resolved (it must contribute NO file edge, and must show up in the
+    // coverage denominator instead of vanishing).
+    fn file_store() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::core::code_index_db::migrate_connection(&conn).unwrap();
+        conn.execute_batch(
+            r#"
+            INSERT INTO entities(id, file, kind, name, line, node_path) VALUES
+              ('gtw:a.rs:function:f', 'a.rs', 'function', 'f', 1, '1'),
+              ('gtw:b.rs:function:g', 'b.rs', 'function', 'g', 1, '1'),
+              ('gtw:c.rs:function:h', 'c.rs', 'function', 'h', 1, '1');
+            INSERT INTO relations(from_id, to_name, to_id, relation_type, line, file) VALUES
+              ('gtw:a.rs:function:f', 'g', 'gtw:b.rs:function:g', 'calls', 2, 'a.rs'),
+              ('gtw:a.rs:function:f', 'g', 'gtw:b.rs:function:g', 'calls', 3, 'a.rs'),
+              ('gtw:b.rs:function:g', 'f', 'gtw:a.rs:function:f', 'calls', 2, 'b.rs'),
+              ('gtw:b.rs:function:g', 'h', 'gtw:c.rs:function:h', 'calls', 3, 'b.rs'),
+              ('gtw:c.rs:function:h', 'unwrap', NULL, 'calls', 2, 'c.rs');
+            "#,
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn file_graph_projects_edges_and_states_its_coverage() {
+        let conn = file_store();
+        let g = file_graph(&conn).unwrap();
+        assert_eq!(g.files, 3, "three files take part");
+        let pair = |a: &str, b: &str| {
+            g.edges
+                .iter()
+                .find(|e| e.from == a && e.to == b)
+                .map(|e| e.edges)
+        };
+        assert_eq!(pair("a.rs", "b.rs"), Some(2), "weight is the edge count");
+        assert_eq!(pair("b.rs", "a.rs"), Some(1));
+        assert_eq!(pair("b.rs", "c.rs"), Some(1));
+        // The unresolved target contributes no file edge, but it IS counted:
+        // hiding it would make the graph look complete.
+        assert_eq!(g.attributed_edges, 4);
+        assert_eq!(g.unattributed_edges, 1);
+        assert!((g.coverage - 0.8).abs() < 1e-6, "coverage {}", g.coverage);
+    }
+
+    #[test]
+    fn file_cycles_group_mutually_reachable_files() {
+        let conn = file_store();
+        let groups = file_cycles(&conn).unwrap();
+        assert_eq!(groups.len(), 1, "one cycle group: {groups:?}");
+        assert_eq!(groups[0], vec!["a.rs".to_string(), "b.rs".to_string()]);
+        // c.rs is reachable from b.rs but cannot get back: not a cycle.
+        assert!(!groups[0].iter().any(|f| f == "c.rs"));
     }
 }

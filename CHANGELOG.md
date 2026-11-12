@@ -1,5 +1,36 @@
 ## [Unreleased]
 
+### Added — fil-nivå: `--file-graph` och `--cycles --by-file`
+
+Kopplingar **mellan filer** utan att lägga in en enda ny nod. Varje
+`relations`-rad bär redan filen den uppstår i, och målets fil kommer från den
+upplösta entiteten — alltså är "vilka filer beror på vilka" en `GROUP BY`, inte
+en schemaändring.
+
+```
+$ gnawtreewriter code-index . --file-graph
+filer: 114 | par: 303 | coverage: 0.124
+    48  src/cli.rs               -> src/core/mod.rs
+    28  tests/mcp_integration.rs -> src/mcp/mod.rs
+    24  tests/insert_position.rs -> src/llm/gnaw_sense.rs
+```
+
+- `--focus <substr>` visar **båda riktningarna** ("vad rör den här filen" och
+  "vilka rör den"), för en läsare som måste fråga två gånger läser svaret en.
+- `--cycles --by-file` grupperar filer som ömsesidigt når varandra (SCC) i
+  stället för 29 entitetscykler — på projektnivå är en cykel nästan alltid
+  "de här modulerna refererar varandra".
+- `coverage` redovisas bredvid grafen: 0,124 är **rätt** tal (det räknar alla
+  relationstyper, inklusive std-anrop som aldrig kan upplösas) och noten säger
+  att man ska läsa det vid sidan av `--coverage`, där lokal/ extern skiljs åt.
+
+**Vad som INTE byggdes:** `file`-entiteter. De skulle ge 451 filnivå-kanter en
+källa, men en fil är ingen symbol — namnen blir `mod`, `cli`, `age` och grafen
+fylls med noder som inte är kod. Fil→fil-grafen behövde dem inte (mätt: 303
+kanter utan), och det som faktiskt begränsar den är **målupplösningen**, inte
+källsidan. Kvar för en framtid: `kind=file` med relativ sökväg som namn, om
+`impact` ska kunna starta från en fils toppnivå.
+
 ### Added (docs) — `docs/LOCAL_MODEL_BAKEOFF.md`: LFM2.5 vs LFM3 vs Qwen3.5
 
 Planen för att välja L4-modell med **mätta** tal i stället för magkänsla:

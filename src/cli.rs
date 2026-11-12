@@ -275,6 +275,20 @@ enum Commands {
         /// unresolved) and how many entities share the target name
         #[arg(long)]
         why: Option<String>,
+        /// Project the store onto FILE-level dependencies: which files depend
+        /// on which, by how many edges. Read-only. Needs no new nodes — every
+        /// relation row already carries its file, and the target's file comes
+        /// from the resolved entity.
+        #[arg(long)]
+        file_graph: bool,
+        /// With --file-graph: only edges where the from- or to-file contains
+        /// this substring (both directions shown)
+        #[arg(long)]
+        focus: Option<String>,
+        /// With --cycles: report cycles between FILES instead of between
+        /// entities (strongly connected components, readable at project scale)
+        #[arg(long)]
+        by_file: bool,
         /// Hop bound for --cycles/--impact (default: 64 / 3)
         #[arg(long)]
         depth: Option<usize>,
@@ -1452,6 +1466,9 @@ impl Cli {
                 why,
                 depth,
                 stdout,
+                file_graph,
+                focus,
+                by_file,
             } => {
                 // Same guard as the MCP tools (core::project_root, one rule):
                 // indexing or walking $HOME / a workspace folder from the CLI
@@ -1487,11 +1504,16 @@ impl Cli {
                     // Phase 1 coverage harness (proposal 2026-11-09):
                     // measure the store graph — read-only, JSON out.
                     Self::handle_code_index_coverage(Path::new(&path))?;
-                } else if cycles || impact.is_some() || why.is_some() {
+                } else if file_graph {
+                    // File-level projection of the entity graph — read-only,
+                    // derived from existing columns (no file nodes).
+                    Self::handle_code_file_graph(Path::new(&path), focus.as_deref())?;
+                } else if cycles || impact.is_some() || why.is_some() || by_file {
                     // P2: graph queries over the store — read-only.
                     Self::handle_code_graph(
                         Path::new(&path),
-                        cycles,
+                        cycles || by_file,
+                        by_file,
                         impact.as_deref(),
                         why.as_deref(),
                         depth,
@@ -2187,11 +2209,64 @@ Use --no-preview to actually perform the restore"
         Ok(())
     }
 
+    /// File-level projection: "which files depend on which, and by how many
+    /// edges". Read-only, derived from `relations.file` + `entities.file` — no
+    /// file nodes exist and none are needed (see `core_graph::file_graph`).
+    fn handle_code_file_graph(path: &Path, focus: Option<&str>) -> Result<()> {
+        let index_root = crate::core::code_index_db::resolve_index_root(path);
+        let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
+            anyhow::anyhow!(
+                "code-index --file-graph needs a store — run `gnawtreewriter code-index <root> --db` first ({e:#})"
+            )
+        })?;
+        let mut graph = crate::core::code_graph::file_graph(&conn)?;
+
+        if let Some(needle) = focus {
+            // Both directions: "what does this file touch" AND "what touches
+            // it" are the same question from two sides, and a reader who has to
+            // ask twice will read the answer once.
+            graph
+                .edges
+                .retain(|e| e.from.contains(needle) || e.to.contains(needle));
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "kind": "file_graph",
+                    "focus": needle,
+                    "files": graph.files,
+                    "edge_pairs": graph.edges.len(),
+                    "edges": graph.edges,
+                    "attributed_edges": graph.attributed_edges,
+                    "unattributed_edges": graph.unattributed_edges,
+                    "coverage": graph.coverage,
+                    "note": graph.note,
+                }))?
+            );
+            return Ok(());
+        }
+
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "kind": "file_graph",
+                "files": graph.files,
+                "edge_pairs": graph.edges.len(),
+                "edges": graph.edges,
+                "attributed_edges": graph.attributed_edges,
+                "unattributed_edges": graph.unattributed_edges,
+                "coverage": graph.coverage,
+                "note": graph.note,
+            }))?
+        );
+        Ok(())
+    }
+
     /// P2 (Comparative-Thinker-planen §4): graph queries over the store.
     /// Read-only — never creates it (same rule as `--coverage`).
     fn handle_code_graph(
         path: &Path,
         cycles: bool,
+        by_file: bool,
         impact: Option<&str>,
         why: Option<&str>,
         depth: Option<usize>,
@@ -2221,6 +2296,22 @@ Use --no-preview to actually perform the restore"
             "static_only": true,
             "note": "static call/import edges: no dyn dispatch, no trait-object resolution. Cross-file METHOD targets are left unresolved on purpose (a name unique in this index is not unique in reality — std is not indexed).",
         });
+        if cycles && by_file {
+            // File-level cycles: "these N modules reference each other". Reads
+            // better than entity cycles at project scale, and needs no new
+            // nodes — it is the same edges, projected onto their files.
+            let groups = crate::core::code_graph::file_cycles(&conn)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "kind": "file_cycles",
+                    "count": groups.len(),
+                    "groups": groups,
+                    "meta": meta,
+                }))?
+            );
+            return Ok(());
+        }
         if cycles {
             let found = crate::core::code_graph::cycles(&conn, depth.unwrap_or(64))?;
             println!(
