@@ -278,6 +278,35 @@ pub(crate) fn git_facts(root: &Path) -> (String, bool) {
     (rev, dirty)
 }
 
+/// Files changed in the working tree, as paths relative to the index root:
+/// `git diff --name-only HEAD` (staged + unstaged) plus untracked files, so a
+/// brand-new file is not silently missing from "what did I change?".
+/// Sorted and deduped; an empty vec when git is unavailable — the caller
+/// reports zero rather than pretending.
+pub fn changed_files_from_git(root: &Path) -> Vec<String> {
+    let run = |args: &[&str]| -> Vec<String> {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .map(|l| l.trim().replace('\\', "/"))
+                    .filter(|l| !l.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut files = run(&["diff", "--name-only", "HEAD"]);
+    files.extend(run(&["ls-files", "--others", "--exclude-standard"]));
+    files.sort();
+    files.dedup();
+    files
+}
+
 #[derive(Debug, serde::Serialize)]
 pub(crate) struct FileIndex {
     pub(crate) path: String,

@@ -436,6 +436,159 @@ pub fn file_cycles(conn: &Connection) -> Result<Vec<Vec<String>>> {
     Ok(out)
 }
 
+/// One edge LEAVING the subject: where it lands, and where it is written.
+#[derive(Debug, Clone, Serialize)]
+pub struct OutEdge {
+    /// File the target lives in (never the subject's own file).
+    pub file: String,
+    pub name: String,
+    /// Definition line of the target.
+    pub line: i64,
+    pub relation_type: String,
+    /// Line in the SUBJECT where this use occurs.
+    pub from_line: i64,
+}
+
+/// One edge ENTERING the subject: who reaches it.
+#[derive(Debug, Clone, Serialize)]
+pub struct InEdge {
+    pub file: String,
+    /// Resolved caller name, when the source id matched an entity. `None` means
+    /// the use sits at file scope or in a function the extractor does not name —
+    /// reported as unknown rather than guessed.
+    pub from_symbol: Option<String>,
+    /// Call-site line in the other file.
+    pub line: i64,
+    pub relation_type: String,
+}
+
+/// "What does this file / symbol touch, and where exactly?"
+///
+/// Two questions, one shape: outgoing edges that CROSS a file boundary (with the
+/// target's file, symbol and line) and incoming edges (who reaches in). Same
+/// rows as `--file-graph`, kept per-edge because "which files" is not actionable
+/// without "where in the files" (user, 2026-11-12).
+#[derive(Debug, Clone, Serialize)]
+pub struct Touches {
+    pub subject: String,
+    /// "file" or "symbol"
+    pub kind: &'static str,
+    pub outgoing: Vec<OutEdge>,
+    pub incoming: Vec<InEdge>,
+    pub note: &'static str,
+}
+
+const TOUCHES_NOTE: &str = "Cross-file edges only. Outgoing = what the subject uses elsewhere (target file + symbol + definition line, plus the line here); incoming = who uses the subject. Unresolved targets cannot appear here, which is the same limit as --file-graph: run --coverage for that denominator.";
+
+/// Distinct cross-file uses of one file.
+pub fn touches_file(conn: &Connection, file: &str) -> Result<Touches> {
+    let mut out_stmt = conn.prepare(
+        "SELECT e.file, e.name, e.line, r.relation_type, r.line
+         FROM relations r JOIN entities e ON e.id = r.to_id
+         WHERE r.file = ?1 AND e.file <> ?1
+         ORDER BY e.file, e.line, e.name",
+    )?;
+    let outgoing: Vec<OutEdge> = out_stmt
+        .query_map(params![file], |r| {
+            Ok(OutEdge {
+                file: r.get(0)?,
+                name: r.get(1)?,
+                line: r.get(2)?,
+                relation_type: r.get(3)?,
+                from_line: r.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut in_stmt = conn.prepare(
+        "SELECT r.file,
+                (SELECT name FROM entities WHERE id = r.from_id),
+                r.line, r.relation_type
+         FROM relations r JOIN entities e ON e.id = r.to_id
+         WHERE e.file = ?1 AND r.file <> ?1
+         ORDER BY r.file, r.line",
+    )?;
+    let incoming: Vec<InEdge> = in_stmt
+        .query_map(params![file], |r| {
+            Ok(InEdge {
+                file: r.get(0)?,
+                from_symbol: r.get(1)?,
+                line: r.get(2)?,
+                relation_type: r.get(3)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Touches {
+        subject: file.to_string(),
+        kind: "file",
+        outgoing,
+        incoming,
+        note: TOUCHES_NOTE,
+    })
+}
+
+/// Cross-file uses of every entity that DEFINES `symbol` (methods included:
+/// their ids carry `Type::name`, so a bare name can yield several seeds).
+pub fn touches_symbol(conn: &Connection, symbol: &str) -> Result<Touches> {
+    let seeds = resolve_symbols(conn, symbol)?;
+    let mut outgoing = Vec::new();
+    let mut incoming = Vec::new();
+    let mut out_stmt = conn.prepare(
+        "SELECT e.file, e.name, e.line, r.relation_type, r.line
+         FROM relations r JOIN entities e ON e.id = r.to_id
+         WHERE r.from_id = ?1 AND e.file <> r.file
+         ORDER BY e.file, e.line, e.name",
+    )?;
+    let mut in_stmt = conn.prepare(
+        "SELECT r.file,
+                (SELECT name FROM entities WHERE id = r.from_id),
+                r.line, r.relation_type
+         FROM relations r JOIN entities e ON e.id = r.to_id
+         WHERE r.to_id = ?1 AND r.file <> e.file
+         ORDER BY r.file, r.line",
+    )?;
+    for seed in &seeds {
+        outgoing.extend(
+            out_stmt
+                .query_map(params![&seed.id], |r| {
+                    Ok(OutEdge {
+                        file: r.get(0)?,
+                        name: r.get(1)?,
+                        line: r.get(2)?,
+                        relation_type: r.get(3)?,
+                        from_line: r.get(4)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        incoming.extend(
+            in_stmt
+                .query_map(params![&seed.id], |r| {
+                    Ok(InEdge {
+                        file: r.get(0)?,
+                        from_symbol: r.get(1)?,
+                        line: r.get(2)?,
+                        relation_type: r.get(3)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+    }
+    outgoing.sort_by(|a, b| (&a.file, a.line, &a.name).cmp(&(&b.file, b.line, &b.name)));
+    outgoing.dedup_by(|a, b| {
+        a.file == b.file && a.line == b.line && a.name == b.name && a.from_line == b.from_line
+    });
+    incoming.sort_by(|a, b| (&a.file, a.line).cmp(&(&b.file, b.line)));
+    Ok(Touches {
+        subject: symbol.to_string(),
+        kind: "symbol",
+        outgoing,
+        incoming,
+        note: TOUCHES_NOTE,
+    })
+}
+
 /// Result of `impact`. `seeds` is empty when the name is not in the store —
 /// reported as-is, never fabricated into an impact chain (same honesty rule
 /// as `ImpactReport::unresolved_calls`).
@@ -788,6 +941,46 @@ mod impact_tests {
         assert_eq!(g.attributed_edges, 4);
         assert_eq!(g.unattributed_edges, 1);
         assert!((g.coverage - 0.8).abs() < 1e-6, "coverage {}", g.coverage);
+    }
+
+    #[test]
+    fn touches_names_the_target_file_and_line() {
+        let conn = file_store();
+        // a.rs:f calls b.rs:g (twice) — outgoing from a file, with the target's
+        // definition line and the line in the subject.
+        let a = touches_file(&conn, "a.rs").unwrap();
+        assert_eq!(a.kind, "file");
+        assert!(
+            a.outgoing
+                .iter()
+                .any(|e| e.file == "b.rs" && e.name == "g" && e.line == 1),
+            "a.rs must list b.rs:g at its definition line: {:?}",
+            a.outgoing
+        );
+        assert_eq!(a.incoming.len(), 1, "b.rs:g calls back into a.rs:f");
+        assert_eq!(a.incoming[0].file, "b.rs");
+        assert_eq!(a.incoming[0].from_symbol.as_deref(), Some("g"));
+
+        // Symbol mode: g's cross-file use of h, and who uses g.
+        let g = touches_symbol(&conn, "g").unwrap();
+        assert_eq!(g.kind, "symbol");
+        assert!(
+            g.outgoing
+                .iter()
+                .any(|e| e.file == "c.rs" && e.name == "h" && e.from_line == 3),
+            "g uses c.rs:h at line 3: {:?}",
+            g.outgoing
+        );
+        assert!(
+            g.incoming.iter().any(|e| e.file == "a.rs"),
+            "a.rs:f uses g: {:?}",
+            g.incoming
+        );
+
+        // A name that is not in the store yields empty lists, never an error
+        // and never a fabricated edge.
+        let none = touches_symbol(&conn, "does_not_exist").unwrap();
+        assert!(none.outgoing.is_empty() && none.incoming.is_empty());
     }
 
     #[test]

@@ -31,6 +31,32 @@ kanter utan), och det som faktiskt begränsar den är **målupplösningen**, int
 källsidan. Kvar för en framtid: `kind=file` med relativ sökväg som namn, om
 `impact` ska kunna starta från en fils toppnivå.
 
+### Added — `--touches` och `--changed`: *var* i filerna
+
+`--file-graph` svarar "vilka filer". Utan "var i filerna" är det inte
+åtgärdbart, så nu finns radnivån också:
+
+```bash
+$ gnawtreewriter code-index . --touches build_tree
+subject: build_tree | ut: 34 | in: 0
+  UT  från rad 48  -> char_col_pair    src/parser/mod.rs:59
+  UT  från rad 71  -> dispatcher       src/core/macro_dispatcher.rs:54
+  UT  från rad 85  -> try_expand_macro src/core/macro_dispatcher.rs:152
+```
+
+- **`--touches <SYMBOL>`** — varje utgående kant som korsar en filgräns, med
+  **målfil, målsymbol och definitionsrad**, plus raden i subjektet där användningen
+  står. `incoming` visar vem som använder symbolen (`from_symbol` är `null` när
+  källan är filnivå/icke-namngiven — redovisat som okänt, aldrig gissat).
+- **`--changed`** — filerna i arbetskopians diff (`git diff --name-only HEAD` +
+  ospårade filer), var och en med sina utgående mål och inkommande användare.
+  Filer utan kanter får `triple_in_store: false`: skillnaden mellan "isolerad"
+  och "indexet ser den inte" syns i payloaden.
+
+Mätt på det här repot: `build_tree` 34 utgående kanter; `--changed` med tre
+rörda filer gav `cli.rs` 136 ut, `code_graph.rs` 5 ut/14 in, `code_index.rs`
+7 ut/32 in.
+
 ### Added (docs) — `docs/LOCAL_MODEL_BAKEOFF.md`: LFM2.5 vs LFM3 vs Qwen3.5
 
 Planen för att välja L4-modell med **mätta** tal i stället för magkänsla:

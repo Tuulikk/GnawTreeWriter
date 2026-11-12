@@ -289,6 +289,16 @@ enum Commands {
         /// entities (strongly connected components, readable at project scale)
         #[arg(long)]
         by_file: bool,
+        /// "What does this SYMBOL touch in other files?" — every outgoing edge
+        /// that crosses a file boundary, with target file, symbol and line,
+        /// plus who uses the symbol (incoming). Read-only
+        #[arg(long)]
+        touches: Option<String>,
+        /// "What does my current change touch?" — the files in the working tree
+        /// diff, each with its cross-file outgoing targets (where in the other
+        /// file) and incoming users. Read-only
+        #[arg(long)]
+        changed: bool,
         /// Hop bound for --cycles/--impact (default: 64 / 3)
         #[arg(long)]
         depth: Option<usize>,
@@ -1469,6 +1479,8 @@ impl Cli {
                 file_graph,
                 focus,
                 by_file,
+                touches,
+                changed,
             } => {
                 // Same guard as the MCP tools (core::project_root, one rule):
                 // indexing or walking $HOME / a workspace folder from the CLI
@@ -1508,6 +1520,10 @@ impl Cli {
                     // File-level projection of the entity graph — read-only,
                     // derived from existing columns (no file nodes).
                     Self::handle_code_file_graph(Path::new(&path), focus.as_deref())?;
+                } else if let Some(symbol) = touches.as_deref() {
+                    Self::handle_code_touches(Path::new(&path), symbol)?;
+                } else if changed {
+                    Self::handle_code_changed(Path::new(&path))?;
                 } else if cycles || impact.is_some() || why.is_some() || by_file {
                     // P2: graph queries over the store — read-only.
                     Self::handle_code_graph(
@@ -2206,6 +2222,63 @@ Use --no-preview to actually perform the restore"
             obj.insert("levels".to_string(), serde_json::to_value(&levels)?);
         }
         println!("{}", serde_json::to_string_pretty(&body)?);
+        Ok(())
+    }
+
+    /// "What does this symbol touch in other files?" — outgoing edges with the
+    /// target's file/symbol/line, plus incoming users. Read-only.
+    fn handle_code_touches(path: &Path, symbol: &str) -> Result<()> {
+        let index_root = crate::core::code_index_db::resolve_index_root(path);
+        let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
+            anyhow::anyhow!(
+                "code-index --touches needs a store — run `gnawtreewriter code-index <root> --db` first ({e:#})"
+            )
+        })?;
+        let t = crate::core::code_graph::touches_symbol(&conn, symbol)?;
+        println!("{}", serde_json::to_string_pretty(&t)?);
+        Ok(())
+    }
+
+    /// Files in the working-tree diff, each with what it touches elsewhere and
+    /// who touches it. Read-only; the git read is a name-only diff, so nothing
+    /// is parsed here beyond the store that already exists.
+    fn handle_code_changed(path: &Path) -> Result<()> {
+        let index_root = crate::core::code_index_db::resolve_index_root(path);
+        let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
+            anyhow::anyhow!(
+                "code-index --changed needs a store — run `gnawtreewriter code-index <root> --db` first ({e:#})"
+            )
+        })?;
+
+        let files = crate::core::code_index::changed_files_from_git(&index_root);
+        let mut entries = Vec::new();
+        let mut indexed = 0usize;
+        for file in &files {
+            let t = crate::core::code_graph::touches_file(&conn, file)?;
+            let known = !t.outgoing.is_empty() || !t.incoming.is_empty();
+            if known {
+                indexed += 1;
+            }
+            entries.push(serde_json::json!({
+                "file": file,
+                // A file with no edges is either isolated or not in the store;
+                // saying which is the difference between "nothing to see" and
+                // "the index cannot see it".
+                "triple_in_store": known,
+                "outgoing": t.outgoing,
+                "incoming": t.incoming,
+            }));
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "kind": "changed",
+                "changed_files": files.len(),
+                "with_edges_in_store": indexed,
+                "entries": entries,
+                "note": "Files come from `git diff --name-only HEAD` plus untracked files. `triple_in_store: false` means the store has no edges for that path — either it is isolated or the index is older than the change; re-run with --db before drawing conclusions.",
+            }))?
+        );
         Ok(())
     }
 
