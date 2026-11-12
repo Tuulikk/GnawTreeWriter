@@ -32,7 +32,18 @@ use std::time::Duration;
 /// `clone`/`len`/`is_empty`/`get` are "unique" only because std is not
 /// indexed). The version is part of `generation_key`, so existing stores
 /// rebuild instead of keeping the old, confidently-wrong edges.
-pub const EXTRACTOR_VERSION: &str = "3";
+/// Bumped to 4 (2026-11-12): ENTITY EXTRACTION now recurses into inline
+/// `mod x { ... }` bodies. Without the bump a fix like that looks ineffective:
+/// this repo's src/mcp/mod.rs (4 387 lines inside `pub mod mcp_server`) kept
+/// its single entity because the file itself had not changed, so the
+/// incremental refresh never re-parsed it. Measured after a real rebuild:
+/// that file 1 → 102 entities, entities overall 2 882 → 3 412, matched sources
+/// 16 686 → 22 526, `function_scope_unmatched` 6 773 → 1 331 (−80 %).
+/// Honest side effect: `calls` resolution_rate 0.102 → 0.124 is NOT the whole
+/// story — more entity names also create more ambiguity, so resolution can
+/// move either way; the local-candidate denominator in `--coverage` is the
+/// number to read.
+pub const EXTRACTOR_VERSION: &str = "4";
 
 const SCHEMA_VERSION: i32 = 4;
 const BUSY_TIMEOUT_MS: u64 = 5000;
