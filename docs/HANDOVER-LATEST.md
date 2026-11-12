@@ -1,276 +1,226 @@
-# Handover — 2026-11-10 (IV): språk + edit-korrekthet (md/css/yaml/toml → tree-sitter)
+# Handover — 2026-11-12 (V): spårbarhet, tillstånd, två Motor2-fynd
 
-## Denna session (IV) — KLART, ej släppt
+**Läget just nu:** allt committat och pushat (`b5a3c11`), träd rent,
+`## master...origin/master`. **466 tester**, `clippy --all-targets -D warnings`
+= 0, `scripts/commit-build.sh` → `RESULT ok`. Ingen release taggad (0.26.1 ute,
+0.27.0 ej påbörjad).
 
-**Fyra nya grammatiker** (probe-verifierade mot tree-sitter **0.26.13** innan de
-togs in; ingen drar en andra runtime):
+Läsordning för den som tar över: den här filen → `uppslag.md` (nyast först) →
+`CHANGELOG.md` `[Unreleased]` → `docs/BACKUP_STORAGE_AND_TIME_TRAVEL.md`.
 
-- **PowerShell** (`.ps1`, `.psm1`, `.psd1`) — 20 filer i arbetsytan, ingen
-  parser tidigare. Grammatikegenheter: **tom fil ger ERROR-noder** (så
-  `validate` säger "invalid" på en 0-byte `.ps1`) och en funktionskropp med
-  flera statements på EN rad ger ERROR vid `param`. Flervadiga kroppar parsar rent.
-- **CMake** (`.cmake` + `CMakeLists.txt`), **Makefile**
-  (`Makefile`/`makefile`/`GNUmakefile`), **Ruby** (`.rb`).
-- **Filnamnsdetektering** införd: `parser_for_special_filename` körs **före**
-  ändelsematchningen. Behövdes för tre klasser: `CMakeLists.txt` (ändelse
-  `.txt` → blev `TextParser`), `Makefile` (`extension()` = `None`) och
-  `.bashrc`/`.zshrc`/`.profile`/… (också `None`). De senare fick bash-parsern.
-- **Tillägg på befintliga språk:** `.pyi` → Python, `.mts`/`.cts` → TypeScript.
-- **Ruby var en tyst lögn:** `get_parser_for_language` mappade `ruby`/`rb` →
-  `"rb"` men `get_parser` hade ingen `"rb"`-arm → `GenericParser` (en nod), så
-  `language: ruby`-regler kompilerade mot ett tomt träd och matchade aldrig.
+---
 
-**Fyra parsrar bytta till tree-sitter** (byte-exakta spann i stället för
-position-blinda noder): **markdown, css, yaml, toml**. Detta var inte
-kosmetika — `edit_node` förstörde filerna:
+## 1. Denna session — KLART
 
-| Format | Före (mätt mot 0.24.0-binären) | Efter |
+Sju sammanhängande saker, alla med mätning före ändring:
+
+**a) Semantiska indexet ljög om färskhet.** `file_hash` var en **path**-hash →
+ingenting kunde någonsin upptäcka en ändring. Nu hashas innehåll;
+`has_content_hash()` är enda skip-frågan. `ai index <PATH>` skrev till **cwd**:s
+store i stället för målets rot (fixat, skriver `📦 Store:`). Hermetiskt bevis:
+2 inbäddade → 0/2 → en `printf`-ändring → 1/2.
+
+**b) Ärliga nämnare.** `local_resolution` per relationstyp (resolved /
+module_path / needs_receiver / ambiguous / external / macros) + `reading_note` i
+`--coverage`; `--scope <prefix>` filtrerar **täljare och nämnare tillsammans**
+(mätt spridning: hela projektet 43 %, `src/core/` 47 %, `src/llm/` 35 %,
+`src/mcp/` 53 %). `file_scope_by_design` (döpt om från `..._unmatched`).
+
+**c) Filnivå:** `--file-graph [--focus]`, `--cycles --by-file` (SCC),
+`--touches <SYMBOL>` (båda riktningarna, `from_symbol: null` = okänt),
+`--changed` (git-diff + untracked, `triple_in_store`).
+
+**d) Relationshistorik i DB:n** — tabellen fanns med **noll skrivare**.
+`RelationDelta` + `agg_relations` + `diff_relations` + `record_revision`;
+before-image fångas före per-fil-upsert. Aggregerad nyckel
+`from_id|relation_type|to_name` (`to_id` utesluten — resolution är härledd),
+`count_changed` som egen kind. Mätt rev 311: 55 added, 6 count_changed,
+1 removed; omkörning → 0. `--history` + `--onion` (frame = tillstånd **vid**
+revisionen, off-by-one rättad).
+
+**e) `--scope` på alla fem** (`coverage`, `touches`, `file_graph`, `history`,
+`onion`, `changed`) med semantiken namngiven per kommando: motpart för
+`touches`, incident-par för `file_graph`, prefix på relation key för
+history/onion. Nya fältet `matches_in_store` gör att en tom sida inte kan
+förväxlas med "historiken börjar nu".
+
+**f) Backuper: AST:n bort.** `tree` var **99,1 %** av 15,45 GiB (15,31 GiB) och
+lästes **ingenstans**. v2 lagrar bara `source_code`: samma fil 49 002 423 B →
+304 735 B = **160,8×**. Projektion för de 980: ~139 MiB (och ~5–6 MiB med zstd
+senare). Gamla blobbar orörda och läsbara.
+
+**g) Tillstånd (A+B).** `undo`/`redo` skriver nu **reaktioner**
+(`OperationType::Undo`/`Redo` med `metadata.reverted_txn` / `restored_txn`) och
+den applicerade mängden **härleds** (`TransactionLog::applied_transactions`,
+`redo_candidates`). Journalen är append-only. `core::state_head` projicerar
+"vilket innehåll gäller per fil" + `content_source`; `.gnawtreewriter_head.json`
+är en **cache med vattenstämpel** — raderar man den blir projektionen identisk
+(testat). `head [--verify] [--trace]` — `--verify` rapporterar
+`no_content_source` / `source_unreadable` / `source_hash_mismatch` /
+`working_tree_mismatch` / `file_missing` / `cache_stale` och **lagar aldrig**.
+Efter-blobbar ger det nyaste tillståndet en verifierbar källa (den gamla
+before-blobben kunde inte).
+
+**h) Attribution (deklarerad, frivillig).** `core::attribution`: bidragsgivare
+med **roller som lista** (en identitet med flera roller skrivs en gång),
+`mechanism` (cli/mcp/batch/plugin — satt av **kodvägen**, kan inte påstås),
+`client`/`client_version` ur MCP-handskakningen, `change_id` (en logisk ändring
+över filer) och `task_id` ovanför. Lagras i `Transaction.metadata` → gamla
+journaler läses oförändrat, inget lib-API brutet. `--author`, `--co-designer`,
+`--reviewer`, `--initiator`, `--model`, `--change-id`, `--task-id`.
+`head --trace` visar nämnare + `by client` / `by mechanism`.
+
+**i) Två Motor2-fynd** (se §4).
+
+## 2. Den röda tråden — klassen av fel som återkommit fyra gånger
+
+**Ett värde som ser ut som data men inte är det.** Förekomster i den här
+sessionen: path-hash i `file_hash`; fantom-store i fel katalog; `mamba3`-katalog
+(6,4 GB) utan loader; `resolution_rate` utan nämnare; `tree` i varje backup;
+`file_versions.before_hash` alltid NULL; `revisions_tx_links` med noll rader;
+`prose_annotations` med noll anropare. **Fixen är alltid "gör talet till det det
+påstår", aldrig "förbättra talet".**
+
+Invarianter som inte får raseras (de är dyrt köpta):
+
+1. **Journalen äger tillståndshistoriken; indexet härleder.** Append-only —
+   ingenting skrivs om, reaktioner är nya rader.
+2. **Head är en projektion, aldrig en auktoritet.** `rm .gnawtreewriter_head.json`
+   förlorar ingenting.
+3. **Frånvaro är inte noll.** `graph: Option<f32>` — "absence is not agreement".
+   `unknown` är en riktig hink i varje räkning.
+4. **Varje tal skriver ut sin nämnare.** `--scope`, `local_resolution`,
+   `head --trace` (0/980), `--coverage`.
+5. **Lagra aldrig utvärderat tillstånd.** Blender-läxan: keys, inte states.
+   En sparad AST är dessutom *fryst* — den påstår vad en dåtida parser sa.
+6. **`mechanism` sätts av kodvägen**, aldrig av anroparen. `client` är
+   självrapporterad och får inte presenteras som verifierad.
+7. **Tester är hermetiska:** `tempfile::tempdir()` + **`.git`-markör** (annars
+   kapar en sessionsfil i `/tmp` backuparna — mätt i den här sessionen).
+8. **`end_line` betyder "raden med sista byten"**, inte "sista raden". För text
+   som slutar med `\n` är den en rad för hög. Använd den aldrig som slice-gräns
+   utan att kompensera (se §4).
+
+## 3. Vad som mättes och var siffrorna finns
+
+| Mätning | Värde | Var |
 |---|---|---|
-| markdown | rubrik-edit **raderade `#`**; stycke-edit **åt upp blankraden** | `# Ny rubrik` intakt, blankrader kvar |
-| css | värde-edit **ersatte hela regelraden** | `body { color: green; }` kirurgiskt |
-| yaml | edits **nekades** av Duplex ("broke the AST") → read-only | `namn: demo2`, `version: 1` kvar |
-| toml | som yaml | `namn = "demo2"`, nyckeln orörd |
+| AST:ns andel av backuperna | 15,31 / 15,45 GiB = 99,1 % | `docs/BACKUP_STORAGE_AND_TIME_TRAVEL.md` |
+| v1 → v2 för samma fil | 49 002 423 B → 304 735 B (160,8×) | samma doc §7 |
+| lokal resolutionsgrad | 43 % totalt; 47/35/53 per scope | `--coverage` |
+| relationer som externa/makro/mottagarberoende/ambigusa | 12 284 / 3 659 / 2 056 / 1 428 | `local_resolution` |
+| `head --verify` på repot | 61 `no_content_source`, 41 `working_tree_mismatch`, 2 `file_missing` | `head --verify --json` |
+| `head --trace` på repot | **0/980** med deklarerad bidragsgivare | `head --trace` |
+| attributionsspridning (temp) | by client `opencode=1 unknown=2`; by mechanism `cli=2 mcp=1` | CHANGELOG `[Unreleased]` |
 
-Rotorsak: `start_col`/`end_col` var `0`, `content` ofta rekonstruerad text i
-stället för källslice ⇒ splitten föll tillbaka på **helrads-ersättning**.
-Delad konverterare `parser::tree_from_ts_node` + `parse_with_tree_sitter` bär
-spann-logiken på ett ställe (var 8 kopior). Netto **−1249/+835 rader**
-(markdown-parsern 569 → 33).
+**Misstagen jag gjorde, så nästa inte upprepar dem:**
 
-**Bonusfynd (pre-existing, inte från språkarbetet):**
+- *"Prosa-filen äger körningen"* — det var **debug-binären** (10–50× långsammare
+  för ONNX). Mät med release/installerad binär när det gäller prestanda.
+- *"Import-scope ger +1 000 resolvade kanter"* — det gav **+105**. Realistiskt
+  tak för heuristik är ~45–50 %; 43 % ligger nära det. Compiler-orakel (SCIP) är
+  enda vägen till 90 %+, opt-in, aldrig ett krav.
+- **Verktygsanrop blev text i stället för att köras** upprepade gånger i
+  Cline-miljön. Inget skadades (fallet inträffade före exekvering), men
+  motmedlet som fungerade: **ett anrop per tur**, inga nästlade citattecken,
+  skriv skript med `editor` och kör `bash /tmp/x.sh` (naket, utan flaggor).
+  Användaren överväger att flytta till OpenCode av samma skäl.
 
-- **`edit_node` tog bort filens avslutande newline i ALLA format** — även
-  Rust: `}\n` → `}`. `str::lines()` + `join("\n")` sätter aldrig tillbaka den.
-  Fixat i alla fyra splice-ställen (`join_preserving_newline`, LF/CRLF-medveten).
-  Betyder att varje GTW-edit historiskt gett "no newline at end of file"-brus
-  och att `bytes_changed` varit off-by-one.
-- **Panik vid leaf-edit:** `TreeVisualizer::generate_sparkline` delade med noll
-  när den renderade en ensam nod (max-djup 0 = normalfallet när en **leaf**
-  redigeras). Krashen kom **efter** att editen skrivits och verifierats på
-  disk ⇒ anroparen såg fel på en lyckad operation. Vakt `max(1)` i
-  `visualizer.rs` + `visualizer_test.rs`, 2 enhetstester.
-- **CLI:t hade en egen `--extensions`-default** (samma 15 stale lista), så
-  `CodeIndexOptions::default()`-fixen var verkningslös för CLI-vägen. Nu tom
-  default → faller tillbaka på den inbyggda listan (**en** källa, inte två).
-- **`code_index`-default: 15 → 32 ändelser**, bara parser-backade. Nio grupper
-  (`kt/kts`, `swift`, `cs`, `dart`, `svelte`, `sql`, `qml`, `slint`,
-  `mjs/cjs`) hade parser men indexerades aldrig.
+## 4. De två Motor2-fynden (reproducerade, åtgärdade, svar skrivet)
 
-**Verifiering:** ny `tests/legacy_parser_surgical_edit.rs` (8 tester) som
-assertar **hela filtexten** efter edit — inte "innehåller värdet", vilket var
-precis vad som släppte igenom korruptionen. **385 tester / 19 testbinärer /
-0 fel**. `cargo clippy -- -D warnings` (lib+bin) **ren**. `rustfmt --check` ren
-på samtliga rörda filer. `code-index.md` omgenererad (2275 rader, titel
-`GnawTreeWriter`, de fyra nya parserfilerna med).
+Fullt svar i `docs/SVAR-TILL-MOTOR2-2026-11-12.md` §6.
 
-**Probe-artefakter:** `/tmp/gtw-lang-probe/` (isolerade crates, egen
-`CARGO_TARGET_DIR`; `REPORT.md` + `LEGACY_TS.txt` + `USAGE.txt`).
-`tree-sitter-dockerfile 0.2.0` **avvisad**: exporterar ingen `LANGUAGE` och
-drar en andra runtime (0.20.10). `hcl 1.1.0` och `lua 0.5.0` verifierade OK
-men **inte inkopplade** (0 filer i ytan).
+**1) `delete` svalde nästa rad.** `/// doc` ovanför `use std::fmt;` → båda
+försvann, och filen parsade fortfarande, så syntaxvakten såg inget (tyst
+kodförlust). Orsak: `end_line` = raden med sista byten; för text som slutar med
+`\n` är den en rad för hög, och `delete` använde den som exklusiv slice-gräns.
+En funktion slutar inte med `\n` → därför var funktionsradering rätt och buggen
+kunde leva. Fix: räkna om slutraden. Test
+`delete_of_a_newline_terminated_comment_keeps_the_next_line`.
 
+**2) `insert_node` med position utanför intervallet.** Två varianter, båda med
+"Content inserted": klammerförälder → innehåll **efter** `}` (utanför modulen);
+**lövnod** som förälder → `children.is_empty()` → `start_line - 1` = **överst i
+filen**. Fix: klampning till förälderns eget slut **plus varning på stderr**.
+Test `insert_beyond_the_child_count_clamps_inside_the_parent`.
 
-## Session IV, fortsättning — P2 klar + fem CLI-hål stängda
+`end_line`-semantiken är **orörd** (många konsumenter läser den). De två
+ställena som använde den som grind är fixade; att normalisera fältet (eller lägga
+till `start_byte`/`end_byte`) är en öppen tråd.
 
-**P2 (CT-planen §4) färdigkopplad.** `src/core/code_graph.rs` (skriven av
-föregående agent, 401 rad, 10 tester) hade implementation men **ingen yta**.
-Tillagt av denna session: `impact` + `resolve_symbols` (ett bart *namn* slås upp
-mot `entities.name` → flera filer = flera seeds, alla rapporterade; okänt namn =
-**synligt tomt**, aldrig fabricerad kedja), 3 tester, samt inkoppling:
+## 5. Öppna trådar, i prioritetsordning
 
-- MCP: `code_index kind=cycles | kind=impact` + `symbol`/`depth` i schemat.
-- CLI: `code-index --cycles`, `--impact <namn>`, `--depth N` (read-only,
-  kräver store — samma regel som `--coverage`).
+1. **Bron (C): `revisions_tx_links` + `file_versions.before_hash`.** Tabellen är
+   deklarerad och har **noll skrivare**; `file_versions` skrivs men läses aldrig
+   och `before_hash` är alltid NULL. En `INSERT` vid indexering + en kolumn räcker
+   för att koppla head till indexet och därmed låsa upp `--at` och onion över
+   transaktioner. **Nästa naturliga steg.**
+2. **Claims (D):** `prose_annotations` (anchor_kind/key/hash, status,
+   invalid_reason) har schema + `upsert_prose` + statusuppdaterare men **noll
+   anropare** och noll rader. Koppla in + invalidiering när `anchor_hash` inte
+   längre matchar. ALF ska bli den korta, LLM-fria ytan (dryg, parsebar —
+   `tuulikk[unknown:author] via cli change=c1`).
+3. **Lagring:** formatmigration av de 980 v1-blobbarna (verifiera-läs-tillbaka
+   före radering, manifest), sedan zstd/content-addressing och **GC** — GC kräver
+   referensmodellen från (1).
+4. **Döda-ledningar-kontrollen:** lista strukturer som skrivs men aldrig läses,
+   **med belägg och osäkerhet** — inte döma ut kod. Hade fångat `tree`,
+   `file_versions`, `revisions_tx_links`, `prose_annotations`.
+5. **`end_line`-normalisering** (eller byte-offsets) — nu med två mätta symptom.
+6. **Attributionens kanter:** batch får `change_id` `auto:batch-…` när ingen
+   anges (mönstret är etablerat); `kind` är alltid `unknown` från CLI (avsiktligt
+   — CLI kan inte veta); `--trace` saknar tidsfönster (kosmetika).
+7. **Onion/vyer:** `docs/ONION_SKIN_MODEL.md` och `docs/VIEWS_MODEL.md` är
+   modeller utan kod. Vyer = linser (tröskel/opacitet/ordning), aldrig lagring;
+   frånvaro ≠ noll; varje vy redovisar egen nämnare.
+8. **`--at`:** kräver (1) + en läsande resolver som returnerar **text**, aldrig
+   skriver (bevis: mtime oförändrad).
 
-**Fem CLI-hål stängda** (alla verifierade mot byggd binär före fixen):
+## 6. Fällor i miljön (kostat tid)
 
-| # | Före | Efter |
-|---|---|---|
-| 1 | `--version`/`--help` → **exit 1 + stderr** (main.rs mappade *alla* clap-fel till exit 1) | `e.exit()`: help/version → stdout + 0; användningsfel → **2** |
-| 2 | `analyze` → **exit 0** när inget parsades | non-zero när 0 filer parsades (delscan behåller 0) |
-| 3 | `insert` **panikade på varje anrop** i debug (obligatorisk positional efter villkorlig) | `position: Option<usize>` (default 1) |
-| 4 | `curate` två `-m`, `pack` två `-i` (×2), `restore` bool som positional | long-only/flagga |
-| 5 | cachad numerisk path **skrev tyst fel nod** (mätt: `fn a() {}` → `fn CLOBBERED() {}`, exit 0) | `edit --expect-name <namn>` (B1-paritet med MCP) → avvisar, fil orörd |
-| 6 | `quick-replace '-1'` avvisades utan `--` | `allow_hyphen_values` |
+- **`/tmp/.gnawtreewriter_session.json` finns** (från en ad-hoc-körning) och gör
+  att `find_project_root` kapar temp-katalogers backuper till `/tmp`. Pinnna
+  alltid med `.git` i temp-projekt.
+- **Debug-binären är 10–50× långsammare** för ONNX. Prestandapåståenden kräver
+  release/installerad binär.
+- **`--json` är global** på `Cli`; att deklarera en andra `--json` på en
+  subcommand är en dubblett som `tests/cli_contract` fångar.
+- **clap:s `debug_assert` behöver ~16 MiB stack** (~100 subkommandon); testtråden
+  har 2 MiB → SIGABRT. `cli_contract` kör assertionen på en stor tråd.
+- **`redo` kräver after-blob.** Finns bara för rader skrivna efter 2026-11-12;
+  äldre rader ger `journal:no-blob` i head — det är sant, inte ett fel.
+- **`scripts/daemon-hygiene.sh`**: döda aldrig din egen MCP-daemon mitt i en
+  session (`GTW_REAP=yes`), klienten återansluter inte själv.
+- **Motor2 pinnar en commit**, följer inte master (fyra HEAD-flyttar på en dag).
 
-**Nya grindar:** `tests/cli_contract.rs` (`Cli::command().debug_assert()` — hade
-fångat alla fyra argument-tabellfelen på en gång) och `tests/cli_behaviour.rs`
-(kör den riktiga binären: exit-koder/strömmar för `--version`, användningsfel,
-`analyze`-fel och `--expect-name`). **404 tester / 21 binärer gröna ·
-clippy `-D warnings` ren (lib+bin).**
+## 7. Arbetsmetod som fungerade
 
-## Trovärdighetspaketet för planering — tre bitar KLARA
-
-Motiverat av mätningen: `to_id` sattes när ett namn var unikt **i indexet**, och
-`len`/`clone`/`is_empty`/`get` är unika bara för att std inte indexeras.
-
-**1. Målets resolution är inte längre en gissning.** Båda
-resolutionsplatserna (`index_relations::resolve_relations` OCH
-`code_index_db`-pass 2 — regeln fanns på två ställen) vägrar nu kors-fil-mål
-som är **metoder**; fria funktioner och samma-fil-metoder resolvas som förut.
-`EXTRACTOR_VERSION` 2 → 3 (resolutionen är del av `generation_key` ⇒ full
-ombyggnad; prose-lagret ligger i egen tabell och rörs inte).
-
-| Mått (GTW:s egen store) | Före | Efter |
-|---|---|---|
-| resolvade call-kanter | 3 898 | **2 064** |
-| kors-fil metodmål (= gissningarna) | 1 848 | **0** |
-| fler-nodscykler | 338 | **29** |
-| vanligaste mål | `clone` 612, `len` 284, `is_empty` 255, `get` 245 | `new` 120, `entry` 61, `context` 55 |
-
-**2. Färskhet + statisk-hederlighet i varje grafsvar** (D9/D10 i
-`CODE_INDEX_RELATION_HISTORY_PROPOSAL.md`): `meta { store_rev, worktree_rev,
-worktree_dirty, index_stale, static_only, note }`. Verifierat live:
-`index_stale: false` när rev matchar. `static_only` + noten säger rakt ut att
-kanterna är statiska (ingen dyn dispatch/trait-objekt).
-
-**3. `code-index --why <symbol>`** — per utgående kant: `resolved`, `to_id`,
-`target_defs` (hur många entiteter som delar målnamnet) och `verdict`
-(`unique_in_index` / `ambiguous_pick` / `unresolved`). Gör ett grafsvar
-**falsifierbart på ett anrop** i stället för att kräva tillit.
-
-Kvar av post 15: `from_id`-täckningen (D7) och 73 self-loops (samma-fil
-metod-self-edges, t.ex. `self.cache.lock()…len()` → `ParseCache::len`).
-**406 tester / 21 binärer gröna · clippy `-D warnings` ren.**
-
-## Bekräftat läge
-
-- **v0.24.0 SLÄPPT** (`eaa1209`, tagg + GitHub Latest) + uppföljande commits
-  (alla pushade): kuvert-fix `21dc368`, fas 2-ökning 1 `5db65e4` (schema v4),
-  prosa-lagret `83cd3d7`, CT-planen `b860747` + rev II `a14b245`, harmony
-  steg 1 `14b4e0d`, **P1 wiring `834d390`**.
-- **Fas 1 (code-index) KLAR:** delmål A (coverage-yta: CLI `--coverage` +
-  MCP `mode=coverage`), B (hermetisk fixtursvit + facit-projekt
-  `testprojekt/code-index-fixture/`), C (extraktor v2: metodanrop H1,
-  makron H2, scoped-path H3, implements kind=trait H4).
-  Före/efter GTW-repot: relations 4 650 → 22 095; resolved call-kanter
-  890 → 3 848 (4,3×); käll-matched 49,4 % → 70,7 %; implements 31/31
-  korrekt-målade (de gamla 88,5 % innehöll fel-mål).
-- **CT-planen P1 KLART enligt S-protokollet** (S0–S5: källan läst, byggd +
-  KÖRD — 6 mätta cases pinnade; DERIVE-klassad): `src/llm/harmony.rs`
-  (ren, funktions-oberoende modul) + **P1 wiring KLART**: `RerankedHit`
-  bär råa pelare (`lex`, `graph: Option<f32>`) + `harmony` (verdict +
-  suggestion); FileMatch exponerar harmony; MCP-prosan surface:ar
-  top-träffens verdict (suspect_note-mönstret).
-  **291 lib-tester + fixtur gröna · clippy `-D warnings` ren ·
-  no-default-features 0 fel.** Studieranteckning 09.1 ifylld i planen §3.6.
-- **Prosa-lagret i DB (användarens design):** `prose_annotations` i schema
-  v4 — ankare (kind/key/hash/name), body, producer/model/language,
-  generation-revision, state machine `fresh` → `stale` ("ej färsk") →
-  `invalid` ("ej gällande", med `suggested_key` vid unik samnamnig
-  efterträdare). Deterministisk sweep per revision; producenter via
-  `upsert_prose`; aldrig grind. Coverage: `ProseSummary` +
-  `regenerate_recommended`.
-- **Migrations-helande (nytt mönster):** commit-hookens äldre binär kan
-  migrera storen med äldre ADD-sätt → `migrate_connection` kör idempotent
-  DDL (CREATE IF NOT EXISTS) vid VARJE öppning + additiv kolumn-reparation
-  (PRAGMA table_info + ALTER ADD DEFAULT). Verifierat på live-storen
-  (anchor_name reparerat).
-- **Bonus-guards:** `E_DUPLICATE_ATTRIBUTE` (dubbel-`#[test]`-fällan) —
-  4-falls enhetstest. Issue-loggen: post II (kuvert + daemner) och III
-  (edit-stöd: search_nodes-annotering, read_node storlek, storleksschock —
-  "bygg nu"-status).
-- **Daemner/hygien:** 84 → 8 daemner (76 deleted-exe under cline-hub
-  dödade). Nuvarande 5 daemner kör CPU-bin (0.24.0 med allt) — **MCP
-  coverage LIVE** (verifierat: full rapport via wrapper). libexec (GPU)
-  = 10:45-bygget, SAKNAR kuvert/schema-v4/prosa → **GPU-rebuild måste
-  köras om** (föregående avbröts av omstarten); harmlöst tills dess
-  (daemner använder bin). gnawdrivers db_surf var stale (egen varning) —
-  bygg om gnawdriver; python3-sqlite3 mode=ro användes som sanningskälla.
-
-## Öppna poster (ordning enligt överenskommelse)
-
-1. **P2** (CT-planen): graf-frågor `kind=cycles|impact` + `chain` i ny
-   `src/core/code_graph.rs` (SQL UNION-rekursiv reachable — UNION dedupar
-   så cykler terminerar; Rust path-stack-cykler med rotationskanonisering;
-   dokumenterad begränsning: syntetiska callsite-from_ids propagerar inte).
-2. **Fas 2 I2:** D5(a) atomisk wrap av refresh (revision+deltan+nuläge i EN
-   tx; failed-refresh-bokföring i egen tx) — benchmark på Motor2-storlek
-   fixtur.
-3. **I3:** entity/relation-deltas (aggregerade D1/D8-nycklar med counts) +
-   `changes --from --to` (CLI/MCP).
-4. **I4:** D7-källklassificering (6 009 function_scope_unmatched →
-   kvalificera from-identiteten) + git_hook-spelningens live-verifiering
-   (hooken spelar INTE revisioner idag — upptäckt; hook-scriptet behöver
-   reinstall för `GTW_CODE_INDEX_SOURCE=git_hook`-prefixet).
-5. **P3a** (complexity på riktig AST — decision_kinds-tabell per språk;
-   fixtures är riskposten) och **P4** (JSON-analysartefakt `gtw-analysis/1`
-   + triage-skript) per CT-planen.
-6. **Prosa-ytan:** `upsert_prose` har INGEN CLI/MCP-yta än (producenter
-   väntar; guard blockerar rå sqlite-skrivning) — nästa öknings-kandidat
-   jämte P2.
-7. **Underhåll:** hook-reinstall (`--uninstall-hook` + `--install-hook`)
-   för env-prefixet; CHANGELOG för prosa-lagret + P1.
-   **Hook-fällan är FIXAD** (`9363bce`): den anropar inte längre blint
-   `gnawtreewriter` från PATH. Den föredrar `target/release` →
-   `target/debug` → PATH, och **hoppar över** med en rad på stderr när den
-   valda binären är äldre än `Cargo.toml`/`src`
-   ("is older than the source — code-index refresh SKIPPED"). Dessutom vägrar
-   `refresh()` köra mot en store vars `extractor_version` är **högre** än
-   binärens — en gammal binär kan alltså inte längre nedgradera storen (mätt
-   fall: v2 skrev över en v3-store och återinförde fabricerade kanter).
-   Verifierat: hooken skrev SKIPPED efter commit, `git status` rent och
-   `code-index.md` kvar på 2275 rader. **Kvar:** kör
-   `cargo install --path .` när du vill att hooken ska refresha igen; tills
-   dess är indexet fruset men aldrig fel (och `meta.index_stale` säger till).
-
-### Nya öppna poster från session IV
-
-8. **`cargo clippy --all-targets -- -D warnings` är RÖD — men inte på denna
-   sessions kod.** Två lints, båda i testkod i filer som inte rördes:
-   - `src/core/index_entities.rs:975` → `clippy::doc_lazy_continuation`
-   - `src/llm/semantic_index.rs:843` → `clippy::field_reassign_with_default`
-   `cargo clippy -- -D warnings` (lib+bin) är **grön**. Beslut behövs: fixa de
-   två lints, eller medvetandegör att CI-grinden är lib-only.
-9. **`cargo fmt --check` avviker på 52 filer redan på HEAD** — varav 40+ orörda
-   av session IV (bl.a. `src/cli.rs`, `tests/code_index_fixtures.rs` och
-   `src/llm/harmony.rs`). En repo-wide `cargo fmt` är ett eget beslut; sessionen
-   formaterade bara egna filer för att inte begrava ändringen i brus.
-10. **`.h` → C++-heuristik** ej gjord. `.h` mappas alltid till C-parsern, även
-    för C++-headers (`class`/`template`/`namespace`), och ytan har 49 `.h` mot
-    50 `.cpp`. Beteendeförändring på befintliga filer ⇒ egna tester först.
-11. **JSON kvar på interim (J1).** `json_semantic_edit` navigerar per
-    **nyckelnamn**, inte numeriskt index — ett byte till `tree-sitter-json`
-    ändrar varje JSON-path och måste göras ihop med funktionen (pinnat av
-    `json_edit_stays_valid_and_goes_through_the_semantic_path`).
-    **Separat fynd (fanns före session IV):** `--preview` visar den råa
-    splitten medan skarp edit tar den semantiska vägen — preview och apply är
-    oense för JSON.
-12. **PowerShell-grammatikens egenheter** (dokumenterade i `powershell.rs`):
-    tom fil ⇒ ERROR-noder (så `validate` säger "invalid" på en 0-byte `.ps1`),
-    och en funktionskropp med flera statements på EN rad ⇒ ERROR vid `param`.
-    Ingen åtgärd tagen — kräver antingen en `empty_ok`-väg i `validate` eller en
-    lokalt patchad grammatik.
-13. **Dockerfile saknas fortfarande.** `tree-sitter-dockerfile 0.2.0`
-    exporterar ingen `LANGUAGE` och drar en andra runtime (0.20.10) ⇒ oanvändbar
-    utan omskrivning. `hcl 1.1.0` och `lua 0.5.0` är probe-verifierade men
-    **inte inkopplade** (0 filer i ytan).
-14. **MCP-ytan:** `blast`, `graph` och `cycles` är fortfarande **CLI-only**.
-    P2 i CT-planen adresserar det via `code_index kind=cycles|impact`.
-15. **EXTRACTOR-HÅL (hög prioritet, nytt i session IV): same-name-missresolution
-    fabricerar kanter.** `to_id` sätts när ett namn är unikt **i indexet** — men
-    `len` är unikt bara för att std inte indexeras, så **alla 286 `len`-anrop**
-    i repot resolvar till `ParseCache::len` (även `vec.len()`, `tensor.len()`
-    inne i `bge_embed_batched`). Följd: 73 self-loops + 338 "cykler" som
-    `len ↔ bge_embed_batched`, och `impact`/`blast` får fabricerade kanter.
-    Mätt på GTW:s egen store 2026-11-10. `code_graph` rapporterar ärligt vad
-    grafen innehåller — felet ligger i resolutionen, inte i frågorna.
-    Åtgärdsförslag: resolva inte metodanrop (`x.m()`) utan mottagartyp — lämna
-    `to_id` NULL (ärligt "unresolved", coverage redovisar det), eller lagra
-    mottagaren och matcha typ. Kräver beslut eftersom det sänker den uppmätta
-    käll-matchningsgraden (70,7 %) — men de kant­erna är i dag fabricerade.
+1. **Mät före ändring** (och mät om efter) — varje påstående i den här filen har
+   ett kommando bakom sig. Två observationer innan en bugg rapporteras.
+2. **Reproducera i temp-projekt med `.git`** — aldrig mot repots egen state.
+3. **Rätt ställe:** GTW `edit`/`quick-replace` → `editor` → aldrig
+   `python`/`sed -i`/`dd`/`tee` på projektfiler (M2). En avvikelse i den här
+   sessionen (två `python3`-heredoc för mekaniska flersidiga byten) är redovisad i
+   `uppslag.md` med vad som kompenserade — godkända tester ersätter inte regeln.
+4. **Skriv in fällan i koden** där den gäller, och i `uppslag.md` med belägg,
+   status och "om det är fel".
+5. **Avgränsa:** en ändring = en commit med mätning i meddelandet, `RESULT ok`
+   som sista rad.
 
 ## Pekare
 
-- Plan of record: `docs/COMPARATIVE_THINKER_ADAPTATION_PLAN.md` (rev II;
-  studieanteckning 09.1 ifylld i §3.6) +
-  `docs/CODE_INDEX_RELATION_HISTORY_PROPOSAL.md` ("Fas 2-designnoter",
-  låsta D1–D10 + design-noter från sessionen).
-- Checkpoints: `phase1-coverage-harness`, `phase1-extractor-v2`.
-- Minne: `gnawtreewriter:decision:phase2-locks`,
-  `gnawtreewriter:decision:code-index-prose-layer`,
-  `gnawtreewriter:reference:comparative-thinker-plan`,
-  `gnawtreewriter:lesson:opencode2x-mcp-binary-pickup`.
-- Facit-projekt: `testprojekt/code-index-fixture/` (FACTS.md — före/efter
-  C mätta 2026-11-10).
-- Issue-log: post II (kuvert + daemn-hygien) och III (edit-stöd, "bygg nu").
+- Detta är session V. Föregående: `docs/HANDOVER-LATEST.md` i git-historiken
+  (`git log --all -- docs/HANDOVER-LATEST.md`).
+- Docs: `BACKUP_STORAGE_AND_TIME_TRAVEL.md` (§7 = mätningen),
+  `ONION_SKIN_MODEL.md`, `VIEWS_MODEL.md`, `LOCAL_MODEL_BAKEOFF.md`,
+  `SVAR-TILL-MOTOR2-2026-11-12.md` (§6 = Motor2-fynden).
+- Fyndlista: `uppslag.md` (nyast först, med status och nämnare).
+- Motor2:s rapporter: `FEEDBACK_FRAN_MOTOR2_2026-11-12.md`,
+  `GTW_FYND_FRAN_MOTOR2_2026-11-12.md`.
+- Nyckelmoduler: `src/core/state_head.rs`, `src/core/attribution.rs`,
+  `src/core/transaction_log.rs` (`applied_transactions`, `redo_candidates`),
+  `src/core/capabilities.rs`, `src/core/index_levels.rs`.
+- Modeller installerade: 418 MB `bge-base` (embeddings, L3) + 697 MB `lfm25`
+  (L4, kräver `mamba`-feature). 7,5 GB felaktiga modeller raderade 2026-11-12.
+
+
