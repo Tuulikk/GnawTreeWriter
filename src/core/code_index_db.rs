@@ -21,7 +21,8 @@ use crate::core::code_index::{
 };
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use serde::Serialize;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -206,6 +207,39 @@ pub struct RefreshStats {
     pub files_removed: usize,
     /// Full rebuild happened (generation change or corruption recovery).
     pub full_rebuild: bool,
+    /// Aggregated relation deltas this refresh produced, ready to be written
+    /// into `relation_changes` under the revision that `record_revision` creates.
+    ///
+    /// Carried here rather than written inline because the revision id does not
+    /// exist yet at refresh time (the revision row is created afterwards). The
+    /// proposal called this the "single-tx wrap"; this is the cheap half of it:
+    /// the PRE-refresh state is captured while it is still in scope, and the
+    /// AFTER state is read once the cross-file resolution pass has run.
+    pub relation_deltas: Vec<RelationDelta>,
+}
+
+/// One aggregated relation delta: `(from_id, relation_type, to_name)` with the
+/// occurrence count on each side.
+///
+/// Granularity follows `docs/CODE_INDEX_RELATION_HISTORY_PROPOSAL.md` (D1):
+/// the unit is the AGGREGATE, not the callsite — otherwise "two calls to the
+/// same target became one" would look like nothing happened. `count_changed`
+/// is therefore a real change kind even though the edge still exists (D8).
+#[derive(Debug, Clone, Serialize)]
+pub struct RelationDelta {
+    /// File the relation rows belong to (the source file).
+    pub file: String,
+    /// `from_id|relation_type|to_name` — `to_id` is excluded on purpose:
+    /// resolution is derived and may flip without the edge changing.
+    pub relation_key: String,
+    /// `added` | `removed` | `count_changed`
+    pub change_kind: String,
+    pub count_before: i64,
+    pub count_after: i64,
+    pub before_json: Option<String>,
+    pub after_json: Option<String>,
+    /// `resolved` | `unresolved` | `mixed` for the side that exists.
+    pub resolution_status: String,
 }
 
 pub struct DbRun {
@@ -502,6 +536,96 @@ fn upsert_file(
     Ok(())
 }
 
+/// Aggregated edges of ONE file: `relation_key -> (count, resolved_count)`.
+/// Same key the delta rows use, so before/after can be compared as sets.
+fn agg_relations(conn: &Connection, file: &str) -> Result<BTreeMap<String, (i64, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT from_id || '|' || relation_type || '|' || to_name,
+                COUNT(*), COALESCE(SUM(to_id IS NOT NULL), 0)
+         FROM relations WHERE file = ?1
+         GROUP BY from_id, relation_type, to_name",
+    )?;
+    let rows = stmt.query_map(params![file], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
+    })?;
+    let mut out = BTreeMap::new();
+    for row in rows {
+        let (k, count, resolved) = row?;
+        out.insert(k, (count, resolved));
+    }
+    Ok(out)
+}
+
+fn resolution_of(resolved: i64, count: i64) -> &'static str {
+    if resolved == 0 {
+        "unresolved"
+    } else if resolved == count {
+        "resolved"
+    } else {
+        "mixed"
+    }
+}
+
+/// Diff two aggregated states into delta rows.
+fn diff_relations(
+    file: &str,
+    before: &BTreeMap<String, (i64, i64)>,
+    after: &BTreeMap<String, (i64, i64)>,
+) -> Vec<RelationDelta> {
+    let empty: BTreeMap<String, (i64, i64)> = BTreeMap::new();
+    let b = if before.is_empty() { &empty } else { before };
+    let a = if after.is_empty() { &empty } else { after };
+    let mut keys: BTreeSet<&String> = BTreeSet::new();
+    keys.extend(b.keys());
+    keys.extend(a.keys());
+
+    let mut out = Vec::new();
+    for key in keys {
+        let (cb, rb) = b.get(key).copied().unwrap_or((0, 0));
+        let (ca, ra) = a.get(key).copied().unwrap_or((0, 0));
+        if cb == 0 && ca == 0 {
+            continue;
+        }
+        let kind = if cb == 0 {
+            "added"
+        } else if ca == 0 {
+            "removed"
+        } else if cb != ca {
+            "count_changed"
+        } else {
+            // Existence AND count identical: not a delta. A resolution flip is
+            // recorded on the row that does exist rather than as its own change
+            // — otherwise every new entity would flood the log with
+            // "nothing changed but now it resolves".
+            continue;
+        };
+        let (rc, cc) = if ca > 0 { (ra, ca) } else { (rb, cb) };
+        out.push(RelationDelta {
+            file: file.to_string(),
+            relation_key: key.clone(),
+            change_kind: kind.to_string(),
+            count_before: cb,
+            count_after: ca,
+            before_json: if cb > 0 {
+                Some(format!("{{\"count\":{cb},\"resolved\":{rb}}}"))
+            } else {
+                None
+            },
+            after_json: if ca > 0 {
+                Some(format!("{{\"count\":{ca},\"resolved\":{ra}}}"))
+            } else {
+                None
+            },
+            resolution_status: resolution_of(rc, cc).to_string(),
+        });
+    }
+    out
+}
+
 /// Incremental refresh: parse only files whose content hash changed (or
 /// everything, on generation change). Rows for removed files are deleted.
 /// The staleness queue drains on success (decision #8). `meta` is written
@@ -571,7 +695,13 @@ pub fn refresh(
         files_reused: 0,
         files_removed: 0,
         full_rebuild,
+        relation_deltas: Vec::new(),
     };
+
+    // Pre-refresh edge sets per touched file. Captured HERE because the
+    // per-file upsert below deletes the old rows — after that the "before"
+    // state is gone, and a delta without a before-image is not history.
+    let mut before_sets: BTreeMap<String, BTreeMap<String, (i64, i64)>> = BTreeMap::new();
 
     let mut current: HashSet<String> = HashSet::new();
     for path in &files {
@@ -611,12 +741,16 @@ pub fn refresh(
             &mut rel_index.relations,
             &ent_index.entities,
         );
+        before_sets.insert(rel.clone(), agg_relations(conn, &rel)?);
         store_entities_relations(conn, &rel, &ent_index.entities, &rel_index.relations)?;
         stats.files_parsed += 1;
     }
 
     for old in known.keys() {
         if !current.contains(old) {
+            // Capture the removed file's edges before they are dropped: a
+            // deleted file's relations are the clearest delta there is.
+            before_sets.insert(old.clone(), agg_relations(conn, old)?);
             // Null out cross-file references BEFORE dropping the file's
             // entities (FK order), then clean all three tables — removed
             // files must not leak rows.
@@ -635,6 +769,15 @@ pub fn refresh(
     // relation the per-file pass left NULL gets one shot against the FULL
     // entity set; what remains unresolved is a symbol, not a reference.
     resolve_unresolved_in_db(conn)?;
+
+    // Deltas are computed AFTER the cross-file pass: before that, `to_id` is
+    // still NULL for every cross-file edge, and "resolved" would be a lie.
+    for (file, before) in &before_sets {
+        let after = agg_relations(conn, file)?;
+        stats
+            .relation_deltas
+            .extend(diff_relations(file, before, &after));
+    }
     conn.execute("DELETE FROM symbols", [])?;
     conn.execute_batch(
         "INSERT INTO symbols (name, file, external, occurrences)
@@ -662,7 +805,12 @@ pub fn refresh(
 /// stage; before/after deltas arrive with the single-tx wrap where the
 /// pre-refresh state is naturally in scope). Failed refreshes record
 /// nothing yet — the dedicated failure path lands with the wrap.
-pub(crate) fn record_revision(conn: &mut Connection, root: &Path, source: &str) -> Result<i64> {
+pub(crate) fn record_revision(
+    conn: &mut Connection,
+    root: &Path,
+    source: &str,
+    deltas: &[RelationDelta],
+) -> Result<i64> {
     let (rev, dirty) = git_facts(root);
     let now = chrono::Utc::now().timestamp();
     let gk = meta_get(conn, "generation_key")?.unwrap_or_default();
@@ -680,6 +828,29 @@ pub(crate) fn record_revision(conn: &mut Connection, root: &Path, source: &str) 
         params![parent, rev, dirty as i64, source, IDENTITY_SCHEME_VERSION, gk, now],
     )?;
     let rid = tx.last_insert_rowid();
+    {
+        // Relation history (the half that was scaffolding until now): the
+        // proposal's D1 granularity — aggregated key with counts on both sides,
+        // `to_id` excluded because resolution is derived.
+        let mut stmt = tx.prepare(
+            "INSERT OR REPLACE INTO relation_changes
+                (revision_id, relation_key, change_kind, count_before, count_after,
+                 before_json, after_json, resolution_status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )?;
+        for d in deltas {
+            stmt.execute(params![
+                rid,
+                d.relation_key,
+                d.change_kind,
+                d.count_before,
+                d.count_after,
+                d.before_json,
+                d.after_json,
+                d.resolution_status,
+            ])?;
+        }
+    }
     {
         let mut stmt = tx.prepare(
             "INSERT INTO file_versions (revision_id, path, before_hash, after_hash, parse_status)
@@ -956,7 +1127,7 @@ pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun> {
     // via GTW_CODE_INDEX_SOURCE (git_hook sets it in the installed hook).
     let source =
         std::env::var("GTW_CODE_INDEX_SOURCE").unwrap_or_else(|_| "refresh_manual".to_string());
-    if let Err(e) = record_revision(&mut conn, &index_root, &source) {
+    if let Err(e) = record_revision(&mut conn, &index_root, &source, &stats.relation_deltas) {
         notices.push(format!("revisionspost kunde inte skrivas: {e:#}"));
     }
     // Freshness sweep after the revision: prose claims are facts-checked
@@ -1305,6 +1476,113 @@ pub fn is_busy_error(err: &anyhow::Error) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod relation_history_tests {
+    use super::*;
+
+    /// The history that was scaffolding for two days, tested end to end:
+    /// a no-op refresh must log NOTHING, a changed occurrence count must log
+    /// `count_changed`, and a deleted call must log `removed`.
+    ///
+    /// The no-op case is the one that matters most: the per-file upsert deletes
+    /// and reinserts every relation row, so a naive "compare rows" would report
+    /// every edge as removed+added on every touch. Only a SET comparison of the
+    /// aggregated key is honest.
+    #[test]
+    fn refresh_records_relation_deltas_and_ignores_unchanged_edges() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.rs"), "fn a() { b(); }\n").unwrap();
+        std::fs::write(root.join("b.rs"), "pub fn b() {}\n").unwrap();
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        migrate_connection(&conn).unwrap();
+        let opts = CodeIndexOptions::default();
+
+        // ── 1. baseline: everything is new, so every edge is `added` ──────
+        let s1 = refresh(&mut conn, root, &opts).unwrap();
+        assert!(
+            s1.relation_deltas.iter().all(|d| d.change_kind == "added"),
+            "a first index can only add: {:?}",
+            s1.relation_deltas
+                .iter()
+                .map(|d| &d.change_kind)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            s1.relation_deltas
+                .iter()
+                .any(|d| d.relation_key.contains("|calls|b")),
+            "the call a -> b must be in the baseline: {:?}",
+            s1.relation_deltas
+                .iter()
+                .map(|d| &d.relation_key)
+                .collect::<Vec<_>>()
+        );
+        let rid1 = record_revision(&mut conn, root, "test", &s1.relation_deltas).unwrap();
+        let n1: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM relation_changes WHERE revision_id = ?1",
+                params![rid1],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n1 as usize, s1.relation_deltas.len());
+
+        // ── 2. no-op refresh: zero deltas ────────────────────────────────
+        let s2 = refresh(&mut conn, root, &opts).unwrap();
+        assert!(
+            s2.relation_deltas.is_empty(),
+            "an unchanged tree must log nothing, got: {:?}",
+            s2.relation_deltas
+                .iter()
+                .map(|d| (&d.relation_key, &d.change_kind))
+                .collect::<Vec<_>>()
+        );
+
+        // ── 3. second call to the same target: count_changed 1 -> 2 ──────
+        std::fs::write(root.join("a.rs"), "fn a() { b(); b(); }\n").unwrap();
+        let s3 = refresh(&mut conn, root, &opts).unwrap();
+        let delta = s3
+            .relation_deltas
+            .iter()
+            .find(|d| d.relation_key.contains("|calls|b"))
+            .expect("the a -> b edge must be reported");
+        assert_eq!(delta.change_kind, "count_changed", "{delta:?}");
+        assert_eq!((delta.count_before, delta.count_after), (1, 2));
+        // D8: existence unchanged, count changed — still a delta.
+        assert!(delta.before_json.is_some() && delta.after_json.is_some());
+
+        // ── 4. call removed: `removed` with a before-image ───────────────
+        std::fs::write(root.join("a.rs"), "fn a() { }\n").unwrap();
+        let s4 = refresh(&mut conn, root, &opts).unwrap();
+        let gone = s4
+            .relation_deltas
+            .iter()
+            .find(|d| d.relation_key.contains("|calls|b"))
+            .expect("the vanished edge must be reported");
+        assert_eq!(gone.change_kind, "removed", "{gone:?}");
+        assert_eq!(gone.count_after, 0);
+        assert!(
+            gone.before_json.is_some(),
+            "a removal keeps its before-image"
+        );
+
+        // ── 5. the log is append-only across revisions ───────────────────
+        record_revision(&mut conn, root, "test", &s3.relation_deltas).unwrap();
+        record_revision(&mut conn, root, "test", &s4.relation_deltas).unwrap();
+        let revisions: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT revision_id) FROM relation_changes",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(revisions, 3, "one row set per revision that had changes");
+    }
 }
 
 #[cfg(test)]

@@ -31,6 +31,34 @@ kanter utan), och det som faktiskt begränsar den är **målupplösningen**, int
 källsidan. Kvar för en framtid: `kind=file` med relativ sökväg som namn, om
 `impact` ska kunna starta från en fils toppnivå.
 
+### Added — relationshistorik i databasen (den var aldrig inkopplad)
+
+`relation_changes` fanns sedan `docs/CODE_INDEX_RELATION_HISTORY_PROPOSAL.md` men
+hade **ingen skrivare** — 0 rader, ingen `INSERT` i koden. 305 revisioner mindes
+*att* en refresh hände, aldrig *vad* som ändrades i grafen. Nu skrivs den.
+
+- **Granularitet enligt förslagets D1:** aggregerat `(from_id, relation_type,
+  to_name)` med `count_before`/`count_after` — inte per callsite, annars ser
+  "två anrop blev ett" ut som ingenting.
+- **`to_id` ingår inte i nyckeln.** Upplösning är härledd och kan flippa utan att
+  kanten ändras; en nyckel som innehåller den skulle göra varje ny entitet till
+  mass-ändring.
+- **`count_changed` är en egen ändringskind** (D8): existensen oförändrad,
+  antalet ändrat — fortfarande en delta.
+- **Before-bilden fångas före** den per-fil-upsert som raderar de gamla raderna,
+  och **after** läses först efter `resolve_unresolved_in_db` (före det är
+  `to_id` NULL för varje kors-fil-kant och "resolved" vore en lögn).
+- **Bevisat hermett:** oförändrat träd ⇒ **noll** deltan (den viktiga — upserten
+  raderar och infogar varje rad, så en naiv jämförelse skulle logga allt som
+  removed+added vid varje beröring); `b();` → `b(); b();` ⇒ `count_changed` 1→2;
+  anropet bort ⇒ `removed` med bevarad before-bild.
+- **Mätt på det här repot:** revision 311 loggade 55 `added`, 6 `count_changed`,
+  1 `removed`; en direkt omkörning utan ändringar loggade **0** nya rader.
+
+**Ärligt om det förflutna:** historiken börjar nu. De 305 tidigare revisionerna
+har inga relation-deltan och kan inte rekonstrueras — bara genom att checka ut
+en gammal commit och indexera in i en temp-databas.
+
 ### Added — `--touches` och `--changed`: *var* i filerna
 
 `--file-graph` svarar "vilka filer". Utan "var i filerna" är det inte
