@@ -108,6 +108,12 @@ pub fn project(history: &[Transaction]) -> Head {
                     if let Some(e) = files.get_mut(&key) {
                         e.applied.retain(|a| a != reverted);
                         e.content_hash = t.after_hash.clone();
+                        // A reaction does not NAME a blob: resolving one by hash
+                        // means scanning every backup (minutes here), and
+                        // claiming the previous blob would be a false mismatch —
+                        // measured 2026-11-12. So: no source, stated as such.
+                        // Content-addressed lookup (C) will make naming free.
+                        e.content_source = "journal:no-blob".to_string();
                         e.updated_at = ts;
                     }
                 }
@@ -126,6 +132,8 @@ pub fn project(history: &[Transaction]) -> Head {
                         e.applied.push(restored.clone());
                     }
                     e.content_hash = t.after_hash.clone();
+                    // Same rule as Undo: no cheap way to name the blob.
+                    e.content_source = "journal:no-blob".to_string();
                     e.updated_at = ts;
                 }
                 None => unreadable.push(t.id.clone()),
@@ -325,6 +333,10 @@ mod tests {
         let e = head.files.get("a.rs").unwrap();
         assert_eq!(e.content_hash.as_deref(), Some("h1"));
         assert_eq!(e.applied, vec!["e1".to_string()]);
+        // A reaction never claims a content source it cannot name cheaply —
+        // claiming the previous blob produced a FALSE source_hash_mismatch
+        // (measured 2026-11-12). "no-blob" is the honest answer.
+        assert_eq!(e.content_source, "journal:no-blob");
     }
 
     #[test]
