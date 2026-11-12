@@ -100,7 +100,7 @@ Nu finns hela kedjan på alla tre ytor: `--touches` (nuläge, fil:rad),
 `--changed` (ändringen), `--history` (deltan), `--onion` (rörelse) — och samma
 fyra som MCP-kinds.
 
-
+### Added (docs) — `docs/LOCAL_MODEL_BAKEOFF.md`: LFM2.5 vs LFM3 vs Qwen3.5
 
 Planen för att välja L4-modell med **mätta** tal i stället för magkänsla:
 
