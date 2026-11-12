@@ -1000,9 +1000,14 @@ impl Cli {
     pub async fn run(self) -> Result<()> {
         let _json_mode = self.json;
         let global_dry_run = self.dry_run;
-        // Declared attribution is per-process context: write paths read it and
-        // force their own `mechanism`. Empty flags → no keys written.
-        crate::core::attribution::set_process_attribution(self.declared_attribution());
+        // Declared attribution is per-process context. It carries
+        // `mechanism = cli` because THIS is the path that was invoked — write
+        // paths may override it with their own (batch), but a path that merely
+        // inherits the context (scaffold) must not end up with no mechanism at
+        // all. Empty flags → no contributor keys written.
+        let mut declared = self.declared_attribution();
+        declared.mechanism = Some("cli".to_string());
+        crate::core::attribution::set_process_attribution(declared);
         match self.command {
             Commands::Analyze {
                 paths,
