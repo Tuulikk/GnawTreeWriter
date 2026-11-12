@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 6a3ce76f6c8839822248b2a8c9c3bdf9
+> Body-hash: 917c57d7f9ea3907322eaabfe18be474
 
 ## Träd
 
@@ -77,7 +77,7 @@ scripts/hooks/
   block-text-replace.py (258 rader)
 src/
   auth_demo.rs (19 rader)
-  cli.rs (7239 rader)
+  cli.rs (7273 rader)
   lib.rs (11 rader)
   main.rs (77 rader)
   network.rs (14 rader)
@@ -91,7 +91,7 @@ src/core/
   blast.rs (310 rader)
   blueprint.rs (182 rader)
   capabilities.rs (366 rader)
-  code_graph.rs (995 rader)
+  code_graph.rs (1198 rader)
   code_index.rs (722 rader)
   code_index_coverage.rs (610 rader)
   code_index_db.rs (1611 rader)
@@ -517,113 +517,114 @@ _(inga toppnivå-items)_
 ### auth_demo.rs (19 rader)
 _(inga toppnivå-items)_
 
-### cli.rs (7239 rader)
+### cli.rs (7273 rader)
 - `enum McpSubcommands` :28
 - `pub struct Cli` :73
 - `enum Commands` :86
-- `enum AiSubcommands` :789
-- `enum RuleSubcommands` :843
-- `enum TagSubcommands` :868
-- `impl Cli` :906
-  - `pub async fn run(self) -> Result<()>` :907
-  - `fn handle_gnaw_blast(` :1874
-  - `fn handle_tag_add(file_path: &str, node_path: &str, name: &str, force: bool) -> Result<()>` :1897
-  - `fn handle_tag_list(file_path: &str) -> Result<()>` :1924
-  - `fn handle_tag_remove(file_path: &str, name: &str) -> Result<()>` :1940
-  - `fn handle_tag_rename(` :1952
-  - `fn handle_undo(steps: usize, preview: bool, files: bool) -> Result<()>` :1971
-  - `fn handle_redo(steps: usize) -> Result<()>` :2058
-  - `fn handle_history(limit: usize, format: &str) -> Result<()>` :2091
-  - `fn handle_restore(file_path: &str, transaction_id: &str, preview: bool) -> Result<()>` :2136
-  - `fn handle_batch(file: &str, preview: bool) -> Result<()>` :2175
-  - `fn handle_code_index_coverage(path: &Path) -> Result<()>` :2192
-  - `fn handle_code_touches(path: &Path, symbol: &str) -> Result<()>` :2230
-  - `fn handle_code_changed(path: &Path) -> Result<()>` :2245
-  - `fn handle_code_file_graph(path: &Path, focus: Option<&str>) -> Result<()>` :2288
-  - `fn handle_code_graph(` :2339
-  - `fn handle_diff_to_batch(diff_file: &str, output: Option<&str>, preview: bool) -> Result<()>` :2471
-  - `fn handle_search(` :2516
-  - `fn handle_code_index(` :2606
-  - `fn hook_block() -> String` :2709
-  - `fn handle_code_index_hook(path: &Path, install: bool, uninstall: bool) -> Result<()>` :2747
-  - `fn handle_skeleton(file_path: &str, max_depth: usize, raw: bool) -> Result<()>` :2849
-  - `fn handle_compress(file_path: &str, output: Option<&str>, show_stats: bool) -> Result<()>` :2875
-  - `fn handle_pack(` :2902
-  - `fn handle_curate(` :2965
-  - `fn handle_stats(path: &str, format: &str) -> Result<()>` :3027
-  - `fn handle_explore(target: &str, level_str: &str, format: &str) -> Result<()>` :3084
-  - `fn print_explore_tree(node: &crate::core::explore::ExploreNode, depth: usize)` :3114
-  - `async fn handle_semantic_report(file_path: &str) -> Result<()>` :3150
-  - `fn sense_degraded_cli(` :3189
-  - `async fn handle_sense(` :3241
-  - `async fn handle_sense_insert(` :3426
-  - `fn handle_version() -> Result<()>` :3499
-  - `fn err_modernbert_disabled() -> Result<()>` :3507
-  - `fn err_mamba_disabled() -> Result<()>` :3524
-  - `fn print_budget(budget: &crate::llm::TokenBudget)` :3542
-  - `fn handle_edit_ask(file_path: &str, request: &str, preview: bool, force: bool) -> Result<()>` :3565
-  - `fn handle_edit_ask(` :3660
-  - `fn handle_edit_ask_all(` :3673
-  - `fn handle_edit_ask_all(` :3737
-  - `fn handle_explain(file: &PathBuf, node: Option<&str>, resolution: &str) -> Result<()>` :3748
-  - `fn handle_explain(_file: &PathBuf, _node: Option<&str>, _resolution: &str) -> Result<()>` :3767
-  - `fn handle_summarize(path: &PathBuf, max_files: usize, resolution: &str) -> Result<()>` :3773
-  - `fn handle_summarize(_path: &PathBuf, _max_files: usize, _resolution: &str) -> Result<()>` :3799
-  - `fn handle_investigate(question: &str, resolution: &str) -> Result<()>` :3805
-  - `fn handle_investigate(_question: &str, _resolution: &str) -> Result<()>` :3826
-  - `fn handle_blueprint(output_path: Option<&str>) -> Result<()>` :3830
-  - `async fn handle_semantic_edit(` :3852
-  - `fn handle_gnaw_find(` :3916
-  - `fn handle_gnaw_inspect(` :3959
-  - `fn handle_gnaw_refactor(` :3996
-  - `fn handle_validate(file: &std::path::Path) -> Result<()>` :4033
-  - `fn handle_gnaw_diff(` :4054
-  - `fn handle_gnaw_graph(` :4080
-  - `fn handle_scaffold(` :4103
-  - `fn handle_heal(file_path: &Path, apply: bool, json: bool) -> Result<()>` :4147
-  - `fn handle_alf(` :4191
-  - `async fn handle_ai_setup(force: bool) -> Result<()>` :4265
-  - `fn handle_ai_status() -> Result<()>` :4292
-  - `fn handle_ai_calibrate() -> Result<()>` :4338
-  - `fn handle_ai_calibrate() -> Result<()>` :4355
-  - `fn device_mode_from_config_text(text: &str) -> Option<String>` :4363
-  - `fn resolve_index_device_from_config() -> Option<String>` :4377
-  - `async fn handle_ai_index(path: Option<PathBuf>, gpu: bool) -> Result<()>` :4383
-  - `async fn handle_ai_report(limit: usize, output: Option<PathBuf>) -> Result<()>` :4433
-  - `fn handle_session_start(name: Option<String>) -> Result<()>` :4451
-  - `fn handle_restore_project(timestamp: &str, preview: bool) -> Result<()>` :4468
-  - `fn handle_restore_files(since: &str, file_patterns: &[String], preview: bool) -> Result<()>` :4515
-  - `fn handle_restore_session(session_id: &str, preview: bool) -> Result<()>` :4580
-  - `fn handle_debug_hash(content: &str) -> Result<()>` :4625
-  - `fn handle_commands(json: bool) -> Result<()>` :4643
-  - `fn handle_examples(topic: Option<&str>) -> Result<()>` :4751
-  - `fn handle_wizard(task: Option<&str>) -> Result<()>` :5088
-  - `fn show_visual_pulse(writer: &GnawTreeWriter, focus_path: &str, narrative: Option<&str>)` :5307
-  - `fn show_visual_diff(` :5333
-  - `fn handle_analyze(paths: &[String], format: &str, recursive: bool) -> Result<()>` :5407
-  - `fn handle_quick_insert(` :5503
-  - `fn find_supported_files(dir: &std::path::Path) -> Result<Vec<String>>` :5608
-  - `fn handle_quick_replace(` :5637
-  - `fn handle_rename(` :5743
-  - `fn handle_clone(` :5755
-  - `fn handle_move(` :5832
-  - `fn find_node_by_path<'a>(tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :5911
-  - `fn handle_lint(` :5924
-  - `fn handle_rules_add(` :6049
-  - `fn handle_rules_list() -> Result<()>` :6093
-  - `fn handle_lint_discover(paths: &[String]) -> Result<()>` :6120
-  - `fn handle_lint_discover(_paths: &[String]) -> Result<()>` :6253
-  - `fn parse_rule_proposals(s: &str) -> Result<Vec<serde_json::Value>>` :6261
-  - `fn handle_capabilities(json: bool) -> Result<()>` :6273
-  - `fn handle_doctor(format: Option<&str>) -> Result<()>` :6289
-  - `async fn handle_health_check() -> Result<()>` :6364
-- `const SENSE_COSINE_WARN: f32 = crate::llm::gnaw_sense::SENSE_ANSWERABLE_COSINE` :6599
-- `fn sense_confidence(` :6617
-- `fn print_diff(old: &str, new: &str)` :6646
-- `fn show_hint()` :6659
-- `fn list_nodes(` :6689
-- `fn resolve_content(` :6750
-- `fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>>` :6787
+- `enum AiSubcommands` :797
+- `enum RuleSubcommands` :851
+- `enum TagSubcommands` :876
+- `impl Cli` :914
+  - `pub async fn run(self) -> Result<()>` :915
+  - `fn handle_gnaw_blast(` :1894
+  - `fn handle_tag_add(file_path: &str, node_path: &str, name: &str, force: bool) -> Result<()>` :1917
+  - `fn handle_tag_list(file_path: &str) -> Result<()>` :1944
+  - `fn handle_tag_remove(file_path: &str, name: &str) -> Result<()>` :1960
+  - `fn handle_tag_rename(` :1972
+  - `fn handle_undo(steps: usize, preview: bool, files: bool) -> Result<()>` :1991
+  - `fn handle_redo(steps: usize) -> Result<()>` :2078
+  - `fn handle_history(limit: usize, format: &str) -> Result<()>` :2111
+  - `fn handle_restore(file_path: &str, transaction_id: &str, preview: bool) -> Result<()>` :2156
+  - `fn handle_batch(file: &str, preview: bool) -> Result<()>` :2195
+  - `fn handle_code_index_coverage(path: &Path) -> Result<()>` :2212
+  - `fn handle_code_history(path: &Path, filter: Option<&str>, last: usize) -> Result<()>` :2250
+  - `fn handle_code_touches(path: &Path, symbol: &str) -> Result<()>` :2264
+  - `fn handle_code_changed(path: &Path) -> Result<()>` :2279
+  - `fn handle_code_file_graph(path: &Path, focus: Option<&str>) -> Result<()>` :2322
+  - `fn handle_code_graph(` :2373
+  - `fn handle_diff_to_batch(diff_file: &str, output: Option<&str>, preview: bool) -> Result<()>` :2505
+  - `fn handle_search(` :2550
+  - `fn handle_code_index(` :2640
+  - `fn hook_block() -> String` :2743
+  - `fn handle_code_index_hook(path: &Path, install: bool, uninstall: bool) -> Result<()>` :2781
+  - `fn handle_skeleton(file_path: &str, max_depth: usize, raw: bool) -> Result<()>` :2883
+  - `fn handle_compress(file_path: &str, output: Option<&str>, show_stats: bool) -> Result<()>` :2909
+  - `fn handle_pack(` :2936
+  - `fn handle_curate(` :2999
+  - `fn handle_stats(path: &str, format: &str) -> Result<()>` :3061
+  - `fn handle_explore(target: &str, level_str: &str, format: &str) -> Result<()>` :3118
+  - `fn print_explore_tree(node: &crate::core::explore::ExploreNode, depth: usize)` :3148
+  - `async fn handle_semantic_report(file_path: &str) -> Result<()>` :3184
+  - `fn sense_degraded_cli(` :3223
+  - `async fn handle_sense(` :3275
+  - `async fn handle_sense_insert(` :3460
+  - `fn handle_version() -> Result<()>` :3533
+  - `fn err_modernbert_disabled() -> Result<()>` :3541
+  - `fn err_mamba_disabled() -> Result<()>` :3558
+  - `fn print_budget(budget: &crate::llm::TokenBudget)` :3576
+  - `fn handle_edit_ask(file_path: &str, request: &str, preview: bool, force: bool) -> Result<()>` :3599
+  - `fn handle_edit_ask(` :3694
+  - `fn handle_edit_ask_all(` :3707
+  - `fn handle_edit_ask_all(` :3771
+  - `fn handle_explain(file: &PathBuf, node: Option<&str>, resolution: &str) -> Result<()>` :3782
+  - `fn handle_explain(_file: &PathBuf, _node: Option<&str>, _resolution: &str) -> Result<()>` :3801
+  - `fn handle_summarize(path: &PathBuf, max_files: usize, resolution: &str) -> Result<()>` :3807
+  - `fn handle_summarize(_path: &PathBuf, _max_files: usize, _resolution: &str) -> Result<()>` :3833
+  - `fn handle_investigate(question: &str, resolution: &str) -> Result<()>` :3839
+  - `fn handle_investigate(_question: &str, _resolution: &str) -> Result<()>` :3860
+  - `fn handle_blueprint(output_path: Option<&str>) -> Result<()>` :3864
+  - `async fn handle_semantic_edit(` :3886
+  - `fn handle_gnaw_find(` :3950
+  - `fn handle_gnaw_inspect(` :3993
+  - `fn handle_gnaw_refactor(` :4030
+  - `fn handle_validate(file: &std::path::Path) -> Result<()>` :4067
+  - `fn handle_gnaw_diff(` :4088
+  - `fn handle_gnaw_graph(` :4114
+  - `fn handle_scaffold(` :4137
+  - `fn handle_heal(file_path: &Path, apply: bool, json: bool) -> Result<()>` :4181
+  - `fn handle_alf(` :4225
+  - `async fn handle_ai_setup(force: bool) -> Result<()>` :4299
+  - `fn handle_ai_status() -> Result<()>` :4326
+  - `fn handle_ai_calibrate() -> Result<()>` :4372
+  - `fn handle_ai_calibrate() -> Result<()>` :4389
+  - `fn device_mode_from_config_text(text: &str) -> Option<String>` :4397
+  - `fn resolve_index_device_from_config() -> Option<String>` :4411
+  - `async fn handle_ai_index(path: Option<PathBuf>, gpu: bool) -> Result<()>` :4417
+  - `async fn handle_ai_report(limit: usize, output: Option<PathBuf>) -> Result<()>` :4467
+  - `fn handle_session_start(name: Option<String>) -> Result<()>` :4485
+  - `fn handle_restore_project(timestamp: &str, preview: bool) -> Result<()>` :4502
+  - `fn handle_restore_files(since: &str, file_patterns: &[String], preview: bool) -> Result<()>` :4549
+  - `fn handle_restore_session(session_id: &str, preview: bool) -> Result<()>` :4614
+  - `fn handle_debug_hash(content: &str) -> Result<()>` :4659
+  - `fn handle_commands(json: bool) -> Result<()>` :4677
+  - `fn handle_examples(topic: Option<&str>) -> Result<()>` :4785
+  - `fn handle_wizard(task: Option<&str>) -> Result<()>` :5122
+  - `fn show_visual_pulse(writer: &GnawTreeWriter, focus_path: &str, narrative: Option<&str>)` :5341
+  - `fn show_visual_diff(` :5367
+  - `fn handle_analyze(paths: &[String], format: &str, recursive: bool) -> Result<()>` :5441
+  - `fn handle_quick_insert(` :5537
+  - `fn find_supported_files(dir: &std::path::Path) -> Result<Vec<String>>` :5642
+  - `fn handle_quick_replace(` :5671
+  - `fn handle_rename(` :5777
+  - `fn handle_clone(` :5789
+  - `fn handle_move(` :5866
+  - `fn find_node_by_path<'a>(tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :5945
+  - `fn handle_lint(` :5958
+  - `fn handle_rules_add(` :6083
+  - `fn handle_rules_list() -> Result<()>` :6127
+  - `fn handle_lint_discover(paths: &[String]) -> Result<()>` :6154
+  - `fn handle_lint_discover(_paths: &[String]) -> Result<()>` :6287
+  - `fn parse_rule_proposals(s: &str) -> Result<Vec<serde_json::Value>>` :6295
+  - `fn handle_capabilities(json: bool) -> Result<()>` :6307
+  - `fn handle_doctor(format: Option<&str>) -> Result<()>` :6323
+  - `async fn handle_health_check() -> Result<()>` :6398
+- `const SENSE_COSINE_WARN: f32 = crate::llm::gnaw_sense::SENSE_ANSWERABLE_COSINE` :6633
+- `fn sense_confidence(` :6651
+- `fn print_diff(old: &str, new: &str)` :6680
+- `fn show_hint()` :6693
+- `fn list_nodes(` :6723
+- `fn resolve_content(` :6784
+- `fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>>` :6821
 
 ### lib.rs (11 rader)
 _(inga toppnivå-items)_
@@ -751,7 +752,7 @@ _(inga toppnivå-items)_
 - `fn dir_size_mb(path: &std::path::Path) -> u64` :218
 - `pub fn render(project_root: &std::path::Path) -> String` :240
 
-### code_graph.rs (995 rader)
+### code_graph.rs (1198 rader)
 - `pub struct Reach` :27
 - `pub struct Cycle` :33
 - `pub fn reachable(conn: &Connection, start: &str, max_depth: usize) -> Result<Vec<Reach>>` :44
@@ -773,9 +774,13 @@ _(inga toppnivå-items)_
 - `const TOUCHES_NOTE: &str = "Cross-file edges only. Outgoing = what the subject uses elsewhere (target file + s…` :481
 - `pub fn touches_file(conn: &Connection, file: &str) -> Result<Touches>` :484
 - `pub fn touches_symbol(conn: &Connection, symbol: &str) -> Result<Touches>` :533
-- `pub struct ImpactReport` :596
-- `pub fn resolve_symbols(conn: &Connection, symbol: &str) -> Result<Vec<SymbolSeed>>` :608
-- `pub fn impact(conn: &Connection, symbol: &str, max_depth: usize) -> Result<ImpactReport>` :623
+- `pub struct HistoryChange` :594
+- `pub struct HistoryRevision` :606
+- `pub struct HistoryReport` :625
+- `pub fn history(conn: &Connection, filter: Option<&str>, last: usize) -> Result<HistoryReport>` :636
+- `pub struct ImpactReport` :723
+- `pub fn resolve_symbols(conn: &Connection, symbol: &str) -> Result<Vec<SymbolSeed>>` :735
+- `pub fn impact(conn: &Connection, symbol: &str, max_depth: usize) -> Result<ImpactReport>` :750
 
 ### code_index.rs (722 rader)
 - `fn item_category(kind: &str) -> Option<&'static str>` :33
