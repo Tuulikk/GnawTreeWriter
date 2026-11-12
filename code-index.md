@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 30d45db797d6bc99caccaf7a86354262
+> Body-hash: d80b7cc41c0912ca600896e1c8c7231b
 
 ## Träd
 
@@ -77,7 +77,7 @@ scripts/hooks/
   block-text-replace.py (258 rader)
 src/
   auth_demo.rs (19 rader)
-  cli.rs (7591 rader)
+  cli.rs (7621 rader)
   lib.rs (11 rader)
   main.rs (77 rader)
   network.rs (14 rader)
@@ -86,7 +86,7 @@ src/core/
   age.rs (231 rader)
   alf.rs (122 rader)
   anchor.rs (166 rader)
-  attribution.rs (389 rader)
+  attribution.rs (397 rader)
   backup.rs (293 rader)
   batch.rs (933 rader)
   blast.rs (310 rader)
@@ -520,7 +520,7 @@ _(inga toppnivå-items)_
 ### auth_demo.rs (19 rader)
 _(inga toppnivå-items)_
 
-### cli.rs (7591 rader)
+### cli.rs (7621 rader)
 - `enum McpSubcommands` :28
 - `pub struct Cli` :73
 - `impl Cli` :109
@@ -624,14 +624,14 @@ _(inga toppnivå-items)_
   - `fn handle_capabilities(json: bool) -> Result<()>` :6478
   - `fn handle_doctor(format: Option<&str>) -> Result<()>` :6494
   - `fn handle_head(verify: bool, json: bool, save: bool, trace: bool) -> Result<()>` :6573
-  - `async fn handle_health_check() -> Result<()>` :6716
-- `const SENSE_COSINE_WARN: f32 = crate::llm::gnaw_sense::SENSE_ANSWERABLE_COSINE` :6951
-- `fn sense_confidence(` :6969
-- `fn print_diff(old: &str, new: &str)` :6998
-- `fn show_hint()` :7011
-- `fn list_nodes(` :7041
-- `fn resolve_content(` :7102
-- `fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>>` :7139
+  - `async fn handle_health_check() -> Result<()>` :6746
+- `const SENSE_COSINE_WARN: f32 = crate::llm::gnaw_sense::SENSE_ANSWERABLE_COSINE` :6981
+- `fn sense_confidence(` :6999
+- `fn print_diff(old: &str, new: &str)` :7028
+- `fn show_hint()` :7041
+- `fn list_nodes(` :7071
+- `fn resolve_content(` :7132
+- `fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>>` :7169
 
 ### lib.rs (11 rader)
 _(inga toppnivå-items)_
@@ -692,7 +692,7 @@ _(inga toppnivå-items)_
   - `fn extract_hint(&self, text: &str, style: AnchorStyle) -> Option<String>` :116
   - `fn deduplicate_overlapping(&self, anchors: Vec<Anchor>) -> Vec<Anchor>` :145
 
-### attribution.rs (389 rader)
+### attribution.rs (397 rader)
 - `static PROCESS_ATTRIBUTION: RwLock<Option<Attribution>> = RwLock::new(None)` :32
 - `pub fn set_process_attribution(a: Attribution)` :34
 - `pub fn update_process_attribution(f: impl FnOnce(&mut Attribution))` :42
@@ -719,9 +719,9 @@ _(inga toppnivå-items)_
   - `pub fn apply_to(&self, meta: &mut HashMap<String, String>)` :200
   - `pub fn merged_with(&self, other: &Attribution) -> Attribution` :225
   - `pub fn terse(&self) -> String` :257
-- `impl Role` :294
-  - `pub fn as_str(&self) -> &'static str` :295
-  - `pub fn parse(s: &str) -> Option<Role>` :307
+- `impl Role` :302
+  - `pub fn as_str(&self) -> &'static str` :303
+  - `pub fn parse(s: &str) -> Option<Role>` :315
 
 ### backup.rs (293 rader)
 - `pub struct BackupFile` :18
