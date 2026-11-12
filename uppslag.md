@@ -206,6 +206,23 @@ stabil. Citera det som *inte* rör sig när filen checkas in.
 
 ---
 
+## 2026-11-12 — Vyer som lager (fotoredigering)  📋 IDÉ, modell skriven
+
+Staplade tröskellager med transparens väljer ut exakt de gråskalor man vill ha, i
+en vald ordning — och genomsläpp på fel ställen ger grumlig bild. Samma sak som
+kanalblandning: GTW har redan kompositen i `sense` (fyra kanaler, `fuse_by_max`,
+en global kurva), men hårdkodad och utan kontroll.
+
+Modell + invarianter + minsta skiva: **`docs/VIEWS_MODEL.md`**. Kort: en vy är en
+lins som bara väljer och ordnar befintliga utdata; den får aldrig ändra lagring,
+frånvaro är inte noll (`Option`, inte `0.0`), och varje vy redovisar sin egen
+nämnare (samma läxa som `--scope`).
+
+**Byggt:** inget. **Nästa:** `--view <namn>` + committad `views.yaml`, med
+determinism- och "ingen omindexering vid vybyte"-kriterierna i dokumentet.
+
+---
+
 ## 2026-11-12 — Onion skin: var → är → på väg att bli  📋 IDÉ, ej byggd
 
 **Idén** (från animation): lägga lager på varandra så man ser progression — vad som
