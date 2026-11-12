@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 7ea5aa95c5384f1bc7165389451c3b9f
+> Body-hash: 930a6631338d8b102e873c710fa162d6
 
 ## Träd
 
@@ -94,7 +94,7 @@ src/core/
   code_graph.rs (579 rader)
   code_index.rs (693 rader)
   code_index_coverage.rs (604 rader)
-  code_index_db.rs (1322 rader)
+  code_index_db.rs (1333 rader)
   compress.rs (487 rader)
   create_file.rs (88 rader)
   curator.rs (709 rader)
@@ -798,51 +798,51 @@ _(inga toppnivå-items)_
 - `pub fn measure(conn: &Connection) -> Result<CoverageReport>` :162
 - `fn relations_total(conn: &Connection) -> anyhow::Result<i64>` :420
 
-### code_index_db.rs (1322 rader)
-- `pub const EXTRACTOR_VERSION: &str = "3"` :35
-- `const SCHEMA_VERSION: i32 = 4` :37
-- `const BUSY_TIMEOUT_MS: u64 = 5000` :38
-- `const SCHEMA_V1: &str = r#"` :40
-- `const SCHEMA_V2: &str = r#"` :77
-- `const SCHEMA_V3: &str = r#"` :109
-- `pub(crate) const IDENTITY_SCHEME_VERSION: &str = "1"` :118
-- `const SCHEMA_V4: &str = r#"` :125
-- `pub struct RefreshStats` :191
-- `pub struct DbRun` :200
-- `pub fn db_path(root: &Path) -> PathBuf` :210
-- `pub fn resolve_index_root(root: &Path) -> PathBuf` :217
-- `fn sidecar(path: &Path, suffix: &str) -> PathBuf` :237
-- `fn open_and_migrate(path: &Path) -> Result<Connection>` :243
-- `pub(crate) fn migrate_connection(conn: &Connection) -> Result<()>` :255
-- `fn repair_prose_columns(conn: &Connection) -> Result<()>` :292
-- `pub fn open_or_recreate(root: &Path) -> Result<(Connection, bool)>` :331
-- `pub fn open_existing(root: &Path) -> Result<Connection>` :352
-- `pub struct StoreStatus` :375
-- `pub fn store_status(root: &Path) -> Option<StoreStatus>` :382
-- `fn store_is_newer(store: &str, mine: &str) -> bool` :405
-- `fn generation_key(opts: &CodeIndexOptions) -> String` :412
-- `fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>>` :423
-- `fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()>` :432
-- `fn upsert_file(` :443
-- `pub fn refresh(` :498
-- `pub(crate) fn record_revision(conn: &mut Connection, root: &Path, source: &str) -> Result<i64>` :654
-- `pub fn upsert_prose(` :692
-- `pub(crate) fn sweep_prose_freshness(conn: &mut Connection) -> Result<()>` :722
-- `pub(crate) fn load_index(conn: &Connection) -> Result<Vec<FileIndex>>` :828
-- `fn load_warnings(conn: &Connection) -> Result<Vec<String>>` :893
-- `pub fn render(` :906
-- `pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun>` :920
-- `fn store_entities_relations(` :969
-- `fn resolve_unresolved_in_db(conn: &Connection) -> Result<()>` :1035
-- `pub fn mark_stale(root: &Path, file_path: &str)` :1115
-- `pub fn content_hash(path: &Path) -> Option<String>` :1137
-- `pub fn is_stale(root: &Path, file: &str) -> bool` :1146
-- `pub fn stale_files(root: &Path) -> std::collections::BTreeSet<String>` :1165
-- `pub fn load_entities(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1186
-- `pub fn load_items(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1211
-- `pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1237
-- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :1261
-- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :1283
+### code_index_db.rs (1333 rader)
+- `pub const EXTRACTOR_VERSION: &str = "4"` :46
+- `const SCHEMA_VERSION: i32 = 4` :48
+- `const BUSY_TIMEOUT_MS: u64 = 5000` :49
+- `const SCHEMA_V1: &str = r#"` :51
+- `const SCHEMA_V2: &str = r#"` :88
+- `const SCHEMA_V3: &str = r#"` :120
+- `pub(crate) const IDENTITY_SCHEME_VERSION: &str = "1"` :129
+- `const SCHEMA_V4: &str = r#"` :136
+- `pub struct RefreshStats` :202
+- `pub struct DbRun` :211
+- `pub fn db_path(root: &Path) -> PathBuf` :221
+- `pub fn resolve_index_root(root: &Path) -> PathBuf` :228
+- `fn sidecar(path: &Path, suffix: &str) -> PathBuf` :248
+- `fn open_and_migrate(path: &Path) -> Result<Connection>` :254
+- `pub(crate) fn migrate_connection(conn: &Connection) -> Result<()>` :266
+- `fn repair_prose_columns(conn: &Connection) -> Result<()>` :303
+- `pub fn open_or_recreate(root: &Path) -> Result<(Connection, bool)>` :342
+- `pub fn open_existing(root: &Path) -> Result<Connection>` :363
+- `pub struct StoreStatus` :386
+- `pub fn store_status(root: &Path) -> Option<StoreStatus>` :393
+- `fn store_is_newer(store: &str, mine: &str) -> bool` :416
+- `fn generation_key(opts: &CodeIndexOptions) -> String` :423
+- `fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>>` :434
+- `fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()>` :443
+- `fn upsert_file(` :454
+- `pub fn refresh(` :509
+- `pub(crate) fn record_revision(conn: &mut Connection, root: &Path, source: &str) -> Result<i64>` :665
+- `pub fn upsert_prose(` :703
+- `pub(crate) fn sweep_prose_freshness(conn: &mut Connection) -> Result<()>` :733
+- `pub(crate) fn load_index(conn: &Connection) -> Result<Vec<FileIndex>>` :839
+- `fn load_warnings(conn: &Connection) -> Result<Vec<String>>` :904
+- `pub fn render(` :917
+- `pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun>` :931
+- `fn store_entities_relations(` :980
+- `fn resolve_unresolved_in_db(conn: &Connection) -> Result<()>` :1046
+- `pub fn mark_stale(root: &Path, file_path: &str)` :1126
+- `pub fn content_hash(path: &Path) -> Option<String>` :1148
+- `pub fn is_stale(root: &Path, file: &str) -> bool` :1157
+- `pub fn stale_files(root: &Path) -> std::collections::BTreeSet<String>` :1176
+- `pub fn load_entities(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1197
+- `pub fn load_items(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1222
+- `pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1248
+- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :1272
+- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :1294
 
 ### compress.rs (487 rader)
 - `pub struct CompressedOutput` :12
