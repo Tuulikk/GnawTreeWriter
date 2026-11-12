@@ -299,6 +299,14 @@ enum Commands {
         /// file) and incoming users. Read-only
         #[arg(long)]
         changed: bool,
+        /// Relation history from the store: what changed in the graph, per
+        /// revision. Optional value filters the relation key (a symbol, a file
+        /// prefix, any substring). Read-only
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        history: Option<String>,
+        /// With --history: how many revisions back (default 5)
+        #[arg(long)]
+        last: Option<usize>,
         /// Hop bound for --cycles/--impact (default: 64 / 3)
         #[arg(long)]
         depth: Option<usize>,
@@ -1481,6 +1489,8 @@ impl Cli {
                 by_file,
                 touches,
                 changed,
+                history,
+                last,
             } => {
                 // Same guard as the MCP tools (core::project_root, one rule):
                 // indexing or walking $HOME / a workspace folder from the CLI
@@ -1524,6 +1534,16 @@ impl Cli {
                     Self::handle_code_touches(Path::new(&path), symbol)?;
                 } else if changed {
                     Self::handle_code_changed(Path::new(&path))?;
+                } else if let Some(filter) = history.as_deref() {
+                    Self::handle_code_history(
+                        Path::new(&path),
+                        if filter.is_empty() {
+                            None
+                        } else {
+                            Some(filter)
+                        },
+                        last.unwrap_or(5),
+                    )?;
                 } else if cycles || impact.is_some() || why.is_some() || by_file {
                     // P2: graph queries over the store — read-only.
                     Self::handle_code_graph(
@@ -2222,6 +2242,20 @@ Use --no-preview to actually perform the restore"
             obj.insert("levels".to_string(), serde_json::to_value(&levels)?);
         }
         println!("{}", serde_json::to_string_pretty(&body)?);
+        Ok(())
+    }
+
+    /// Relation history: what changed in the graph, per revision. Read-only, and
+    /// the only place the past is a first-class answer instead of a re-index.
+    fn handle_code_history(path: &Path, filter: Option<&str>, last: usize) -> Result<()> {
+        let index_root = crate::core::code_index_db::resolve_index_root(path);
+        let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
+            anyhow::anyhow!(
+                "code-index --history needs a store — run `gnawtreewriter code-index <root> --db` first ({e:#})"
+            )
+        })?;
+        let report = crate::core::code_graph::history(&conn, filter, last)?;
+        println!("{}", serde_json::to_string_pretty(&report)?);
         Ok(())
     }
 

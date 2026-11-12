@@ -589,6 +589,133 @@ pub fn touches_symbol(conn: &Connection, symbol: &str) -> Result<Touches> {
     })
 }
 
+/// One logged relation change (a row of `relation_changes`).
+#[derive(Debug, Clone, Serialize)]
+pub struct HistoryChange {
+    /// `from_id|relation_type|to_name` — the aggregated key.
+    pub relation_key: String,
+    /// `added` | `removed` | `count_changed`
+    pub change_kind: String,
+    pub count_before: i64,
+    pub count_after: i64,
+    pub resolution_status: String,
+}
+
+/// All changes recorded under one revision.
+#[derive(Debug, Clone, Serialize)]
+pub struct HistoryRevision {
+    pub revision_id: i64,
+    pub git_rev: Option<String>,
+    pub completed_at: Option<i64>,
+    pub source: Option<String>,
+    pub added: usize,
+    pub removed: usize,
+    pub count_changed: usize,
+    pub changes: Vec<HistoryChange>,
+}
+
+/// "What changed in the graph, and when?" — the read side of
+/// `relation_changes`, i.e. the onion skin's past layer.
+///
+/// Rows only exist from the revision where the writer landed (2026-11-12);
+/// older revisions recorded that a refresh happened but not what it changed, so
+/// an empty history is reported as "starts here", never as "nothing ever
+/// changed".
+#[derive(Debug, Clone, Serialize)]
+pub struct HistoryReport {
+    /// Substring filter applied to the relation key, when given.
+    pub filter: Option<String>,
+    pub revisions: Vec<HistoryRevision>,
+    pub most_recent_revision: Option<i64>,
+    /// True when the store has revisions but no delta rows at all: the writer is
+    /// newer than the data, which is a fact about the past, not about the code.
+    pub history_starts_now: bool,
+    pub note: &'static str,
+}
+
+pub fn history(conn: &Connection, filter: Option<&str>, last: usize) -> Result<HistoryReport> {
+    let filter_str = filter.unwrap_or("");
+    let limit = last.max(1) as i64;
+    let mut stmt = conn.prepare(
+        "SELECT rc.revision_id, r.git_rev, r.completed_at, r.source,
+                rc.relation_key, rc.change_kind, rc.count_before, rc.count_after,
+                rc.resolution_status
+         FROM relation_changes rc
+         JOIN index_revisions r ON r.id = rc.revision_id
+         WHERE (?1 = '' OR rc.relation_key LIKE '%' || ?1 || '%')
+           AND rc.revision_id IN (
+                 SELECT DISTINCT revision_id FROM relation_changes
+                 WHERE (?1 = '' OR relation_key LIKE '%' || ?1 || '%')
+                 ORDER BY revision_id DESC LIMIT ?2)
+         ORDER BY rc.revision_id DESC, rc.change_kind, rc.relation_key",
+    )?;
+    let rows = stmt.query_map(params![filter_str, limit], |r| {
+        Ok((
+            HistoryRevision {
+                revision_id: r.get(0)?,
+                git_rev: r.get(1)?,
+                completed_at: r.get(2)?,
+                source: r.get(3)?,
+                added: 0,
+                removed: 0,
+                count_changed: 0,
+                changes: Vec::new(),
+            },
+            HistoryChange {
+                relation_key: r.get(4)?,
+                change_kind: r.get(5)?,
+                count_before: r.get(6)?,
+                count_after: r.get(7)?,
+                resolution_status: r.get(8)?,
+            },
+        ))
+    })?;
+
+    let mut revisions: Vec<HistoryRevision> = Vec::new();
+    for row in rows {
+        let (meta, change) = row?;
+        if revisions.last().map(|r| r.revision_id) != Some(meta.revision_id) {
+            revisions.push(meta);
+        }
+        let rev = revisions.last_mut().unwrap();
+        match change.change_kind.as_str() {
+            "added" => rev.added += 1,
+            "removed" => rev.removed += 1,
+            "count_changed" => rev.count_changed += 1,
+            _ => {}
+        }
+        rev.changes.push(change);
+    }
+
+    let total_rows: i64 = conn
+        .query_row(
+            "SELECT COALESCE(COUNT(*), 0) FROM relation_changes",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let revisions_in_store: i64 = conn
+        .query_row(
+            "SELECT COALESCE(COUNT(*), 0) FROM index_revisions",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let most_recent_revision: Option<i64> = conn
+        .query_row("SELECT MAX(revision_id) FROM relation_changes", [], |r| {
+            r.get(0)
+        })
+        .unwrap_or(None);
+
+    Ok(HistoryReport {
+        filter: filter.map(str::to_string),
+        revisions,
+        most_recent_revision,
+        history_starts_now: total_rows == 0 && revisions_in_store > 0,
+        note: "Rows come from relation_changes, written since 2026-11-12: earlier revisions recorded THAT a refresh happened, not WHAT changed. Only files that were (re)parsed after the writer landed have rows here — an untouched file has NO history even though its edges exist, so read `--touches` for the current state and this for the movement. change_kind count_changed means the edge still exists but its occurrence count moved (D8). A filter is a substring match on `from_id|relation_type|to_name`.",
+    })
+}
+
 /// Result of `impact`. `seeds` is empty when the name is not in the store —
 /// reported as-is, never fabricated into an impact chain (same honesty rule
 /// as `ImpactReport::unresolved_calls`).
@@ -981,6 +1108,82 @@ mod impact_tests {
         // and never a fabricated edge.
         let none = touches_symbol(&conn, "does_not_exist").unwrap();
         assert!(none.outgoing.is_empty() && none.incoming.is_empty());
+    }
+
+    #[test]
+    fn history_groups_by_revision_and_filters_the_key() {
+        let conn = file_store();
+        // Two revisions with relation_changes rows, plus one unrelated key.
+        conn.execute_batch(
+            r#"
+            INSERT INTO index_revisions (id, parent_id, git_rev, dirty, source,
+                identity_scheme_version, generation_key, started_at, completed_at, status)
+            VALUES (1, NULL, 'aaa111', 0, 'test', 1, 'gk', 100, 100, 'completed'),
+                   (2, 1, 'bbb222', 1, 'test', 1, 'gk', 200, 200, 'completed');
+            INSERT INTO relation_changes
+              (revision_id, relation_key, change_kind, count_before, count_after,
+               before_json, after_json, resolution_status)
+            VALUES
+              (1, 'gtw:a.rs:function:f|calls|g', 'added', 0, 1, NULL, '{"count":1,"resolved":1}', 'resolved'),
+              (1, 'gtw:b.rs:function:g|calls|h', 'added', 0, 1, NULL, '{"count":1,"resolved":1}', 'resolved'),
+              (2, 'gtw:a.rs:function:f|calls|g', 'count_changed', 1, 2, '{"count":1,"resolved":1}', '{"count":2,"resolved":1}', 'resolved'),
+              (2, 'gtw:c.rs:function:h|calls|unwrap', 'removed', 1, 0, '{"count":1,"resolved":0}', NULL, 'unresolved');
+            "#,
+        )
+        .unwrap();
+
+        let all = history(&conn, None, 5).unwrap();
+        assert_eq!(all.revisions.len(), 2, "two revisions have changes");
+        // Newest first, so the reader sees "what just happened" first.
+        assert_eq!(all.revisions[0].revision_id, 2);
+        assert_eq!(
+            (
+                all.revisions[0].added,
+                all.revisions[0].removed,
+                all.revisions[0].count_changed
+            ),
+            (0, 1, 1),
+            "kind counters per revision: {:?}",
+            all.revisions[0]
+        );
+        assert_eq!(all.revisions[1].added, 2);
+        assert_eq!(all.revisions[0].git_rev.as_deref(), Some("bbb222"));
+        assert!(!all.history_starts_now, "rows exist, so history is live");
+
+        // Filter on a symbol: only the a.rs -> g keys survive.
+        let filtered = history(&conn, Some("function:f"), 5).unwrap();
+        assert_eq!(filtered.filter.as_deref(), Some("function:f"));
+        let keys: Vec<&str> = filtered
+            .revisions
+            .iter()
+            .flat_map(|r| r.changes.iter().map(|c| c.relation_key.as_str()))
+            .collect();
+        assert!(!keys.is_empty(), "the filter must match the a.rs keys");
+        assert!(
+            keys.iter().all(|k| k.contains("function:f")),
+            "no unfiltered key may leak in: {keys:?}"
+        );
+
+        // `last` bounds the number of revisions, newest first.
+        let one = history(&conn, None, 1).unwrap();
+        assert_eq!(one.revisions.len(), 1);
+        assert_eq!(one.revisions[0].revision_id, 2);
+
+        // A store with revisions but no deltas is "history starts now", not
+        // "nothing ever changed" — the distinction the writer's age creates.
+        let empty_conn = Connection::open_in_memory().unwrap();
+        crate::core::code_index_db::migrate_connection(&empty_conn).unwrap();
+        empty_conn
+            .execute(
+                "INSERT INTO index_revisions (id, parent_id, git_rev, dirty, source,
+                    identity_scheme_version, generation_key, started_at, completed_at, status)
+                 VALUES (9, NULL, 'old', 0, 'pre-writer', 1, 'gk', 1, 1, 'completed')",
+                [],
+            )
+            .unwrap();
+        let stale = history(&empty_conn, None, 5).unwrap();
+        assert!(stale.history_starts_now, "revisions without deltas");
+        assert!(stale.revisions.is_empty());
     }
 
     #[test]
