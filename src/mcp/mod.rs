@@ -489,8 +489,12 @@ pub mod mcp_server {
                             .get("depth")
                             .and_then(Value::as_u64)
                             .map(|d| d as usize);
+                        let last = arguments
+                            .get("last")
+                            .and_then(Value::as_u64)
+                            .map(|d| d as usize);
                         Ok(envelope_code_index(handle_code_index_mcp(
-                            mode, root, intro, prefix, fix, kind, symbol, depth,
+                            mode, root, intro, prefix, fix, kind, symbol, depth, last,
                         )))
                     }
                     "get_semantic_report" => {
@@ -662,7 +666,8 @@ pub mod mcp_server {
                         "root": { "type": "string", "description": "Project root (default .)" },
                         "intro_file": { "type": "string", "description": "Optional intro splice file for refresh/check renders" },
                         "path_prefix": { "type": "string", "description": "query: only paths starting with this prefix" },
-                        "kind": { "type": "string", "description": "query payload: items (default) | relations (from/to_name/to_id/type) | symbols (unresolved+external names) | cycles (dependency cycles, rotation-deduped) | impact (what is affected by changing `symbol`; requires symbol) | touches (what `symbol` uses in OTHER files, with target file+line, plus who uses it; requires symbol) | file_graph (which files depend on which, by weight; path_prefix focuses both directions) | changed (files in the working-tree diff, each with its cross-file targets and users)" },
+                        "kind": { "type": "string", "description": "query payload: items (default) | relations (from/to_name/to_id/type) | symbols (unresolved+external names) | cycles (dependency cycles, rotation-deduped) | impact (what is affected by changing `symbol`; requires symbol) | touches (what `symbol` uses in OTHER files, with target file+line, plus who uses it; requires symbol) | file_graph (which files depend on which, by weight; path_prefix focuses both directions) | changed (files in the working-tree diff, each with its cross-file targets and users) | history (relation deltas per revision; `symbol` filters the relation key, `last` revisions) | onion (each edge's count across the last `last` revisions, ending at now — the past-to-present view)" },
+                        "last": { "type": "integer", "description": "kind=history|onion: how many revisions/frames back (default 5 / 3)" },
                         "symbol": { "type": "string", "description": "kind=impact|touches: the DEFINING name to analyse (e.g. parse_file). A name in several files yields several seeds, all reported" },
                         "depth": { "type": "integer", "description": "kind=impact|cycles: hop bound (impact default 3, cycles default 64)" },
                         "fix": { "type": "boolean", "description": "check: rewrite the artifact when stale (default false)" }
@@ -3205,6 +3210,7 @@ or list_nodes for a flat index of this file.",
         kind: &str,
         symbol: Option<&str>,
         depth: Option<usize>,
+        last: Option<usize>,
     ) -> Value {
         use crate::core::code_index::{self as ci, CodeIndexOptions};
         use crate::core::code_index_db;
@@ -3279,6 +3285,29 @@ or list_nodes for a flat index of this file.",
                                     "count": report.reachable.len(), "impact": report
                                 }),
                                 Err(e) => tool_error(format!("code_index impact failed: {e:#}")),
+                            }
+                        }
+                        "history" => {
+                            match crate::core::code_graph::history(&conn, symbol, last.unwrap_or(5))
+                            {
+                                Ok(h) => json!({
+                                    "mode": "query", "kind": "history",
+                                    "revisions": h.revisions.len(),
+                                    "most_recent_revision": h.most_recent_revision,
+                                    "history_starts_now": h.history_starts_now,
+                                    "report": h
+                                }),
+                                Err(e) => tool_error(format!("code_index history failed: {e:#}")),
+                            }
+                        }
+                        "onion" => {
+                            match crate::core::code_graph::onion(&conn, symbol, last.unwrap_or(3)) {
+                                Ok(o) => json!({
+                                    "mode": "query", "kind": "onion",
+                                    "channels": o.channels.len(),
+                                    "onion": o
+                                }),
+                                Err(e) => tool_error(format!("code_index onion failed: {e:#}")),
                             }
                         }
                         "touches" => {

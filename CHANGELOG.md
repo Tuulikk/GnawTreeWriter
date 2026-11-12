@@ -85,7 +85,22 @@ Mätt på det här repot: `build_tree` 34 utgående kanter; `--changed` med tre
 rörda filer gav `cli.rs` 136 ut, `code_graph.rs` 5 ut/14 in, `code_index.rs`
 7 ut/32 in.
 
-### Added (docs) — `docs/LOCAL_MODEL_BAKEOFF.md`: LFM2.5 vs LFM3 vs Qwen3.5
+### Added (MCP) — `history` och `onion` på agent-ytan
+
+Samma rörelsevy som CLI:t, i `code_index`-verktyget (`kind=history|onion` +
+`last`), så en agent kan se *vad som ändrades* och *hur en kant rörde sig* — inte
+bara nuläget. Bevisat genom kanalen (JSON-RPC över `mcp stdio`):
+
+```
+kind=onion   symbol=record_revision last=2  → 20 kanaler, "3 (count_changed @311)"
+kind=history last=1                          → 1 revision
+```
+
+Nu finns hela kedjan på alla tre ytor: `--touches` (nuläge, fil:rad),
+`--changed` (ändringen), `--history` (deltan), `--onion` (rörelse) — och samma
+fyra som MCP-kinds.
+
+
 
 Planen för att välja L4-modell med **mätta** tal i stället för magkänsla:
 
