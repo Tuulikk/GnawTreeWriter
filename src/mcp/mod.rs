@@ -662,8 +662,8 @@ pub mod mcp_server {
                         "root": { "type": "string", "description": "Project root (default .)" },
                         "intro_file": { "type": "string", "description": "Optional intro splice file for refresh/check renders" },
                         "path_prefix": { "type": "string", "description": "query: only paths starting with this prefix" },
-                        "kind": { "type": "string", "description": "query payload: items (default) | relations (from/to_name/to_id/type) | symbols (unresolved+external names) | cycles (dependency cycles, rotation-deduped) | impact (what is affected by changing `symbol`; requires symbol)" },
-                        "symbol": { "type": "string", "description": "kind=impact: the DEFINING name to analyse (e.g. parse_file). A name in several files yields several seeds, all reported" },
+                        "kind": { "type": "string", "description": "query payload: items (default) | relations (from/to_name/to_id/type) | symbols (unresolved+external names) | cycles (dependency cycles, rotation-deduped) | impact (what is affected by changing `symbol`; requires symbol) | touches (what `symbol` uses in OTHER files, with target file+line, plus who uses it; requires symbol) | file_graph (which files depend on which, by weight; path_prefix focuses both directions) | changed (files in the working-tree diff, each with its cross-file targets and users)" },
+                        "symbol": { "type": "string", "description": "kind=impact|touches: the DEFINING name to analyse (e.g. parse_file). A name in several files yields several seeds, all reported" },
                         "depth": { "type": "integer", "description": "kind=impact|cycles: hop bound (impact default 3, cycles default 64)" },
                         "fix": { "type": "boolean", "description": "check: rewrite the artifact when stale (default false)" }
                     },
@@ -3280,6 +3280,70 @@ or list_nodes for a flat index of this file.",
                                 }),
                                 Err(e) => tool_error(format!("code_index impact failed: {e:#}")),
                             }
+                        }
+                        "touches" => {
+                            let Some(sym) = symbol else {
+                                return tool_error(
+                                    "code_index kind=touches requires `symbol` — a bare name like \"build_tree\", not an id"
+                                        .to_string(),
+                                );
+                            };
+                            match crate::core::code_graph::touches_symbol(&conn, sym) {
+                                Ok(t) => json!({
+                                    "mode": "query", "kind": "touches",
+                                    "outgoing": t.outgoing.len(), "incoming": t.incoming.len(),
+                                    "touches": t
+                                }),
+                                Err(e) => tool_error(format!("code_index touches failed: {e:#}")),
+                            }
+                        }
+                        "file_graph" => match crate::core::code_graph::file_graph(&conn) {
+                            Ok(mut g) => {
+                                // path_prefix doubles as the focus: both
+                                // directions, because "what does this file
+                                // touch" and "what touches it" are one question.
+                                if let Some(needle) = prefix.as_deref() {
+                                    g.edges.retain(|e| {
+                                        e.from.contains(needle) || e.to.contains(needle)
+                                    });
+                                }
+                                json!({
+                                    "mode": "query", "kind": "file_graph",
+                                    "files": g.files, "edge_pairs": g.edges.len(),
+                                    "edges": g.edges,
+                                    "attributed_edges": g.attributed_edges,
+                                    "unattributed_edges": g.unattributed_edges,
+                                    "coverage": g.coverage, "note": g.note
+                                })
+                            }
+                            Err(e) => tool_error(format!("code_index file_graph failed: {e:#}")),
+                        },
+                        "changed" => {
+                            let files =
+                                crate::core::code_index::changed_files_from_git(&index_root);
+                            let mut entries = Vec::new();
+                            for file in &files {
+                                match crate::core::code_graph::touches_file(&conn, file) {
+                                    Ok(t) => entries.push(json!({
+                                        "file": file,
+                                        "triple_in_store": !t.outgoing.is_empty()
+                                            || !t.incoming.is_empty(),
+                                        "outgoing": t.outgoing,
+                                        "incoming": t.incoming,
+                                    })),
+                                    Err(e) => {
+                                        return tool_error(format!(
+                                            "code_index changed failed on {file}: {e:#}"
+                                        ))
+                                    }
+                                }
+                            }
+                            json!({
+                                "mode": "query", "kind": "changed",
+                                "changed_files": files.len(),
+                                "entries": entries,
+                                "note": "Files come from `git diff --name-only HEAD` plus untracked. triple_in_store:false means the store has no edges for that path — isolated, or the index is older than the change."
+                            })
                         }
                         "relations" => match code_index_db::load_relations(&conn, prefix) {
                             Ok(rows) => json!({

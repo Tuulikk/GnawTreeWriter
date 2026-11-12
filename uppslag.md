@@ -206,6 +206,42 @@ stabil. Citera det som *inte* rör sig när filen checkas in.
 
 ---
 
+## 2026-11-12 — Onion skin: var → är → på väg att bli  📋 IDÉ, ej byggd
+
+**Idén** (från animation): lägga lager på varandra så man ser progression — vad som
+var, vad som är, och vad som är på väg att bli. Applicerat på kod: en funktions
+kanter i går, i dag, och efter en föreslagen ändring.
+
+**Vad som redan finns (mätt i storen):**
+
+| Byggsten | Innehåll |
+|---|---|
+| `transaction_log` | varje GTW-edit med before/after, `undo` kör härifrån |
+| `index_revisions` | **305** rader — att en refresh hände, per revision |
+| `file_versions` | **55 363** rader — filinnehåll per revision |
+| `stale_files` / `index_stale` | exakt gapet mellan store (då) och arbetsträd (nu) |
+| `preview_edit` | förslagets text-diff, före skrivning |
+
+**Vad som saknas — och det är en riktig lucka:** `relation_changes` och
+`entity_changes` är **tomma** (0 rader) och har **ingen skrivare**: det finns
+ingen `INSERT INTO relation_changes` i koden. Designen ville ha grafens
+before/after per revision; verkligheten har bara *att* något uppdaterades. Alltså
+går "vilka kanter försvann när X ändrades?" inte att svara på i efterhand.
+
+**Billigaste första skiva (ingen ny tabell):**
+1. **Är vs blir** (retroaktivt, fungerar i dag): kopiera `code_index.db` till en
+temp-sökväg, kör en inkrementell refresh mot arbetsträdet, och diffa
+`--touches` från de två storerna → `added`/`removed`-kanter med fil:rad. Det
+återanvänder allt som byggdes 2026-11-12 och kräver inget schema.
+2. **Var vs är** (framåt): skriv `relation_changes` vid refresh. Då ackumuleras
+historiken och onion skin blir gratis därefter.
+
+**Mått som ska redovisas:** antal tillagda/borttagna kanter per fil, och vilka
+tidigare kanter som *inte* längre har någon källa — det är samma ärlighetsregel
+som `--coverage` (en försvunnen kant är ett faktum, inte en gissning).
+
+---
+
 ## 2026-11-12 — En fix som aldrig parsar om syns inte  ✅ ÅTGÄRDAT
 
 **Fyndet:** inline-modul-fixen (entiteter inuti `pub mod x { ... }`) såg
