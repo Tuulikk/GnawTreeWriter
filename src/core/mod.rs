@@ -326,6 +326,31 @@ pub(crate) fn check_duplicate_attribute_above(
     Ok(())
 }
 
+/// Comments are LEAVES in this tree, whatever the grammar says.
+///
+/// `tree-sitter-rust` 0.21 → 0.24 (bumped in 0.25.0) started giving
+/// `line_comment` children: `outer_doc_comment_marker` and `doc_comment`, plus
+/// the literal `//` / `/` tokens. That silently reshaped what consumers walk:
+/// in a flat node list the entry immediately BEFORE a function became a
+/// grandchild (`1.2 [doc_comment]`) instead of the sibling `1 [line_comment]`,
+/// so a consumer scanning backwards for attached comments — and verifying
+/// siblinghood via the parent path — stopped finding them. Measured effect:
+/// Motor2's `delete_node` left the doc comment on disk after a successful
+/// delete (FEEDBACK_FRAN_MOTOR2_2026-11-12 §1).
+///
+/// The internals of a comment carry no tree value (nobody edits `//` as a
+/// node), and one rule here beats teaching every consumer about every grammar
+/// bump: comments stay single nodes with one path and one line range.
+fn flatten_comment_children(node: &mut TreeNode) {
+    if node.node_type.contains("comment") {
+        node.children.clear();
+        return;
+    }
+    for child in &mut node.children {
+        flatten_comment_children(child);
+    }
+}
+
 impl GnawTreeWriter {
     pub fn new(file_path: &str) -> Result<Self> {
         Self::new_with_boundary(file_path, None)
@@ -343,7 +368,8 @@ impl GnawTreeWriter {
             fs::read_to_string(path).context(format!("Failed to read file: {}", file_path))?;
 
         let parser = get_parser(path)?;
-        let tree = parser.parse(&source_code)?;
+        let mut tree = parser.parse(&source_code)?;
+        flatten_comment_children(&mut tree);
 
         // Initialize transaction log for the project root
         // Use find_project_root to ensure we log to the correct centralized location
@@ -386,7 +412,8 @@ impl GnawTreeWriter {
 
         let parser = get_parser(path)?;
         let (tree_result, warning) = parser.parse_lenient(&source_code);
-        let tree = tree_result?;
+        let mut tree = tree_result?;
+        flatten_comment_children(&mut tree);
 
         let project_root = find_project_root_in(path, boundary);
         let transaction_log = TransactionLog::load(project_root)?;
@@ -951,6 +978,7 @@ impl GnawTreeWriter {
         self.source_code = modified_code;
         let parser = get_parser(Path::new(&self.file_path))?;
         self.tree = parser.parse(&self.source_code)?;
+        flatten_comment_children(&mut self.tree);
 
         // B1(a): re-resolve the addressed node in the FRESH tree — content
         // replacement keeps the ordinal position, so this path is
@@ -1730,6 +1758,62 @@ pub(crate) fn signature_impact_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A comment is ONE node, whatever the grammar nests inside it.
+    ///
+    /// tree-sitter-rust 0.24 gave `line_comment` children (`outer_doc_comment_marker`,
+    /// `doc_comment`, `//`, `/`). In a flat node list that moved the entry before
+    /// a function from the sibling `0 [line_comment]` to the grandchild
+    /// `0.2 [doc_comment]`, and Motor2's attached-comment deletion — which
+    /// verifies siblinghood by parent path — stopped finding it, leaving doc
+    /// comments on disk after a delete (FEEDBACK_FRAN_MOTOR2_2026-11-12 §1).
+    /// The Writer flattens them at construction, so every consumer sees the old
+    /// shape again; this test pins it at the SOURCE rather than at one tool.
+    #[test]
+    fn comment_nodes_are_leaves_after_construction() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("doc.rs");
+        std::fs::write(
+            &path,
+            "/// Doc line one.\n/// Doc line two.\nfn target() {}\n\nfn other() {}\n",
+        )
+        .unwrap();
+
+        let writer = GnawTreeWriter::new(path.to_str().unwrap()).unwrap();
+        let tree = writer.analyze();
+
+        let comment = tree
+            .children
+            .iter()
+            .find(|c| c.node_type.contains("comment"))
+            .expect("the doc comment must be a direct child of the root");
+        assert!(
+            comment.children.is_empty(),
+            "comment must be a leaf, has {} child(ren): {:?}",
+            comment.children.len(),
+            comment
+                .children
+                .iter()
+                .map(|c| c.node_type.as_str())
+                .collect::<Vec<_>>()
+        );
+
+        // The consumer's walk: the node BEFORE the function, by index, is the
+        // comment — and it is a sibling (same parent), not a descendant.
+        let idx = tree
+            .children
+            .iter()
+            .position(|c| c.node_type == "function_item")
+            .expect("target function");
+        assert!(idx > 0, "a comment must precede the function");
+        let before = &tree.children[idx - 1];
+        assert!(
+            before.node_type.contains("comment"),
+            "entry before the function is {:?}, not a comment",
+            before.node_type
+        );
+        assert_eq!(before.path.rsplit_once('.').map(|(p, _)| p), None);
+    }
 
     fn parse_tree(code: &str) -> TreeNode {
         let parser = crate::parser::get_parser(Path::new("x.rs")).unwrap();

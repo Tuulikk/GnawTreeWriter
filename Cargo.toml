@@ -110,6 +110,12 @@ reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 # table that answers it now.
 default = ["ai", "mcp"]
 ai = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "ureq", "tokenizers"]
+# Deprecated alias, one release cycle (2026-11-12). Path-dependents that still
+# pass `--features modernbert` used to fail at workspace resolution with
+# "gnawtreewriter does not have that feature" — a cryptic error for a rename we
+# documented in CHANGELOG but could not warn about. Motor2 hit exactly this
+# (FEEDBACK_FRAN_MOTOR2_2026-11-12.md §2). Remove after the next minor release.
+modernbert = ["ai"]
 mamba = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "ureq", "tokenizers", "dep:fastrand"]
 mcp = ["dep:reqwest", "hyper", "axum", "tokio-stream", "tower-http"]
 cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
