@@ -117,6 +117,10 @@ pub struct CoverageReport {
     /// One-line reading instruction, so no consumer has to infer which number
     /// means what (a rate without its denominator is the M7 mistake).
     pub reading_note: String,
+    /// Path prefix this report was restricted to, when given. Empty = whole
+    /// project. The point of scoping is that "43 % of what?" has an answer in
+    /// the payload instead of in the reader's assumptions.
+    pub scope: String,
     pub symbols: SymbolSummary,
     /// D9 read-time signals: staleness queue non-empty at measure time.
     pub index_stale: bool,
@@ -138,7 +142,7 @@ pub struct CoverageReport {
 /// code (named `mod`, `cli`, `age` — see uppslag 2026-11-12). A file is not a
 /// symbol; naming the class after a defect would send the next reader hunting
 /// for a bug that is a design boundary.
-fn source_coverage_for(conn: &Connection) -> Result<Vec<SourceClass>> {
+fn source_coverage_for(conn: &Connection, scope: &str) -> Result<Vec<SourceClass>> {
     let mut source_coverage = Vec::new();
     let mut stmt = conn.prepare(
         "SELECT CASE
@@ -152,10 +156,13 @@ fn source_coverage_for(conn: &Connection) -> Result<Vec<SourceClass>> {
          COUNT(*)
          FROM relations r
          LEFT JOIN entities e ON e.id = r.from_id
+         WHERE (?1 = '' OR r.file LIKE ?1 || '%')
          GROUP BY class
          ORDER BY COUNT(*) DESC, class",
     )?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    let rows = stmt.query_map(rusqlite::params![scope], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+    })?;
     for row in rows {
         let (class, count) = row?;
         source_coverage.push(SourceClass { class, count });
@@ -165,16 +172,29 @@ fn source_coverage_for(conn: &Connection) -> Result<Vec<SourceClass>> {
 
 /// Measure graph quality from the store. Deterministic: same DB bytes →
 /// same report (the scan-tools determinism principle).
+/// Measure graph quality, optionally restricted to a path prefix.
+///
+/// `scope` is the answer to "43 % of *what*?" — a global rate says nothing about
+/// the module you are working in, and a correct edge outside your purpose is
+/// noise. The scope filters every edge query by the file the relation occurs in,
+/// so the RATE and its DENOMINATOR describe the same set of edges (the M7 rule,
+/// applied to relevance instead of to externals).
 pub fn measure(conn: &Connection) -> Result<CoverageReport> {
+    measure_scoped(conn, None)
+}
+
+pub fn measure_scoped(conn: &Connection, scope: Option<&str>) -> Result<CoverageReport> {
+    let scope_str = scope.unwrap_or("");
     let mut types = Vec::new();
     {
         let mut stmt = conn.prepare(
             "SELECT relation_type, COUNT(*), COALESCE(SUM(to_id IS NOT NULL), 0)
              FROM relations
+             WHERE (?1 = '' OR file LIKE ?1 || '%')
              GROUP BY relation_type
              ORDER BY COUNT(*) DESC, relation_type",
         )?;
-        let rows = stmt.query_map([], |r| {
+        let rows = stmt.query_map(rusqlite::params![scope_str], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, i64>(1)?,
@@ -238,8 +258,11 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
         }
         let mut acc: HashMap<String, Acc> = HashMap::new();
         {
-            let mut stmt = conn.prepare("SELECT relation_type, to_name, to_id FROM relations")?;
-            let rows = stmt.query_map([], |r| {
+            let mut stmt = conn.prepare(
+                "SELECT relation_type, to_name, to_id FROM relations
+                 WHERE (?1 = '' OR file LIKE ?1 || '%')",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![scope_str], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
@@ -307,7 +330,7 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
         }
     }
 
-    let source_coverage = source_coverage_for(conn)?;
+    let source_coverage = source_coverage_for(conn, scope_str)?;
 
     // Target classes: macro targets carry a `!` suffix (increment C
     // convention), qualified paths hint at module paths the resolver
@@ -323,10 +346,13 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
              END AS class,
              COUNT(*)
              FROM relations
+             WHERE (?1 = '' OR file LIKE ?1 || '%')
              GROUP BY class
              ORDER BY COUNT(*) DESC, class",
         )?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        let rows = stmt.query_map(rusqlite::params![scope_str], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
         for row in rows {
             let (class, count) = row?;
             target_classes.push(TargetClass { class, count });
@@ -386,7 +412,7 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
             regenerate_recommended: stale + invalid > 0,
         }
     };
-    let relations_total: i64 = relations_total(conn)?;
+    let relations_total: i64 = relations_total(conn, scope_str)?;
     let reading_note = match local_resolution.iter().find(|t| t.relation_type == "calls") {
         Some(c) => format!(
                 "resolution_rate counts external targets as failures. Of calls: {} of {} local-candidate edges resolved ({:.0} %); {} target std/prelude or fields and cannot resolve without indexing std + inferring receiver types; {} need a receiver type, {} are ambiguous names, {} carry a module path the resolver does not walk. Graph walks (impact/cycles/chain) traverse RESOLVED edges only.",
@@ -410,6 +436,7 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
         target_classes,
         local_resolution,
         reading_note,
+        scope: scope_str.to_string(),
         symbols: SymbolSummary {
             total: symbols_total,
             external: symbols_external,
@@ -423,8 +450,12 @@ pub fn measure(conn: &Connection) -> Result<CoverageReport> {
     })
 }
 
-fn relations_total(conn: &Connection) -> anyhow::Result<i64> {
-    Ok(conn.query_row("SELECT COUNT(*) FROM relations", [], |r| r.get(0))?)
+fn relations_total(conn: &Connection, scope: &str) -> anyhow::Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM relations WHERE (?1 = '' OR file LIKE ?1 || '%')",
+        rusqlite::params![scope],
+        |r| r.get(0),
+    )?)
 }
 
 #[cfg(test)]
@@ -581,6 +612,48 @@ mod tests {
             5,
             "every calls edge lands in exactly one class"
         );
+    }
+
+    /// A scope must restrict the DENOMINATOR as well as the numerator — the
+    /// whole point of "43 % of what?". If only the top line were filtered, the
+    /// rate would silently describe a different edge set than it claims.
+    #[test]
+    fn scope_restricts_rate_and_denominator_together() {
+        let conn = mem_store();
+        seed(&conn);
+
+        let all = measure(&conn).unwrap();
+        assert_eq!(all.relations_total, 4, "unscoped: every relation");
+        assert_eq!(all.scope, "", "unscoped is empty, not a wildcard string");
+
+        // Only src/a.rs: alpha->alpha, gamma->Mod::beta, cfg! (macro)
+        let a = measure_scoped(&conn, Some("src/a.rs")).unwrap();
+        assert_eq!(a.scope, "src/a.rs");
+        assert_eq!(
+            a.relations_total, 3,
+            "the scope filters the denominator too"
+        );
+        let calls = a
+            .types
+            .iter()
+            .find(|t| t.relation_type == "calls")
+            .expect("calls row");
+        assert_eq!((calls.extracted, calls.resolved), (3, 2));
+        // src/b.rs's import must not appear in a scoped report.
+        assert!(
+            a.types.iter().all(|t| t.relation_type != "imports"),
+            "the imports edge lives in src/b.rs: {:?}",
+            a.types.iter().map(|t| &t.relation_type).collect::<Vec<_>>()
+        );
+
+        // And the source classes are scoped the same way (no silent widening).
+        let classified: i64 = a.source_coverage.iter().map(|c| c.count).sum();
+        assert_eq!(classified, a.relations_total);
+
+        // A prefix that matches nothing is empty, not the whole project.
+        let none = measure_scoped(&conn, Some("nope/")).unwrap();
+        assert_eq!(none.relations_total, 0);
+        assert!(none.types.is_empty());
     }
 
     #[test]

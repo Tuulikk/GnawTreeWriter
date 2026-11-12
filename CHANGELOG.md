@@ -85,6 +85,28 @@ Mätt på det här repot: `build_tree` 34 utgående kanter; `--changed` med tre
 rörda filer gav `cli.rs` 136 ut, `code_graph.rs` 5 ut/14 in, `code_index.rs`
 7 ut/32 in.
 
+### Added — `--coverage --scope <prefix>`: "43 % av *vad*?"
+
+Det globala talet dolde spridningen. Mätt på det här repot:
+
+| Scope | `calls` lokalt upplösta |
+|---|---|
+| hela projektet | 2 827 / 6 641 = **43 %** |
+| `src/core/` | 1 459 / 3 121 = **47 %** |
+| `src/llm/` | 346 / 982 = **35 %** |
+| `src/mcp/` | 348 / 655 = **53 %** |
+
+Att arbeta i `src/llm` innebär alltså 35 %, inte 43 % — och det är den siffran
+som ska stå i svaret.
+
+- Scopet filtrerar **både täljaren och nämnaren** (alla kant-frågor får samma
+  `file LIKE prefix%`), plus `relations_total` och källklasserna. Testet
+  `scope_restricts_rate_and_denominator_together` låser att en prefix-matchning
+  som inte träffar något ger **noll**, inte hela projektet.
+- `scope` finns i payloaden och skrivs i statusraden (`· scope src/llm/ ·`), så
+  talet kan inte citeras utan sitt sammanhang.
+- Prefix som inte matchar ⇒ tomt, aldrig tyst fallback till allt.
+
 ### Added (MCP) — `history` och `onion` på agent-ytan
 
 Samma rörelsevy som CLI:t, i `code_index`-verktyget (`kind=history|onion` +

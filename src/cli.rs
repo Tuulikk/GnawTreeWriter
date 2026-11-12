@@ -262,6 +262,10 @@ enum Commands {
         /// Read-only — never creates the store. JSON to stdout.
         #[arg(long)]
         coverage: bool,
+        /// With --coverage: restrict every measure to this path prefix, so the
+        /// rate and its denominator describe the same edges. "43 % of what?"
+        #[arg(long)]
+        scope: Option<String>,
         /// List dependency cycles in the store graph (rotation-deduped).
         /// Read-only; needs a store (run with --db first)
         #[arg(long)]
@@ -1487,6 +1491,7 @@ impl Cli {
                 install_hook,
                 uninstall_hook,
                 coverage,
+                scope,
                 cycles,
                 impact,
                 why,
@@ -1535,7 +1540,7 @@ impl Cli {
                 } else if coverage {
                     // Phase 1 coverage harness (proposal 2026-11-09):
                     // measure the store graph — read-only, JSON out.
-                    Self::handle_code_index_coverage(Path::new(&path))?;
+                    Self::handle_code_index_coverage(Path::new(&path), scope.as_deref())?;
                 } else if file_graph {
                     // File-level projection of the entity graph — read-only,
                     // derived from existing columns (no file nodes).
@@ -2229,14 +2234,14 @@ Use --no-preview to actually perform the restore"
     /// 2026-11-09): print graph-quality metrics for the store as JSON.
     /// Opens an EXISTING store only (decision #8) — a missing store is a
     /// loud error with the refresh hint, never a created one.
-    fn handle_code_index_coverage(path: &Path) -> Result<()> {
+    fn handle_code_index_coverage(path: &Path, scope: Option<&str>) -> Result<()> {
         let index_root = crate::core::code_index_db::resolve_index_root(path);
         let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
                 anyhow::anyhow!(
                     "code-index coverage needs a store — run `gnawtreewriter code-index <root> --db` first ({e:#})"
                 )
             })?;
-        let report = crate::core::code_index_coverage::measure(&conn)?;
+        let report = crate::core::code_index_coverage::measure_scoped(&conn, scope)?;
         // Level status rides along: which tier is stale, how much, and which
         // model the vectors came from — computed WITHOUT the model, because
         // reviewing the index must never require one (2026-11-11).
@@ -2249,12 +2254,20 @@ Use --no-preview to actually perform the restore"
             .iter()
             .find(|t| t.relation_type == "calls")
         {
+            // The scope belongs in the human line: "39 %" means nothing without
+            // "of what", and the reader should not have to scroll the JSON.
+            let where_ = if report.scope.is_empty() {
+                "whole project".to_string()
+            } else {
+                format!("scope {}", report.scope)
+            };
             eprintln!(
-                "graph: calls {}/{} local resolved ({:.0}%) · {} external/field targets · walks see resolved edges only",
+                "graph: calls {}/{} local resolved ({:.0}%) · {} external/field targets · {} · walks see resolved edges only",
                 calls.resolved,
                 calls.with_local_candidate,
                 calls.rate * 100.0,
-                calls.external
+                calls.external,
+                where_
             );
         }
         let mut body = serde_json::to_value(&report)?;
