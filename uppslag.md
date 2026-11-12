@@ -206,6 +206,51 @@ stabil. Citera det som *inte* rör sig när filen checkas in.
 
 ---
 
+## 2026-11-12 — Motor2-fynd 2: insert utanför intervallet placerade kod utanför föräldern  ✅ ÅTGÄRDAT
+
+**Påstående:** `insert_node(position=999)` rapporterar framgång men placerar
+innehållet utanför förälderns giltiga region.
+
+**Bevis (reproducerat, två varianter):** `mod m { … }` som förälder gav `fn z()`
+**efter** stängande klammer; en lövnod (`identifier`) som förälder gav det
+**överst i filen**. Båda svarade "Content inserted" med transaktions-id.
+
+**Orsak:** `idx > children.len()` använde sista barnets råa `end_line` som
+0-baserad insättningsindex, och `children.is_empty()` föll tillbaka på
+`start_line - 1`.
+
+**Åtgärd:** klampning till förälderns eget slut (före `}` för klammerföräldrar,
+filens slut för roten, efter lövnoden för löv) **plus en varning på stderr**.
+Tester: `insert_beyond_the_child_count_clamps_inside_the_parent`.
+
+---
+
+## 2026-11-12 — `end_line` betyder "raden med sista byten", inte "sista raden"  ⚠️ BELAGT (fixad på 2 ställen, semantiken kvar)
+
+**Påstående:** `TreeNode.end_line` är den rad som innehåller nodens sista byte.
+För text som slutar med `\n` ligger den byten i början av nästa rad — alltså är
+`end_line` en rad **för hög** för kommentarer och `use`-rader, men korrekt för
+funktioner (som slutar med `}`).
+
+**Bevis:** `/// doc` på rad 3 rapporterar `end_line = 4`; `fn a() { … }` på rad
+5-7 rapporterar `end_line = 7`. Två noder, två olika betydelser av samma fält.
+
+**Konsekvens (mätt):** `delete` använde `end_line` som exklusiv slice-gräns och
+tog en rad för mycket — `/// doc` ovanför `use std::fmt;` raderade **båda**, och
+filen parsade fortfarande så syntaxvakten såg inget. Motor2-fynd 2026-11-12.
+
+**Åtgärd:** de två ställena som använde `end_line` som grind (delete, insert)
+räknar nu om för newline-terminerade noder; `end_line` självt är orört eftersom
+många konsumenter läser det. **Öppen tråd:** normalisera fältet (eller lägg till
+`start_byte`/`end_byte`) så att nästa konsument inte behöver känna fällan.
+
+**Om det är fel:** testet `delete_of_a_newline_terminated_comment_keeps_the_next_line`
+faller om beteendet återgår — och det testet skrevs först när fyndet var
+reproducerat i två former (funktion = rätt, kommentar = fel).
+
+---
+
+
 ## 2026-11-12 — `undo` mellan processer: ÅTGÄRDAT (A+B)  ✅
 
 **Påståendet ovan var:** två separata `undo`-anrop ångrar samma transaktion.

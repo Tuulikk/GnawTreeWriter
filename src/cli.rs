@@ -79,6 +79,64 @@ pub struct Cli {
     #[arg(long, global = true)]
     /// Output machine-readable JSON for errors and results
     json: bool,
+    // ── Attribution (see core::attribution) ────────────────────────────────
+    // Voluntary and declared. NOT all roles need to be given, and absent means
+    // unknown — nothing here is inferred. The tool (mechanism) is recorded by
+    // the code path itself and cannot be set from here.
+    #[arg(long, global = true)]
+    /// A contributor who wrote/asked for the change (repeatable)
+    author: Vec<String>,
+    #[arg(long = "co-designer", global = true)]
+    /// A contributor who took part in the design (repeatable)
+    co_designer: Vec<String>,
+    #[arg(long, global = true)]
+    /// A contributor who reviewed it (repeatable)
+    reviewer: Vec<String>,
+    #[arg(long, global = true)]
+    /// A contributor who initiated it (repeatable)
+    initiator: Vec<String>,
+    #[arg(long, global = true)]
+    /// Optional model note; never implies authorship
+    model: Option<String>,
+    #[arg(long = "change-id", global = true)]
+    /// Group the transactions of ONE logical change (may span files)
+    change_id: Option<String>,
+    #[arg(long = "task-id", global = true)]
+    /// Group the changes of one task (a task may hold several changes)
+    task_id: Option<String>,
+}
+
+impl Cli {
+    /// Turn the global flags into declared attribution. Empty flags produce an
+    /// EMPTY attribution (no keys written), which is the honest default.
+    ///
+    /// Contributors are folded through `merged_with`, so ONE identity that holds
+    /// several roles appears ONCE (`--author tuulikk --initiator tuulikk` is one
+    /// contributor with two roles, not two entries).
+    fn declared_attribution(&self) -> crate::core::attribution::Attribution {
+        use crate::core::attribution::{Attribution, Contributor, ContributorKind, Role};
+        let mut acc = Attribution::default();
+        let mut add = |list: &[String], role: Role| {
+            for id in list {
+                // Kind is Unknown: the CLI cannot know whether "cline" is an
+                // agent or a human, and guessing would be worse than not saying.
+                let one = Attribution {
+                    contributors: vec![Contributor::new(id, ContributorKind::Unknown, &[role])],
+                    ..Default::default()
+                };
+                acc = acc.merged_with(&one);
+            }
+        };
+        add(&self.author, Role::Author);
+        add(&self.co_designer, Role::CoDesigner);
+        add(&self.reviewer, Role::Reviewed);
+        add(&self.initiator, Role::Initiator);
+
+        acc.model = self.model.clone();
+        acc.change_id = self.change_id.clone();
+        acc.task_id = self.task_id.clone();
+        acc
+    }
 }
 
 #[allow(clippy::enum_variant_names, clippy::too_many_arguments)]
@@ -94,6 +152,10 @@ enum Commands {
         /// Write the projection as a cache after computing it (default: no write)
         #[arg(long)]
         save: bool,
+        /// Show declared attribution per file, WITH the denominator of what is
+        /// unknown (absence is counted, never guessed)
+        #[arg(long)]
+        trace: bool,
     },
     /// Parse files and show their AST tree structure
     Analyze {
@@ -938,6 +1000,9 @@ impl Cli {
     pub async fn run(self) -> Result<()> {
         let _json_mode = self.json;
         let global_dry_run = self.dry_run;
+        // Declared attribution is per-process context: write paths read it and
+        // force their own `mechanism`. Empty flags → no keys written.
+        crate::core::attribution::set_process_attribution(self.declared_attribution());
         match self.command {
             Commands::Analyze {
                 paths,
@@ -1668,11 +1733,15 @@ impl Cli {
             Commands::Status => {
                 Self::handle_health_check().await?;
             }
-            Commands::Head { verify, save } => {
+            Commands::Head {
+                verify,
+                save,
+                trace,
+            } => {
                 // JSON uses the GLOBAL --json: declaring a second `--json` on
                 // this variant is a duplicate flag, which `tests/cli_contract`
                 // exists to catch (it did).
-                Self::handle_head(verify, _json_mode, save)?;
+                Self::handle_head(verify, _json_mode, save, trace)?;
             }
             Commands::SemanticReport { file_path } => {
                 Self::handle_semantic_report(&file_path).await?;
@@ -5696,6 +5765,7 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
             return Ok(());
         }
         let mut writer = GnawTreeWriter::new(file)?;
+        writer.set_attribution(crate::core::attribution::for_path("cli"));
         writer.create_backup()?;
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
@@ -5706,6 +5776,7 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
         // failure must not block the write, but the head will then say
         // `journal:no-blob` instead of implying recoverability.
         let mut txn_meta = std::collections::HashMap::new();
+        crate::core::attribution::for_path("cli").apply_to(&mut txn_meta);
         if let Ok(blob) = writer.store_content_blob(&modified) {
             txn_meta.insert("after_blob".to_string(), blob);
         }
@@ -5847,6 +5918,7 @@ Use --no-preview to actually apply the change."
         // Same rule as QuickInsert: store the state this write CREATES, so the
         // head has a verifiable source and `redo` can resolve its target.
         let mut txn_meta = std::collections::HashMap::new();
+        crate::core::attribution::for_path("cli").apply_to(&mut txn_meta);
         if let Ok(blob) = writer.store_content_blob(&modified) {
             txn_meta.insert("after_blob".to_string(), blob);
         }
@@ -6493,10 +6565,51 @@ Use without --preview to apply the clone"
     /// `.gnawtreewriter_head.json` loses nothing. `--verify` answers the honest
     /// question behind a content hash: *are the bytes actually stored, and does
     /// the working file still match?* It reports, and never writes a repair.
-    fn handle_head(verify: bool, json: bool, save: bool) -> Result<()> {
+    fn handle_head(verify: bool, json: bool, save: bool, trace: bool) -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir);
         let (head, cache_stale) = crate::core::state_head::load(&project_root)?;
+
+        // Attribution trace: declared per file, with the DENOMINATOR of what is
+        // unknown. 983 rows predate the fields — saying so is the point.
+        let attribution_trace = if trace {
+            let log = TransactionLog::load(&project_root)?;
+            let history = log.get_full_history()?;
+            let mut total = 0usize;
+            let mut with_contributors = 0usize;
+            let mut with_change_id = 0usize;
+            let mut with_mechanism = 0usize;
+            let mut last_per_file: std::collections::BTreeMap<String, String> =
+                std::collections::BTreeMap::new();
+            for t in history
+                .iter()
+                .filter(|t| t.operation.is_content_operation())
+            {
+                total += 1;
+                let a = t.attribution();
+                if !a.contributors.is_empty() {
+                    with_contributors += 1;
+                    last_per_file.insert(t.file_path.to_string_lossy().to_string(), a.terse());
+                }
+                if a.change_id.is_some() {
+                    with_change_id += 1;
+                }
+                if a.mechanism.is_some() {
+                    with_mechanism += 1;
+                }
+            }
+            serde_json::json!({
+                "transactions": total,
+                "with_contributors": with_contributors,
+                "without_contributors": total - with_contributors,
+                "with_change_id": with_change_id,
+                "with_mechanism": with_mechanism,
+                "last_per_file": last_per_file,
+                "note": "Declared, voluntary attribution. Absence means UNKNOWN and is counted here rather than filled in. mechanism is observed by the code path; contributors/client are declared and cannot be verified.",
+            })
+        } else {
+            serde_json::Value::Null
+        };
 
         let mut discrepancies = if verify {
             crate::core::state_head::verify(&head, &project_root)
@@ -6527,6 +6640,7 @@ Use without --preview to apply the clone"
                     "cache_stale": cache_stale,
                     "verified": verify,
                     "discrepancies": discrepancies,
+                    "attribution": attribution_trace,
                     "entries": head.files,
                     "note": "Head is derived from the journal (append-only). content_source names where the bytes can be read back; `journal:no-blob` means the hash is known but the content is NOT stored. A discrepancy is reported, never repaired.",
                 }))?
@@ -6556,6 +6670,29 @@ Use without --preview to apply the clone"
         }
         if cache_stale {
             println!("\n⚠️  cached head is stale (journal moved); this run ignored it");
+        }
+        if trace {
+            let total = attribution_trace["transactions"].as_u64().unwrap_or(0);
+            let known = attribution_trace["with_contributors"].as_u64().unwrap_or(0);
+            let unknown = attribution_trace["without_contributors"]
+                .as_u64()
+                .unwrap_or(0);
+            println!(
+                "\nATTRIBUTION: {known}/{total} transactions have a declared contributor \
+                 ({unknown} unknown — absence is counted, not filled in)"
+            );
+            println!(
+                "             change_id: {}   mechanism: {}",
+                attribution_trace["with_change_id"], attribution_trace["with_mechanism"]
+            );
+            if let Some(map) = attribution_trace["last_per_file"].as_object() {
+                if !map.is_empty() {
+                    println!("\n  last declared contributor per file:");
+                    for (file, who) in map {
+                        println!("    {:<40} {who}", file);
+                    }
+                }
+            }
         }
         if verify {
             if discrepancies.is_empty() {

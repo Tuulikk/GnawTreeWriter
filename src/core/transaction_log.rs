@@ -21,6 +21,14 @@ pub struct Transaction {
     pub metadata: HashMap<String, String>,
 }
 
+impl Transaction {
+    /// Attribution as declared in `metadata` (see `core::attribution`).
+    /// Unknown stays unknown: no contributors means an empty list, never a guess.
+    pub fn attribution(&self) -> crate::core::attribution::Attribution {
+        crate::core::attribution::Attribution::from_metadata(&self.metadata)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OperationType {
     Edit,
@@ -217,7 +225,6 @@ impl TransactionLog {
     pub fn get_full_history(&self) -> Result<Vec<Transaction>> {
         Self::load_full_history_from_file(&self.log_file)
     }
-
     /// Fold the journal into the set of transactions that are STILL APPLIED.
     ///
     /// This is the single definition of "what counts now", and it is derived —

@@ -1,5 +1,56 @@
 ## [Unreleased]
 
+### Fixed — Motor2-fynd: `delete` svalde nästa rad
+
+`end_line` betyder "raden som innehåller nodens **sista byte**". För text som
+slutar med `\n` — varje kommentar, varje `use` — ligger den byten i början av
+nästa rad, så `end_line` är en rad för hög. `delete` använde fältet som exklusiv
+slice-gräns och tog därför en rad för mycket:
+
+```
+/// doc          ← delete s.rs 1
+use std::fmt;   ← försvann också, och filen parsade fortfarande
+fn a() {}
+```
+
+Syntaxvakten kunde inte se det, eftersom resultatet är giltig Rust. En funktion
+slutar inte med `\n`, vilket är varför buggen kunde leva: funktionsradering var
+korrekt, kommentarsradering var det inte.
+
+Fix: delete räknar om slutraden för newline-terminerade noder. Test
+`delete_of_a_newline_terminated_comment_keeps_the_next_line`.
+
+### Fixed — Motor2-fynd: `insert_node` med position utanför intervallet
+
+Två varianter, båda med "Content inserted" som svar:
+
+* klammerförälder (`mod m { … }`) + position > antal barn → innehållet hamnade
+  **efter stängande klammer**, utanför modulen;
+* **lövnod** som förälder (`identifier`) → `children.is_empty()` föll tillbaka på
+  `start_line - 1` och lade innehållet **överst i filen**.
+
+Fix: klampning till förälderns eget slut (före `}` för klammerföräldrar, filens
+slut för roten, efter lövnoden för löv) **och en varning på stderr**. Klampning
+valdes framför nekande eftersom legitima anropare skickar `children.len() + 1` som
+"lägg sist". Test `insert_beyond_the_child_count_clamps_inside_the_parent`.
+
+### Added — attribution: deklarerad spårbarhet (bidragsgivare, roller, change_id)
+
+`core::attribution` låter en transaktion bära **bidragsgivare med roller**
+(`initiator`, `author`, `co_designer`, `reviewer`, `operator`, `responsible`) —
+en identitet med flera roller skrivs **en gång** — plus `mechanism`
+(cli/mcp/batch/plugin, satt av kodvägen och därför observerad), `client` /
+`client_version` från MCP-handskakningen, `change_id` som grupperar en logisk
+ändring över flera filer, och `task_id` ovanför den.
+
+Globala flaggor: `--author`, `--co-designer`, `--reviewer`, `--initiator`
+(upprepningsbara), `--model`, `--change-id`, `--task-id`. `head --trace` visar per
+fil vem som senast deklarerats, **med nämnaren** — frånvaro räknas, den fylls
+aldrig i.
+
+Lagringen är `Transaction.metadata` (inte ett nytt fält), så gamla journaler läses
+oförändrat och inget biblioteks-API bryts. Okänd information förblir okänd.
+
 ### Fixed — `undo` och `redo` överlevde inte en processgräns
 
 Två separata `undo`-anrop ångrade **samma** transaktion, eftersom stacken

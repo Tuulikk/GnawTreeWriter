@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 pub mod age;
 pub mod alf;
 pub mod anchor;
+pub mod attribution;
 
 pub mod backup;
 pub mod batch;
@@ -91,6 +92,10 @@ pub struct GnawTreeWriter {
     /// the knowledge graph has callers. None otherwise (omitted, not an
     /// error — missing index is normal).
     last_impact: Option<serde_json::Value>,
+    /// Declared attribution for this writer's transactions (see
+    /// `core::attribution`). Empty by default = unknown, never invented, and it
+    /// lives in `metadata` so old journals and library callers keep working.
+    attribution: crate::core::attribution::Attribution,
 }
 
 #[derive(Debug, Clone)]
@@ -387,6 +392,7 @@ impl GnawTreeWriter {
             last_receipt: None,
             last_verdict: None,
             last_impact: None,
+            attribution: crate::core::attribution::process_attribution(),
         })
     }
 
@@ -430,6 +436,7 @@ impl GnawTreeWriter {
                 last_receipt: None,
                 last_verdict: None,
                 last_impact: None,
+                attribution: crate::core::attribution::Attribution::default(),
             },
             warning,
         ))
@@ -519,6 +526,17 @@ impl GnawTreeWriter {
         )
         .with_context(|| format!("writing after-blob {blob_name}"))?;
         Ok(blob_name)
+    }
+
+    /// Declare who is involved in this writer's changes. Merged with whatever
+    /// the write path itself knows (mechanism), so a caller cannot claim a
+    /// different code path than the one that ran.
+    pub fn set_attribution(&mut self, attribution: crate::core::attribution::Attribution) {
+        self.attribution = attribution;
+    }
+
+    pub fn attribution(&self) -> &crate::core::attribution::Attribution {
+        &self.attribution
     }
 
     pub(crate) fn create_backup(&mut self) -> Result<PathBuf> {
@@ -995,6 +1013,17 @@ impl GnawTreeWriter {
         // state this edit creates). Failure does NOT block the edit: the head
         // then reports `journal:no-blob`, which is a fact, not a lie.
         let mut txn_meta: HashMap<String, String> = HashMap::new();
+        // Declared attribution first; `mechanism` is forced by the code path so
+        // a caller can never claim a different one (owner's rule: mechanism is
+        // observed, not asserted). Empty attribution writes NO keys.
+        self.attribution.clone().apply_to(&mut txn_meta);
+        txn_meta.insert(
+            crate::core::attribution::MECHANISM.to_string(),
+            self.attribution
+                .mechanism
+                .clone()
+                .unwrap_or_else(|| "library".to_string()),
+        );
         match self.store_content_blob(&modified_code) {
             Ok(blob) => {
                 txn_meta.insert("after_blob".to_string(), blob);
@@ -1607,9 +1636,36 @@ impl GnawTreeWriter {
                 // 2026-10-13, and triage 2026-10-31 (T2), where position 3
                 // of 5 root fns nested the new fn inside the first one.
                 if parent.children.is_empty() {
-                    parent.start_line.saturating_sub(1)
+                    // A LEAF parent has no slot to insert INTO. This used to
+                    // fall back to `start_line - 1` — the top of the file — and
+                    // still report success (Motor2 finding 2026-11-12: a
+                    // position beyond the child count inside an identifier put
+                    // the new code above everything). Insert AFTER the leaf,
+                    // which is the only reading that leaves the parent intact,
+                    // and SAY SO instead of silently choosing.
+                    eprintln!(
+                        "⚠️  insert: parent '{}' ({}) has no children — inserting AFTER it, not inside it",
+                        node_path, parent.node_type
+                    );
+                    parent.end_line
                 } else if idx > parent.children.len() {
-                    parent.children[parent.children.len() - 1].end_line
+                    // Clamp to the parent's own end AND SAY SO. For a braced
+                    // container that is BEFORE its closing brace; for the file
+                    // it is the end of the file. Previously the raw end_line of
+                    // the last child was used, which for `mod m { … }` placed the
+                    // content AFTER the closing brace — outside the parent —
+                    // while reporting success (Motor2 finding 2026-11-12).
+                    eprintln!(
+                        "⚠️  insert: position {idx} exceeds {} child slot(s) — clamped to append",
+                        parent.children.len()
+                    );
+                    if parent.node_type == "source_file" {
+                        lines.len()
+                    } else if parent.content.trim_end().ends_with('}') {
+                        parent.end_line.saturating_sub(1)
+                    } else {
+                        parent.end_line
+                    }
                 } else {
                     // start_line is 1-based, so start_line - 1 is the
                     // 0-based insert index of the line BEFORE the sibling.
@@ -1670,7 +1726,20 @@ impl GnawTreeWriter {
         // regel (§45): core håller ren region-logik, F2d håller kedjan.
         let lines: Vec<&str> = self.source_code.lines().collect();
         let start_idx = node.start_line - 1;
-        let end_idx = node.end_line;
+        // `end_line` is "the line containing the node's LAST BYTE". For a node
+        // whose text ends in a newline — every comment, every `use` — that byte
+        // sits at the START of the next line, so `end_line` is one PAST the
+        // visible text. Using it as an exclusive slice bound therefore deleted
+        // one extra line, and when that line was code the syntax guard did not
+        // always see it: `/// doc` immediately above `use std::fmt;` took the
+        // `use` with it and the file still parsed (Motor2 finding 2026-11-12,
+        // reproduced 2026-11-12). A function does not end in a newline, which
+        // is why [5,7] happened to be correct and the bug hid.
+        let end_idx = if node.content.ends_with('\n') {
+            node.end_line.saturating_sub(1).max(node.start_line)
+        } else {
+            node.end_line
+        };
         // Vakt (Motor2-batt 2026-10-14, panic mod.rs:998): en nod-path från
         // en STALE tree (filen har krympt sedan skeleton/analyze) panikade
         // med byte/rad-slice out of range — ärligt fel i stället: tvinga
@@ -2403,7 +2472,73 @@ mod tests {
         );
     }
 
-    /// Steg 1 i docs/BACKUP_STORAGE_AND_TIME_TRAVEL.md: AST:n mätte 99,1 % av
+    /// Motor2-fynd 2026-11-12 (1): deleting a comment that ends in a newline
+    /// must not take the NEXT line with it. `end_line` is the line containing
+    /// the node's last byte, and for text ending in `\n` that byte sits at the
+    /// start of the next line — using it directly as an exclusive slice bound
+    /// deleted `use std::fmt;` while the file still parsed, so the syntax guard
+    /// never saw it.
+    #[test]
+    fn delete_of_a_newline_terminated_comment_keeps_the_next_line() {
+        let code = "//! hdr\n\n/// doc\nuse std::fmt;\nfn a() {}\n";
+        let (dir, path) = temp_rust_file(code);
+        let mut gtw = GnawTreeWriter::new(&path).unwrap();
+        // Node 1 is the `/// doc` comment (0 is the inner doc line).
+        gtw.edit(
+            EditOperation::Delete {
+                node_path: "1".to_string(),
+            },
+            false,
+        )
+        .expect("deleting a comment must be allowed");
+
+        let after = std::fs::read_to_string(dir.path().join("sample.rs")).unwrap();
+        assert!(
+            !after.contains("/// doc"),
+            "the comment must be gone: {after:?}"
+        );
+        assert!(
+            after.contains("use std::fmt;"),
+            "the FOLLOWING line must survive — it is code, not part of the comment: {after:?}"
+        );
+        assert!(after.contains("fn a() {}"));
+    }
+
+    /// Motor2-fynd 2026-11-12 (2): a position beyond the parent's child count
+    /// used to place the content OUTSIDE the parent (after its closing brace,
+    /// or at the top of the file for a leaf) while reporting success.
+    #[test]
+    fn insert_beyond_the_child_count_clamps_inside_the_parent() {
+        let code = "mod m {\n    fn a() {}\n}\n";
+        let (dir, path) = temp_rust_file(code);
+        let mut gtw = GnawTreeWriter::new(&path).unwrap();
+        // 0 = mod_item, 0.2 = its declaration_list.
+        gtw.edit(
+            EditOperation::Insert {
+                parent_path: "0.2".to_string(),
+                position: 999,
+                content: "fn z() {}".to_string(),
+            },
+            false,
+        )
+        .expect("out-of-range position must clamp, not fail");
+
+        let after = std::fs::read_to_string(dir.path().join("sample.rs")).unwrap();
+        let lines: Vec<&str> = after.lines().collect();
+        let z = lines
+            .iter()
+            .position(|l| l.contains("fn z()"))
+            .expect("inserted function present");
+        let close = lines
+            .iter()
+            .position(|l| l.trim() == "}")
+            .expect("module closes");
+        assert!(
+            z < close,
+            "content must land INSIDE the module, not after its brace: {after:?}"
+        );
+    }
+
     /// varje backup och lästes aldrig. v2 lagrar bara källan — och måste
     /// fortsätta vara läsbar för undo, som bara läser `source_code`.
     #[test]

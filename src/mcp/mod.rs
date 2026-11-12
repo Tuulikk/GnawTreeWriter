@@ -145,16 +145,46 @@ pub mod mcp_server {
 
     async fn process_request(state: Arc<AppState>, req: JsonRpcRequest) -> Result<Value, Value> {
         match req.method.as_str() {
-            "initialize" => Ok(json!({
-                "protocolVersion": "2024-11-05",
-                "serverInfo": {
-                    "name": env!("CARGO_PKG_NAME"),
-                    "version": env!("CARGO_PKG_VERSION")
-                },
-                "capabilities": {
-                    "tools": { "listChanged": true }
-                }
-            })),
+            "initialize" => {
+                // The handshake is the only place an MCP CLIENT identifies
+                // itself. Recorded as DECLARED attribution: it is self-reported,
+                // and it is not necessarily the agent platform behind the client
+                // (owner's distinction, 2026-11-12). `mechanism` is observed.
+                let info = req
+                    .params
+                    .as_ref()
+                    .and_then(|p| p.get("clientInfo"))
+                    .cloned();
+                let name = info
+                    .as_ref()
+                    .and_then(|i| i.get("name"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let version = info
+                    .as_ref()
+                    .and_then(|i| i.get("version"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                crate::core::attribution::update_process_attribution(|a| {
+                    a.mechanism = Some("mcp".to_string());
+                    if let Some(n) = name {
+                        a.client = Some(n);
+                    }
+                    if let Some(v) = version {
+                        a.client_version = Some(v);
+                    }
+                });
+                Ok(json!({
+                    "protocolVersion": "2024-11-05",
+                    "serverInfo": {
+                        "name": env!("CARGO_PKG_NAME"),
+                        "version": env!("CARGO_PKG_VERSION")
+                    },
+                    "capabilities": {
+                        "tools": { "listChanged": true }
+                    }
+                }))
+            }
 
             "tools/list" => Ok(json!({ "tools": tool_definitions() })),
 
