@@ -4137,17 +4137,21 @@ fi
         // and the root it came from is printed with it. The old output asked
         // `modern_bert_installed` and could therefore say "not found" while the
         // embedder that `sense` needs sat in the other cache root.
+        //
+        // ModernBert is deliberately NOT in this list (2026-11-11): it was the
+        // first embedder, proved unusable for retrieval (recall@5 = 0,
+        // anisotropic space) and was replaced by bge-base. Nothing loads it, so
+        // listing it as "❌ not found (run 'ai setup')" was advice to download
+        // 575 MB that no code path reads. If it IS on disk it still shows up
+        // through `status.models` (the per-model truth above), just never as a
+        // recommendation.
         #[cfg(feature = "mamba")]
         let wanted = [
             crate::llm::ai_manager::AiModel::Bge,
-            crate::llm::ai_manager::AiModel::ModernBert,
             crate::llm::ai_manager::AiModel::Lfm25,
         ];
         #[cfg(not(feature = "mamba"))]
-        let wanted = [
-            crate::llm::ai_manager::AiModel::Bge,
-            crate::llm::ai_manager::AiModel::ModernBert,
-        ];
+        let wanted = [crate::llm::ai_manager::AiModel::Bge];
         for model in wanted {
             match status.models.iter().find(|r| r.model.id() == model.id()) {
                 Some(r) => println!(
