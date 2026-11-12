@@ -6584,6 +6584,14 @@ Use without --preview to apply the clone"
             let mut with_contributors = 0usize;
             let mut with_change_id = 0usize;
             let mut with_mechanism = 0usize;
+            // Breakdowns so a platform move becomes a NUMBER instead of an
+            // impression: `client` comes from the MCP handshake, `mechanism`
+            // from the code path. "unknown" is a real bucket — absence is
+            // counted here, never filled in.
+            let mut by_client: std::collections::BTreeMap<String, usize> =
+                std::collections::BTreeMap::new();
+            let mut by_mechanism: std::collections::BTreeMap<String, usize> =
+                std::collections::BTreeMap::new();
             let mut last_per_file: std::collections::BTreeMap<String, String> =
                 std::collections::BTreeMap::new();
             for t in history
@@ -6602,6 +6610,12 @@ Use without --preview to apply the clone"
                 if a.mechanism.is_some() {
                     with_mechanism += 1;
                 }
+                *by_client
+                    .entry(a.client.clone().unwrap_or_else(|| "unknown".to_string()))
+                    .or_insert(0) += 1;
+                *by_mechanism
+                    .entry(a.mechanism.clone().unwrap_or_else(|| "unknown".to_string()))
+                    .or_insert(0) += 1;
             }
             serde_json::json!({
                 "transactions": total,
@@ -6609,6 +6623,8 @@ Use without --preview to apply the clone"
                 "without_contributors": total - with_contributors,
                 "with_change_id": with_change_id,
                 "with_mechanism": with_mechanism,
+                "by_client": by_client,
+                "by_mechanism": by_mechanism,
                 "last_per_file": last_per_file,
                 "note": "Declared, voluntary attribution. Absence means UNKNOWN and is counted here rather than filled in. mechanism is observed by the code path; contributors/client are declared and cannot be verified.",
             })
@@ -6690,6 +6706,20 @@ Use without --preview to apply the clone"
                 "             change_id: {}   mechanism: {}",
                 attribution_trace["with_change_id"], attribution_trace["with_mechanism"]
             );
+            for (label, key) in [
+                ("by client   ", "by_client"),
+                ("by mechanism", "by_mechanism"),
+            ] {
+                if let Some(map) = attribution_trace[key].as_object() {
+                    let parts: Vec<String> = map
+                        .iter()
+                        .map(|(k, v)| format!("{k}={}", v.as_u64().unwrap_or(0)))
+                        .collect();
+                    if !parts.is_empty() {
+                        println!("             {label}: {}", parts.join("  "));
+                    }
+                }
+            }
             if let Some(map) = attribution_trace["last_per_file"].as_object() {
                 if !map.is_empty() {
                     println!("\n  last declared contributor per file:");

@@ -266,9 +266,17 @@ impl Attribution {
                     .map(|m| format!("{{{m}}}"))
                     .unwrap_or_default();
                 format!(
-                    "{}[{:?}:{}]{}",
+                    "{}[{}:{}]{}",
                     c.id.as_deref().unwrap_or("?"),
-                    c.kind,
+                    // Readable, not Debug: this string is a user-facing surface
+                    // (head --trace, ALF, logs), so `unknown` not `Unknown`.
+                    match c.kind {
+                        ContributorKind::Human => "human",
+                        ContributorKind::Agent => "agent",
+                        ContributorKind::Model => "model",
+                        ContributorKind::Organization => "org",
+                        ContributorKind::Unknown => "unknown",
+                    },
                     roles.join(","),
                     model
                 )
