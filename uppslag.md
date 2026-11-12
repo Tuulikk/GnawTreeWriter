@@ -206,6 +206,38 @@ stabil. Citera det som *inte* rör sig när filen checkas in.
 
 ---
 
+## 2026-11-12 — `undo` mellan processer: ÅTGÄRDAT (A+B)  ✅
+
+**Påståendet ovan var:** två separata `undo`-anrop ångrar samma transaktion.
+
+**Åtgärden:** journalen får **reaktioner** (`Undo`/`Redo` med
+`metadata.reverted_txn` / `restored_txn`) och den applicerade mängden **härleds**
+ur journalen (`TransactionLog::applied_transactions`, `redo_candidates`). Inget
+skrivs om.
+
+**Bevis (riktiga processer, separata `Command`-anrop):**
+`tests/undo_across_processes.rs` → 4 tester gröna:
+`undo` i process 1 tar bort senaste editen, `undo` i process 2 tar bort den
+**föregående** (filen blir byte-identisk med originalet), `redo` i process 3
+återställer, och en extern skrivning syns som `working_tree_mismatch` utan att
+något "lagas". Journalen visar 2 `Undo` + 1 `Redo` med namn på sina mål.
+
+**`head`** = projektion (aldrig auktoritet): `.gnawtreewriter_head.json` är en
+cache med vattenstämpel; testet raderar filen och får identisk projektion.
+`head --verify` läser blobbar och arbetsfil och rapporterar.
+
+**Mätt på det här repot:** 983 journalrader → 61 filer; `--verify` gav
+**61 `no_content_source`** (historiken saknar after-blob; den infördes nu),
+**41 `working_tree_mismatch`** (`cargo fmt`/editor ändrade filer utanför
+journalen — detektionen fungerar) och **2 `file_missing`** (gamla
+`/home/tuulikk/...`-sökvägar).
+
+**Kvar:** `head`→index-bron (`revisions_tx_links`), claims (D), migration/GC.
+**Kostnad:** varje edit skriver nu två v2-blobbar (före + efter, ~300 KB för
+`cli.rs`) — dedup/komprimering är C.
+
+---
+
 ## 2026-11-12 — `undo` är processlokalt: två anrop ångrar samma transaktion  ⚠️ BELAGT FYND
 
 **Påstående:** `undo` utan `--steps` i två separata processer ångrar **samma**

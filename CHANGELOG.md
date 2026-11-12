@@ -1,5 +1,44 @@
 ## [Unreleased]
 
+### Fixed — `undo` och `redo` överlevde inte en processgräns
+
+Två separata `undo`-anrop ångrade **samma** transaktion, eftersom stacken
+byggdes ur en platt lista av innehållsoperationer och ingenting registrerade att
+en redan ångrats. Nu skriver `undo`/`redo` **reaktioner** i journalen
+(`OperationType::Undo` / `Redo`) med `metadata.reverted_txn` / `restored_txn`,
+och den applicerade mängden **härleds** vid varje start
+(`TransactionLog::applied_transactions`, `redo_candidates`). Journalen är
+fortsatt append-only — ingenting skrivs om.
+
+Bevisat med riktiga processer (`tests/undo_across_processes.rs`, 4 tester):
+`undo` i process 1 tar bort senaste editen, `undo` i process 2 tar bort den
+**föregående** (byte-identiskt med originalet), `redo` i process 3 återställer.
+
+### Added — `head`: en projektion av journalen (och `head --verify`)
+
+`gnawtreewriter head [--verify] [--json] [--save]` visar per fil vilket innehåll
+som är applicerat och **var bytesen kan läsas tillbaka**.
+`.gnawtreewriter_head.json` är en cache med vattenstämpel, aldrig en auktoritet:
+raderar man filen blir projektionen identisk (testat).
+
+`--verify` svarar på frågan en hash inte kan svara på — *finns innehållet
+lagrat?* — och rapporterar `no_content_source`, `source_unreadable`,
+`source_hash_mismatch`, `working_tree_mismatch`, `file_missing`, `cache_stale`.
+**Ingenting lagas automatiskt.** Mätt på det här repot: 61 `no_content_source`
+(historik före denna ändring), 41 `working_tree_mismatch` (`cargo fmt`/editor
+skriver utan att journalföra) och 2 `file_missing` (gamla sökvägar).
+
+### Added — after-blob: nyaste tillståndet har en verifierbar innehållskälla
+
+Den vanliga blobben är *före*-tillståndet, så det allra nyaste tillståndet saknade
+lagrat innehåll (det låg bara på disk — och var borta om ett annat verktyg skrev
+filen). Skrivvägarna (`edit`, `quick-insert`, `quick-replace`) lagrar nu även en
+v2-blob av tillståndet de **skapar**, och journalposten namnger den i
+`metadata.after_blob`. `redo` kan därför också lösa sitt mål.
+
+Kostnad: två v2-blobbar per edit (~300 KB för `cli.rs`) — dedup och komprimering
+är ett senare steg, medvetet inte gjort nu.
+
 ### Changed — backuper lagrar inte längre AST:n (`gtw-backup-v2`)
 
 AST:n var **99,1 % av all backup-lagring** (15,31 av 15,45 GiB över 980 blobbar,

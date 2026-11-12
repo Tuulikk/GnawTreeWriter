@@ -49,6 +49,7 @@ pub mod rules;
 pub mod scaffold;
 pub mod secrets;
 pub mod state;
+pub mod state_head;
 pub mod stats;
 pub mod tag_manager;
 pub mod token_count;
@@ -481,6 +482,43 @@ impl GnawTreeWriter {
     /// was rejected, or the index is missing.
     pub fn last_edit_impact(&self) -> Option<&serde_json::Value> {
         self.last_impact.as_ref()
+    }
+
+    /// Store a v2 blob for ARBITRARY content and return its basename.
+    ///
+    /// The pre-edit blob cannot cover the NEWEST state (owner's rule #3: a hash
+    /// is not storage). Writing the post-edit state gives the head a content
+    /// source that can be read back and re-hashed, so a file clobbered by
+    /// another tool — or by a destructive experiment — is still recoverable.
+    ///
+    /// Same directory and JSON shape as `create_backup` (v2: source only), so
+    /// the existing reader (`backup::parse_backup_file`, `find_backup_by_hash`)
+    /// resolves these blobs too.
+    pub(crate) fn store_content_blob(&self, content: &str) -> Result<String> {
+        let file_name = Path::new(&self.file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        let timestamp = Utc::now().format("%Y%m%d_%H%M%S_%3f");
+        let blob_name = format!("{file_name}_after_{timestamp}.json");
+
+        let project_root = find_project_root(Path::new(&self.file_path));
+        let backup_dir = project_root.join(".gnawtreewriter_backups");
+        fs::create_dir_all(&backup_dir)?;
+
+        let body = serde_json::json!({
+            "format": "gtw-backup-v2",
+            "state": "after",
+            "file_path": self.file_path,
+            "timestamp": Utc::now().to_rfc3339(),
+            "source_code": content
+        });
+        fs::write(
+            backup_dir.join(&blob_name),
+            serde_json::to_string_pretty(&body)?,
+        )
+        .with_context(|| format!("writing after-blob {blob_name}"))?;
+        Ok(blob_name)
     }
 
     pub(crate) fn create_backup(&mut self) -> Result<PathBuf> {
@@ -952,6 +990,22 @@ impl GnawTreeWriter {
             }
         };
 
+        // Give the NEWEST state a verifiable content source (owner's rule #3:
+        // a content hash is not storage — the pre-edit blob cannot cover the
+        // state this edit creates). Failure does NOT block the edit: the head
+        // then reports `journal:no-blob`, which is a fact, not a lie.
+        let mut txn_meta: HashMap<String, String> = HashMap::new();
+        match self.store_content_blob(&modified_code) {
+            Ok(blob) => {
+                txn_meta.insert("after_blob".to_string(), blob);
+            }
+            Err(e) => {
+                eprintln!(
+                    "⚠️  after-blob not written ({e:#}) — the newest state will have no stored content source"
+                );
+            }
+        }
+
         let transaction_id = self.transaction_log.log_transaction(
             operation_type,
             PathBuf::from(&self.file_path),
@@ -959,7 +1013,7 @@ impl GnawTreeWriter {
             Some(before_hash.clone()),
             Some(after_hash.clone()),
             description.clone(),
-            HashMap::new(),
+            txn_meta,
         )?;
         self.last_transaction_id = Some(transaction_id.clone());
 
@@ -2377,23 +2431,47 @@ mod tests {
             .map(|e| e.path())
             .collect();
         entries.sort();
-        assert_eq!(entries.len(), 1, "en skrivning = en backup");
+        // TWO blobs per write since A+B (2026-11-12): the pre-state (undo
+        // needs it) AND the state the edit CREATES — the newest state must have
+        // a verifiable content source, which the pre-state cannot provide.
+        assert_eq!(entries.len(), 2, "before + after: {entries:?}");
 
-        let raw = std::fs::read_to_string(&entries[0]).unwrap();
-        assert!(
-            !raw.contains("\"tree\""),
-            "v2 får inte serialisera AST:n: {raw}"
-        );
-        assert!(raw.contains("\"format\": \"gtw-backup-v2\""));
+        for path in &entries {
+            let raw = std::fs::read_to_string(path).unwrap();
+            assert!(
+                !raw.contains("\"tree\""),
+                "v2 får inte serialisera AST:n: {}",
+                path.display()
+            );
+            assert!(raw.contains("\"format\": \"gtw-backup-v2\""));
+        }
 
-        // Läsarvägen som undo faktiskt använder: blobben ska hasha till
-        // innehållet FÖRE redigeringen, inte efter.
-        let parsed = crate::core::backup::parse_backup_file(&entries[0]).unwrap();
-        let expected = crate::core::calculate_content_hash(before);
+        let before_blob = entries
+            .iter()
+            .find(|p| !p.to_string_lossy().contains("_after_"))
+            .expect("a pre-state blob");
+        let after_blob = entries
+            .iter()
+            .find(|p| p.to_string_lossy().contains("_after_"))
+            .expect("an after-state blob");
+
+        // The reader path undo uses: the pre-state blob hashes to the content
+        // BEFORE the edit…
+        let parsed = crate::core::backup::parse_backup_file(before_blob).unwrap();
+        let expected_before = crate::core::calculate_content_hash(before);
         assert_eq!(
             parsed.content_hash.as_deref(),
-            Some(expected.as_str()),
+            Some(expected_before.as_str()),
             "before-blobben ska bära innehållet före redigeringen"
+        );
+
+        // …and the after blob hashes to the content AFTER it (owner's rule #3).
+        let after = crate::core::backup::parse_backup_file(after_blob).unwrap();
+        let expected_after = crate::core::calculate_content_hash("fn f() -> i32 {\n    2\n}\n");
+        assert_eq!(
+            after.content_hash.as_deref(),
+            Some(expected_after.as_str()),
+            "after-blobben ska bära det NYA tillståndet"
         );
     }
 

@@ -84,6 +84,17 @@ pub struct Cli {
 #[allow(clippy::enum_variant_names, clippy::too_many_arguments)]
 #[derive(Subcommand)]
 enum Commands {
+    /// Show the HEAD: a projection of the journal telling which content is
+    /// applied per file and where it is VERIFIABLY stored. `--verify` re-reads
+    /// the blobs and the working tree; nothing is ever repaired.
+    Head {
+        /// Re-read blobs + working files and report discrepancies
+        #[arg(long)]
+        verify: bool,
+        /// Write the projection as a cache after computing it (default: no write)
+        #[arg(long)]
+        save: bool,
+    },
     /// Parse files and show their AST tree structure
     Analyze {
         paths: Vec<String>,
@@ -1656,6 +1667,12 @@ impl Cli {
             }
             Commands::Status => {
                 Self::handle_health_check().await?;
+            }
+            Commands::Head { verify, save } => {
+                // JSON uses the GLOBAL --json: declaring a second `--json` on
+                // this variant is a duplicate flag, which `tests/cli_contract`
+                // exists to catch (it did).
+                Self::handle_head(verify, _json_mode, save)?;
             }
             Commands::SemanticReport { file_path } => {
                 Self::handle_semantic_report(&file_path).await?;
@@ -5685,6 +5702,13 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
         let before_hash = crate::core::calculate_content_hash(&original);
         let after_hash = crate::core::calculate_content_hash(&modified);
         let mut tlog = TransactionLog::load(&project_root)?;
+        // The newest state needs a stored content source (owner's rule #3);
+        // failure must not block the write, but the head will then say
+        // `journal:no-blob` instead of implying recoverability.
+        let mut txn_meta = std::collections::HashMap::new();
+        if let Ok(blob) = writer.store_content_blob(&modified) {
+            txn_meta.insert("after_blob".to_string(), blob);
+        }
         let txid = tlog.log_transaction(
             OperationType::Insert,
             PathBuf::from(file),
@@ -5692,7 +5716,7 @@ To analyze specific files: gnawtreewriter analyze {}/*.ext",
             Some(before_hash),
             Some(after_hash),
             format!("QuickInsert: {} insertion(s) after /{}/", insertions, after),
-            std::collections::HashMap::new(),
+            txn_meta,
         )?;
         std::fs::write(path, &modified)
             .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", file, e))?;
@@ -5820,6 +5844,12 @@ Use --no-preview to actually apply the change."
         let after_hash = crate::core::calculate_content_hash(&modified);
 
         let mut tlog = TransactionLog::load(&project_root)?;
+        // Same rule as QuickInsert: store the state this write CREATES, so the
+        // head has a verifiable source and `redo` can resolve its target.
+        let mut txn_meta = std::collections::HashMap::new();
+        if let Ok(blob) = writer.store_content_blob(&modified) {
+            txn_meta.insert("after_blob".to_string(), blob);
+        }
         let txid = tlog.log_transaction(
             OperationType::Edit,
             PathBuf::from(file),
@@ -5827,7 +5857,7 @@ Use --no-preview to actually apply the change."
             Some(before_hash),
             Some(after_hash),
             format!("Quick replace '{}' -> '{}'", search, replace),
-            std::collections::HashMap::new(),
+            txn_meta,
         )?;
 
         std::fs::write(path, modified)
@@ -6454,6 +6484,88 @@ Use without --preview to apply the clone"
                         report.warnings.to_string().yellow()
                     );
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// The HEAD is a PROJECTION of the journal, never an authority — deleting
+    /// `.gnawtreewriter_head.json` loses nothing. `--verify` answers the honest
+    /// question behind a content hash: *are the bytes actually stored, and does
+    /// the working file still match?* It reports, and never writes a repair.
+    fn handle_head(verify: bool, json: bool, save: bool) -> Result<()> {
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir);
+        let (head, cache_stale) = crate::core::state_head::load(&project_root)?;
+
+        let mut discrepancies = if verify {
+            crate::core::state_head::verify(&head, &project_root)
+        } else {
+            Vec::new()
+        };
+        if cache_stale {
+            // Not a repair signal — a fact: the cache predates the journal.
+            discrepancies.push(crate::core::state_head::Discrepancy::CacheStale {
+                cached_entries: 0,
+                projected_entries: head.watermark_entries,
+            });
+        }
+
+        if save {
+            crate::core::state_head::save(&head, &project_root)?;
+        }
+
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "kind": "head",
+                    "watermark_entries": head.watermark_entries,
+                    "watermark_last_id": head.watermark_last_id,
+                    "files": head.files.len(),
+                    "unreadable_events": head.unreadable_events,
+                    "cache_stale": cache_stale,
+                    "verified": verify,
+                    "discrepancies": discrepancies,
+                    "entries": head.files,
+                    "note": "Head is derived from the journal (append-only). content_source names where the bytes can be read back; `journal:no-blob` means the hash is known but the content is NOT stored. A discrepancy is reported, never repaired.",
+                }))?
+            );
+            return Ok(());
+        }
+
+        println!(
+            "HEAD (projection of {} journal rows, newest {})\n",
+            head.watermark_entries,
+            head.watermark_last_id.as_deref().unwrap_or("-")
+        );
+        for (path, e) in &head.files {
+            println!(
+                "  {:<40} applied={:<3} {}  [{}]",
+                path,
+                e.applied.len(),
+                e.content_hash.as_deref().unwrap_or("-"),
+                e.content_source
+            );
+        }
+        if !head.unreadable_events.is_empty() {
+            println!(
+                "\n⚠️  uninterpretable reactions: {}",
+                head.unreadable_events.join(", ")
+            );
+        }
+        if cache_stale {
+            println!("\n⚠️  cached head is stale (journal moved); this run ignored it");
+        }
+        if verify {
+            if discrepancies.is_empty() {
+                println!("\n✅ verified: every applied state has readable bytes that hash back, and the working files match.");
+            } else {
+                println!("\n❌ {} discrepancy(ies):", discrepancies.len());
+                for d in &discrepancies {
+                    println!("  - {}", serde_json::to_string(d)?);
+                }
+                println!("\nNothing was repaired — inspect, then decide.");
             }
         }
         Ok(())

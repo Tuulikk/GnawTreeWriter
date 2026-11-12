@@ -16,5 +16,18 @@ use gnawtreewriter::cli::Cli;
 
 #[test]
 fn cli_command_table_is_well_formed() {
-    Cli::command().debug_assert();
+    // clap's `debug_assert` walks the WHOLE table (≈100 subcommands with long
+    // about-texts), and a Rust test thread gets 2 MiB of stack, not the 8 MiB
+    // the main thread has. Adding the `head` variant pushed it over and the
+    // process aborted with SIGABRT instead of reporting — measured 2026-11-12.
+    // The contract is about the TABLE, not about fitting in the harness stack,
+    // so the assertion runs on a thread with room.
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            Cli::command().debug_assert();
+        })
+        .expect("spawn assertion thread")
+        .join()
+        .expect("the command table must be valid");
 }

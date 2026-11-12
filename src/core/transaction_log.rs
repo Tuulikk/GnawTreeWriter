@@ -30,6 +30,20 @@ pub enum OperationType {
     AddComponent,
     Move,
     Restore,
+    /// A transaction was REVERTED by `undo` (2026-11-12).
+    ///
+    /// Distinct from `Restore` on purpose: `Restore` says "content was replaced
+    /// by a stored state" and need not name a single transaction; `Undo` says
+    /// "THIS transaction is no longer applied". The reverted id lives in
+    /// `metadata["reverted_txn"]`, with `from_hash`/`to_hash` beside it.
+    ///
+    /// These events are what make undo survive a process boundary: the journal
+    /// stays append-only, and the applied set is DERIVED by folding it
+    /// (`TransactionLog::applied_transactions`). Nothing is rewritten.
+    Undo,
+    /// A previously undone transaction is applied again (`redo`).
+    /// Carries `metadata["restored_txn"]`.
+    Redo,
     /// A FILE was created (scaffold). Filesystem scope — its undo is
     /// `undo --files`, never the in-file undo path (owner's distinction,
     /// 2026-11-11: reverting content and deleting a file are different
@@ -202,6 +216,92 @@ impl TransactionLog {
     /// Get full transaction history from file
     pub fn get_full_history(&self) -> Result<Vec<Transaction>> {
         Self::load_full_history_from_file(&self.log_file)
+    }
+
+    /// Fold the journal into the set of transactions that are STILL APPLIED.
+    ///
+    /// This is the single definition of "what counts now", and it is derived —
+    /// never stored as truth (owner's rule, 2026-11-12: the head file is a
+    /// projection of the journal, not a second authority).
+    ///
+    /// Rules, in journal order:
+    /// * a content operation (edit/insert/delete/restore/...) is a CANDIDATE
+    /// * `Undo` with `metadata["reverted_txn"]` removes that id from the set
+    /// * `Redo` with `metadata["restored_txn"]` puts it back
+    /// * everything else (session markers, an unknown/missing id) is ignored —
+    ///   an unreadable event leaves the set alone instead of guessing, which is
+    ///   why the return also names the events that could not be interpreted.
+    ///
+    /// Return order is journal order, i.e. the order `undo` must walk backwards.
+    pub fn applied_transactions(history: &[Transaction]) -> (Vec<String>, Vec<String>) {
+        let mut applied: Vec<String> = Vec::new();
+        let mut unreadable: Vec<String> = Vec::new();
+
+        for t in history {
+            match &t.operation {
+                OperationType::Undo => match t.metadata.get("reverted_txn") {
+                    Some(id) => applied.retain(|a| a != id),
+                    None => unreadable.push(t.id.clone()),
+                },
+                OperationType::Redo => match t.metadata.get("restored_txn") {
+                    // Re-appending keeps the original relative order: a redo of
+                    // an older txn must not jump above a newer one, because
+                    // undo walks the journal backwards.
+                    Some(id) => {
+                        if !applied.iter().any(|a| a == id) {
+                            let anchor =
+                                history.iter().position(|h| &h.id == id).and_then(|orig| {
+                                    let orig_ts = history.get(orig).map(|h| h.timestamp);
+                                    applied.iter().position(|a| {
+                                        history
+                                            .iter()
+                                            .find(|h| &h.id == a)
+                                            .map(|h| h.timestamp > orig_ts.unwrap_or(h.timestamp))
+                                            .unwrap_or(true)
+                                    })
+                                });
+                            match anchor {
+                                Some(pos) => applied.insert(pos, id.clone()),
+                                None => applied.push(id.clone()),
+                            }
+                        }
+                    }
+                    None => unreadable.push(t.id.clone()),
+                },
+                op if op.is_content_operation() => applied.push(t.id.clone()),
+                _ => {}
+            }
+        }
+        (applied, unreadable)
+    }
+
+    /// The REDO set: transactions that were undone and not re-applied since,
+    /// oldest-first (so `pop()` yields the newest undo, which is what redo does).
+    ///
+    /// A new content operation clears the list — the standard rule: editing
+    /// after an undo abandons the branch you undid away from. Derived from the
+    /// journal, so redo also survives a process boundary.
+    pub fn redo_candidates(history: &[Transaction]) -> Vec<String> {
+        let mut redoable: Vec<String> = Vec::new();
+        for t in history {
+            match &t.operation {
+                OperationType::Undo => {
+                    if let Some(id) = t.metadata.get("reverted_txn") {
+                        if !redoable.iter().any(|r| r == id) {
+                            redoable.push(id.clone());
+                        }
+                    }
+                }
+                OperationType::Redo => {
+                    if let Some(id) = t.metadata.get("restored_txn") {
+                        redoable.retain(|r| r != id);
+                    }
+                }
+                op if op.is_content_operation() => redoable.clear(),
+                _ => {}
+            }
+        }
+        redoable
     }
 
     /// Load full history from a log file (helper method)
@@ -557,6 +657,26 @@ pub fn calculate_content_hash(content: &str) -> String {
     let mut hasher = DefaultHasher::new();
     content.hash(&mut hasher);
     format!("{:x}", hasher.finish())
+}
+
+impl OperationType {
+    /// True for the operations that change a file's CONTENT and are therefore
+    /// reversible from a content blob. Session markers and the `Undo`/`Redo`
+    /// events themselves are deliberately excluded: reactions are not things
+    /// that can be undone as if they were edits.
+    pub fn is_content_operation(&self) -> bool {
+        matches!(
+            self,
+            OperationType::Edit
+                | OperationType::Insert
+                | OperationType::Delete
+                | OperationType::AddProperty
+                | OperationType::AddComponent
+                | OperationType::Move
+                | OperationType::Restore
+                | OperationType::CreateFile
+        )
+    }
 }
 
 #[cfg(test)]

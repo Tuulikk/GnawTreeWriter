@@ -2,6 +2,7 @@ use crate::core::transaction_log::{OperationType, Transaction, TransactionLog};
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use std::collections::HashMap;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -28,34 +29,37 @@ impl UndoRedoManager {
 
         let transaction_log = TransactionLog::load(project_root.clone())?;
 
-        // Populate undo stack from transaction log history
-        let mut undo_stack = Vec::new();
+        // Populate the undo stack from the journal FOLD, not from a flat list.
+        //
+        // This is the fix for the process-boundary bug found 2026-11-12: two
+        // separate `undo` invocations used to revert the SAME transaction,
+        // because every start rebuilt the stack from all content operations and
+        // nothing recorded that one had already been reverted. The fold honours
+        // `Undo`/`Redo` events (append-only, nothing rewritten), so a fresh
+        // process sees the same applied set as the one that made the change.
         let history = transaction_log.get_full_history()?;
-
-        for transaction in history {
-            // Only add reversible operations to the undo stack
-            if matches!(
-                transaction.operation,
-                OperationType::Edit
-                    | OperationType::Insert
-                    | OperationType::Delete
-                    | OperationType::AddProperty
-                    | OperationType::AddComponent
-                    | OperationType::Move
-                    | OperationType::Restore
-                    // CreateFile belongs on the stack (it must be undoable), but
-                    // it is FILESYSTEM scope: `undo` refuses it and points at
-                    // `undo --files`, which is the only path that removes it.
-                    | OperationType::CreateFile
-            ) {
-                undo_stack.push(transaction.id);
-            }
+        let (mut undo_stack, unreadable) = TransactionLog::applied_transactions(&history);
+        if !unreadable.is_empty() {
+            // Declared, never silently repaired: an unreadable reaction means
+            // the stack may be wrong, and saying so is cheaper than guessing.
+            eprintln!(
+                "⚠️  {} undo/redo event(s) could not be interpreted (missing reverted_txn/restored_txn): {}",
+                unreadable.len(),
+                unreadable.join(", ")
+            );
         }
+        // The stack is walked backwards, so the newest applied transaction must
+        // be last.
+        undo_stack.retain(|id| {
+            history
+                .iter()
+                .any(|t| &t.id == id && t.operation.is_content_operation())
+        });
 
         Ok(Self {
             transaction_log,
             undo_stack,
-            redo_stack: Vec::new(),
+            redo_stack: TransactionLog::redo_candidates(&history),
             backup_dir,
             project_root,
         })
@@ -97,6 +101,14 @@ impl UndoRedoManager {
                     }
                 }
                 let result = self.undo_single_transaction(&transaction_id)?;
+                if result.success {
+                    self.record_reaction(
+                        OperationType::Undo,
+                        "reverted_txn",
+                        &transaction_id,
+                        &result,
+                    )?;
+                }
                 self.redo_stack.push(transaction_id);
                 results.push(result);
             }
@@ -113,12 +125,60 @@ impl UndoRedoManager {
         for _ in 0..steps_to_redo {
             if let Some(transaction_id) = self.redo_stack.pop() {
                 let result = self.redo_single_transaction(&transaction_id)?;
+                if result.success {
+                    self.record_reaction(
+                        OperationType::Redo,
+                        "restored_txn",
+                        &transaction_id,
+                        &result,
+                    )?;
+                }
                 self.undo_stack.push(transaction_id);
                 results.push(result);
             }
         }
 
         Ok(results)
+    }
+
+    /// Append a REACTION to the journal — `Undo` names what it reverted,
+    /// `Redo` what it re-applied.
+    ///
+    /// Nothing is rewritten: the applied set is derived by folding
+    /// (`TransactionLog::applied_transactions`), so this single append is what
+    /// makes the state survive a process boundary. The stored hashes point in
+    /// the direction the file actually moved, so a reader can verify a head
+    /// claim instead of re-deriving it.
+    fn record_reaction(
+        &mut self,
+        kind: OperationType,
+        key: &str,
+        target: &str,
+        result: &UndoRedoResult,
+    ) -> Result<()> {
+        let tx = self.transaction_log.find_transaction(target)?;
+        let (file_path, before_hash, after_hash) = match tx {
+            Some(t) if kind == OperationType::Undo => (t.file_path, t.after_hash, t.before_hash),
+            Some(t) => (t.file_path, t.before_hash, t.after_hash),
+            None => (result.file_path.clone(), None, None),
+        };
+        let mut metadata = HashMap::new();
+        metadata.insert(key.to_string(), target.to_string());
+        let verb = if kind == OperationType::Undo {
+            "Undo"
+        } else {
+            "Redo"
+        };
+        self.transaction_log.log_transaction(
+            kind,
+            file_path,
+            None,
+            before_hash,
+            after_hash,
+            format!("{verb}: {target} — {}", result.message),
+            metadata,
+        )?;
+        Ok(())
     }
 
     /// Get the current undo/redo state
@@ -175,7 +235,13 @@ impl UndoRedoManager {
             OperationType::Move => self.undo_move(&transaction),
             OperationType::Restore => self.undo_restore(&transaction),
             OperationType::CreateFile => self.undo_create_file(&transaction),
-            OperationType::SessionStart | OperationType::SessionEnd => Ok(UndoRedoResult {
+            // Reactions never enter the stack (the fold filters them out), so
+            // these arms are defensive: a hand-edited log must not panic, and
+            // "no action" is the honest answer — the reaction already happened.
+            OperationType::SessionStart
+            | OperationType::SessionEnd
+            | OperationType::Undo
+            | OperationType::Redo => Ok(UndoRedoResult {
                 transaction_id: transaction.id.clone(),
                 operation: transaction.operation.clone(),
                 file_path: transaction.file_path.clone(),
@@ -207,7 +273,10 @@ impl UndoRedoManager {
                 message: "redo of a file creation is not supported: the log stores a content hash, not the content — re-create it with `scaffold`".to_string(),
             }),
             OperationType::Restore => self.redo_restore(&transaction),
-            OperationType::SessionStart | OperationType::SessionEnd => Ok(UndoRedoResult {
+            OperationType::SessionStart
+            | OperationType::SessionEnd
+            | OperationType::Undo
+            | OperationType::Redo => Ok(UndoRedoResult {
                 transaction_id: transaction.id.clone(),
                 operation: transaction.operation.clone(),
                 file_path: transaction.file_path.clone(),
