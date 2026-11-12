@@ -147,6 +147,39 @@ pub fn find_backup_by_content_hash_for_file<P: AsRef<Path>>(
     Ok(None)
 }
 
+/// Write a v2 blob for ARBITRARY content and return its basename.
+///
+/// Used by every write path that needs a verifiable content source for the state
+/// it CREATES (the pre-edit blob cannot cover the newest state — owner's rule
+/// #3: a content hash is not storage). Lives here rather than on a writer so
+/// `batch` can store blobs for files it writes directly, without re-parsing them
+/// through `GnawTreeWriter::new`.
+pub fn write_after_blob(project_root: &Path, file_path: &str, content: &str) -> Result<String> {
+    let file_name = Path::new(file_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+    let timestamp = Utc::now().format("%Y%m%d_%H%M%S_%3f");
+    let blob_name = format!("{file_name}_after_{timestamp}.json");
+
+    let backup_dir = project_root.join(".gnawtreewriter_backups");
+    fs::create_dir_all(&backup_dir)?;
+
+    let body = serde_json::json!({
+        "format": "gtw-backup-v2",
+        "state": "after",
+        "file_path": file_path,
+        "timestamp": Utc::now().to_rfc3339(),
+        "source_code": content
+    });
+    fs::write(
+        backup_dir.join(&blob_name),
+        serde_json::to_string_pretty(&body)?,
+    )
+    .with_context(|| format!("writing after-blob {blob_name}"))?;
+    Ok(blob_name)
+}
+
 /// Read the `source_code` field from a backup JSON and write it to `target_path`.
 /// Returns the written `PathBuf` on success.
 pub fn restore_from_backup<P: AsRef<Path>, Q: AsRef<Path>>(

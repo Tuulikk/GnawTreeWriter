@@ -69,6 +69,17 @@ pub fn create(path: &Path, source: ContentSource<'_>) -> Result<usize> {
         use crate::core::transaction_log::{calculate_content_hash, OperationType};
         let mut meta = std::collections::HashMap::new();
         meta.insert("operation".to_string(), "scaffold".to_string());
+        // Declared attribution: `mechanism` stays what actually invoked us
+        // (cli/mcp), while `operation` above says WHAT was done — two different
+        // questions that must not be collapsed (owner, 2026-11-12).
+        crate::core::attribution::process_attribution().apply_to(&mut meta);
+        // A created file is a content operation (head counts it), so the state it
+        // creates needs a verifiable source like every other write.
+        if let Ok(blob) =
+            crate::core::backup::write_after_blob(&root, &path.display().to_string(), &code)
+        {
+            meta.insert("after_blob".to_string(), blob);
+        }
         let _ = log.log_transaction(
             OperationType::CreateFile,
             path.to_path_buf(),

@@ -402,6 +402,14 @@ impl Batch {
         let mut backups: HashMap<String, PathBuf> = HashMap::new();
         let mut written: Vec<String> = Vec::new();
 
+        // ONE grouping key for the whole invocation. Generated (hence `auto:`)
+        // because no caller supplied one, and because the fact it records — "all
+        // these transactions came from this one batch" — is true regardless.
+        let batch_change_id = format!(
+            "auto:batch-{}",
+            chrono::Utc::now().format("%Y%m%dT%H%M%S%.3f")
+        );
+
         for fd in &diffs {
             // If no change, skip
             if fd.before == fd.after {
@@ -448,11 +456,39 @@ impl Batch {
 
             // Log transaction for this file (one transaction per file in MVP)
             let project_root = find_project_root(Path::new(&fd.file));
-            let mut transaction_log = TransactionLog::load(project_root)
+            let mut transaction_log = TransactionLog::load(project_root.clone())
                 .with_context(|| format!("Failed to load transaction log for {}", fd.file))?;
 
             let before_hash = Some(calculate_content_hash(&fd.before));
             let after_hash = Some(calculate_content_hash(&fd.after));
+
+            // Declared attribution, with `mechanism` forced to `batch` by this
+            // code path (the caller cannot claim another one).
+            //
+            // A batch IS one logical change across files, so it needs a
+            // `change_id` even when the caller gave none — and that key is not a
+            // guess: it records the FACT that these transactions came from ONE
+            // invocation. It is prefixed `auto:` so a reader can always tell a
+            // generated grouping key from a declared one (owner's rule: unknown
+            // stays unknown, but a known fact may be labelled as derived).
+            let mut txn_meta = std::collections::HashMap::new();
+            let mut attr = crate::core::attribution::for_path("batch");
+            if attr.change_id.is_none() {
+                attr.change_id = Some(batch_change_id.clone());
+            }
+            attr.apply_to(&mut txn_meta);
+            // The newest state must have a verifiable content source (rule #3):
+            // batch writes the file directly, so the pre-edit blob cannot carry
+            // it and `writer.edit` is not in the path.
+            match crate::core::backup::write_after_blob(&project_root, &fd.file, &fd.after) {
+                Ok(blob) => {
+                    txn_meta.insert("after_blob".to_string(), blob);
+                }
+                Err(e) => eprintln!(
+                    "⚠️  batch: after-blob not written for {} ({e:#}) — the newest state will have no stored content source",
+                    fd.file
+                ),
+            }
 
             let txn_id = transaction_log.log_transaction(
                 crate::core::OperationType::Edit,
@@ -461,7 +497,7 @@ impl Batch {
                 before_hash,
                 after_hash,
                 format!("Batch apply: {}", self.description_or_ops()),
-                std::collections::HashMap::new(),
+                txn_meta,
             )?;
             self.transaction_ids.borrow_mut().push(txn_id);
 

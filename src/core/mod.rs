@@ -502,30 +502,8 @@ impl GnawTreeWriter {
     /// the existing reader (`backup::parse_backup_file`, `find_backup_by_hash`)
     /// resolves these blobs too.
     pub(crate) fn store_content_blob(&self, content: &str) -> Result<String> {
-        let file_name = Path::new(&self.file_path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
-        let timestamp = Utc::now().format("%Y%m%d_%H%M%S_%3f");
-        let blob_name = format!("{file_name}_after_{timestamp}.json");
-
         let project_root = find_project_root(Path::new(&self.file_path));
-        let backup_dir = project_root.join(".gnawtreewriter_backups");
-        fs::create_dir_all(&backup_dir)?;
-
-        let body = serde_json::json!({
-            "format": "gtw-backup-v2",
-            "state": "after",
-            "file_path": self.file_path,
-            "timestamp": Utc::now().to_rfc3339(),
-            "source_code": content
-        });
-        fs::write(
-            backup_dir.join(&blob_name),
-            serde_json::to_string_pretty(&body)?,
-        )
-        .with_context(|| format!("writing after-blob {blob_name}"))?;
-        Ok(blob_name)
+        crate::core::backup::write_after_blob(&project_root, &self.file_path, content)
     }
 
     /// Declare who is involved in this writer's changes. Merged with whatever

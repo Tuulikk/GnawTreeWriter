@@ -1,5 +1,47 @@
 ## [Unreleased]
 
+### Fixed — attributionen nådde inte alla skrivvägar
+
+Attributionen var kopplad i `edit`, `quick-insert` och `quick-replace`, men inte i
+`batch` och `scaffold` — alltså saknade två riktiga skrivvägar `mechanism` och
+bidragsgivare, och `batch` saknade dessutom after-blob (den skriver filerna direkt
+och går aldrig genom `writer.edit`).
+
+Nu:
+
+* **`batch`** bär attribution med `mechanism: batch`, och när anroparen inte angett
+  något `change_id` får hela anropet **en** genererad gruppnyckel
+  (`auto:batch-…`). Prefixet `auto:` gör att en läsare alltid kan skilja en
+  genererad gruppering från en deklarerad — nyckeln påstår inget om *vem*, bara
+  att transaktionerna kom från samma anrop.
+* **`scaffold`** bär attribution där `mechanism` förblir **hur det anropades**
+  (cli/mcp) medan `operation: scaffold` säger **vad** som gjordes. Två frågor som
+  inte får slås ihop.
+* **after-blob** skrivs nu även av `batch` och `scaffold`, via en delad
+  `backup::write_after_blob` (samma v2-format, samma läsare) — det nyaste
+  tillståndet har en verifierbar innehållskälla oavsett väg.
+
+### Verified — MCP-klienten fångas i verkligheten
+
+`initialize` med `clientInfo {name: "cline", version: "3.1"}` följt av en
+`edit_node` ger journalraden:
+
+```
+client=cline  client_version=3.1  mechanism=mcp  after_blob=s.rs_after_….json
+```
+
+Tidigare var detta bara kopplat i kod; nu är det sett i en journal.
+
+### Batch-mätning (samma anrop, två filer)
+
+```
+s.rs | mechanism=batch change_id=auto:batch-20261112T205401.951 author+co_designer after_blob=…
+t.rs | mechanism=batch change_id=auto:batch-20261112T205401.951 author+co_designer after_blob=…
+```
+
+Samma `change_id` på båda raderna: en logisk ändring över två filer går att
+gruppera utan ett nytt change-set-system.
+
 ### Fixed — Motor2-fynd: `delete` svalde nästa rad
 
 `end_line` betyder "raden som innehåller nodens **sista byte**". För text som
