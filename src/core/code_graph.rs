@@ -21,7 +21,7 @@
 
 use rusqlite::{Connection, Result};
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Reach {
@@ -716,6 +716,164 @@ pub fn history(conn: &Connection, filter: Option<&str>, last: usize) -> Result<H
     })
 }
 
+/// One frame of an onion-skin channel: the count at a revision.
+#[derive(Debug, Clone, Serialize)]
+pub struct OnionFrame {
+    pub revision_id: i64,
+    pub git_rev: Option<String>,
+    pub count: i64,
+}
+
+/// One channel = one aggregated relation key, sampled over the last N revisions.
+///
+/// This is the F-curve shape Blender taught: the key is the property, each
+/// revision is a keyframe, `count` is the value. A frame is the state AT its
+/// revision (not the gap before it), and the newest frame always equals `now` —
+/// so the ghosts are reconstructed from `count_after`, and a key absent from a
+/// revision simply inherits the newer value (it did not change there).
+#[derive(Debug, Clone, Serialize)]
+pub struct OnionChannel {
+    pub relation_key: String,
+    /// Occurrence count in the CURRENT store.
+    pub now: i64,
+    /// Oldest → newest; `frames.last().count == now` by construction.
+    pub frames: Vec<OnionFrame>,
+    /// `1 -> 2` plus where it turned, e.g. `count_changed @311`.
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OnionReport {
+    pub filter: Option<String>,
+    pub frames_requested: usize,
+    /// Channels that exist now or moved in the window. Quiet channels are not
+    /// listed: onion skin is about MOVEMENT, not inventory.
+    pub channels: Vec<OnionChannel>,
+    pub note: &'static str,
+}
+
+pub fn onion(conn: &Connection, filter: Option<&str>, frames: usize) -> Result<OnionReport> {
+    let frames = frames.max(1);
+    let hist = history(conn, filter, frames)?;
+
+    // Current counts for every aggregated key (optionally filtered).
+    let needle = filter.unwrap_or("");
+    let mut current: BTreeMap<String, i64> = BTreeMap::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT from_id || '|' || relation_type || '|' || to_name, COUNT(*)
+             FROM relations
+             WHERE (?1 = '' OR (from_id || '|' || relation_type || '|' || to_name)
+                              LIKE '%' || ?1 || '%')
+             GROUP BY from_id, relation_type, to_name",
+        )?;
+        let rows = stmt.query_map(params![needle], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (k, n) = row?;
+            current.insert(k, n);
+        }
+    }
+
+    // Per revision, its changes indexed by relation key.
+    let mut by_rev: Vec<(i64, Option<String>, BTreeMap<String, (String, i64, i64)>)> = Vec::new();
+    for rev in &hist.revisions {
+        let mut m = BTreeMap::new();
+        for c in &rev.changes {
+            m.insert(
+                c.relation_key.clone(),
+                (c.change_kind.clone(), c.count_before, c.count_after),
+            );
+        }
+        by_rev.push((rev.revision_id, rev.git_rev.clone(), m));
+    }
+
+    let mut keys: BTreeSet<String> = current.keys().cloned().collect();
+    for (_, _, m) in &by_rev {
+        keys.extend(m.keys().cloned());
+    }
+
+    let mut channels = Vec::new();
+    for key in keys {
+        let now = *current.get(&key).unwrap_or(&0);
+        // Walk newest → oldest. A frame is the state AT that revision (Blender
+        // shows states, not the gaps before them), so a revision that changed
+        // the key contributes its `count_after`; a revision that did not change
+        // it inherits the newer value.
+        let mut walk: Vec<(i64, Option<String>, i64, Option<String>)> = Vec::new();
+        let mut count = now;
+        for (rid, rev, m) in by_rev.iter() {
+            let kind = m.get(&key).map(|(k, _, _)| k.clone());
+            if let Some((_, _, after)) = m.get(&key) {
+                count = *after;
+            }
+            walk.push((*rid, rev.clone(), count, kind));
+        }
+        walk.reverse();
+        if walk.is_empty() {
+            walk.push((0, None, now, None));
+        }
+
+        let mut frames_out: Vec<OnionFrame> = walk
+            .iter()
+            .map(|(rid, rev, c, _)| OnionFrame {
+                revision_id: *rid,
+                git_rev: rev.clone(),
+                count: *c,
+            })
+            .collect();
+        // The invariant that makes this trustworthy.
+        if let Some(last) = frames_out.last_mut() {
+            last.count = now;
+        }
+
+        let mut seq: Vec<i64> = Vec::new();
+        for f in &frames_out {
+            if seq.last() != Some(&f.count) {
+                seq.push(f.count);
+            }
+        }
+        let path = seq
+            .iter()
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(" -> ");
+        let last_move = walk
+            .iter()
+            .rev()
+            .find_map(|(rid, _, _, k)| k.as_ref().map(|kind| format!("{kind} @{rid}")));
+        let summary = match last_move {
+            Some(m) => format!("{path} ({m})"),
+            None => format!("{path} (still)"),
+        };
+
+        let moved = walk.iter().any(|(_, _, _, kind)| kind.is_some());
+        if now == 0 && !moved {
+            continue;
+        }
+        channels.push(OnionChannel {
+            relation_key: key,
+            now,
+            frames: frames_out,
+            summary,
+        });
+    }
+
+    channels.sort_by(|a, b| {
+        b.now
+            .cmp(&a.now)
+            .then_with(|| a.relation_key.cmp(&b.relation_key))
+    });
+
+    Ok(OnionReport {
+        filter: filter.map(str::to_string),
+        frames_requested: frames,
+        channels,
+        note: "Onion skin: the count of each aggregated edge AT the last N revisions, oldest first, ending at the live store (a frame is a state, not the gap before it). A key absent from a revision inherits the newer value — it did not change there. Channels that neither exist nor moved are omitted: this is movement, not inventory. The working-tree frame (\"becoming\") is not included; it is not in the database yet.",
+    })
+}
+
 /// Result of `impact`. `seeds` is empty when the name is not in the store —
 /// reported as-is, never fabricated into an impact chain (same honesty rule
 /// as `ImpactReport::unresolved_calls`).
@@ -1184,6 +1342,51 @@ mod impact_tests {
         let stale = history(&empty_conn, None, 5).unwrap();
         assert!(stale.history_starts_now, "revisions without deltas");
         assert!(stale.revisions.is_empty());
+    }
+
+    /// The onion-skin invariant: the frames must reconstruct the past EXACTLY,
+    /// and the newest frame must equal the live store. If either breaks, the
+    /// ghosts are decoration rather than evidence.
+    #[test]
+    fn onion_reconstructs_earlier_frames_from_the_deltas() {
+        let conn = file_store();
+        conn.execute_batch(
+            r#"
+            INSERT INTO index_revisions (id, parent_id, git_rev, dirty, source,
+                identity_scheme_version, generation_key, started_at, completed_at, status)
+            VALUES (1, NULL, 'r1', 0, 'test', 1, 'gk', 100, 100, 'completed'),
+                   (2, 1, 'r2', 1, 'test', 1, 'gk', 200, 200, 'completed');
+            -- f -> g went 1 (added at rev1) then 2 (count_changed at rev2);
+            -- the store currently holds TWO such edges (a.rs has two calls).
+            INSERT INTO relation_changes
+              (revision_id, relation_key, change_kind, count_before, count_after,
+               before_json, after_json, resolution_status)
+            VALUES
+              (1, 'gtw:a.rs:function:f|calls|g', 'added', 0, 1, NULL, '{"count":1,"resolved":1}', 'resolved'),
+              (2, 'gtw:a.rs:function:f|calls|g', 'count_changed', 1, 2, '{"count":1,"resolved":1}', '{"count":2,"resolved":1}', 'resolved');
+            "#,
+        )
+        .unwrap();
+
+        let r = onion(&conn, Some("function:f|calls|g"), 2).unwrap();
+        assert_eq!(r.channels.len(), 1, "one channel: {:?}", r.channels);
+        let ch = &r.channels[0];
+        assert_eq!(ch.now, 2, "the live store has two f -> g edges");
+        assert_eq!(ch.frames.len(), 2);
+        // A frame is the state AT that revision: rev1 added the edge (1),
+        // rev2 raised the count (2), and the newest frame is the live store.
+        assert_eq!(ch.frames[0].count, 1, "state at the revision that added it");
+        assert_eq!(ch.frames[1].count, 2, "state at the count_changed");
+        assert_eq!(
+            ch.frames.last().unwrap().count,
+            ch.now,
+            "the newest frame is the live store"
+        );
+        assert_eq!(ch.summary, "1 -> 2 (count_changed @2)");
+
+        // A quiet channel is not listed: onion skin is movement, not inventory.
+        let quiet = onion(&conn, Some("no_such_symbol"), 2).unwrap();
+        assert!(quiet.channels.is_empty(), "{:?}", quiet.channels);
     }
 
     #[test]

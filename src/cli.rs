@@ -307,6 +307,14 @@ enum Commands {
         /// With --history: how many revisions back (default 5)
         #[arg(long)]
         last: Option<usize>,
+        /// Onion skin: the count of each edge at the last N revisions, oldest
+        /// first, ending at the current store — reconstructed by walking the
+        /// recorded deltas backwards. Optional value filters the relation key
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        onion: Option<String>,
+        /// With --onion: how many frames back (default 3)
+        #[arg(long)]
+        frames: Option<usize>,
         /// Hop bound for --cycles/--impact (default: 64 / 3)
         #[arg(long)]
         depth: Option<usize>,
@@ -1491,6 +1499,8 @@ impl Cli {
                 changed,
                 history,
                 last,
+                onion,
+                frames,
             } => {
                 // Same guard as the MCP tools (core::project_root, one rule):
                 // indexing or walking $HOME / a workspace folder from the CLI
@@ -1534,6 +1544,16 @@ impl Cli {
                     Self::handle_code_touches(Path::new(&path), symbol)?;
                 } else if changed {
                     Self::handle_code_changed(Path::new(&path))?;
+                } else if let Some(filter) = onion.as_deref() {
+                    Self::handle_code_onion(
+                        Path::new(&path),
+                        if filter.is_empty() {
+                            None
+                        } else {
+                            Some(filter)
+                        },
+                        frames.unwrap_or(3),
+                    )?;
                 } else if let Some(filter) = history.as_deref() {
                     Self::handle_code_history(
                         Path::new(&path),
@@ -2242,6 +2262,19 @@ Use --no-preview to actually perform the restore"
             obj.insert("levels".to_string(), serde_json::to_value(&levels)?);
         }
         println!("{}", serde_json::to_string_pretty(&body)?);
+        Ok(())
+    }
+
+    /// Onion skin: the movement of each edge over the last N revisions.
+    fn handle_code_onion(path: &Path, filter: Option<&str>, frames: usize) -> Result<()> {
+        let index_root = crate::core::code_index_db::resolve_index_root(path);
+        let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
+            anyhow::anyhow!(
+                "code-index --onion needs a store — run `gnawtreewriter code-index <root> --db` first ({e:#})"
+            )
+        })?;
+        let report = crate::core::code_graph::onion(&conn, filter, frames)?;
+        println!("{}", serde_json::to_string_pretty(&report)?);
         Ok(())
     }
 
