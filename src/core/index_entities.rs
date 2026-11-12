@@ -182,13 +182,34 @@ fn collect_entities(
     file_path: &str,
     include_private: bool,
 ) -> EntityIndex {
+    // Recursion INTO inline module bodies matters (2026-11-11): a file whose
+    // content is wrapped in `pub mod X { ... }` used to yield exactly ONE
+    // entity (the module) while relations still referenced every function
+    // inside it. Measured: src/mcp/mod.rs (4 387 lines, `pub mod mcp_server`
+    // at line 10) had 1 entity and 1 791 call edges whose SOURCE did not exist
+    // in the entity table. Such edges cannot be walked (impact/cycles skip
+    // them), so the gap was invisible except as a coverage class.
+    let mut index = collect_from(&tree.children, source, file_path, include_private);
+    disambiguate_ids(&mut index.entities);
+    index
+}
+
+/// One level of extraction, reusable for nested module bodies.
+/// `disambiguate_ids` runs ONCE in `collect_entities` because it already walks
+/// children itself — running it per level would number the same name twice.
+fn collect_from(
+    children: &[TreeNode],
+    source: &str,
+    file_path: &str,
+    include_private: bool,
+) -> EntityIndex {
     let lines: Vec<&str> = source.lines().collect();
 
     let mut entities = Vec::new();
     let mut imports = Vec::new();
     let mut exports = Vec::new();
 
-    for child in &tree.children {
+    for child in children {
         match child.node_type.as_str() {
             // Imports
             "use_declaration" => {
@@ -267,12 +288,29 @@ fn collect_entities(
                     entities.push(entity);
                 }
             }
-            // Modules (Rust)
+            // Modules (Rust) — recurse INTO the body. Without this, a file
+            // wrapped in `pub mod X { ... }` yields one entity and hides every
+            // function inside it (src/mcp/mod.rs: 1 791 orphaned call edges).
             "mod_item" | "mod_declaration" => {
-                if let Some(entity) = extract_module(child, &lines, file_path, include_private) {
+                if let Some(mut entity) = extract_module(child, &lines, file_path, include_private)
+                {
                     if entity.visibility == "pub" {
                         exports.push(entity.name.clone());
                     }
+                    // tree-sitter nests the body in a `declaration_list`, so
+                    // the functions are grandchildren of the mod_item, not
+                    // children. Descend through that wrapper explicitly —
+                    // recursing over `child.children` alone finds nothing,
+                    // which is why the first version of this fix still yielded
+                    // a childless module (caught by the regression test).
+                    let body = child
+                        .children
+                        .iter()
+                        .find(|c| c.node_type == "declaration_list")
+                        .map(|c| c.children.as_slice())
+                        .unwrap_or(child.children.as_slice());
+                    let nested = collect_from(body, source, file_path, include_private);
+                    entity.children = nested.entities;
                     entities.push(entity);
                 }
             }
@@ -280,8 +318,9 @@ fn collect_entities(
         }
     }
 
-    disambiguate_ids(&mut entities);
-
+    // No `disambiguate_ids` here: it walks children itself, so running it per
+    // nesting level would number the same name twice. `collect_entities` calls
+    // it once on the assembled tree.
     EntityIndex {
         file: file_path.to_string(),
         entity_count: entities.len() + imports.len(),
@@ -853,6 +892,74 @@ fn private_helper() {}"#;
         );
         assert!(!result.exports.contains(&"private_helper".to_string()));
         assert!(result.entity_count >= 4);
+    }
+
+    /// Regression (2026-11-11): a file wrapped in `pub mod X { ... }` yielded
+    /// exactly ONE entity — the module — while relations still referenced every
+    /// function inside it. Measured on src/mcp/mod.rs: 4 387 lines, 1 entity,
+    /// 1 791 call edges whose SOURCE did not exist in the entity table, so
+    /// those edges could never be walked by impact/cycles. The body must be
+    /// extracted as children of the module, recursively.
+    #[test]
+    fn inline_module_bodies_are_extracted() {
+        let source = r#"pub mod inner {
+    pub fn visible_inside() -> u8 { 1 }
+
+    pub struct Thing;
+
+    mod deeper {
+        fn deepest() {}
+    }
+}
+"#;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wrapped.rs");
+        fs::write(&path, source).unwrap();
+
+        let result = index_entities(path.to_str().unwrap(), true).unwrap();
+        let names: Vec<&str> = result.entities.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["inner"], "top level is the module: {names:?}");
+
+        let module = &result.entities[0];
+        let nested: Vec<&str> = module.children.iter().map(|e| e.name.as_str()).collect();
+        assert!(
+            nested.contains(&"visible_inside"),
+            "nested fn missing: {nested:?}"
+        );
+        assert!(
+            nested.contains(&"Thing"),
+            "nested struct missing: {nested:?}"
+        );
+        assert!(
+            nested.contains(&"deeper"),
+            "nested module missing: {nested:?}"
+        );
+
+        // Two levels down, so this is recursion and not a single special case.
+        let deeper = module
+            .children
+            .iter()
+            .find(|e| e.name == "deeper")
+            .expect("nested module entity");
+        let deepest: Vec<&str> = deeper.children.iter().map(|e| e.name.as_str()).collect();
+        assert!(
+            deepest.contains(&"deepest"),
+            "third level missing: {deepest:?}"
+        );
+
+        // Ids stay `gtw:{file}:{kind}:{name}` (no module prefix), which is what
+        // relation sources are built from — otherwise the fix would rename the
+        // gap instead of closing it.
+        let hidden = module
+            .children
+            .iter()
+            .find(|e| e.name == "visible_inside")
+            .expect("nested fn entity");
+        assert!(
+            hidden.id.ends_with(":function:visible_inside"),
+            "id: {}",
+            hidden.id
+        );
     }
 
     #[test]
