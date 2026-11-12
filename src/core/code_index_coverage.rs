@@ -132,6 +132,12 @@ pub struct CoverageReport {
 
 /// D7 source-identity classes (extracted unchanged, one function so the
 /// measure() body stays readable).
+///
+/// `file_scope_by_design`, not `..._unmatched`: `gtw:{file}:file:{stem}` has no
+/// entity to match and never will unless we invent graph nodes that are not
+/// code (named `mod`, `cli`, `age` — see uppslag 2026-11-12). A file is not a
+/// symbol; naming the class after a defect would send the next reader hunting
+/// for a bug that is a design boundary.
 fn source_coverage_for(conn: &Connection) -> Result<Vec<SourceClass>> {
     let mut source_coverage = Vec::new();
     let mut stmt = conn.prepare(
@@ -140,7 +146,7 @@ fn source_coverage_for(conn: &Connection) -> Result<Vec<SourceClass>> {
             WHEN r.from_id LIKE '%:callsite:%' THEN 'synthetic_callsite'
             WHEN r.from_id LIKE '%:function:%' THEN 'function_scope_unmatched'
             WHEN r.from_id LIKE '%:impl:%' THEN 'impl_scope_unmatched'
-            WHEN r.from_id LIKE '%:file:%' THEN 'file_scope_unmatched'
+            WHEN r.from_id LIKE '%:file:%' THEN 'file_scope_by_design'
             ELSE 'other_unmatched'
          END AS class,
          COUNT(*)
@@ -496,7 +502,7 @@ mod tests {
         assert_eq!(class("matched"), 1);
         assert_eq!(class("function_scope_unmatched"), 1);
         assert_eq!(class("synthetic_callsite"), 1);
-        assert_eq!(class("file_scope_unmatched"), 1);
+        assert_eq!(class("file_scope_by_design"), 1);
         assert_eq!(class("other_unmatched"), 0);
         // No silent drops: the named classes account for every relation.
         let classified: i64 = report.source_coverage.iter().map(|c| c.count).sum();
