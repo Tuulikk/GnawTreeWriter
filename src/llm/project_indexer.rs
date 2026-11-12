@@ -167,7 +167,7 @@ impl ProjectIndexer {
         if std::env::var_os("GTW_INDEX_TRACE").is_some() {
             return;
         }
-        if report.visited % 25 == 0 {
+        if report.visited.is_multiple_of(25) {
             eprintln!(
                 "  … {} file(s): {} embedded, {} unchanged",
                 report.visited, report.embedded, report.unchanged

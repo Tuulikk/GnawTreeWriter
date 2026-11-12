@@ -3288,12 +3288,17 @@ or list_nodes for a flat index of this file.",
                             }
                         }
                         "history" => {
-                            match crate::core::code_graph::history(&conn, symbol, last.unwrap_or(5))
-                            {
+                            match crate::core::code_graph::history(
+                                &conn,
+                                symbol,
+                                last.unwrap_or(5),
+                                prefix,
+                            ) {
                                 Ok(h) => json!({
                                     "mode": "query", "kind": "history",
                                     "revisions": h.revisions.len(),
                                     "most_recent_revision": h.most_recent_revision,
+                                    "matches_in_store": h.matches_in_store,
                                     "history_starts_now": h.history_starts_now,
                                     "report": h
                                 }),
@@ -3301,7 +3306,12 @@ or list_nodes for a flat index of this file.",
                             }
                         }
                         "onion" => {
-                            match crate::core::code_graph::onion(&conn, symbol, last.unwrap_or(3)) {
+                            match crate::core::code_graph::onion(
+                                &conn,
+                                symbol,
+                                last.unwrap_or(3),
+                                prefix,
+                            ) {
                                 Ok(o) => json!({
                                     "mode": "query", "kind": "onion",
                                     "channels": o.channels.len(),
@@ -3317,7 +3327,11 @@ or list_nodes for a flat index of this file.",
                                         .to_string(),
                                 );
                             };
-                            match crate::core::code_graph::touches_symbol(&conn, sym) {
+                            match crate::core::code_graph::touches_symbol(
+                                &conn,
+                                sym,
+                                prefix,
+                            ) {
                                 Ok(t) => json!({
                                     "mode": "query", "kind": "touches",
                                     "outgoing": t.outgoing.len(), "incoming": t.incoming.len(),
@@ -3326,33 +3340,32 @@ or list_nodes for a flat index of this file.",
                                 Err(e) => tool_error(format!("code_index touches failed: {e:#}")),
                             }
                         }
-                        "file_graph" => match crate::core::code_graph::file_graph(&conn) {
-                            Ok(mut g) => {
-                                // path_prefix doubles as the focus: both
-                                // directions, because "what does this file
-                                // touch" and "what touches it" are one question.
-                                if let Some(needle) = prefix.as_deref() {
-                                    g.edges.retain(|e| {
-                                        e.from.contains(needle) || e.to.contains(needle)
-                                    });
-                                }
-                                json!({
+                        "file_graph" => {
+                            // path_prefix is the SCOPE here (edges incident to
+                            // the subtree, from OR to) — the same meaning it
+                            // has for coverage, so one argument does not mean
+                            // substring in one kind and prefix in another.
+                            match crate::core::code_graph::file_graph(&conn, prefix) {
+                                Ok(g) => json!({
                                     "mode": "query", "kind": "file_graph",
+                                    "scope": prefix,
                                     "files": g.files, "edge_pairs": g.edges.len(),
                                     "edges": g.edges,
                                     "attributed_edges": g.attributed_edges,
                                     "unattributed_edges": g.unattributed_edges,
                                     "coverage": g.coverage, "note": g.note
-                                })
+                                }),
+                                Err(e) => {
+                                    tool_error(format!("code_index file_graph failed: {e:#}"))
+                                }
                             }
-                            Err(e) => tool_error(format!("code_index file_graph failed: {e:#}")),
-                        },
+                        }
                         "changed" => {
                             let files =
                                 crate::core::code_index::changed_files_from_git(&index_root);
                             let mut entries = Vec::new();
                             for file in &files {
-                                match crate::core::code_graph::touches_file(&conn, file) {
+                                match crate::core::code_graph::touches_file(&conn, file, None) {
                                     Ok(t) => entries.push(json!({
                                         "file": file,
                                         "triple_in_store": !t.outgoing.is_empty()

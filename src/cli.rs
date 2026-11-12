@@ -1544,11 +1544,15 @@ impl Cli {
                 } else if file_graph {
                     // File-level projection of the entity graph — read-only,
                     // derived from existing columns (no file nodes).
-                    Self::handle_code_file_graph(Path::new(&path), focus.as_deref())?;
+                    Self::handle_code_file_graph(
+                        Path::new(&path),
+                        focus.as_deref(),
+                        scope.as_deref(),
+                    )?;
                 } else if let Some(symbol) = touches.as_deref() {
-                    Self::handle_code_touches(Path::new(&path), symbol)?;
+                    Self::handle_code_touches(Path::new(&path), symbol, scope.as_deref())?;
                 } else if changed {
-                    Self::handle_code_changed(Path::new(&path))?;
+                    Self::handle_code_changed(Path::new(&path), scope.as_deref())?;
                 } else if let Some(filter) = onion.as_deref() {
                     Self::handle_code_onion(
                         Path::new(&path),
@@ -1558,6 +1562,7 @@ impl Cli {
                             Some(filter)
                         },
                         frames.unwrap_or(3),
+                        scope.as_deref(),
                     )?;
                 } else if let Some(filter) = history.as_deref() {
                     Self::handle_code_history(
@@ -1568,6 +1573,7 @@ impl Cli {
                             Some(filter)
                         },
                         last.unwrap_or(5),
+                        scope.as_deref(),
                     )?;
                 } else if cycles || impact.is_some() || why.is_some() || by_file {
                     // P2: graph queries over the store — read-only.
@@ -2279,42 +2285,52 @@ Use --no-preview to actually perform the restore"
     }
 
     /// Onion skin: the movement of each edge over the last N revisions.
-    fn handle_code_onion(path: &Path, filter: Option<&str>, frames: usize) -> Result<()> {
+    fn handle_code_onion(
+        path: &Path,
+        filter: Option<&str>,
+        frames: usize,
+        scope: Option<&str>,
+    ) -> Result<()> {
         let index_root = crate::core::code_index_db::resolve_index_root(path);
         let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
             anyhow::anyhow!(
                 "code-index --onion needs a store — run `gnawtreewriter code-index <root> --db` first ({e:#})"
             )
         })?;
-        let report = crate::core::code_graph::onion(&conn, filter, frames)?;
+        let report = crate::core::code_graph::onion(&conn, filter, frames, scope)?;
         println!("{}", serde_json::to_string_pretty(&report)?);
         Ok(())
     }
 
     /// Relation history: what changed in the graph, per revision. Read-only, and
     /// the only place the past is a first-class answer instead of a re-index.
-    fn handle_code_history(path: &Path, filter: Option<&str>, last: usize) -> Result<()> {
+    fn handle_code_history(
+        path: &Path,
+        filter: Option<&str>,
+        last: usize,
+        scope: Option<&str>,
+    ) -> Result<()> {
         let index_root = crate::core::code_index_db::resolve_index_root(path);
         let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
             anyhow::anyhow!(
                 "code-index --history needs a store — run `gnawtreewriter code-index <root> --db` first ({e:#})"
             )
         })?;
-        let report = crate::core::code_graph::history(&conn, filter, last)?;
+        let report = crate::core::code_graph::history(&conn, filter, last, scope)?;
         println!("{}", serde_json::to_string_pretty(&report)?);
         Ok(())
     }
 
     /// "What does this symbol touch in other files?" — outgoing edges with the
     /// target's file/symbol/line, plus incoming users. Read-only.
-    fn handle_code_touches(path: &Path, symbol: &str) -> Result<()> {
+    fn handle_code_touches(path: &Path, symbol: &str, scope: Option<&str>) -> Result<()> {
         let index_root = crate::core::code_index_db::resolve_index_root(path);
         let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
             anyhow::anyhow!(
                 "code-index --touches needs a store — run `gnawtreewriter code-index <root> --db` first ({e:#})"
             )
         })?;
-        let t = crate::core::code_graph::touches_symbol(&conn, symbol)?;
+        let t = crate::core::code_graph::touches_symbol(&conn, symbol, scope)?;
         println!("{}", serde_json::to_string_pretty(&t)?);
         Ok(())
     }
@@ -2322,7 +2338,7 @@ Use --no-preview to actually perform the restore"
     /// Files in the working-tree diff, each with what it touches elsewhere and
     /// who touches it. Read-only; the git read is a name-only diff, so nothing
     /// is parsed here beyond the store that already exists.
-    fn handle_code_changed(path: &Path) -> Result<()> {
+    fn handle_code_changed(path: &Path, scope: Option<&str>) -> Result<()> {
         let index_root = crate::core::code_index_db::resolve_index_root(path);
         let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
             anyhow::anyhow!(
@@ -2330,11 +2346,20 @@ Use --no-preview to actually perform the restore"
             )
         })?;
 
-        let files = crate::core::code_index::changed_files_from_git(&index_root);
+        let all_files = crate::core::code_index::changed_files_from_git(&index_root);
+        // Scope on `--changed` filters the changed files themselves: "what did I
+        // touch in src/llm" is the question, not "what did I touch, grouped".
+        let files: Vec<String> = match scope {
+            Some(prefix) => all_files
+                .into_iter()
+                .filter(|f| f.starts_with(prefix))
+                .collect(),
+            None => all_files,
+        };
         let mut entries = Vec::new();
         let mut indexed = 0usize;
         for file in &files {
-            let t = crate::core::code_graph::touches_file(&conn, file)?;
+            let t = crate::core::code_graph::touches_file(&conn, file, None)?;
             let known = !t.outgoing.is_empty() || !t.incoming.is_empty();
             if known {
                 indexed += 1;
@@ -2353,10 +2378,11 @@ Use --no-preview to actually perform the restore"
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
                 "kind": "changed",
+                "scope": scope,
                 "changed_files": files.len(),
                 "with_edges_in_store": indexed,
                 "entries": entries,
-                "note": "Files come from `git diff --name-only HEAD` plus untracked files. `triple_in_store: false` means the store has no edges for that path — either it is isolated or the index is older than the change; re-run with --db before drawing conclusions.",
+                "note": "Files come from `git diff --name-only HEAD` plus untracked files. `triple_in_store: false` means the store has no edges for that path — either it is isolated or the index is older than the change; re-run with --db before drawing conclusions. With a scope, `changed_files` counts only the changed files inside it, so the denominator stays true.",
             }))?
         );
         Ok(())
@@ -2365,14 +2391,18 @@ Use --no-preview to actually perform the restore"
     /// File-level projection: "which files depend on which, and by how many
     /// edges". Read-only, derived from `relations.file` + `entities.file` — no
     /// file nodes exist and none are needed (see `core_graph::file_graph`).
-    fn handle_code_file_graph(path: &Path, focus: Option<&str>) -> Result<()> {
+    fn handle_code_file_graph(path: &Path, focus: Option<&str>, scope: Option<&str>) -> Result<()> {
         let index_root = crate::core::code_index_db::resolve_index_root(path);
         let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
             anyhow::anyhow!(
                 "code-index --file-graph needs a store — run `gnawtreewriter code-index <root> --db` first ({e:#})"
             )
         })?;
-        let mut graph = crate::core::code_graph::file_graph(&conn)?;
+        // Scope is applied in SQL (pairs incident to the prefix), focus is a
+        // substring on the remaining pairs. Both are reported, so a reader can
+        // tell "the graph is small" from "I filtered it".
+        let mut graph = crate::core::code_graph::file_graph(&conn, scope)?;
+        let before_focus = graph.edges.len();
 
         if let Some(needle) = focus {
             // Both directions: "what does this file touch" AND "what touches
@@ -2381,28 +2411,16 @@ Use --no-preview to actually perform the restore"
             graph
                 .edges
                 .retain(|e| e.from.contains(needle) || e.to.contains(needle));
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "kind": "file_graph",
-                    "focus": needle,
-                    "files": graph.files,
-                    "edge_pairs": graph.edges.len(),
-                    "edges": graph.edges,
-                    "attributed_edges": graph.attributed_edges,
-                    "unattributed_edges": graph.unattributed_edges,
-                    "coverage": graph.coverage,
-                    "note": graph.note,
-                }))?
-            );
-            return Ok(());
         }
 
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
                 "kind": "file_graph",
+                "scope": scope,
+                "focus": focus,
                 "files": graph.files,
+                "edge_pairs_before_focus": before_focus,
                 "edge_pairs": graph.edges.len(),
                 "edges": graph.edges,
                 "attributed_edges": graph.attributed_edges,

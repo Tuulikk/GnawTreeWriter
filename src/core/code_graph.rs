@@ -325,15 +325,20 @@ fn file_adjacency(conn: &Connection) -> Result<HashMap<String, Vec<String>>> {
     Ok(adj)
 }
 
-pub fn file_graph(conn: &Connection) -> Result<FileGraph> {
+pub fn file_graph(conn: &Connection, scope: Option<&str>) -> Result<FileGraph> {
+    // Scope = "edges incident to this subtree": from OR to. That is the only
+    // reading that answers "what does this module depend on, and who depends on
+    // it" in one call — a from-only filter would silently hide the second half.
+    let scope_str = scope.unwrap_or("");
     let mut stmt = conn.prepare(
         "SELECT r.file, e.file, COUNT(*)
          FROM relations r JOIN entities e ON e.id = r.to_id
          WHERE r.file <> e.file
+           AND (?1 = '' OR r.file LIKE ?1 || '%' OR e.file LIKE ?1 || '%')
          GROUP BY r.file, e.file
          ORDER BY COUNT(*) DESC, r.file, e.file",
     )?;
-    let rows = stmt.query_map([], |r| {
+    let rows = stmt.query_map(params![scope_str], |r| {
         Ok(FileEdge {
             from: r.get(0)?,
             to: r.get(1)?,
@@ -349,10 +354,15 @@ pub fn file_graph(conn: &Connection) -> Result<FileGraph> {
         edges.push(e);
     }
 
+    // Coverage counts relations OCCURRING in the scope's files (the same rule
+    // as --coverage), while `edges` above are pairs INCIDENT to the scope. Two
+    // different denominators on purpose, and both are named in the note — a
+    // scoped graph without that sentence would be the M7 mistake dressed up.
     let (attributed, unattributed): (i64, i64) = conn.query_row(
         "SELECT COALESCE(SUM(to_id IS NOT NULL), 0), COALESCE(SUM(to_id IS NULL), 0)
-         FROM relations",
-        [],
+         FROM relations
+         WHERE (?1 = '' OR file LIKE ?1 || '%')",
+        params![scope_str],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     let total = attributed + unattributed;
@@ -368,7 +378,7 @@ pub fn file_graph(conn: &Connection) -> Result<FileGraph> {
         attributed_edges: attributed,
         unattributed_edges: unattributed,
         coverage: (coverage * 1000.0).round() / 1000.0,
-        note: "Cross-file dependencies only, aggregated over ALL relation types. Derived from relations.file (source) and entities.file (resolved target), so an unresolved target contributes no edge. coverage = attributed / all relation rows and therefore includes std/prelude calls that can never resolve — read it next to `code-index --coverage`, where the local-candidate denominator separates 'external' from 'missed'.",
+        note: "Cross-file dependencies, aggregated over ALL relation types. `edges` are pairs INCIDENT to the scope (from OR to) when a scope is given; `coverage` counts relation rows OCCURRING inside it (file prefix) — two denominators, both stated. An unresolved target contributes no edge, so coverage includes std/prelude calls that can never resolve; read it beside `code-index --coverage`, where the local-candidate denominator separates 'external' from 'missed'.",
     })
 }
 
@@ -480,16 +490,23 @@ pub struct Touches {
 
 const TOUCHES_NOTE: &str = "Cross-file edges only. Outgoing = what the subject uses elsewhere (target file + symbol + definition line, plus the line here); incoming = who uses the subject. Unresolved targets cannot appear here, which is the same limit as --file-graph: run --coverage for that denominator.";
 
-/// Distinct cross-file uses of one file.
-pub fn touches_file(conn: &Connection, file: &str) -> Result<Touches> {
+/// Distinct cross-file uses of one file, optionally restricted to a scope.
+///
+/// Scope applies to the COUNTERPART: outgoing edges whose target lies in the
+/// scope, incoming ones whose caller does. "What does this file touch in
+/// `src/llm`" and "who in `src/llm` touches it" are two real questions; a
+/// source-file filter would answer neither.
+pub fn touches_file(conn: &Connection, file: &str, scope: Option<&str>) -> Result<Touches> {
+    let scope_str = scope.unwrap_or("");
     let mut out_stmt = conn.prepare(
         "SELECT e.file, e.name, e.line, r.relation_type, r.line
          FROM relations r JOIN entities e ON e.id = r.to_id
          WHERE r.file = ?1 AND e.file <> ?1
+           AND (?2 = '' OR e.file LIKE ?2 || '%')
          ORDER BY e.file, e.line, e.name",
     )?;
     let outgoing: Vec<OutEdge> = out_stmt
-        .query_map(params![file], |r| {
+        .query_map(params![file, scope_str], |r| {
             Ok(OutEdge {
                 file: r.get(0)?,
                 name: r.get(1)?,
@@ -506,10 +523,11 @@ pub fn touches_file(conn: &Connection, file: &str) -> Result<Touches> {
                 r.line, r.relation_type
          FROM relations r JOIN entities e ON e.id = r.to_id
          WHERE e.file = ?1 AND r.file <> ?1
+           AND (?2 = '' OR r.file LIKE ?2 || '%')
          ORDER BY r.file, r.line",
     )?;
     let incoming: Vec<InEdge> = in_stmt
-        .query_map(params![file], |r| {
+        .query_map(params![file, scope_str], |r| {
             Ok(InEdge {
                 file: r.get(0)?,
                 from_symbol: r.get(1)?,
@@ -530,14 +548,16 @@ pub fn touches_file(conn: &Connection, file: &str) -> Result<Touches> {
 
 /// Cross-file uses of every entity that DEFINES `symbol` (methods included:
 /// their ids carry `Type::name`, so a bare name can yield several seeds).
-pub fn touches_symbol(conn: &Connection, symbol: &str) -> Result<Touches> {
+pub fn touches_symbol(conn: &Connection, symbol: &str, scope: Option<&str>) -> Result<Touches> {
     let seeds = resolve_symbols(conn, symbol)?;
+    let scope_str = scope.unwrap_or("");
     let mut outgoing = Vec::new();
     let mut incoming = Vec::new();
     let mut out_stmt = conn.prepare(
         "SELECT e.file, e.name, e.line, r.relation_type, r.line
          FROM relations r JOIN entities e ON e.id = r.to_id
          WHERE r.from_id = ?1 AND e.file <> r.file
+           AND (?2 = '' OR e.file LIKE ?2 || '%')
          ORDER BY e.file, e.line, e.name",
     )?;
     let mut in_stmt = conn.prepare(
@@ -546,12 +566,13 @@ pub fn touches_symbol(conn: &Connection, symbol: &str) -> Result<Touches> {
                 r.line, r.relation_type
          FROM relations r JOIN entities e ON e.id = r.to_id
          WHERE r.to_id = ?1 AND r.file <> e.file
+           AND (?2 = '' OR r.file LIKE ?2 || '%')
          ORDER BY r.file, r.line",
     )?;
     for seed in &seeds {
         outgoing.extend(
             out_stmt
-                .query_map(params![&seed.id], |r| {
+                .query_map(params![&seed.id, scope_str], |r| {
                     Ok(OutEdge {
                         file: r.get(0)?,
                         name: r.get(1)?,
@@ -564,7 +585,7 @@ pub fn touches_symbol(conn: &Connection, symbol: &str) -> Result<Touches> {
         );
         incoming.extend(
             in_stmt
-                .query_map(params![&seed.id], |r| {
+                .query_map(params![&seed.id, scope_str], |r| {
                     Ok(InEdge {
                         file: r.get(0)?,
                         from_symbol: r.get(1)?,
@@ -625,16 +646,30 @@ pub struct HistoryRevision {
 pub struct HistoryReport {
     /// Substring filter applied to the relation key, when given.
     pub filter: Option<String>,
+    /// Path prefix the keys were restricted to, when given.
+    pub scope: Option<String>,
     pub revisions: Vec<HistoryRevision>,
     pub most_recent_revision: Option<i64>,
+    /// Rows matching filter+scope anywhere in the store. Without this, an empty
+    /// scoped result is indistinguishable from "history starts now" — the exact
+    /// confusion this field exists to prevent.
+    pub matches_in_store: i64,
     /// True when the store has revisions but no delta rows at all: the writer is
     /// newer than the data, which is a fact about the past, not about the code.
     pub history_starts_now: bool,
     pub note: &'static str,
 }
 
-pub fn history(conn: &Connection, filter: Option<&str>, last: usize) -> Result<HistoryReport> {
+pub fn history(
+    conn: &Connection,
+    filter: Option<&str>,
+    last: usize,
+    scope: Option<&str>,
+) -> Result<HistoryReport> {
     let filter_str = filter.unwrap_or("");
+    // A relation key starts with `gtw:{file}:`, so a path scope is a PREFIX on
+    // the key — exact, index-friendly, and the same identity the edges use.
+    let scope_key = scope.map(|s| format!("gtw:{s}")).unwrap_or_default();
     let limit = last.max(1) as i64;
     let mut stmt = conn.prepare(
         "SELECT rc.revision_id, r.git_rev, r.completed_at, r.source,
@@ -643,13 +678,15 @@ pub fn history(conn: &Connection, filter: Option<&str>, last: usize) -> Result<H
          FROM relation_changes rc
          JOIN index_revisions r ON r.id = rc.revision_id
          WHERE (?1 = '' OR rc.relation_key LIKE '%' || ?1 || '%')
+           AND (?3 = '' OR rc.relation_key LIKE ?3 || '%')
            AND rc.revision_id IN (
                  SELECT DISTINCT revision_id FROM relation_changes
                  WHERE (?1 = '' OR relation_key LIKE '%' || ?1 || '%')
+                   AND (?3 = '' OR relation_key LIKE ?3 || '%')
                  ORDER BY revision_id DESC LIMIT ?2)
          ORDER BY rc.revision_id DESC, rc.change_kind, rc.relation_key",
     )?;
-    let rows = stmt.query_map(params![filter_str, limit], |r| {
+    let rows = stmt.query_map(params![filter_str, limit, scope_key], |r| {
         Ok((
             HistoryRevision {
                 revision_id: r.get(0)?,
@@ -694,6 +731,15 @@ pub fn history(conn: &Connection, filter: Option<&str>, last: usize) -> Result<H
             |r| r.get(0),
         )
         .unwrap_or(0);
+    let matches_in_store: i64 = conn
+        .query_row(
+            "SELECT COALESCE(COUNT(*), 0) FROM relation_changes
+             WHERE (?1 = '' OR relation_key LIKE '%' || ?1 || '%')
+               AND (?2 = '' OR relation_key LIKE ?2 || '%')",
+            params![filter_str, scope_key],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
     let revisions_in_store: i64 = conn
         .query_row(
             "SELECT COALESCE(COUNT(*), 0) FROM index_revisions",
@@ -709,10 +755,12 @@ pub fn history(conn: &Connection, filter: Option<&str>, last: usize) -> Result<H
 
     Ok(HistoryReport {
         filter: filter.map(str::to_string),
+        scope: scope.map(str::to_string),
         revisions,
         most_recent_revision,
+        matches_in_store,
         history_starts_now: total_rows == 0 && revisions_in_store > 0,
-        note: "Rows come from relation_changes, written since 2026-11-12: earlier revisions recorded THAT a refresh happened, not WHAT changed. Only files that were (re)parsed after the writer landed have rows here — an untouched file has NO history even though its edges exist, so read `--touches` for the current state and this for the movement. change_kind count_changed means the edge still exists but its occurrence count moved (D8). A filter is a substring match on `from_id|relation_type|to_name`.",
+        note: "Rows come from relation_changes, written since 2026-11-12: earlier revisions recorded THAT a refresh happened, not WHAT changed. Only files that were (re)parsed after the writer landed have rows here — an untouched file has NO history even though its edges exist, so read `--touches` for the current state and this for the movement. change_kind count_changed means the edge still exists but its occurrence count moved (D8). A filter is a substring match on `from_id|relation_type|to_name`; a scope is a PREFIX on the same key (`gtw:<path>`). `matches_in_store` counts the whole store under filter+scope, so an empty page is never mistaken for an empty history.",
     })
 }
 
@@ -745,6 +793,8 @@ pub struct OnionChannel {
 #[derive(Debug, Clone, Serialize)]
 pub struct OnionReport {
     pub filter: Option<String>,
+    /// Path prefix the channels were restricted to, when given.
+    pub scope: Option<String>,
     pub frames_requested: usize,
     /// Channels that exist now or moved in the window. Quiet channels are not
     /// listed: onion skin is about MOVEMENT, not inventory.
@@ -752,12 +802,22 @@ pub struct OnionReport {
     pub note: &'static str,
 }
 
-pub fn onion(conn: &Connection, filter: Option<&str>, frames: usize) -> Result<OnionReport> {
+pub fn onion(
+    conn: &Connection,
+    filter: Option<&str>,
+    frames: usize,
+    scope: Option<&str>,
+) -> Result<OnionReport> {
     let frames = frames.max(1);
-    let hist = history(conn, filter, frames)?;
+    let hist = history(conn, filter, frames, scope)?;
 
-    // Current counts for every aggregated key (optionally filtered).
+    // Current counts for every aggregated key (optionally filtered and scoped).
+    // from_id is `gtw:<file>:<symbol>`, so a path scope is a prefix on it —
+    // the same identity the history keys use. A source-file filter here and a
+    // key-prefix filter there must agree, or the live frame would not be the
+    // newest frame for the scoped set.
     let needle = filter.unwrap_or("");
+    let scope_key = scope.map(|s| format!("gtw:{s}")).unwrap_or_default();
     let mut current: BTreeMap<String, i64> = BTreeMap::new();
     {
         let mut stmt = conn.prepare(
@@ -765,9 +825,10 @@ pub fn onion(conn: &Connection, filter: Option<&str>, frames: usize) -> Result<O
              FROM relations
              WHERE (?1 = '' OR (from_id || '|' || relation_type || '|' || to_name)
                               LIKE '%' || ?1 || '%')
+               AND (?2 = '' OR from_id LIKE ?2 || '%')
              GROUP BY from_id, relation_type, to_name",
         )?;
-        let rows = stmt.query_map(params![needle], |r| {
+        let rows = stmt.query_map(params![needle, scope_key], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
         })?;
         for row in rows {
@@ -777,7 +838,9 @@ pub fn onion(conn: &Connection, filter: Option<&str>, frames: usize) -> Result<O
     }
 
     // Per revision, its changes indexed by relation key.
-    let mut by_rev: Vec<(i64, Option<String>, BTreeMap<String, (String, i64, i64)>)> = Vec::new();
+    // (revision_id, git_rev, key -> (change_kind, count_before, count_after))
+    type RevChanges = (i64, Option<String>, BTreeMap<String, (String, i64, i64)>);
+    let mut by_rev: Vec<RevChanges> = Vec::new();
     for rev in &hist.revisions {
         let mut m = BTreeMap::new();
         for c in &rev.changes {
@@ -868,9 +931,10 @@ pub fn onion(conn: &Connection, filter: Option<&str>, frames: usize) -> Result<O
 
     Ok(OnionReport {
         filter: filter.map(str::to_string),
+        scope: scope.map(str::to_string),
         frames_requested: frames,
         channels,
-        note: "Onion skin: the count of each aggregated edge AT the last N revisions, oldest first, ending at the live store (a frame is a state, not the gap before it). A key absent from a revision inherits the newer value — it did not change there. Channels that neither exist nor moved are omitted: this is movement, not inventory. The working-tree frame (\"becoming\") is not included; it is not in the database yet.",
+        note: "Onion skin: the count of each aggregated edge AT the last N revisions, oldest first, ending at the live store (a frame is a state, not the gap before it). A key absent from a revision inherits the newer value — it did not change there. Channels that neither exist nor moved are omitted: this is movement, not inventory. The working-tree frame (\"becoming\") is not included; it is not in the database yet. A scope is a prefix on the edge's source file (`gtw:<path>`), applied to the live counts and the history alike.",
     })
 }
 
@@ -1210,7 +1274,7 @@ mod impact_tests {
     #[test]
     fn file_graph_projects_edges_and_states_its_coverage() {
         let conn = file_store();
-        let g = file_graph(&conn).unwrap();
+        let g = file_graph(&conn, None).unwrap();
         assert_eq!(g.files, 3, "three files take part");
         let pair = |a: &str, b: &str| {
             g.edges
@@ -1233,7 +1297,7 @@ mod impact_tests {
         let conn = file_store();
         // a.rs:f calls b.rs:g (twice) — outgoing from a file, with the target's
         // definition line and the line in the subject.
-        let a = touches_file(&conn, "a.rs").unwrap();
+        let a = touches_file(&conn, "a.rs", None).unwrap();
         assert_eq!(a.kind, "file");
         assert!(
             a.outgoing
@@ -1247,7 +1311,7 @@ mod impact_tests {
         assert_eq!(a.incoming[0].from_symbol.as_deref(), Some("g"));
 
         // Symbol mode: g's cross-file use of h, and who uses g.
-        let g = touches_symbol(&conn, "g").unwrap();
+        let g = touches_symbol(&conn, "g", None).unwrap();
         assert_eq!(g.kind, "symbol");
         assert!(
             g.outgoing
@@ -1264,8 +1328,67 @@ mod impact_tests {
 
         // A name that is not in the store yields empty lists, never an error
         // and never a fabricated edge.
-        let none = touches_symbol(&conn, "does_not_exist").unwrap();
+        let none = touches_symbol(&conn, "does_not_exist", None).unwrap();
         assert!(none.outgoing.is_empty() && none.incoming.is_empty());
+    }
+
+    #[test]
+    fn scope_filters_the_counterpart_and_keeps_its_own_denominator() {
+        let conn = file_store();
+
+        // Unscoped: three files, three PAIRS carrying four edges, and the
+        // unresolved call sits in c.rs — so the whole-project rate is 4/5.
+        let all = file_graph(&conn, None).unwrap();
+        assert_eq!(all.edges.len(), 3, "pairs, not edges: {:?}", all.edges);
+        assert_eq!(all.edges.iter().map(|e| e.edges).sum::<i64>(), 4);
+        assert_eq!((all.attributed_edges, all.unattributed_edges), (4, 1));
+        assert!((all.coverage - 0.8).abs() < 1e-6);
+
+        // Scoped to a.rs: only pairs INCIDENT to it survive (a->b, b->a), and
+        // coverage now counts only the rows OCCURRING in a.rs — both resolve,
+        // so the rate is 100%. Same store, different rate, because the
+        // denominator moved with the scope. That is the whole point.
+        let in_a = file_graph(&conn, Some("a.rs")).unwrap();
+        assert_eq!(in_a.edges.len(), 2, "incident pairs: {:?}", in_a.edges);
+        assert_eq!((in_a.attributed_edges, in_a.unattributed_edges), (2, 0));
+        assert!((in_a.coverage - 1.0).abs() < 1e-6);
+
+        // Scoped to c.rs the same store reads 0% — its one edge is the call
+        // that never resolved. Neither number is a lie; both name their set.
+        let in_c = file_graph(&conn, Some("c.rs")).unwrap();
+        assert_eq!(in_c.edges.len(), 1);
+        assert!((in_c.coverage - 0.0).abs() < 1e-6);
+
+        // touches: the scope is the COUNTERPART, never the subject. a.rs does
+        // not touch c.rs, so scoping to c.rs must not invent an edge — but
+        // b.rs's calls into c.rs must survive.
+        let a_in_c = touches_file(&conn, "a.rs", Some("c.rs")).unwrap();
+        assert!(
+            a_in_c.outgoing.is_empty() && a_in_c.incoming.is_empty(),
+            "a.rs and c.rs are unrelated: {a_in_c:?}"
+        );
+        let b_in_c = touches_file(&conn, "b.rs", Some("c.rs")).unwrap();
+        assert!(
+            b_in_c
+                .outgoing
+                .iter()
+                .any(|e| e.file == "c.rs" && e.name == "h"),
+            "b.rs calls c.rs:h: {:?}",
+            b_in_c.outgoing
+        );
+
+        // Symbol mode, same rule: g uses c.rs:h (survives the scope), and its
+        // only caller lives in a.rs (so incoming is filtered away, not guessed).
+        let g_in_c = touches_symbol(&conn, "g", Some("c.rs")).unwrap();
+        assert!(g_in_c
+            .outgoing
+            .iter()
+            .any(|e| e.file == "c.rs" && e.name == "h"));
+        assert!(
+            g_in_c.incoming.is_empty(),
+            "the caller of g is in a.rs, outside the scope: {:?}",
+            g_in_c.incoming
+        );
     }
 
     #[test]
@@ -1290,7 +1413,7 @@ mod impact_tests {
         )
         .unwrap();
 
-        let all = history(&conn, None, 5).unwrap();
+        let all = history(&conn, None, 5, None).unwrap();
         assert_eq!(all.revisions.len(), 2, "two revisions have changes");
         // Newest first, so the reader sees "what just happened" first.
         assert_eq!(all.revisions[0].revision_id, 2);
@@ -1309,7 +1432,7 @@ mod impact_tests {
         assert!(!all.history_starts_now, "rows exist, so history is live");
 
         // Filter on a symbol: only the a.rs -> g keys survive.
-        let filtered = history(&conn, Some("function:f"), 5).unwrap();
+        let filtered = history(&conn, Some("function:f"), 5, None).unwrap();
         assert_eq!(filtered.filter.as_deref(), Some("function:f"));
         let keys: Vec<&str> = filtered
             .revisions
@@ -1323,9 +1446,30 @@ mod impact_tests {
         );
 
         // `last` bounds the number of revisions, newest first.
-        let one = history(&conn, None, 1).unwrap();
+        let one = history(&conn, None, 1, None).unwrap();
         assert_eq!(one.revisions.len(), 1);
         assert_eq!(one.revisions[0].revision_id, 2);
+
+        // Scope is a PREFIX on the relation key. And an empty page is not an
+        // empty history: `matches_in_store` is what tells them apart.
+        let scoped = history(&conn, None, 5, Some("a.rs")).unwrap();
+        assert_eq!(scoped.scope.as_deref(), Some("a.rs"));
+        assert_eq!(scoped.matches_in_store, 2, "two rows carry a.rs keys");
+        assert!(
+            scoped
+                .revisions
+                .iter()
+                .flat_map(|r| r.changes.iter())
+                .all(|c| c.relation_key.starts_with("gtw:a.rs")),
+            "no key outside the scope may leak in: {scoped:?}"
+        );
+        let elsewhere = history(&conn, None, 5, Some("src/nope/")).unwrap();
+        assert!(elsewhere.revisions.is_empty());
+        assert_eq!(elsewhere.matches_in_store, 0);
+        assert!(
+            !elsewhere.history_starts_now,
+            "the store HAS deltas; the scope filtered them out — that is not a young writer"
+        );
 
         // A store with revisions but no deltas is "history starts now", not
         // "nothing ever changed" — the distinction the writer's age creates.
@@ -1339,7 +1483,7 @@ mod impact_tests {
                 [],
             )
             .unwrap();
-        let stale = history(&empty_conn, None, 5).unwrap();
+        let stale = history(&empty_conn, None, 5, None).unwrap();
         assert!(stale.history_starts_now, "revisions without deltas");
         assert!(stale.revisions.is_empty());
     }
@@ -1368,7 +1512,7 @@ mod impact_tests {
         )
         .unwrap();
 
-        let r = onion(&conn, Some("function:f|calls|g"), 2).unwrap();
+        let r = onion(&conn, Some("function:f|calls|g"), 2, None).unwrap();
         assert_eq!(r.channels.len(), 1, "one channel: {:?}", r.channels);
         let ch = &r.channels[0];
         assert_eq!(ch.now, 2, "the live store has two f -> g edges");
@@ -1385,7 +1529,7 @@ mod impact_tests {
         assert_eq!(ch.summary, "1 -> 2 (count_changed @2)");
 
         // A quiet channel is not listed: onion skin is movement, not inventory.
-        let quiet = onion(&conn, Some("no_such_symbol"), 2).unwrap();
+        let quiet = onion(&conn, Some("no_such_symbol"), 2, None).unwrap();
         assert!(quiet.channels.is_empty(), "{:?}", quiet.channels);
     }
 

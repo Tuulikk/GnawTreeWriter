@@ -194,7 +194,7 @@ pub fn installed_models(project_root: &std::path::Path) -> Vec<InstalledModel> {
             });
         }
     }
-    out.sort_by(|a, b| b.megabytes.cmp(&a.megabytes));
+    out.sort_by_key(|m| std::cmp::Reverse(m.megabytes));
     out
 }
 
