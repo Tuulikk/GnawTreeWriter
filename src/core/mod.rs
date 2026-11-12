@@ -500,10 +500,18 @@ impl GnawTreeWriter {
 
         let backup_path = backup_dir.join(&backup_name);
 
+        // v2 (2026-11-12): the AST is deliberately NOT stored.
+        //
+        // It is derivable by parsing `source_code`, and it measured 15.31 of
+        // 15.45 GiB (99.1%) of every backup ever written here — a frozen claim
+        // about what a PAST parser said, read by TODAY's extractor. Readers
+        // only ever used `source_code` (`undo_redo.rs:953`, `backup.rs:93/169`),
+        // so v1 blobs (with "tree") remain readable byte for byte.
+        // Measured and argued in docs/BACKUP_STORAGE_AND_TIME_TRAVEL.md.
         let backup_data = serde_json::json!({
+            "format": "gtw-backup-v2",
             "file_path": self.file_path,
             "timestamp": Utc::now().to_rfc3339(),
-            "tree": &self.tree,
             "source_code": self.source_code
         });
 
@@ -2338,6 +2346,54 @@ mod tests {
             result.is_ok(),
             "lone operator change must not block: {:?}",
             result.err()
+        );
+    }
+
+    /// Steg 1 i docs/BACKUP_STORAGE_AND_TIME_TRAVEL.md: AST:n mätte 99,1 % av
+    /// varje backup och lästes aldrig. v2 lagrar bara källan — och måste
+    /// fortsätta vara läsbar för undo, som bara läser `source_code`.
+    #[test]
+    fn new_backups_store_source_only_and_stay_readable() {
+        let before = "fn f() -> i32 {\n    1\n}\n";
+        let (dir, path) = temp_rust_file(before);
+        // Hermetic: a stray `.gnawtreewriter_session.json` in a shared parent
+        // (`/tmp` had one, 2026-11-12) makes find_project_root capture the
+        // tempdir's backups there. The `.git` marker pins the root — AGENTS #6.
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let mut gtw = GnawTreeWriter::new(&path).unwrap();
+        gtw.edit(
+            EditOperation::Edit {
+                node_path: "@fn:f".to_string(),
+                content: "fn f() -> i32 {\n    2\n}\n".to_string(),
+            },
+            false,
+        )
+        .unwrap();
+
+        let backup_dir = dir.path().join(".gnawtreewriter_backups");
+        let mut entries: Vec<_> = std::fs::read_dir(&backup_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .collect();
+        entries.sort();
+        assert_eq!(entries.len(), 1, "en skrivning = en backup");
+
+        let raw = std::fs::read_to_string(&entries[0]).unwrap();
+        assert!(
+            !raw.contains("\"tree\""),
+            "v2 får inte serialisera AST:n: {raw}"
+        );
+        assert!(raw.contains("\"format\": \"gtw-backup-v2\""));
+
+        // Läsarvägen som undo faktiskt använder: blobben ska hasha till
+        // innehållet FÖRE redigeringen, inte efter.
+        let parsed = crate::core::backup::parse_backup_file(&entries[0]).unwrap();
+        let expected = crate::core::calculate_content_hash(before);
+        assert_eq!(
+            parsed.content_hash.as_deref(),
+            Some(expected.as_str()),
+            "before-blobben ska bära innehållet före redigeringen"
         );
     }
 

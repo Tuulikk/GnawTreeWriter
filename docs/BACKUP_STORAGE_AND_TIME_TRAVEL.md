@@ -160,4 +160,74 @@ lucka: de ändrar inget innehåll.
 **Delta-lagring: nej, inte nu.** Med 31× kompression och `tree` borta är vi på
 tiotalet MiB; delta köper lite och gör återställningen känsligare.
 
+---
+
+## 7. Steg 1 genomfört och mätt (2026-11-12)
+
+**Ändringen:** ett fält bort i `create_backup` + en formatmarkör:
+
+```rust
+let backup_data = serde_json::json!({
+    "format": "gtw-backup-v2",          // v1 = med "tree"
+    "file_path": self.file_path,
+    "timestamp": Utc::now().to_rfc3339(),
+    "source_code": self.source_code
+});
+```
+
+### Mätt på samma fil, samma ändring
+
+`src/cli.rs` kopierad till en temp-katalog (292 719 B), `quick-insert` en rad:
+
+| Binär | Backup | Mot filen |
+|---|---|---|
+| gammal (v1, med `tree`) | **49 002 423 B** (46,7 MiB) | **167×** |
+| ny (v2, utan `tree`) | **304 735 B** (297 KiB) | **1,04×** |
+| | **160,8× mindre** | |
+
+### Förväntad lagring efter migration
+
+| Underlag | Projektion för de 980 |
+|---|---|
+| källkodens andel av 15,45 GiB (0,9 %, mätt) | **~139 MiB** |
+| värsta filens ratio (161×) | ~98 MiB |
+| därefter zstd (25× på `source_code`) | **~5–6 MiB** |
+
+Alltså: **15,45 GiB → ~139 MiB av ändringen**, ~5–6 MiB efter komprimering.
+Målet `< 150 MiB` i §3 är nått redan utan kompression.
+
+### Kompatibilitet, bevisad i båda riktningarna
+
+Ny binär, två backuper (en v1 från gammal binär, en v2 från ny), sedan
+`undo --steps 2` i **ett** anrop:
+
+1. steg 1 läste **v2**-blobben (utan `tree`) ✓
+2. steg 2 läste **v1**-blobben (med `tree`) ✓
+3. resultat: `cmp` mot orörd kopia = **identisk** ✓
+
+Enhetstest: `new_backups_store_source_only_and_stay_readable` (v2 saknar `tree`,
+bär `format`, och hashar till innehållet *före* redigeringen).
+
+### Två fynd på vägen (båda före denna ändring)
+
+1. **`undo` är processlokalt.** `UndoRedoManager::new` bygger `undo_stack` ur
+   transaktionsloggen vid varje start (`undo_redo.rs:32-57`) och det finns ingen
+   persistad "redan ångrad"-markör. Följd: `undo --steps 2` fungerar, men två
+   separata `undo`-anrop ångrar **samma** transaktion två gånger. Verifierat med
+   **både** gammal och ny binär — inte orsakat av denna ändring. Det slår direkt
+   mot premissen "kunna återvända pålitligt", så det står överst på listan.
+2. **Hermeticitet:** `/tmp/.gnawtreewriter_session.json` (från en tidigare
+   ad-hoc-körning) gör att `find_project_root` kapar temp-katalogers backuper
+   till `/tmp`. Testet pinnar därför roten med en `.git`-markör (AGENTS #6).
+   Samma klass som "172 backuper i `Gnaw-Software/`" (2026-10-28).
+
+### Kvar (oförändrat)
+
+- **Gamla 980 backuper är orörda.** Ingen migration, ingen radering.
+- **Lucka 1 kvarstår:** nyaste tillståndet per fil finns inte som blob. Det är
+  förutsättningen för onion skin + destruktiva experiment och ligger kvar som
+  åtgärdspunkt.
+- Komprimering, content-addressing, migration, `--at`: inte påbörjat.
+
+
 

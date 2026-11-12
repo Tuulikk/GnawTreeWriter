@@ -1,5 +1,37 @@
 ## [Unreleased]
 
+### Changed — backuper lagrar inte längre AST:n (`gtw-backup-v2`)
+
+AST:n var **99,1 % av all backup-lagring** (15,31 av 15,45 GiB över 980 blobbar,
+mätt) och lästes **ingenstans**: `undo` och `restore` läser bara `source_code`
+(`undo_redo.rs:953`, `backup.rs:93/169`). Att serialisera den var dessutom en
+fryst påstående om vad en *dåtidig* parser sa, medan extraktorn som läser den är
+dagens.
+
+Samma fil (292 719 B), samma ändring:
+
+```
+v1 (med "tree")   49 002 423 B   (167× filen)
+v2 (utan "tree")     304 735 B   (1,04×)      → 160,8× mindre
+```
+
+Projektion för de befintliga 980 blobborna: **~139 MiB** i stället för 15,45 GiB
+(och ~5–6 MiB efter zstd i ett senare steg). Gamla blobbar är **orörda** och
+fortsatt läsbara — bevisat genom att `undo --steps 2` med ny binär återställde
+byte-identiskt via en v2-blob **och** en v1-blob.
+
+Nya blobbar bär `"format": "gtw-backup-v2"`; v1 saknar fältet och har `"tree"`.
+Migration av de gamla, komprimering, content-addressing och `--at` är **inte**
+gjorda: se `docs/BACKUP_STORAGE_AND_TIME_TRAVEL.md`.
+
+### Fynd på vägen — `undo` är processlokalt (fanns före)
+
+Två separata `undo`-anrop ångrar **samma** transaktion; `undo --steps N` i ett
+anrop fungerar. `UndoRedoManager::new` bygger stacken ur loggen vid varje start
+och det finns ingen persistad "redan ångrad"-markör (`undo_redo.rs:32-57`).
+Verifierat med både gammal och ny binär. Det slår mot premissen för onion skin
+och destruktiva experiment — åtgärdas separat, spårat i `uppslag.md`.
+
 ### Added — fil-nivå: `--file-graph` och `--cycles --by-file`
 
 Kopplingar **mellan filer** utan att lägga in en enda ny nod. Varje

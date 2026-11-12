@@ -3327,11 +3327,7 @@ or list_nodes for a flat index of this file.",
                                         .to_string(),
                                 );
                             };
-                            match crate::core::code_graph::touches_symbol(
-                                &conn,
-                                sym,
-                                prefix,
-                            ) {
+                            match crate::core::code_graph::touches_symbol(&conn, sym, prefix) {
                                 Ok(t) => json!({
                                     "mode": "query", "kind": "touches",
                                     "outgoing": t.outgoing.len(), "incoming": t.incoming.len(),
