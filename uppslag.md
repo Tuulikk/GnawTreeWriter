@@ -206,6 +206,38 @@ stabil. Citera det som *inte* rör sig när filen checkas in.
 
 ---
 
+## 2026-11-12 — En fix som aldrig parsar om syns inte  ✅ ÅTGÄRDAT
+
+**Fyndet:** inline-modul-fixen (entiteter inuti `pub mod x { ... }`) såg
+verkningslös ut: `src/mcp/mod.rs` hade fortfarande **1** entitet efter
+`commit-build`. Orsaken var inte fixen utan **refresh**: den är inkrementell och
+filen hade inte ändrats, så den parsades aldrig om. `EXTRACTOR_VERSION` är den
+enda mekanismen som tvingar fram en full omläsning — den bumpades 3 → 4.
+
+**Mätt efter riktig omindexering:**
+
+| | före | efter |
+|---|---|---|
+| `src/mcp/mod.rs` entiteter | 1 | **102** |
+| entiteter totalt | 2 882 | **3 412** |
+| matchad källidentitet | 16 686 | **22 526** (+5 840) |
+| `function_scope_unmatched` | 6 773 | **1 331** (−80 %) |
+| `calls` upplösta | 2 237 | **2 727** |
+| `calls` lokal upplösning | 39 % | **43 %** |
+
+**Läxan:** en extraktionsfix utan versionsbump är oskiljbar från ingen fix alls.
+Vid varje ändring av vad extraktionen *producerar*: bumpa `EXTRACTOR_VERSION`
+och kör en full refresh innan du mäter. Motsatsen — att mäta direkt efter
+`commit-build` — gav först +690 matchningar och såg ut som en marginell vinst.
+
+**Kvar att klassa (nästa steg):** 1 826 omatchade källor, dominerade av
+`gtw:{fil}:file:{stam}`. En fil är ingen symbol, så de ska **klassas om som
+"by design"** (som `synthetic_callsite`) — inte få påhittade fil-entiteter för
+att siffran ska se bättre ut. Därefter: sampla de kvarvarande `:function:`-id:na
+(1 331) och hitta nästa riktiga klass.
+
+---
+
 ## 2026-11-11 — Fantomstore: en vektorstore i fel katalog  ✅ ÅTGÄRDAT
 
 **Fyndet:** `.gnawtreewriter_ai/embeddings.db` (0 byte, skapad 21:35) låg bredvid den
