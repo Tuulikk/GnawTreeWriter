@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 3e1b8bb39c88d8d74f379ca42a65d01f
+> Body-hash: 7ea5aa95c5384f1bc7165389451c3b9f
 
 ## Träd
 
@@ -110,13 +110,13 @@ src/core/
   gnaw_refactor.rs (369 rader)
   guardian.rs (332 rader)
   healer.rs (297 rader)
-  index_entities.rs (1011 rader)
+  index_entities.rs (1118 rader)
   index_levels.rs (312 rader)
   index_relations.rs (839 rader)
   inspect.rs (514 rader)
   label_manager.rs (90 rader)
   macro_dispatcher.rs (249 rader)
-  mod.rs (2354 rader)
+  mod.rs (2438 rader)
   pack.rs (749 rader)
   parse_cache.rs (119 rader)
   project_root.rs (186 rader)
@@ -1104,7 +1104,7 @@ _(inga toppnivå-items)_
   - `fn heal_brace_languages(&self, code: &str, _error: &SyntaxError) -> Option<HealingAction>` :156
   - `fn heal_python(&self, code: &str, error: &SyntaxError) -> Option<HealingAction>` :280
 
-### index_entities.rs (1011 rader)
+### index_entities.rs (1118 rader)
 - `pub struct Entity` :13
 - `pub struct EntityIndex` :42
 - `pub fn index_entities(file_path: &str, include_private: bool) -> Result<EntityIndex>` :56
@@ -1116,19 +1116,20 @@ _(inga toppnivå-items)_
 - `pub fn canonical_entity_path(file_path: &str) -> String` :134
 - `fn disambiguate_ids(entities: &mut [Entity])` :159
 - `fn collect_entities(` :179
-- `fn get_node_source(node: &TreeNode, lines: &[&str]) -> String` :296
-- `fn get_first_line(node: &TreeNode, lines: &[&str]) -> String` :302
-- `fn detect_visibility(node: &TreeNode) -> String` :311
-- `fn extract_doc_comment(node: &TreeNode, lines: &[&str]) -> Option<String>` :343
-- `fn extract_function(` :368
-- `fn extract_struct(` :410
-- `fn extract_enum(` :487
-- `fn extract_impl(` :562
-- `fn extract_trait(` :633
-- `fn extract_type_alias(` :688
-- `fn extract_const(` :719
-- `fn extract_static(` :749
-- `fn extract_module(` :779
+- `fn collect_from(` :200
+- `fn get_node_source(node: &TreeNode, lines: &[&str]) -> String` :335
+- `fn get_first_line(node: &TreeNode, lines: &[&str]) -> String` :341
+- `fn detect_visibility(node: &TreeNode) -> String` :350
+- `fn extract_doc_comment(node: &TreeNode, lines: &[&str]) -> Option<String>` :382
+- `fn extract_function(` :407
+- `fn extract_struct(` :449
+- `fn extract_enum(` :526
+- `fn extract_impl(` :601
+- `fn extract_trait(` :672
+- `fn extract_type_alias(` :727
+- `fn extract_const(` :758
+- `fn extract_static(` :788
+- `fn extract_module(` :818
 
 ### index_levels.rs (312 rader)
 - `pub struct LevelStatus` :26
@@ -1209,52 +1210,53 @@ _(inga toppnivå-items)_
 - `pub fn is_token_tree(node: &TreeNode) -> bool` :147
 - `pub fn try_expand_macro(` :152
 
-### mod.rs (2354 rader)
+### mod.rs (2438 rader)
 - `pub struct GnawTreeWriter` :73
 - `pub enum EditOperation` :96
 - `pub struct EditReceipt` :120
 - `pub(crate) fn skeleton_outline(` :143
 - `pub(crate) fn detect_replacement_remnant(` :223
 - `pub(crate) fn check_duplicate_attribute_above(` :292
-- `impl GnawTreeWriter` :329
-  - `pub fn new(file_path: &str) -> Result<Self>` :330
-  - `pub fn new_with_boundary(file_path: &str, boundary: Option<&Path>) -> Result<Self>` :340
-  - `pub fn new_lenient(file_path: &str) -> Result<(Self, Option<crate::parser::SyntaxError>)>` :372
-  - `pub fn new_lenient_with_boundary(` :379
-  - `pub fn last_backup_path(&self) -> Option<PathBuf>` :412
-  - `pub fn last_transaction_id(&self) -> Option<String>` :418
-  - `pub fn last_edit_receipt(&self) -> Option<&EditReceipt>` :425
-  - `pub fn last_edit_verdict(&self) -> Option<&serde_json::Value>` :433
-  - `fn set_verdict(` :437
-  - `pub fn last_edit_impact(&self) -> Option<&serde_json::Value>` :455
-  - `pub(crate) fn create_backup(&mut self) -> Result<PathBuf>` :459
-  - `pub fn analyze(&self) -> &TreeNode` :493
-  - `pub fn show_node(&self, node_path: &str) -> Result<String>` :497
-  - `pub fn node_count(&self) -> usize` :510
-  - `pub fn node_exists(&self, node_path: &str) -> bool` :519
-  - `pub fn expect_node(` :530
-  - `pub fn edit(&mut self, operation: EditOperation, force: bool) -> Result<()>` :572
-  - `fn is_json_document(&self) -> bool` :1003
-  - `pub fn preview_edit(&self, operation: EditOperation) -> Result<String>` :1011
-  - `fn resolve_path<'a>(&'a self, query: &str) -> Option<&'a TreeNode>` :1055
-  - `fn find_node_by_path<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :1071
-  - `fn find_node_by_name<'a>(` :1086
-  - `fn doc_block_start_line(&self, node: &TreeNode) -> usize` :1138
-  - `pub fn describe_node(&self, query: &str) -> Option<(String, String, Option<String>)>` :1160
-  - `fn json_semantic_edit(&self, node_path: &str, new_content: &str) -> Result<String>` :1181
-  - `fn json_new_value(content: &str, allow_string: bool) -> Option<serde_json::Value>` :1284
-  - `fn json_content_error(content: &str, target: &str) -> anyhow::Error` :1294
-  - `fn json_render(v: &serde_json::Value) -> String` :1306
-  - `fn join_preserving_newline<S: AsRef<str>>(lines: &[S], source: &str) -> String` :1321
-  - `fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String>` :1340
-  - `fn insert_node_at_path(` :1451
-  - `fn delete_node_at_path(&self, node_path: &str) -> Result<String>` :1572
-  - `pub fn get_source(&self) -> &str` :1603
-- `pub fn find_project_root(start_path: &Path) -> PathBuf` :1610
-- `pub fn find_project_root_in(start_path: &Path, boundary: Option<&Path>) -> PathBuf` :1623
-- `fn count_changed_bytes(before: &str, after: &str) -> usize` :1661
-- `pub(crate) fn verdict_json(` :1673
-- `pub(crate) fn signature_impact_for(` :1692
+- `fn flatten_comment_children(node: &mut TreeNode)` :344
+- `impl GnawTreeWriter` :354
+  - `pub fn new(file_path: &str) -> Result<Self>` :355
+  - `pub fn new_with_boundary(file_path: &str, boundary: Option<&Path>) -> Result<Self>` :365
+  - `pub fn new_lenient(file_path: &str) -> Result<(Self, Option<crate::parser::SyntaxError>)>` :398
+  - `pub fn new_lenient_with_boundary(` :405
+  - `pub fn last_backup_path(&self) -> Option<PathBuf>` :439
+  - `pub fn last_transaction_id(&self) -> Option<String>` :445
+  - `pub fn last_edit_receipt(&self) -> Option<&EditReceipt>` :452
+  - `pub fn last_edit_verdict(&self) -> Option<&serde_json::Value>` :460
+  - `fn set_verdict(` :464
+  - `pub fn last_edit_impact(&self) -> Option<&serde_json::Value>` :482
+  - `pub(crate) fn create_backup(&mut self) -> Result<PathBuf>` :486
+  - `pub fn analyze(&self) -> &TreeNode` :520
+  - `pub fn show_node(&self, node_path: &str) -> Result<String>` :524
+  - `pub fn node_count(&self) -> usize` :537
+  - `pub fn node_exists(&self, node_path: &str) -> bool` :546
+  - `pub fn expect_node(` :557
+  - `pub fn edit(&mut self, operation: EditOperation, force: bool) -> Result<()>` :599
+  - `fn is_json_document(&self) -> bool` :1031
+  - `pub fn preview_edit(&self, operation: EditOperation) -> Result<String>` :1039
+  - `fn resolve_path<'a>(&'a self, query: &str) -> Option<&'a TreeNode>` :1083
+  - `fn find_node_by_path<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :1099
+  - `fn find_node_by_name<'a>(` :1114
+  - `fn doc_block_start_line(&self, node: &TreeNode) -> usize` :1166
+  - `pub fn describe_node(&self, query: &str) -> Option<(String, String, Option<String>)>` :1188
+  - `fn json_semantic_edit(&self, node_path: &str, new_content: &str) -> Result<String>` :1209
+  - `fn json_new_value(content: &str, allow_string: bool) -> Option<serde_json::Value>` :1312
+  - `fn json_content_error(content: &str, target: &str) -> anyhow::Error` :1322
+  - `fn json_render(v: &serde_json::Value) -> String` :1334
+  - `fn join_preserving_newline<S: AsRef<str>>(lines: &[S], source: &str) -> String` :1349
+  - `fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String>` :1368
+  - `fn insert_node_at_path(` :1479
+  - `fn delete_node_at_path(&self, node_path: &str) -> Result<String>` :1600
+  - `pub fn get_source(&self) -> &str` :1631
+- `pub fn find_project_root(start_path: &Path) -> PathBuf` :1638
+- `pub fn find_project_root_in(start_path: &Path, boundary: Option<&Path>) -> PathBuf` :1651
+- `fn count_changed_bytes(before: &str, after: &str) -> usize` :1689
+- `pub(crate) fn verdict_json(` :1701
+- `pub(crate) fn signature_impact_for(` :1720
 
 ### pack.rs (749 rader)
 - `pub enum PackFormat` :15
