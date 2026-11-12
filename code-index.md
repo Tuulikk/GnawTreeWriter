@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 15adb09c3f0c00418e67b9dc75471d92
+> Body-hash: 5ab3b0b5d7e041a8bf336f00d48ef7f4
 
 ## Träd
 
@@ -148,7 +148,7 @@ src/llm/
   relational_index.rs (684 rader)
   semantic_index.rs (1458 rader)
 src/mcp/
-  mod.rs (4387 rader)
+  mod.rs (4451 rader)
 src/parser/
   bash.rs (84 rader)
   c.rs (84 rader)
@@ -1839,7 +1839,7 @@ _(inga toppnivå-items)_
 
 ## src/mcp/
 
-### mod.rs (4387 rader)
+### mod.rs (4451 rader)
 _(inga toppnivå-items)_
 
 ## src/parser/
