@@ -1066,7 +1066,14 @@ impl AiManager {
             // Retrieval embedder (default since recall@5=0 with the MLM
             // checkpoint): BAAI/bge-base-en-v1.5, CLS-pooled, 768-dim.
             let model_id = "BAAI/bge-base-en-v1.5";
-            let model_dir = self.get_model_path(&AiModel::Bge);
+            // Machine-wide install (2026-11-13): modellerna är stora och
+            // identiska mellan projekt — installera i GLOBAL-katalogen så att
+            // ALLA projekt (och Motor2/OpenCode) resolvar dem. Läsarna söker
+            // lokal→global (`roots()`), så en global post tjänar alla. Att
+            // målet var projekt-lokalt (via `model_cache_dir`) gjorde att
+            // `ai setup` i ett projekt lämnade alla andra utan embedder →
+            // `sense` degraderade till lexikal sökning.
+            let model_dir = self.global_cache_dir.join(AiModel::Bge.dir_name());
             if !model_dir.exists() {
                 fs::create_dir_all(&model_dir)?;
             }
@@ -1086,7 +1093,7 @@ impl AiManager {
             }
 
             let model_id = "answerdotai/ModernBERT-base";
-            let model_dir = self.get_model_path(&AiModel::ModernBert);
+            let model_dir = self.global_cache_dir.join(AiModel::ModernBert.dir_name());
             if !model_dir.exists() {
                 fs::create_dir_all(&model_dir)?;
             }
@@ -1113,7 +1120,7 @@ impl AiManager {
             let model_id = "LiquidAI/LFM2.5-1.2B-Instruct-GGUF";
             let gguf_file = "LFM2.5-1.2B-Instruct-QAD-Q4_0.gguf";
             let tok_id = "LiquidAI/LFM2.5-1.2B-Instruct";
-            let model_dir = self.get_model_path(&AiModel::Lfm25);
+            let model_dir = self.global_cache_dir.join(AiModel::Lfm25.dir_name());
             if !model_dir.exists() {
                 fs::create_dir_all(&model_dir)?;
             }

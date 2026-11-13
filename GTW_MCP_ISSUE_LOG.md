@@ -1957,4 +1957,14 @@ annan modells närvaro.
 ("Low confidence: 0.02 < 0.5"). Levande kanal, värdelös rankning — botas med
 `gnawtreewriter ai index`, inte med `ai setup`.
 
+**FIXAD (2026-11-13, Motor2-agent) — SKRIVSIDAN:** `ai setup` målade
+projekt-lokalt (`model_cache_dir`, allt-eller-inget via `get_model_path`) medan
+läsarna är per-modell (`roots()`: lokal→global, fixat 2026-11-11). Setup i ett
+projekt lämnade därmed alla ANDRA projekt (t.ex. Motor2) utan embedder →
+`sense` degraderade till lexikal. **Fix:** `AiManager::setup` installerar nu i
+**GLOBAL-katalogen** (`~/.gnawtreewriter_ai/models`) för Bge/ModernBert/Lfm25
+— en setup tjänar alla projekt. Bevis: `ai status` från ett annat projekt
+hittar `bge-base ✅ (global)`. (Läs-sidans allt-eller-inget var redan fixad
+2026-11-11; detta var skriv-sidans kvarvarande halva.)
+
 
