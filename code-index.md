@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: d80b7cc41c0912ca600896e1c8c7231b
+> Body-hash: 58080ba72aff26c384303b1e5ccf4ca8
 
 ## Träd
 
@@ -136,7 +136,7 @@ src/core/
   visualizer.rs (200 rader)
   visualizer_test.rs (82 rader)
 src/llm/
-  ai_manager.rs (1626 rader)
+  ai_manager.rs (1633 rader)
   batch.rs (96 rader)
   gnaw_sense.rs (977 rader)
   harmony.rs (364 rader)
@@ -1630,7 +1630,7 @@ _(inga toppnivå-items)_
 
 ## src/llm/
 
-### ai_manager.rs (1626 rader)
+### ai_manager.rs (1633 rader)
 - `pub enum ModelSource` :24
 - `impl ModelSource` :29
   - `pub fn as_str(self) -> &'static str` :30
@@ -1686,21 +1686,21 @@ _(inga toppnivå-items)_
   - `pub fn generate_lfm25(` :922
   - `pub async fn generate_semantic_report(&self, file_path: &str) -> Result<SemanticReport>` :996
   - `pub async fn setup(&self, _model: AiModel, _device: DeviceType, _force: bool) -> Result<()>` :1063
-  - `pub fn get_status(&self) -> Result<AiStatus>` :1146
-  - `fn get_model_path(&self, model: &AiModel) -> PathBuf` :1169
-- `fn sample_token(` :1184
-- `pub struct SemanticReport` :1235
-- `pub struct QualityFinding` :1242
-- `pub struct Source` :1253
-- `pub fn sources_from_evidence(evidence: &[(String, String)]) -> Vec<Source>` :1262
-- `impl SemanticReport` :1308
-  - `pub fn sources(&self) -> Vec<Source>` :1311
-- `pub struct AiStatus` :1330
-- `fn download_file(url: &str, dest: &std::path::Path) -> Result<()>` :1347
-- `fn timing_profile_path(cache_dir: &Path) -> PathBuf` :1360
-- `fn load_timing_profile(cache_dir: &Path) -> TimingProfile` :1366
-- `fn save_timing_profile(cache_dir: &Path, profile: &TimingProfile)` :1376
-- `fn measure_profile(` :1389
+  - `pub fn get_status(&self) -> Result<AiStatus>` :1153
+  - `fn get_model_path(&self, model: &AiModel) -> PathBuf` :1176
+- `fn sample_token(` :1191
+- `pub struct SemanticReport` :1242
+- `pub struct QualityFinding` :1249
+- `pub struct Source` :1260
+- `pub fn sources_from_evidence(evidence: &[(String, String)]) -> Vec<Source>` :1269
+- `impl SemanticReport` :1315
+  - `pub fn sources(&self) -> Vec<Source>` :1318
+- `pub struct AiStatus` :1337
+- `fn download_file(url: &str, dest: &std::path::Path) -> Result<()>` :1354
+- `fn timing_profile_path(cache_dir: &Path) -> PathBuf` :1367
+- `fn load_timing_profile(cache_dir: &Path) -> TimingProfile` :1373
+- `fn save_timing_profile(cache_dir: &Path, profile: &TimingProfile)` :1383
+- `fn measure_profile(` :1396
 
 ### batch.rs (96 rader)
 - `pub struct BatchOperation` :6
