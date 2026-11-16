@@ -318,6 +318,7 @@ pub(crate) fn check_duplicate_definitions(
     ) {
         let t = n.node_type.as_str();
         let is_def = !t.contains("impl")
+            && !t.contains("attribute") // #[derive(..)] m.fl. får repeteras fritt
             && (t.contains("function")
                 || t.contains("method")
                 || t.contains("struct")
@@ -2438,6 +2439,18 @@ mod tests {
         );
         check_duplicate_definitions(&original_tree, &modified_tree)
             .expect("legitima metoder i olika impls + rename ska släppa igenom");
+
+        // Attribut får repeteras fritt: två strukter med var sin
+        // #[derive(..)] är laglig Rust (falsk-positiv från full-svit-ronden
+        // 2026-11-16: attribute_item derive ×2 nekades felaktigt).
+        let with_attrs = parse_tree(
+            "#[derive(Clone)]\npub struct A { x: u8 }\n\n#[derive(Clone)]\npub struct B { y: u8 }\n",
+        );
+        let with_attrs_after_edit = parse_tree(
+            "#[derive(Clone)]\npub struct A { x: u8 }\n\n#[derive(Clone, Debug)]\npub struct B { y: u8 }\n",
+        );
+        check_duplicate_definitions(&with_attrs, &with_attrs_after_edit)
+            .expect("upprepade attribut ska släppa igenom");
     }
 
     /// Fas 3: a successful edit produces a receipt proving bytes landed
