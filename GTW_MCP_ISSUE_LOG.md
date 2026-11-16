@@ -1967,4 +1967,33 @@ projekt lämnade därmed alla ANDRA projekt (t.ex. Motor2) utan embedder →
 hittar `bge-base ✅ (global)`. (Läs-sidans allt-eller-inget var redan fixad
 2026-11-11; detta var skriv-sidans kvarvarande halva.)
 
+---
+
+## 2026-11-16 — edit_node remnant: HELT gammalt funktionsorgan kvar bredvid nytt (Motor2-agent)
+
+**Klass:** bugg — partiell ersättning (kvar från GTW_RAPPORT 2026-11-01 (c); tredje beviset).
+
+**Vad:** `edit_node` på `parse_items` i `crates/motor2-session/src/roadmap.rs`
+(Motor2-repot) — nod-path verifierad med `read_node` FÖRE editen, innehåll
+exakt. Diffen efter editen visade den nya funktionen korrekt insatt, men den
+GAMLA funktionskroppen låg kvar — limmad på den nya avslutande klammern:
+`}pub fn parse_items(content: &str) -> Vec<RoadmapItem> {` följt av hela den
+gamla kroppen (45 rader) → dubbel funktionsdefinition, kompilerar inte.
+
+**Varför det är farligt:** diffen SÅG ut som en ren ersättning i sin översta
+del — remnanten syns bara som extra rader längre ner. En agent som litar på
+"Node edited" utan att läsa HELA diffen (§28: läs regionen efter varje
+strukturell edit) får en trasig fil. Remnant-klassen ger ingen felkod från
+edit_node.
+
+**Åtgärd på Motor2-sidan:** remnanten raderad via exakt textmatch
+(edit-verktyget), därefter `cargo test` grön (8/8 roadmap-tester). Övriga 8
+edits i samma fil via edit-verktyget (omväg enl. AGENTS §35.2 — ett
+GTW-försök gjordes först).
+
+**Önskad fix (inköpslistan):** edit_node ska efter skrivning verifiera att
+nodens gamla innehåll inte finns kvar i filen (remnant-detektion), eller
+åtminstone rapportera nod-räkning före/efter (`node_count_before/after`) i
+edit-svaret — en replace som ÖKAR nod-antalet är ett remnant-alarm.
+
 
