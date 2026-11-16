@@ -1973,12 +1973,38 @@ hittar `bge-base ✅ (global)`. (Läs-sidans allt-eller-inget var redan fixad
 
 **Klass:** bugg — partiell ersättning (kvar från GTW_RAPPORT 2026-11-01 (c); tredje beviset).
 
+**ROT-ORSAKEN (lokaliseras samma dag, se uppdateringen i slutet):** B2-vakten
+(`detect_replacement_remnant`, src/core/mod.rs:229) exkluderar rader utanför
+nodens span (`outside_original`, rad 243–249) för att skilja remnanter från
+annan kod. I detta fall var nod-span:en DEGENERERAD — då klassades den gamla
+funktionskroppen som "annan kod" och exkluderades från detektionen. **Vakten
+är blind exakt när span:en är fel, eftersom den ärvde samma trasiga indata
+som skrivaren** (skrivaren sydde remnanten med samma `node.end_line`).
+Skrivningen: `[rader före] + [nytt innehåll] + [rader efter node.end_line]`
+— med fel `end_line` blev "efter" = hela den gamla kroppen, limmad på nytt
+innehålls avslutande klammer (`}pub fn parse_items …`).
+
+**Varför de två tidigare fixarna inte täcker:** (1) B2 (78ca2df, v0.23.0)
+fångar partiell ersättning NÄR span:en är RÄTT; (2) E_PATH_STALE
+(expect_name/expect_kind) fångar fel NOD vid stale path. Denna tredje
+variant är fel SPAN på rätt nod — ingen av guardarna ser den. §17-formen:
+samma klass återkommer via ny mekanism (spans fel → både skriv- och
+detektions-sidan lurade).
+
+**Önskad fix (stänger klassen för gott, span-oberoende):** efter skrivning
+re-parsa filen och NEKA om samma item-namn nu finns TVÅ GÅNGER på toppnivå
+(duplicate-definition-check på AST-nivå). Det var dessutom den ursprungliga
+B2-signaturen från GTW_RAPPORT 2026-11-01 ("duplicate definitions
+downstream").
+
 **Vad:** `edit_node` på `parse_items` i `crates/motor2-session/src/roadmap.rs`
 (Motor2-repot) — nod-path verifierad med `read_node` FÖRE editen, innehåll
 exakt. Diffen efter editen visade den nya funktionen korrekt insatt, men den
 GAMLA funktionskroppen låg kvar — limmad på den nya avslutande klammern:
 `}pub fn parse_items(content: &str) -> Vec<RoadmapItem> {` följt av hela den
 gamla kroppen (45 rader) → dubbel funktionsdefinition, kompilerar inte.
+Körande binär 0.26.1 (10 nov) — INTE stale; B2 finns i bygget men träffades
+aldrig (se rot-orsaken ovan).
 
 **Varför det är farligt:** diffen SÅG ut som en ren ersättning i sin översta
 del — remnanten syns bara som extra rader längre ner. En agent som litar på
