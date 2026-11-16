@@ -284,6 +284,89 @@ pub(crate) fn detect_replacement_remnant(
     }
 }
 
+/// B2-HARDENING (2026-11-16, Motor2-agent — tredje remnant-varianten i
+/// GTW_MCP_ISSUE_LOG): span-oberoende duplicate-definition check. B2:s
+/// remnant-detektor klassificerar "remnant vs annan kod" med nodens EGNA
+/// span — ett degenererat span gör vaken blind exakt när den behövs
+/// (skrivaren ärvde samma felaktiga span och sydde tillbaka den gamla
+/// kroppen som syskon). Denna kontroll ignorerar span helt: räkna
+/// (förälder-path, node_type, namn) för definitions-noder i ORIGINAL och
+/// MODIFIERAD källa; ett antal som ÖKAT förbi 1 betyder att DENNA editen
+/// skapade en dubbel definition — högljudd nekande, inget skrivs.
+///
+/// Soundness (det som legitimt ska passera):
+/// - samma metodnamn i OLIKA impl-block (olika föräldrar → olika nycklar);
+/// - omtituleringar/renames (antalet oförändrat);
+/// - redan existerande dubbletter (ingen ökning).
+/// Impl-blocken själva är containrar och EXKLUDERAS ur nyckelmängden
+/// (delbara inherent impl-block är laglig Rust; metoderna under dem vaktas
+/// som egna defs).
+pub(crate) fn check_duplicate_definitions(
+    original_tree: &TreeNode,
+    modified_tree: &TreeNode,
+) -> Result<()> {
+    fn parent_of(path: &str) -> &str {
+        match path.rfind('.') {
+            Some(i) => &path[..i],
+            None => "",
+        }
+    }
+    fn collect(
+        n: &TreeNode,
+        out: &mut std::collections::HashMap<(String, String, String), usize>,
+    ) {
+        let t = n.node_type.as_str();
+        let is_def = !t.contains("impl")
+            && (t.contains("function")
+                || t.contains("method")
+                || t.contains("struct")
+                || t.contains("enum")
+                || t.contains("trait")
+                || t.contains("interface")
+                || t.contains("class")
+                || t.ends_with("_item")
+                || t.ends_with("_definition"));
+        if is_def {
+            if let Some(name) = n.get_name() {
+                if !name.is_empty() {
+                    *out
+                        .entry((parent_of(&n.path).to_string(), n.node_type.clone(), name))
+                        .or_insert(0) += 1;
+                }
+            }
+        }
+        for c in &n.children {
+            collect(c, out);
+        }
+    }
+
+    let mut original: std::collections::HashMap<(String, String, String), usize> =
+        std::collections::HashMap::new();
+    let mut modified: std::collections::HashMap<(String, String, String), usize> =
+        std::collections::HashMap::new();
+    collect(original_tree, &mut original);
+    collect(modified_tree, &mut modified);
+
+    let mut offenders: Vec<String> = Vec::new();
+    for (key, m_count) in &modified {
+        let o_count = original.get(key).copied().unwrap_or(0);
+        if *m_count > 1 && *m_count > o_count {
+            offenders.push(format!(
+                "{} {} {} ×{} (var {})",
+                key.0, key.1, key.2, m_count, o_count
+            ));
+        }
+    }
+    if !offenders.is_empty() {
+        offenders.sort();
+        anyhow::bail!(
+            "DUPLICATE DEFINITION detected after edit: this replacement created a second definition of the same item — {}. Nothing written — B2-hardening class (GTW_MCP_ISSUE_LOG 2026-11-16: the span-based remnant guard is blind when the node span is degenerate; this check is span-independent). Inspect with preview_edit and re-check the node path/span.",
+            offenders.join("; ")
+        );
+    }
+    Ok(())
+}
+
 /// E_DUPLICATE_ATTRIBUTE (dogfood finding 2026-11-10): when the lines
 /// directly above the target node are attributes (`#[...]`) and the
 /// replacement content re-includes the SAME attribute line, the write
@@ -1542,6 +1625,12 @@ impl GnawTreeWriter {
                 remnants[0]
             );
         }
+        // B2-HARDENING (GTW_MCP_ISSUE_LOG 2026-11-16): the span-based B2
+        // detector above is blind when the node span itself is degenerate —
+        // this sibling check is span-independent: re-parse the modified
+        // source and reject any duplicate definition THIS edit introduced.
+        let modified_tree = get_parser(Path::new(&self.file_path))?.parse(&modified)?;
+        check_duplicate_definitions(&self.tree, &modified_tree)?;
         Ok(modified)
     }
 
@@ -2313,6 +2402,41 @@ mod tests {
             detected.is_none(),
             "other code is not a remnant: {detected:?}"
         );
+    }
+
+    /// B2-HARDENING regression (2026-11-16, GTW_MCP_ISSUE_LOG): the
+    /// degenerate-span variant — the old body survives as a SIBLING (the
+    /// Motor2 incident signature: `}pub fn parse_items {` glued to the new
+    /// closing brace). The span-based remnant detector can't see it (its
+    /// classification excludes lines outside the broken span); the
+    /// span-independent duplicate check must.
+    #[test]
+    fn duplicate_definition_check_rejects_new_same_name_sibling() {
+        let original_tree =
+            parse_tree("pub fn alpha() -> u8 { 1 }\n\npub fn beta() -> u8 { 2 }\n");
+        let modified_tree = parse_tree(
+            "pub fn alpha() -> u8 { 9 }\n\npub fn alpha() -> u8 { 1 }\n\npub fn beta() -> u8 { 2 }\n",
+        );
+        let err = check_duplicate_definitions(&original_tree, &modified_tree)
+            .expect_err("dubbel definition ska nekas");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("DUPLICATE DEFINITION"), "{msg}");
+        assert!(msg.contains("alpha"), "{msg}");
+    }
+
+    /// Legitima fall ska PASSERA: samma metodnamn i olika impl-block är
+    /// laglig Rust (olika föräldrar), och en omtitulering skapar ingen
+    /// dubbel. (Detta är falsk-positiv-vakten för hårdningen.)
+    #[test]
+    fn duplicate_definition_check_allows_impl_siblings_and_renames() {
+        let original_tree = parse_tree(
+            "struct W { a: u16 }\nimpl W { fn run(&self) {} }\nimpl W { fn walk(&self) {} }\n",
+        );
+        let modified_tree = parse_tree(
+            "struct W { a: u16 }\nimpl W { fn sprint(&self) {} }\nimpl W { fn run(&self) {} }\n",
+        );
+        check_duplicate_definitions(&original_tree, &modified_tree)
+            .expect("legitima metoder i olika impls + rename ska släppa igenom");
     }
 
     /// Fas 3: a successful edit produces a receipt proving bytes landed
