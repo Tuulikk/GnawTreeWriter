@@ -298,6 +298,7 @@ pub(crate) fn detect_replacement_remnant(
 /// - samma metodnamn i OLIKA impl-block (olika föräldrar → olika nycklar);
 /// - omtituleringar/renames (antalet oförändrat);
 /// - redan existerande dubbletter (ingen ökning).
+///
 /// Impl-blocken själva är containrar och EXKLUDERAS ur nyckelmängden
 /// (delbara inherent impl-block är laglig Rust; metoderna under dem vaktas
 /// som egna defs).
