@@ -696,7 +696,7 @@ pub mod mcp_server {
                         "root": { "type": "string", "description": "Project root (default .)" },
                         "intro_file": { "type": "string", "description": "Optional intro splice file for refresh/check renders" },
                         "path_prefix": { "type": "string", "description": "query: only paths starting with this prefix" },
-                        "kind": { "type": "string", "description": "query payload: items (default) | relations (from/to_name/to_id/type) | symbols (unresolved+external names) | cycles (dependency cycles, rotation-deduped) | impact (what is affected by changing `symbol`; requires symbol) | touches (what `symbol` uses in OTHER files, with target file+line, plus who uses it; requires symbol) | file_graph (which files depend on which, by weight; path_prefix focuses both directions) | changed (files in the working-tree diff, each with its cross-file targets and users) | history (relation deltas per revision; `symbol` filters the relation key, `last` revisions) | onion (each edge's count across the last `last` revisions, ending at now — the past-to-present view)" },
+                        "kind": { "type": "string", "description": "query payload: items (default) | relations (from/to_name/to_id/type; capped at 5000 rows with honest matched/returned/truncated accounting — bulk dumps killed the stdio daemon, Motor2 2026-11-18) | symbols (unresolved+external names) | cycles (dependency cycles, rotation-deduped) | impact (what is affected by changing `symbol`; requires symbol) | touches (what `symbol` uses in OTHER files, with target file+line, plus who uses it; requires symbol) | file_graph (which files depend on which, by weight; path_prefix focuses both directions) | changed (files in the working-tree diff, each with its cross-file targets and users) | history (relation deltas per revision; `symbol` filters the relation key, `last` revisions) | onion (each edge's count across the last `last` revisions, ending at now — the past-to-present view)" },
                         "last": { "type": "integer", "description": "kind=history|onion: how many revisions/frames back (default 5 / 3)" },
                         "symbol": { "type": "string", "description": "kind=impact|touches: the DEFINING name to analyse (e.g. parse_file). A name in several files yields several seeds, all reported" },
                         "depth": { "type": "integer", "description": "kind=impact|cycles: hop bound (impact default 3, cycles default 64)" },
@@ -3414,10 +3414,30 @@ or list_nodes for a flat index of this file.",
                             })
                         }
                         "relations" => match code_index_db::load_relations(&conn, prefix) {
-                            Ok(rows) => json!({
-                                "mode": "query", "kind": "relations",
-                                "count": rows.len(), "relations": rows
-                            }),
+                            Ok(rows) => {
+                                // Motor2-incident 2026-11-18 (GTW_MCP_ISSUE_LOG):
+                                // a ~92k-row store pushed >16 MiB through stdio
+                                // and KILLED the daemon mid-session. A bulk dump
+                                // is not an answer — cap it and say so.
+                                const RELATIONS_RESPONSE_CAP: usize = 5_000;
+                                let matched = rows.len();
+                                let truncated = matched > RELATIONS_RESPONSE_CAP;
+                                let relations: Vec<_> =
+                                    rows.into_iter().take(RELATIONS_RESPONSE_CAP).collect();
+                                let returned = relations.len();
+                                json!({
+                                    "mode": "query", "kind": "relations",
+                                    "count": returned,
+                                    "matched": matched,
+                                    "returned": returned,
+                                    "result_cap": RELATIONS_RESPONSE_CAP,
+                                    "truncated": truncated,
+                                    "note": if truncated {
+                                        "relations capped — narrow with path_prefix, or query the SQLite store directly (gnawdriver db-surf filters server-side without the dump)"
+                                    } else { "" },
+                                    "relations": relations
+                                })
+                            }
                             Err(e) => tool_error(format!("code_index query failed: {e:#}")),
                         },
                         "symbols" => match code_index_db::load_symbols(&conn) {

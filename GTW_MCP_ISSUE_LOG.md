@@ -2106,6 +2106,16 @@ Båda historiska fixarna VERIFIERADE FUNGANDE i proben: T2 (2026-10-31:
    eller annan idx-översättning. Fix-idé: låt batch gå genom SAMMA
    placeringskärna; regressionstest med position len+1 på batch.
 
+   **KORRIGERING (samma dag, efter käll-läsning av llm/batch.rs:53):**
+   batch anropar `writer.edit(EditOperation::Insert {...})` — SAMMA kärna
+   som CLI:n. "Inte samma kärna" var fel. Divergensen ligger i hur
+   parent_path/position löses per sekventiell operation (tree:et muteras
+   mellan ops; probresultatet two,four,five på kroppstopp stämmer inte med
+   naiv index-räkning i någon riktning). Utredning med instrumentering
+   krävs; mekanismen är okänd, bytes-beviset står. Fix: instrumentera
+   batch-inserts (logga löst insert_pos per op) + regressionstest med
+   position len+1 på batch.
+
 **Omväg som användes:** de två tilläggen (fixture + test) via edit-
 verktyget förankrade på filens sista rader; nod-ersättningarna via batch
 (fungerar). `cargo fmt` normaliserar indentering.
