@@ -2,6 +2,7 @@ use crate::parser::{get_parser, TreeNode};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use std::collections::HashMap;
+pub mod binding_observations;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -312,10 +313,7 @@ pub(crate) fn check_duplicate_definitions(
             None => "",
         }
     }
-    fn collect(
-        n: &TreeNode,
-        out: &mut std::collections::HashMap<(String, String, String), usize>,
-    ) {
+    fn collect(n: &TreeNode, out: &mut std::collections::HashMap<(String, String, String), usize>) {
         let t = n.node_type.as_str();
         let is_def = !t.contains("impl")
             && !t.contains("attribute") // #[derive(..)] m.fl. får repeteras fritt
@@ -331,8 +329,7 @@ pub(crate) fn check_duplicate_definitions(
         if is_def {
             if let Some(name) = n.get_name() {
                 if !name.is_empty() {
-                    *out
-                        .entry((parent_of(&n.path).to_string(), n.node_type.clone(), name))
+                    *out.entry((parent_of(&n.path).to_string(), n.node_type.clone(), name))
                         .or_insert(0) += 1;
                 }
             }
@@ -2414,8 +2411,7 @@ mod tests {
     /// span-independent duplicate check must.
     #[test]
     fn duplicate_definition_check_rejects_new_same_name_sibling() {
-        let original_tree =
-            parse_tree("pub fn alpha() -> u8 { 1 }\n\npub fn beta() -> u8 { 2 }\n");
+        let original_tree = parse_tree("pub fn alpha() -> u8 { 1 }\n\npub fn beta() -> u8 { 2 }\n");
         let modified_tree = parse_tree(
             "pub fn alpha() -> u8 { 9 }\n\npub fn alpha() -> u8 { 1 }\n\npub fn beta() -> u8 { 2 }\n",
         );
