@@ -2022,4 +2022,43 @@ nodens gamla innehåll inte finns kvar i filen (remnant-detektion), eller
 åtminstone rapportera nod-räkning före/efter (`node_count_before/after`) i
 edit-svaret — en replace som ÖKAR nod-antalet är ett remnant-alarm.
 
+---
+
+## 2026-11-18 — code_index `kind=relations` bulk-dump dödade daemonen (16 MiB-stdio-gränsen)
+
+**Kontext:** utredning av Motor2-fynd ("create_goal finns i indexet men
+touches hittar inte anropare") via `execute` + Code Mode-katalogen.
+
+| # | Anrop | Parametrar | Resultat |
+|---|---|---|---|
+| 1 | `code_index` | `{mode:"query", root:<Motor2>, kind:"relations"}` | **`Connection closed: MCP server gnawtreewriter wrote more than 16 MiB to stdout without a message boundary`** — daemonen dog, `gnawtreewriter`-namespace borta för resten av sessionen (systemutvärderaren bekräftar: namespace får ej användas) |
+
+**Bedömning:** saknad funktion + härdningslucka. `kind=relations` har inget
+filter/limit — på ett projekt med ~92 000 relationsrader blir svaret en
+obegränsad dump genom stdio. Att frågan ens kan döda daemonen (och med den
+37 verktyg i en aktiv session) är klassen "högljutt fel" i sin värsta form:
+högljudd, men dödande.
+
+**Omväg som användes:** gnawdriver `db_surf` (filtrerar i daemonen — bara
+träffarna korsar MCP) mot `.gnawtreewriter_ai/code_index.db`, plus GTW-CLI
+(`code-index . --touches/--why`). Fungerade direkt; facit kunde mätas.
+
+**Önskad fix (inköpslistan):** relations-kind får `path_prefix`-/symbol-
+filter eller cursor + radtak/byte-tak med ärlig `truncated`-flagga — samma
+hjärtmedicin som gnawdriver-rapporten `docs/DB-SURF-GAPPS-RAPPORT-2026-
+11-18.md` (fynd 5) skriver ut för db_surf. Tills dess: dokumentera i
+verktygsbeskrivningen att relations-kind är för små projekt, stora frågor →
+db_surf/CLI.
+
+**Facit från samma utredning (till tråd #3 i uppslag.md):** create_goal-
+fallet är metoden-vakten, inte en bugg — entiteten är
+`SessionDatabase::create_goal` (id bär `::`), anropet `db.create_goal(...)`
+är receiver-typat, unik cross-file-kandidat → medvetet NULL (1 840-fabricerade-
+kanter-läxan). Anropsplatserna LIGGER i storen som ouppplösta rader
+(`to_name="create_goal"`, `to_id=NULL`) och som rader i `symbols`-tabellen.
+Förslag: `touches` får en `unresolved_incoming`-sektion (kandidat-användare
+med fil+rad, ärligt märkta) så att "hittar inte anropare" aldrig igen ser ut
+som "har inga anropare".
+
+
 

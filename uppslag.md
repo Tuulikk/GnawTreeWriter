@@ -13,7 +13,50 @@
 
 ---
 
-## 2026-11-11 — Policybrott: `git checkout` + `sed -i` på projektfiler  🟥 PROCESS
+## 2026-11-18 — Motor2-fynd 3: `create_goal` i indexet men `touches` hittar inga anropare  ⚠️ BELAGT (metoden-vakten — by design, men osynlig design)
+
+**Påståendet från Motor2-agenten:** grafen saknar `create_goal`:s konsumenter.
+
+**Facit (mätt i Motor2:s store med `db_surf` + grep):** anroparna FINNS i
+storen — 11 relationsrader `to_name="create_goal[_with_card]"`, varav 8 har
+`to_id=NULL` (cross-file: `motor2-server/sessions.rs:4103`,
+`motor2-chat/bridge/tests.rs:2824,2831,2885` m.fl.) och 3 är upplösta
+(same-file-vinster i `database.rs`). Orsaken till NULL:en är **metoden-
+vakten** i `resolve_relations`/`resolve_unresolved_in_db`: entiteten är
+`SessionDatabase::create_goal` (id:t bär `::` → metod), kandidatmängden för
+bare-name är unik cross-file → fall `(0,1)` → `is_method_entity_id` → NULL.
+Det är 1 840-fabricerade-kanter-läxan (clone/len/get) som arbetar som tänkt:
+`db.create_goal(...)` är receiver-typat och utan typinferens kan vi inte veta
+att `db`:s typ har den metoden.
+
+**Varför det ändå är ett fynd:** vakten är **tyst om sin kandidatmängd**.
+Anropsplatserna ligger synliga i `symbols`-tabellen (exakt de anropande
+filerna) och som råa relationsrader — men `touches` svarar tomma
+`incoming`, vilket för en konsument skiljs åt från "har inga anropare" enbart
+genom notens fina stil. Motor2-agenten drog rätt slutsats (tomma grafträffen
+är aldrig facit) men fick läsa sig till varför. Samma klass som uppslag-
+tråd 3: "vilka kanter löses inte och varför" — nu mätt på ett konkret namn.
+
+**Om det är fel:** om 8 NULL-rader faktiskt borde varit upplösta (de är
+unik-namnade metoder) är vaktens kandidatlogik trasig — men då had det även
+innehållit fabrikeringsfallet `len`; avvägningen står i `index_relations.rs`
+kommentaren. Facitkommandot: `db_surf relations WHERE to_name CONTAINS
+create_goal` på Motor2-storen.
+
+**Möjlig billig förbättring (ej byggd):** `touches_symbol` får en
+`unresolved_incoming`-sektion — rader `to_name = symbol AND to_id IS NULL
+AND r.file <> seed-fil`, ärligt märkta ("kandidatanvändning, ej bevisad
+kant"). Kandidatmängden är redan lagrad; konsumenten får "8 användare i 3 filer vi inte kan knyta" i stället för tyst
+tomhet. Risk: brus för
+std-metod-namn (len/clone) — tak + räkning som `history`-noten.
+
+**Sidohändelse samma session:** Code Mode-dump av `kind=relations`
+(samma store) sprängde 16 MiB-stdio-gränsen och dödade daemonen —
+loggad i `GTW_MCP_ISSUE_LOG.md` 2026-11-18 med omväg (gnawdriver
+`db_surf`, server-side filtrering).
+
+---
+
 
 **Vad som hände:** under bygget av `experiment`-kommandot blev `src/cli.rs`
 okompilerbar (klammerfel efter två insättningar). Jag "löste" det med
