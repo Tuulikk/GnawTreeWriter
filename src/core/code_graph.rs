@@ -485,10 +485,21 @@ pub struct Touches {
     pub kind: &'static str,
     pub outgoing: Vec<OutEdge>,
     pub incoming: Vec<InEdge>,
+    /// Stored uses whose target the resolver could NOT pin (`to_id IS NULL`:
+    /// method calls and ambiguous names — the same-file win means a remaining
+    /// NULL in another file is a REAL candidate use). Candidates, not proven
+    /// edges: shown so an empty `incoming` is never read as "no consumers"
+    /// (Motor2 fynd 3, 2026-11-18: create_goal had 8 such callers while
+    /// `touches` answered empty). Symbol mode only — a file-kind query cannot
+    /// attribute an unresolved target to any definition.
+    pub unresolved_incoming: Vec<InEdge>,
+    /// Candidate rows found before the cap (`unresolved_incoming.len()` may
+    /// be smaller — the cap keeps std-method noise from flooding the answer).
+    pub unresolved_incoming_total: usize,
     pub note: &'static str,
 }
 
-const TOUCHES_NOTE: &str = "Cross-file edges only. Outgoing = what the subject uses elsewhere (target file + symbol + definition line, plus the line here); incoming = who uses the subject. Unresolved targets cannot appear here, which is the same limit as --file-graph: run --coverage for that denominator.";
+const TOUCHES_NOTE: &str = "Cross-file edges only. Outgoing = what the subject uses elsewhere (target file + symbol + definition line, plus the line here); incoming = who uses the subject — resolved edges only. unresolved_incoming lists stored candidate uses whose target the resolver could not pin (method calls, ambiguous names; symbol mode only, capped at 50): candidates, not proven edges — run --coverage for the denominator.";
 
 /// Distinct cross-file uses of one file, optionally restricted to a scope.
 ///
@@ -542,6 +553,10 @@ pub fn touches_file(conn: &Connection, file: &str, scope: Option<&str>) -> Resul
         kind: "file",
         outgoing,
         incoming,
+        // An unresolved target names no definition, so a file-kind query cannot
+        // attribute it — symbol mode answers that question; this one stays honest.
+        unresolved_incoming: Vec::new(),
+        unresolved_incoming_total: 0,
         note: TOUCHES_NOTE,
     })
 }
@@ -549,6 +564,7 @@ pub fn touches_file(conn: &Connection, file: &str, scope: Option<&str>) -> Resul
 /// Cross-file uses of every entity that DEFINES `symbol` (methods included:
 /// their ids carry `Type::name`, so a bare name can yield several seeds).
 pub fn touches_symbol(conn: &Connection, symbol: &str, scope: Option<&str>) -> Result<Touches> {
+    const UNRESOLVED_INCOMING_CAP: usize = 50;
     let seeds = resolve_symbols(conn, symbol)?;
     let scope_str = scope.unwrap_or("");
     let mut outgoing = Vec::new();
@@ -601,11 +617,44 @@ pub fn touches_symbol(conn: &Connection, symbol: &str, scope: Option<&str>) -> R
         a.file == b.file && a.line == b.line && a.name == b.name && a.from_line == b.from_line
     });
     incoming.sort_by(|a, b| (&a.file, a.line).cmp(&(&b.file, b.line)));
+
+    // Candidate uses the store HOLDS but the resolver refused to pin (method
+    // calls, ambiguous names: `to_id IS NULL`). Same-file candidate rows are
+    // excluded — same-file candidates resolve, so a NULL there names a
+    // different symbol, not a missed caller. Motor2 fynd 3 (2026-11-18).
+    let bare_query = symbol.rsplit("::").next().unwrap_or(symbol);
+    let seed_files: std::collections::HashSet<&str> =
+        seeds.iter().map(|s| s.file.as_str()).collect();
+    let mut un_stmt = conn.prepare(
+        "SELECT r.file,
+                (SELECT name FROM entities WHERE id = r.from_id),
+                r.line, r.relation_type
+         FROM relations r
+         WHERE r.to_id IS NULL AND r.to_name = ?1
+           AND (?2 = '' OR r.file LIKE ?2 || '%')
+         ORDER BY r.file, r.line",
+    )?;
+    let mut unresolved: Vec<InEdge> = un_stmt
+        .query_map(params![bare_query, scope_str], |r| {
+            Ok(InEdge {
+                file: r.get(0)?,
+                from_symbol: r.get(1)?,
+                line: r.get(2)?,
+                relation_type: r.get(3)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    unresolved.retain(|e| !seed_files.contains(e.file.as_str()));
+    let unresolved_total = unresolved.len();
+    unresolved.truncate(UNRESOLVED_INCOMING_CAP);
+
     Ok(Touches {
         subject: symbol.to_string(),
         kind: "symbol",
         outgoing,
         incoming,
+        unresolved_incoming: unresolved,
+        unresolved_incoming_total: unresolved_total,
         note: TOUCHES_NOTE,
     })
 }
@@ -1330,6 +1379,10 @@ mod impact_tests {
         // and never a fabricated edge.
         let none = touches_symbol(&conn, "does_not_exist", None).unwrap();
         assert!(none.outgoing.is_empty() && none.incoming.is_empty());
+        assert!(
+            none.unresolved_incoming.is_empty(),
+            "a name nothing defines and nothing calls is truly empty"
+        );
     }
 
     #[test]
@@ -1541,5 +1594,63 @@ mod impact_tests {
         assert_eq!(groups[0], vec!["a.rs".to_string(), "b.rs".to_string()]);
         // c.rs is reachable from b.rs but cannot get back: not a cycle.
         assert!(!groups[0].iter().any(|f| f == "c.rs"));
+    }
+
+    /// The Motor2 fynd 3 shape: a METHOD definition (id carries `Type::name`)
+    /// and callers the resolver cannot pin from a bare receiver — rows stay
+    /// `to_id = NULL` BY DESIGN. This fixture is what `unresolved_incoming`
+    /// exists to report.
+    fn method_store() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::core::code_index_db::migrate_connection(&conn).unwrap();
+        conn.execute_batch(
+            r#"
+            INSERT INTO entities(id, file, kind, name, line, node_path) VALUES
+              ('gtw:db.rs:function:SessionDatabase::create_goal', 'db.rs', 'function', 'create_goal', 1, '1'),
+              ('gtw:db.rs:function:SessionDatabase::create_goal_with_card', 'db.rs', 'function', 'create_goal_with_card', 2, '2'),
+              ('gtw:db.rs:function:other_helper', 'db.rs', 'function', 'other_helper', 3, '3'),
+              ('gtw:app.rs:function:handler', 'app.rs', 'function', 'handler', 1, '1');
+            INSERT INTO relations(from_id, to_name, to_id, relation_type, line, file) VALUES
+              ('gtw:db.rs:function:SessionDatabase::create_goal', 'create_goal_with_card', 'gtw:db.rs:function:SessionDatabase::create_goal_with_card', 'calls', 2, 'db.rs'),
+              ('gtw:app.rs:function:handler', 'create_goal', NULL, 'calls', 7, 'app.rs'),
+              ('gtw:db.rs:function:other_helper', 'create_goal', NULL, 'calls', 9, 'db.rs');
+            "#,
+        )
+        .unwrap();
+        conn
+    }
+
+    /// An empty `incoming` must never be readable as "no consumers": the
+    /// candidate uses the resolver refused to pin are reported as
+    /// `unresolved_incoming`, capped and honest.
+    #[test]
+    fn unresolved_incoming_reports_candidates_instead_of_silence() {
+        let conn = method_store();
+        let t = touches_symbol(&conn, "create_goal", None).unwrap();
+        assert!(
+            t.incoming.is_empty(),
+            "cross-file method targets stay unresolved: {:?}",
+            t.incoming
+        );
+        assert_eq!(
+            t.unresolved_incoming.len(),
+            1,
+            "{:?}",
+            t.unresolved_incoming
+        );
+        let cand = &t.unresolved_incoming[0];
+        assert_eq!(cand.file, "app.rs");
+        assert_eq!(cand.from_symbol.as_deref(), Some("handler"));
+        assert_eq!(cand.line, 7);
+        assert_eq!(t.unresolved_incoming_total, 1);
+
+        // Scope is the counterpart: restrict to the caller file, the candidate
+        // survives; the seed-file NULL row (other_helper) is never a candidate.
+        let scoped = touches_symbol(&conn, "create_goal", Some("app.rs")).unwrap();
+        assert_eq!(scoped.unresolved_incoming.len(), 1);
+        assert!(
+            t.unresolved_incoming.iter().all(|e| e.file != "db.rs"),
+            "same-file NULL rows name a different symbol, not a missed caller"
+        );
     }
 }

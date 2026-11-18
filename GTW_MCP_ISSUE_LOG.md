@@ -2060,5 +2060,64 @@ Förslag: `touches` får en `unresolved_incoming`-sektion (kandidat-användare
 med fil+rad, ärligt märkta) så att "hittar inte anropare" aldrig igen ser ut
 som "har inga anropare".
 
+---
+
+## 2026-11-18 (II) — RETRAKTADE + kvarvarande fynd: insert på CLI funkar som kodad (läs hela outputen!); batch-insert clampar inte
+
+**Förloppet (ärligt):** första prob:en grep:ade diffen (`grep -E "parent:|fn |X"`)
+och filtrade bort `mod m {`/`}` — position 2 som landade INUTI som första barn
+såg ut som "utanför". Det är exakt 2026-11-11-läxan (tre falska rapporter från
+ofullständig diff-läsning) upprepad av samma agent ett år senare. RETRATERAT:
+CLI-inserts in-range är INTE trasiga.
+
+**Vad som är sant (mätt på färsk 0.26.1, prob `mod m { a b c }`, parent 0):**
+
+| position | landar | varför (kärnan, mod.rs ~1689) |
+|---|---|---|
+| 0 | före öppnande klammer? (ej probad) | "first / after opening brace" |
+| 1 | efter SISTA barnet, inuti ✓ | "append / before closing brace" |
+| 2 | som FÖRSTA barnet, inuti ✓ | "after UI properties" (inga i Rust = första luckan) |
+| 3 | **före `mod m {`, dvs utanför** | `idx-3=0` → barn 0 = **unnamed** `mod`-token (start_line 1) |
+| 4 (len+1) | clampad inuti efter sista ✓ | fynd-2-clampen + varning på stderr |
+
+Båda historiska fixarna VERIFIERADE FUNGANDE i proben: T2 (2026-10-31:
+`idx-3` = före barnets start-gräns, aldrig inuti ett syskon) och fynd-2
+(2026-11-12: `>len` clampar inuti, testad av
+`insert_beyond_the_child_count_clamps_inside_the_parent`).
+
+**Kvarvarande fynd (2 st, båda bytes-bevisade):**
+
+1. **Unnamed-tokens är indexerbara men osynliga.** Barn-listan räknar
+   nyckelord/identifierare (`mod`, `m`) som agenten inte ser i outline:en
+   (outline:en visar 0.2.1=a och låter `a` se ut som barn 1). Position 3
+   av 3 synliga funktioner escapar hela föräldern. Klass: UX-fälla +
+   dokumentationslucka, inte fel placering enligt koden — men en agent som
+   räknar synliga barn (alla) träffar fel. Fix-idé: varna på stderr när
+   `children[idx-3]` är unnamed, eller låt position ≥3 räkna endast named
+   children (brytande — kräver ägarbeslut + Motor2-bryggsync, bridge:n
+   skickar `children.len() + 1`).
+
+2. **Batch-insert följer inte kärnans clamp.** `batch {type:"insert",
+   parent_path:"0.2", position:4}` (barn: 3) och `position:5` landade på
+   kroppens TOPP (före första barnet) med feltabbad indentering (8/12 sp) —
+   clampen till "efter sista barnet" som CLI:t gör togs inte. Bevis:
+   tillämpad probfil, `cat -A` (sessionen 2026-11-18). Mechanism: batch-
+   lagret översätter position annorlunda än CLI-insert → inte samma kärna
+   eller annan idx-översättning. Fix-idé: låt batch gå genom SAMMA
+   placeringskärna; regressionstest med position len+1 på batch.
+
+**Omväg som användes:** de två tilläggen (fixture + test) via edit-
+verktyget förankrade på filens sista rader; nod-ersättningarna via batch
+(fungerar). `cargo fmt` normaliserar indentering.
+
+**Facitkommandon:**
+```
+cd /tmp/opencode/gtw-probe
+gnawtreewriter insert probe3.rs 0 3 'fn X() {}' --preview   # → före mod m { (unnamed-tokenfällan)
+gnawtreewriter batch batch-probe2.json --preview            # → tre inserts på kroppstopp trots position 4/5
+```
+
+
+
 
 
