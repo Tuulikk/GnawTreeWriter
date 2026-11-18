@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 0684bf303841150e517829bc0e505bba
+> Body-hash: 2c290a71216befb364af2306bc859942
 
 ## Träd
 
@@ -96,7 +96,7 @@ src/core/
   code_graph.rs (1656 rader)
   code_index.rs (722 rader)
   code_index_coverage.rs (683 rader)
-  code_index_db.rs (1607 rader)
+  code_index_db.rs (1638 rader)
   compress.rs (487 rader)
   create_file.rs (99 rader)
   curator.rs (709 rader)
@@ -151,7 +151,7 @@ src/llm/
   relational_index.rs (684 rader)
   semantic_index.rs (1458 rader)
 src/mcp/
-  mod.rs (4874 rader)
+  mod.rs (4916 rader)
 src/parser/
   bash.rs (84 rader)
   c.rs (84 rader)
@@ -888,7 +888,7 @@ _(inga toppnivå-items)_
 - `pub fn measure_scoped(conn: &Connection, scope: Option<&str>) -> Result<CoverageReport>` :186
 - `fn relations_total(conn: &Connection, scope: &str) -> anyhow::Result<i64>` :453
 
-### code_index_db.rs (1607 rader)
+### code_index_db.rs (1638 rader)
 - `pub const EXTRACTOR_VERSION: &str = "4"` :47
 - `const SCHEMA_VERSION: i32 = 4` :49
 - `const BUSY_TIMEOUT_MS: u64 = 5000` :50
@@ -935,8 +935,10 @@ _(inga toppnivå-items)_
 - `pub fn load_entities(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1364
 - `pub fn load_items(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1389
 - `pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1415
-- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :1439
-- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :1461
+- `pub fn load_relations_filtered(` :1424
+- `pub fn load_symbols_filtered(` :1458
+- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :1486
+- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :1492
 
 ### compress.rs (487 rader)
 - `pub struct CompressedOutput` :12
@@ -1946,7 +1948,7 @@ _(inga toppnivå-items)_
 
 ## src/mcp/
 
-### mod.rs (4874 rader)
+### mod.rs (4916 rader)
 _(inga toppnivå-items)_
 
 ## src/parser/
