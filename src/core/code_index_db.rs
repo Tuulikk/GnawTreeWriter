@@ -1501,6 +1501,84 @@ pub fn load_symbols_filtered(
     Ok(out)
 }
 
+/// T1 (kind=map): the token-budgeted, graph-ranked orientation surface.
+/// Deterministic: the same store bytes and budget give the same output.
+/// Ranking is in-degree over resolved targets (how many relation rows point
+/// AT the entity), tie-broken by name, then file. Signature comes from
+/// `items` (best effort, same file + name). Store-required by decision
+/// 2026-11-18: a lexical list without graph ranking is `curate`'s job, not
+/// a degraded map. The greedy prefix fit (take ranked entries until the
+/// budget is exhausted) keeps the map a top-prefix — never a scattered
+/// subset.
+pub fn load_map(
+    conn: &Connection,
+    prefix: Option<&str>,
+    budget: usize,
+) -> Result<serde_json::Value> {
+    let mut stmt = conn.prepare(
+        "SELECT e.id, e.file, e.kind, e.name, e.line, e.node_path,
+                (SELECT COUNT(*) FROM relations r WHERE r.to_id = e.id
+                    AND (?1 IS NULL OR r.file LIKE ?1 || '%')) AS refs
+         FROM entities e
+         WHERE (?1 IS NULL OR e.file LIKE ?1 || '%')
+         ORDER BY refs DESC, e.name ASC, e.file ASC",
+    )?;
+    let mut candidates = 0usize;
+    let mut used = 0usize;
+    let mut exhausted = false;
+    let mut entries = Vec::new();
+    let rows = stmt.query_map(params![prefix], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+            r.get::<_, i64>(4)?,
+            r.get::<_, Option<String>>(5)?,
+            r.get::<_, i64>(6)?,
+        ))
+    })?;
+    for row in rows {
+        let (id, file, kind, name, line, node_path, refs) = row?;
+        candidates += 1;
+        let signature: Option<String> = conn
+            .query_row(
+                "SELECT signature FROM items WHERE file = ?1 AND name = ?2 ORDER BY line LIMIT 1",
+                params![file, name],
+                |r| r.get(0),
+            )
+            .ok();
+        let entry = serde_json::json!({
+            "name": name,
+            "kind": kind,
+            "file": file,
+            "line": line,
+            "refs": refs,
+            "signature": signature,
+            "node_path": node_path,
+            "id": id,
+        });
+        let text = serde_json::to_string(&entry).unwrap_or_default();
+        let tokens = crate::core::token_count::estimate_code_tokens(&text);
+        // The population count stays budget-independent (it is the ranked
+        // population's size, a fact about the store); only the shown prefix
+        // depends on the budget.
+        if exhausted || used + tokens > budget {
+            exhausted = true;
+            continue;
+        }
+        used += tokens;
+        entries.push(entry);
+    }
+    Ok(serde_json::json!({
+        "map": entries,
+        "candidates_total": candidates,
+        "symbols_shown": entries.len(),
+        "used_tokens": used,
+        "budget": budget,
+    }))
+}
+
 /// MCP query surface: unresolved/external symbols with occurrence counts.
 pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>> {
     load_symbols_filtered(conn, None, None)
@@ -1522,6 +1600,70 @@ pub fn is_busy_error(err: &anyhow::Error) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod map_ranking_tests {
+    use super::*;
+
+    /// T1: the map ranks by in-degree (how many resolved edges point AT an
+    /// entity), not alphabetically — and the greedy budget fit keeps a
+    /// top-prefix, shrinking `symbols_shown` while `candidates_total` stays.
+    #[test]
+    fn map_ranks_by_references_and_fits_the_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // hub.rs defines the hot function; three files call it.
+        std::fs::write(root.join("hub.rs"), "pub fn hot_target() {}\n").unwrap();
+        std::fs::write(
+            root.join("a.rs"),
+            "fn a1() { hot_target(); }\nfn a2() { hot_target(); }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("b.rs"),
+            "fn b1() { hot_target(); }\nfn b2() { cold_one(); }\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("c.rs"), "pub fn cold_one() {}\n").unwrap();
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        migrate_connection(&conn).unwrap();
+        let opts = CodeIndexOptions::default();
+        refresh(&mut conn, root, &opts).unwrap();
+
+        let map = load_map(&conn, None, 100_000).unwrap();
+        let entries = map["map"].as_array().unwrap();
+        assert!(
+            entries.len() >= 2,
+            "a 4-file project maps more than one symbol: {map}"
+        );
+        assert_eq!(
+            entries[0]["name"].as_str().unwrap(),
+            "hot_target",
+            "the most-referenced entity ranks first: {map}"
+        );
+        let refs_top = entries[0]["refs"].as_u64().unwrap();
+        assert!(
+            refs_top >= 3,
+            "hot_target has at least 3 incoming call edges: {refs_top}"
+        );
+
+        // The budget fit: a tiny budget keeps a top-PREFIX (fewer entries
+        // shown) while the candidate count stays the full ranked population.
+        let tight = load_map(&conn, None, 1).unwrap();
+        assert_eq!(
+            tight["symbols_shown"].as_u64().unwrap(),
+            0,
+            "a 1-token budget fits nothing"
+        );
+        assert_eq!(
+            tight["candidates_total"].as_u64().unwrap(),
+            map["candidates_total"].as_u64().unwrap(),
+            "the ranked population is budget-independent"
+        );
+    }
 }
 
 #[cfg(test)]

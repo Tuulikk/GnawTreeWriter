@@ -531,6 +531,10 @@ pub mod mcp_server {
                             .get("limit")
                             .and_then(Value::as_u64)
                             .map(|v| v as usize);
+                        let budget = arguments
+                            .get("budget")
+                            .and_then(Value::as_u64)
+                            .map(|v| v as usize);
                         Ok(envelope_code_index(handle_code_index_mcp(
                             mode,
                             root,
@@ -546,6 +550,7 @@ pub mod mcp_server {
                             name_prefix,
                             external,
                             limit,
+                            budget,
                         )))
                     }
                     "get_semantic_report" => {
@@ -717,7 +722,7 @@ pub mod mcp_server {
                         "root": { "type": "string", "description": "Project root (default .)" },
                         "intro_file": { "type": "string", "description": "Optional intro splice file for refresh/check renders" },
                         "path_prefix": { "type": "string", "description": "query: only paths starting with this prefix" },
-                        "kind": { "type": "string", "description": "query payload: items (default) | relations (from/to_name/to_id/type/resolution — per-edge provenance: resolved | unresolved_macro | unresolved_qualified_path | unresolved_plain_name, same taxonomy as coverage; server-side filters: path_prefix + relation_type + symbol involvement + limit; capped at 5000 with honest matched/returned/truncated accounting — bulk dumps killed the stdio daemon, Motor2 2026-11-18) | symbols (unresolved+external names; filters: name_prefix + external) | cycles (dependency cycles, rotation-deduped) | file_cycles (file-level dependency cycles, grouped, largest first) | chain (shortest resolved-edge path between two names; requires symbol=FROM and to=TO) | impact (what is affected by changing `symbol`; requires symbol; graph_coverage denominator is scoped by path_prefix when given — the walk itself is not) | touches (what `symbol` uses in OTHER files, with target file+line, plus who uses it; requires symbol) | file_graph (which files depend on which, by weight; path_prefix focuses both directions) | changed (files in the working-tree diff, each with its cross-file targets and users) | history (relation deltas per revision; `symbol` filters the relation key, `last` revisions) | onion (each edge's count across the last `last` revisions, ending at now — the past-to-present view)" },
+                        "kind": { "type": "string", "description": "query payload: map (graph-ranked top-symbol orientation within a token budget; store-required — mode=refresh first when missing) | items (default) | relations (from/to_name/to_id/type/resolution — per-edge provenance: resolved | unresolved_macro | unresolved_qualified_path | unresolved_plain_name, same taxonomy as coverage; server-side filters: path_prefix + relation_type + symbol involvement + limit; capped at 5000 with honest matched/returned/truncated accounting — bulk dumps killed the stdio daemon, Motor2 2026-11-18) | symbols (unresolved+external names; filters: name_prefix + external) | cycles (dependency cycles, rotation-deduped) | file_cycles (file-level dependency cycles, grouped, largest first) | chain (shortest resolved-edge path between two names; requires symbol=FROM and to=TO) | impact (what is affected by changing `symbol`; requires symbol; graph_coverage denominator is scoped by path_prefix when given — the walk itself is not) | touches (what `symbol` uses in OTHER files, with target file+line, plus who uses it; requires symbol) | file_graph (which files depend on which, by weight; path_prefix focuses both directions) | changed (files in the working-tree diff, each with its cross-file targets and users) | history (relation deltas per revision; `symbol` filters the relation key, `last` revisions) | onion (each edge's count across the last `last` revisions, ending at now — the past-to-present view)" },
                         "last": { "type": "integer", "description": "kind=history|onion: how many revisions/frames back (default 5 / 3)" },
                         "symbol": { "type": "string", "description": "kind=impact|touches: the DEFINING name to analyse (e.g. parse_file). A name in several files yields several seeds, all reported" },
                         "depth": { "type": "integer", "description": "kind=impact|cycles: hop bound (impact default 3, cycles default 64)" },
@@ -726,6 +731,7 @@ pub mod mcp_server {
                         "name_prefix": { "type": "string", "description": "kind=symbols: name starts-with filter" },
                         "external": { "type": "boolean", "description": "kind=symbols: true = only external names, false = only unresolved-local names" },
                         "limit": { "type": "integer", "description": "kind=relations: max rows returned (default and hard cap 5000; matched/returned/truncated stay honest)" },
+                        "budget": { "type": "integer", "description": "kind=map: token budget for the orientation map (default 1024, clamped 64..8192)" },
                         "fix": { "type": "boolean", "description": "check: rewrite the artifact when stale (default false)" }
                     },
                     "required": []
@@ -3467,6 +3473,34 @@ or list_nodes for a flat index of this file.",
                 false,
                 vec![with_symbol("kind=history")],
             ),
+            "map" => {
+                let top = result
+                    .get("map")
+                    .and_then(Value::as_array)
+                    .and_then(|a| a.first())
+                    .and_then(|e| e.get("name"))
+                    .and_then(Value::as_str);
+                (
+                    "bounded",
+                    format!(
+                        "{} of {} ranked symbols in budget {} (used {} tokens){}",
+                        n("symbols_shown"),
+                        n("candidates_total"),
+                        n("budget"),
+                        n("used_tokens"),
+                        scope_note
+                    ),
+                    false,
+                    match top {
+                        Some(s) => vec![
+                            format!("kind=impact symbol={s}"),
+                            format!("kind=touches symbol={s}"),
+                            "mode=coverage".to_string(),
+                        ],
+                        None => vec!["mode=refresh".to_string(), "mode=coverage".to_string()],
+                    },
+                )
+            }
             // items + unknown kinds fall through to the default listing
             _ => (
                 "complete",
@@ -3494,6 +3528,7 @@ or list_nodes for a flat index of this file.",
         name_prefix: Option<&str>,
         external: Option<bool>,
         limit: Option<usize>,
+        budget: Option<usize>,
     ) -> Value {
         use crate::core::code_index::{self as ci, CodeIndexOptions};
         use crate::core::code_index_db;
@@ -3550,6 +3585,25 @@ or list_nodes for a flat index of this file.",
                             // P2 (Comparative-Thinker-planen §4): graph QUERIES over
                             // the same store. Read-only, and they never create it —
                             // empty store is a loud error with a refresh hint.
+                            "map" => {
+                                // T1: the token-budgeted, graph-ranked orientation
+                                // surface. Store-required per decision 2026-11-18:
+                                // a lexical list without graph ranking is curate's
+                                // job, not a degraded map.
+                                let budget = budget.unwrap_or(1024).clamp(64, 8192);
+                                match code_index_db::load_map(&conn, prefix, budget) {
+                                    Ok(m) => json!({
+                                        "mode": "query", "kind": "map",
+                                        "budget": m["budget"],
+                                        "used_tokens": m["used_tokens"],
+                                        "symbols_shown": m["symbols_shown"],
+                                        "candidates_total": m["candidates_total"],
+                                        "map": m["map"],
+                                        "note": "graph-ranked (in-degree over resolved edges) top-prefix within the token budget; deterministic for a given store+budget; entries chain into read_node via node_path"
+                                    }),
+                                    Err(e) => tool_error(format!("code_index map failed: {e:#}")),
+                                }
+                            }
                             "cycles" => {
                                 match crate::core::code_graph::cycles(&conn, depth.unwrap_or(64)) {
                                     Ok(rows) => json!({
