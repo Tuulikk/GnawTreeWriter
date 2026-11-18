@@ -2,7 +2,7 @@
 
 **Guide for AI agents contributing to the GnawTreeWriter project through dogfooding**
 
-Version: 2.3 | Last Updated: 2026-11-11
+Version: 2.4 | Last Updated: 2026-11-18
 
 ---
 
@@ -27,6 +27,7 @@ ett resultat.**
 | **M10** | Sparad patch är inte giltig patch | `git apply --check` **och** filen parsar efteråt |
 | **M11** | Lång session = avtagande observation; minnet är inte en källa | läs om `git status`, `git diff`, senaste testloggen, `uppslag.md` |
 | **M12** | Mät ytan innan du rör den | `--help`, `doctor`, ett litet prov i en temp-katalog |
+| **M13** | Repots hela tillstånd är vårt att äga — även okommittat arbete från tidigare sessioner | påträffade ändringar utreds (diff, mtimes, `history`), bevisas sammanhängande (bygg + test) och committas med ärlig härkomst — eller dokumenteras med motivering i `uppslag.md`; "någon annans WIP" är ingen disposition |
 
 **Konkreta fel dessa regler finns för** (imitera inte mönstret):
 
@@ -39,6 +40,11 @@ ett resultat.**
   sträng; 161 rader Rust hamnade i en strängliteral. (M10)
 - *"`heal` säger att filen är frisk"* — fel: fem funktioner låg nästlade inuti
   `git()` med balanserade klamrar. (M9)
+- *"Någon annans WIP — inte min att röra"* — fel: 855 rader okommitterat arbete
+  i två vågor klassades som främmande och lämnades ogjorda; det blockerade
+  release-byggets dirty-grind och var ouppspårbart om det tvekas bort.
+  Disposition (utred → bevisa → committa) är den aktiva agentens ansvar,
+  alltid. (M13)
 
 ### Definition of done — skriv ut den punkt för punkt innan du säger klart
 
@@ -49,7 +55,7 @@ ett resultat.**
 5. `git status` rent och pushat
 6. `uppslag.md`/`CHANGELOG` säger vad som är ogjort eller provisoriskt
 
-> M1–M12 gäller **även** när du är trött och kontexten är lång — särskilt då.
+> M1–M13 gäller **även** när du är trött och kontexten är lång — särskilt då.
 > Under ~300k tokens tappar modeller observationen först och självförtroendet
 > sist: det är där M11 räddar sessionen.
 
@@ -258,6 +264,18 @@ sessioner. De gäller oavsett vilket verktyg du använder.
     `code-index --coverage` 10,2 % om samma graf — olika nämnare (lagrade
     relationsrader vs extraherade per typ). Två tal för en bedömning är samma
     sjuka som två trösklar för ett mått: ge talet en ägare och skriv ut nämnaren.
+21. **Okommitterat arbete i trädet är en disposition, inte en förklaring.**
+    Fynd 2026-11-18: 855 rader i två vågor (relationshistorik +
+    binding_observations) låg ogjorda flera dagar — en agent klassade dem som
+    "främmande" i stället för att dispositionera. Proceduren: (1) **utred** —
+    `git diff`, mtimes, GTW:s `history` (transaktionsloggen äger
+    tidsstämplarna), koppla till trådar i minnet/uppslag; (2) **bevisa** —
+    bygg + tester på vågens filer; (3) **committa** i sammanhängande vågor med
+    ärlig härkomst i meddelandet ("recovered orphaned work: …"); (4) är
+    arbetet inte sammanhängande → dokumentera exakt varför i `uppslag.md`,
+    lämnar aldrig tyst. En smutsig grind (`commit-build` → `fail:dirty`) är
+    en signal att disposition ska påbörjas — inte ett hinder att klassa bort.
+    M13 gäller: agenten är medägare av repots hela tillstånd, med ägaren.
 
 ### OpenCode 2.x — arkitektur, MCP-livscykel, binär-pickup (2026-11-10)
 
