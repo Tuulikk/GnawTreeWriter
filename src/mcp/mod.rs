@@ -523,8 +523,9 @@ pub mod mcp_server {
                             .get("last")
                             .and_then(Value::as_u64)
                             .map(|d| d as usize);
+                        let to = arguments.get("to").and_then(Value::as_str);
                         Ok(envelope_code_index(handle_code_index_mcp(
-                            mode, root, intro, prefix, fix, kind, symbol, depth, last,
+                            mode, root, intro, prefix, fix, kind, symbol, depth, last, to,
                         )))
                     }
                     "get_semantic_report" => {
@@ -696,10 +697,11 @@ pub mod mcp_server {
                         "root": { "type": "string", "description": "Project root (default .)" },
                         "intro_file": { "type": "string", "description": "Optional intro splice file for refresh/check renders" },
                         "path_prefix": { "type": "string", "description": "query: only paths starting with this prefix" },
-                        "kind": { "type": "string", "description": "query payload: items (default) | relations (from/to_name/to_id/type; capped at 5000 rows with honest matched/returned/truncated accounting — bulk dumps killed the stdio daemon, Motor2 2026-11-18) | symbols (unresolved+external names) | cycles (dependency cycles, rotation-deduped) | impact (what is affected by changing `symbol`; requires symbol) | touches (what `symbol` uses in OTHER files, with target file+line, plus who uses it; requires symbol) | file_graph (which files depend on which, by weight; path_prefix focuses both directions) | changed (files in the working-tree diff, each with its cross-file targets and users) | history (relation deltas per revision; `symbol` filters the relation key, `last` revisions) | onion (each edge's count across the last `last` revisions, ending at now — the past-to-present view)" },
+                        "kind": { "type": "string", "description": "query payload: items (default) | relations (from/to_name/to_id/type; capped at 5000 rows with honest matched/returned/truncated accounting — bulk dumps killed the stdio daemon, Motor2 2026-11-18) | symbols (unresolved+external names) | cycles (dependency cycles, rotation-deduped) | file_cycles (file-level dependency cycles, grouped, largest first) | chain (shortest resolved-edge path between two names; requires symbol=FROM and to=TO) | impact (what is affected by changing `symbol`; requires symbol) | touches (what `symbol` uses in OTHER files, with target file+line, plus who uses it; requires symbol) | file_graph (which files depend on which, by weight; path_prefix focuses both directions) | changed (files in the working-tree diff, each with its cross-file targets and users) | history (relation deltas per revision; `symbol` filters the relation key, `last` revisions) | onion (each edge's count across the last `last` revisions, ending at now — the past-to-present view)" },
                         "last": { "type": "integer", "description": "kind=history|onion: how many revisions/frames back (default 5 / 3)" },
                         "symbol": { "type": "string", "description": "kind=impact|touches: the DEFINING name to analyse (e.g. parse_file). A name in several files yields several seeds, all reported" },
                         "depth": { "type": "integer", "description": "kind=impact|cycles: hop bound (impact default 3, cycles default 64)" },
+                        "to": { "type": "string", "description": "kind=chain: the TARGET name (bare name like parse_file); symbol is the starting point" },
                         "fix": { "type": "boolean", "description": "check: rewrite the artifact when stale (default false)" }
                     },
                     "required": []
@@ -3241,6 +3243,7 @@ or list_nodes for a flat index of this file.",
         symbol: Option<&str>,
         depth: Option<usize>,
         last: Option<usize>,
+        to: Option<&str>,
     ) -> Value {
         use crate::core::code_index::{self as ci, CodeIndexOptions};
         use crate::core::code_index_db;
@@ -3300,6 +3303,74 @@ or list_nodes for a flat index of this file.",
                                     "count": rows.len(), "cycles": rows
                                 }),
                                 Err(e) => tool_error(format!("code_index cycles failed: {e:#}")),
+                            }
+                        }
+                        "file_cycles" => match crate::core::code_graph::file_cycles(&conn) {
+                            Ok(groups) => json!({
+                                "mode": "query", "kind": "file_cycles",
+                                "count": groups.len(), "groups": groups,
+                                "note": "file-level dependency cycles (mutual reachability, grouped, largest first) - reads better than entity cycles at project scale; unresolved edges contribute no adjacency, read beside kind=file_graph coverage"
+                            }),
+                            Err(e) => tool_error(format!("code_index file_cycles failed: {e:#}")),
+                        },
+                        "chain" => {
+                            let Some(from) = symbol else {
+                                return tool_error(
+                                    "code_index kind=chain requires `symbol` (the FROM name) and `to` (the TO name) - bare names, not ids"
+                                        .to_string(),
+                                );
+                            };
+                            let Some(to) = to else {
+                                return tool_error(
+                                    "code_index kind=chain requires `symbol` (the FROM name) and `to` (the TO name) - bare names, not ids"
+                                        .to_string(),
+                                );
+                            };
+                            match (
+                                crate::core::code_graph::resolve_symbols(&conn, from),
+                                crate::core::code_graph::resolve_symbols(&conn, to),
+                            ) {
+                                (Ok(from_seeds), Ok(to_seeds))
+                                    if from_seeds.is_empty() || to_seeds.is_empty() =>
+                                {
+                                    json!({
+                                        "mode": "query", "kind": "chain",
+                                        "found": false, "path": null,
+                                        "from_seeds": from_seeds, "to_seeds": to_seeds,
+                                        "note": "unresolved endpoint - no entity of that name in the store; check kind=symbols or refresh the store first"
+                                    })
+                                }
+                                (Ok(from_seeds), Ok(to_seeds)) => {
+                                    // Every seed pair is a legitimate start; report the
+                                    // SHORTEST path found and show the seed counts so a
+                                    // multi-file name is visible, not silently merged.
+                                    let mut best: Option<Vec<String>> = None;
+                                    for f in &from_seeds {
+                                        for t in &to_seeds {
+                                            if let Ok(Some(path)) =
+                                                crate::core::code_graph::chain(&conn, &f.id, &t.id)
+                                            {
+                                                if best
+                                                    .as_ref()
+                                                    .is_none_or(|b| path.len() < b.len())
+                                                {
+                                                    best = Some(path);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    json!({
+                                        "mode": "query", "kind": "chain",
+                                        "found": best.is_some(),
+                                        "hops": best.as_ref().map(|p| p.len().saturating_sub(1)),
+                                        "path": best,
+                                        "from_seeds": from_seeds, "to_seeds": to_seeds,
+                                        "note": "shortest path over RESOLVED edges only - an unresolved target (std, cross-file method) contributes no adjacency, so not-found can mean no path OR an unresolved gap; read beside mode=coverage"
+                                    })
+                                }
+                                (Err(e), _) | (_, Err(e)) => {
+                                    tool_error(format!("code_index chain failed: {e:#}"))
+                                }
                             }
                         }
                         "impact" => {

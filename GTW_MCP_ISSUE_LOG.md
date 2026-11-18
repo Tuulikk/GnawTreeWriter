@@ -2127,6 +2127,16 @@ gnawtreewriter insert probe3.rs 0 3 'fn X() {}' --preview   # → före mod m { 
 gnawtreewriter batch batch-probe2.json --preview            # → tre inserts på kroppstopp trots position 4/5
 ```
 
+## 52 — `preview_edit`/`edit_node` på match-arm: duplikat-detektorns falska positiva på `Ok`-mönster (2026-11-18)
+
+**Verktyg + parametrar:** `preview_edit {file_path: "src/mcp/mod.rs", node_path: "7.3.175.5.9.0.2.3.2.3.0.2.1.2.2.4" (match-arm `"cycles" =>`), content: cycles-armen + två NYA armar ("file_cycles", "chain")}`.
+
+**Svar:** `Preview rejected: DUPLICATE DEFINITION detected after edit: ... tuple_struct_pattern Ok ×2 (var 0)` — detektorn ser flera `Ok(...) =>`-mönster i den ersatta subtree:n som "andra definitioner av samma item". Match-armar är inte definitioner; en match_block med flerta `Ok`-armar är normal Rust. Filens existerande armar (history/onion/touches) har samma mönster men lades aldrig via edit_node på ett arm-node, därför fick detektorn aldrig detta fall.
+
+**Omväg som användes:** OpenCode edit-verktyget (exakt text-ankare: cycles-armen + `"impact" => {`). Apply → verifierad med grep + cargo check + clippy -D warnings (rent) + 42 riktade tester. **Klassning: bugg (detektorns "definition"-begrepp ser inte match-armar som icke-definitioner).** Fix-riktning: exkludera `tuple_struct_pattern`/`match_arm`-barn ur duplicate-checken, eller lär den skilja "definierande" nodtyper (fn_item, struct_item, ...) från mönster.
+
+**Sidofynd samma ändring:** quick-replace sök-text med fel typ (`"type": "string"` mot `"type": "integer"`) avvisades högljutt med 0 byte skrivna — gardet fungerar som tänkt (M6: läsa hela svaret; feltexten pekade direkt på re-läsning).
+
 
 
 
