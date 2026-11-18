@@ -689,7 +689,7 @@ pub mod mcp_server {
             json!({
                 "name": "code_index",
                 "title": "Project code index: refresh | query | check",
-                "description": "The project structure index — per-file items (fns/structs/impls/classes) with name, signature, line and GTW node_path. WHAT: one call answers WHERE code sits and WHAT a project contains; node_path chains into read_node/edit_node (re-validate the name first — paths are valid at the indexed hash only). WHEN: orienting in an unfamiliar repo, building a map for a large refactor, or gating a deploy on index freshness. mode=refresh: incremental SQLite refresh (.gnawtreewriter_ai/code_index.db, parses only changed files) returning markdown + stats; mode=query: item rows from the existing store, filterable by path_prefix — never creates the store; mode=check: content-hash gate over the committed code-index.md (fast tier: body vs its own Body-hash header; full tier: fresh render vs body) — DB-free; mode=coverage: graph-quality report from the store (resolution rate per relation type, D7 source-identity classes, unresolved target classes) — read-only. RETURNS: refresh -> {stats, notices, doc}; query -> {files[{path,lines,items[{category,name,sig,line,node_path,methods}]}]}; check -> {ok, fixed, failures[]}; coverage -> {report}. Example: {\"mode\": \"refresh\", \"root\": \".\"}.",
+                "description": "The project structure index — per-file items (fns/structs/impls/classes) with name, signature, line and GTW node_path. WHAT: one call answers WHERE code sits and WHAT a project contains; node_path chains into read_node/edit_node (re-validate the name first — paths are valid at the indexed hash only). WHEN: orienting in an unfamiliar repo, building a map for a large refactor, or gating a deploy on index freshness. mode=refresh: incremental SQLite refresh (.gnawtreewriter_ai/code_index.db, parses only changed files) returning markdown + stats; mode=query: item rows from the existing store, filterable by path_prefix — never creates the store; mode=check: content-hash gate over the committed code-index.md (fast tier: body vs its own Body-hash header; full tier: fresh render vs body) — DB-free; mode=coverage: graph-quality report from the store (resolution rate per relation type, D7 source-identity classes, unresolved target classes) — read-only. RETURNS: refresh -> {stats, notices, doc}; query -> {files[{path,lines,items[{category,name,sig,line,node_path,methods}]}]; every query answer also carries query_status{completeness,denominator,index_stale,next_checks,resolved_edges_only,scope} (T2 contract; index_stale=true puts mode=refresh first in next_checks)}; check -> {ok, fixed, failures[]}; coverage -> {report}. Example: {\"mode\": \"refresh\", \"root\": \".\"}.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -3231,6 +3231,228 @@ or list_nodes for a flat index of this file.",
     /// the store (decision #8 / P6).
     // 8 params: prefix/kind/symbol/depth are the query knobs. They are a group,
     // but this fn is one `match mode` — a param struct would move the noise, not
+    /// T2 (decision 2026-11-18, inline always): staleness with ONE
+    /// definition - the store's last indexed rev vs the current worktree
+    /// rev (the same rule the CLI graph answer's `meta.index_stale` uses).
+    /// A second, queue-based staleness truth would be two numbers for one
+    /// judgement (M7).
+    fn index_stale_now(index_root: &std::path::Path) -> bool {
+        let (worktree_rev, _dirty) = crate::core::code_index::git_facts(index_root);
+        let store_rev =
+            crate::core::code_index_db::store_status(index_root).and_then(|s| s.last_refresh_rev);
+        store_rev.as_deref() != Some(worktree_rev.as_str())
+    }
+
+    /// T2 (inline always): what this answer CAN establish - scope,
+    /// completeness, denominator, resolved-edges-only flag, staleness, and
+    /// executable next checks. The field set is fixed; consumers may rely
+    /// on every field being present (the create_goal lesson: an empty
+    /// answer must be machine-readable as "empty because X", never a
+    /// naked zero).
+    fn query_status_json(
+        prefix: Option<&str>,
+        stale: bool,
+        completeness: &str,
+        denominator: String,
+        resolved_only: bool,
+        next_checks: Vec<String>,
+    ) -> Value {
+        json!({
+            "completeness": completeness,
+            "denominator": denominator,
+            "index_stale": stale,
+            "next_checks": next_checks,
+            "resolved_edges_only": resolved_only,
+            "scope": prefix,
+        })
+    }
+
+    /// Per-kind status: the numbers are read FROM the answer itself (one
+    /// source of truth); missing fields fall back to zeros, never panic.
+    fn describe_query(
+        kind: &str,
+        result: &Value,
+        prefix: Option<&str>,
+        symbol: Option<&str>,
+        last: Option<usize>,
+        depth: Option<usize>,
+    ) -> (&'static str, String, bool, Vec<String>) {
+        let n = |field: &str| result.get(field).and_then(Value::as_u64).unwrap_or(0);
+        let scope_note = prefix.map(|p| format!(" (scope: {p})")).unwrap_or_default();
+        let with_symbol = |tool: &str| match symbol {
+            Some(s) => format!("{tool} symbol={s}"),
+            None => format!("{tool} symbol=<name>"),
+        };
+        match kind {
+            "relations" => {
+                let truncated = result
+                    .get("truncated")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                (
+                    if truncated { "bounded" } else { "complete" },
+                    format!(
+                        "{} matched, {} returned, {} truncated (cap {}){}",
+                        n("matched"),
+                        n("returned"),
+                        n("matched").saturating_sub(n("returned")),
+                        n("result_cap"),
+                        scope_note
+                    ),
+                    false,
+                    vec!["mode=coverage".to_string(), "kind=file_graph".to_string()],
+                )
+            }
+            "symbols" => (
+                "complete",
+                format!("{} aggregate names (unresolved + external)", n("count")),
+                false,
+                vec!["mode=coverage".to_string()],
+            ),
+            "cycles" => (
+                "bounded",
+                format!(
+                    "{} cycles (hop bound <= {})",
+                    n("count"),
+                    depth.unwrap_or(64)
+                ),
+                true,
+                vec!["kind=file_cycles".to_string(), "mode=coverage".to_string()],
+            ),
+            "file_cycles" => (
+                "complete",
+                format!("{} file-groups", n("count")),
+                true,
+                vec!["kind=cycles".to_string(), "mode=coverage".to_string()],
+            ),
+            "chain" => {
+                let from = result
+                    .get("from_seeds")
+                    .and_then(Value::as_array)
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                let to = result
+                    .get("to_seeds")
+                    .and_then(Value::as_array)
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                (
+                    "complete",
+                    format!(
+                        "BFS exhaustive over resolved edges; {} x {} seed pairs; found={}",
+                        from,
+                        to,
+                        result
+                            .get("found")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false)
+                    ),
+                    true,
+                    vec![with_symbol("kind=impact"), "mode=coverage".to_string()],
+                )
+            }
+            "impact" => {
+                let gc = result.get("impact").and_then(|i| i.get("graph_coverage"));
+                let resolved = gc
+                    .and_then(|g| g.get("resolved_edges"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                let total = resolved
+                    + gc.and_then(|g| g.get("unresolved_edges"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0);
+                let rate = gc
+                    .and_then(|g| g.get("local_rate"))
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0);
+                (
+                    "bounded",
+                    format!(
+                        "{resolved}/{total} edges resolved (local_rate {rate:.2}); depth <= {}",
+                        depth.unwrap_or(3)
+                    ),
+                    true,
+                    vec![with_symbol("kind=touches"), "mode=coverage".to_string()],
+                )
+            }
+            "touches" => (
+                "bounded",
+                format!(
+                    "{} outgoing, {} incoming, unresolved_incoming {} (cap 50)",
+                    n("outgoing"),
+                    n("incoming"),
+                    result
+                        .get("unresolved_incoming_total")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0)
+                ),
+                false,
+                vec![with_symbol("kind=impact"), "mode=coverage".to_string()],
+            ),
+            "file_graph" => (
+                "complete",
+                format!(
+                    "{} edge pairs, coverage {}, {} unattributed edges",
+                    n("edge_pairs"),
+                    result
+                        .get("coverage")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(0.0),
+                    n("unattributed_edges")
+                ),
+                false,
+                vec!["kind=changed".to_string(), "mode=coverage".to_string()],
+            ),
+            "changed" => (
+                "complete",
+                format!(
+                    "{} files from the git working-tree diff",
+                    n("changed_files")
+                ),
+                false,
+                vec!["kind=history".to_string()],
+            ),
+            "history" => {
+                let starts_now = result
+                    .get("history_starts_now")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                (
+                    "bounded",
+                    format!(
+                        "{} revisions in store, last {} shown{}",
+                        n("revisions"),
+                        last.unwrap_or(5),
+                        if starts_now {
+                            "; history starts now - pre-revision refreshes have no deltas"
+                        } else {
+                            ""
+                        }
+                    ),
+                    false,
+                    vec![with_symbol("kind=onion")],
+                )
+            }
+            "onion" => (
+                "bounded",
+                format!(
+                    "{} channels, last {} frames",
+                    n("channels"),
+                    last.unwrap_or(3)
+                ),
+                false,
+                vec![with_symbol("kind=history")],
+            ),
+            // items + unknown kinds fall through to the default listing
+            _ => (
+                "complete",
+                format!("{} files listed{}", n("count"), scope_note),
+                false,
+                vec!["mode=coverage".to_string(), "kind=file_graph".to_string()],
+            ),
+        }
+    }
+
     // remove it. The alternative (a struct) was tried in review and read worse.
     #[allow(clippy::too_many_arguments)]
     fn handle_code_index_mcp(
@@ -3292,244 +3514,286 @@ or list_nodes for a flat index of this file.",
                 // The store is repo-rooted (toplevel normalization, decision #10).
                 let index_root = code_index_db::resolve_index_root(root_path);
                 match code_index_db::open_existing(&index_root) {
-                    Ok(conn) => match kind {
-                        // P2 (Comparative-Thinker-planen §4): graph QUERIES over
-                        // the same store. Read-only, and they never create it —
-                        // empty store is a loud error with a refresh hint.
-                        "cycles" => {
-                            match crate::core::code_graph::cycles(&conn, depth.unwrap_or(64)) {
-                                Ok(rows) => json!({
-                                    "mode": "query", "kind": "cycles",
-                                    "count": rows.len(), "cycles": rows
-                                }),
-                                Err(e) => tool_error(format!("code_index cycles failed: {e:#}")),
-                            }
-                        }
-                        "file_cycles" => match crate::core::code_graph::file_cycles(&conn) {
-                            Ok(groups) => json!({
-                                "mode": "query", "kind": "file_cycles",
-                                "count": groups.len(), "groups": groups,
-                                "note": "file-level dependency cycles (mutual reachability, grouped, largest first) - reads better than entity cycles at project scale; unresolved edges contribute no adjacency, read beside kind=file_graph coverage"
-                            }),
-                            Err(e) => tool_error(format!("code_index file_cycles failed: {e:#}")),
-                        },
-                        "chain" => {
-                            let Some(from) = symbol else {
-                                return tool_error(
-                                    "code_index kind=chain requires `symbol` (the FROM name) and `to` (the TO name) - bare names, not ids"
-                                        .to_string(),
-                                );
-                            };
-                            let Some(to) = to else {
-                                return tool_error(
-                                    "code_index kind=chain requires `symbol` (the FROM name) and `to` (the TO name) - bare names, not ids"
-                                        .to_string(),
-                                );
-                            };
-                            match (
-                                crate::core::code_graph::resolve_symbols(&conn, from),
-                                crate::core::code_graph::resolve_symbols(&conn, to),
-                            ) {
-                                (Ok(from_seeds), Ok(to_seeds))
-                                    if from_seeds.is_empty() || to_seeds.is_empty() =>
-                                {
-                                    json!({
-                                        "mode": "query", "kind": "chain",
-                                        "found": false, "path": null,
-                                        "from_seeds": from_seeds, "to_seeds": to_seeds,
-                                        "note": "unresolved endpoint - no entity of that name in the store; check kind=symbols or refresh the store first"
-                                    })
+                    Ok(conn) => {
+                        // T2: staleness computed once per query, ONE definition
+                        // (store rev vs worktree rev - same as CLI graph meta).
+                        let stale = index_stale_now(&index_root);
+                        let mut result = match kind {
+                            // P2 (Comparative-Thinker-planen §4): graph QUERIES over
+                            // the same store. Read-only, and they never create it —
+                            // empty store is a loud error with a refresh hint.
+                            "cycles" => {
+                                match crate::core::code_graph::cycles(&conn, depth.unwrap_or(64)) {
+                                    Ok(rows) => json!({
+                                        "mode": "query", "kind": "cycles",
+                                        "count": rows.len(), "cycles": rows
+                                    }),
+                                    Err(e) => {
+                                        tool_error(format!("code_index cycles failed: {e:#}"))
+                                    }
                                 }
-                                (Ok(from_seeds), Ok(to_seeds)) => {
-                                    // Every seed pair is a legitimate start; report the
-                                    // SHORTEST path found and show the seed counts so a
-                                    // multi-file name is visible, not silently merged.
-                                    let mut best: Option<Vec<String>> = None;
-                                    for f in &from_seeds {
-                                        for t in &to_seeds {
-                                            if let Ok(Some(path)) =
-                                                crate::core::code_graph::chain(&conn, &f.id, &t.id)
-                                            {
-                                                if best
-                                                    .as_ref()
-                                                    .is_none_or(|b| path.len() < b.len())
+                            }
+                            "file_cycles" => match crate::core::code_graph::file_cycles(&conn) {
+                                Ok(groups) => json!({
+                                    "mode": "query", "kind": "file_cycles",
+                                    "count": groups.len(), "groups": groups,
+                                    "note": "file-level dependency cycles (mutual reachability, grouped, largest first) - reads better than entity cycles at project scale; unresolved edges contribute no adjacency, read beside kind=file_graph coverage"
+                                }),
+                                Err(e) => {
+                                    tool_error(format!("code_index file_cycles failed: {e:#}"))
+                                }
+                            },
+                            "chain" => {
+                                let Some(from) = symbol else {
+                                    return tool_error(
+                                    "code_index kind=chain requires `symbol` (the FROM name) and `to` (the TO name) - bare names, not ids"
+                                        .to_string(),
+                                );
+                                };
+                                let Some(to) = to else {
+                                    return tool_error(
+                                    "code_index kind=chain requires `symbol` (the FROM name) and `to` (the TO name) - bare names, not ids"
+                                        .to_string(),
+                                );
+                                };
+                                match (
+                                    crate::core::code_graph::resolve_symbols(&conn, from),
+                                    crate::core::code_graph::resolve_symbols(&conn, to),
+                                ) {
+                                    (Ok(from_seeds), Ok(to_seeds))
+                                        if from_seeds.is_empty() || to_seeds.is_empty() =>
+                                    {
+                                        json!({
+                                            "mode": "query", "kind": "chain",
+                                            "found": false, "path": null,
+                                            "from_seeds": from_seeds, "to_seeds": to_seeds,
+                                            "note": "unresolved endpoint - no entity of that name in the store; check kind=symbols or refresh the store first"
+                                        })
+                                    }
+                                    (Ok(from_seeds), Ok(to_seeds)) => {
+                                        // Every seed pair is a legitimate start; report the
+                                        // SHORTEST path found and show the seed counts so a
+                                        // multi-file name is visible, not silently merged.
+                                        let mut best: Option<Vec<String>> = None;
+                                        for f in &from_seeds {
+                                            for t in &to_seeds {
+                                                if let Ok(Some(path)) =
+                                                    crate::core::code_graph::chain(
+                                                        &conn, &f.id, &t.id,
+                                                    )
                                                 {
-                                                    best = Some(path);
+                                                    if best
+                                                        .as_ref()
+                                                        .is_none_or(|b| path.len() < b.len())
+                                                    {
+                                                        best = Some(path);
+                                                    }
                                                 }
                                             }
                                         }
+                                        json!({
+                                            "mode": "query", "kind": "chain",
+                                            "found": best.is_some(),
+                                            "hops": best.as_ref().map(|p| p.len().saturating_sub(1)),
+                                            "path": best,
+                                            "from_seeds": from_seeds, "to_seeds": to_seeds,
+                                            "note": "shortest path over RESOLVED edges only - an unresolved target (std, cross-file method) contributes no adjacency, so not-found can mean no path OR an unresolved gap; read beside mode=coverage"
+                                        })
                                     }
-                                    json!({
-                                        "mode": "query", "kind": "chain",
-                                        "found": best.is_some(),
-                                        "hops": best.as_ref().map(|p| p.len().saturating_sub(1)),
-                                        "path": best,
-                                        "from_seeds": from_seeds, "to_seeds": to_seeds,
-                                        "note": "shortest path over RESOLVED edges only - an unresolved target (std, cross-file method) contributes no adjacency, so not-found can mean no path OR an unresolved gap; read beside mode=coverage"
-                                    })
-                                }
-                                (Err(e), _) | (_, Err(e)) => {
-                                    tool_error(format!("code_index chain failed: {e:#}"))
+                                    (Err(e), _) | (_, Err(e)) => {
+                                        tool_error(format!("code_index chain failed: {e:#}"))
+                                    }
                                 }
                             }
-                        }
-                        "impact" => {
-                            let Some(sym) = symbol else {
-                                return tool_error(
+                            "impact" => {
+                                let Some(sym) = symbol else {
+                                    return tool_error(
                                     "code_index kind=impact requires `symbol` — a bare name like \"parse_file\", not an id"
                                         .to_string(),
                                 );
-                            };
-                            match crate::core::code_graph::impact(&conn, sym, depth.unwrap_or(3)) {
-                                Ok(report) => json!({
-                                    "mode": "query", "kind": "impact",
-                                    "count": report.reachable.len(), "impact": report
-                                }),
-                                Err(e) => tool_error(format!("code_index impact failed: {e:#}")),
-                            }
-                        }
-                        "history" => {
-                            match crate::core::code_graph::history(
-                                &conn,
-                                symbol,
-                                last.unwrap_or(5),
-                                prefix,
-                            ) {
-                                Ok(h) => json!({
-                                    "mode": "query", "kind": "history",
-                                    "revisions": h.revisions.len(),
-                                    "most_recent_revision": h.most_recent_revision,
-                                    "matches_in_store": h.matches_in_store,
-                                    "history_starts_now": h.history_starts_now,
-                                    "report": h
-                                }),
-                                Err(e) => tool_error(format!("code_index history failed: {e:#}")),
-                            }
-                        }
-                        "onion" => {
-                            match crate::core::code_graph::onion(
-                                &conn,
-                                symbol,
-                                last.unwrap_or(3),
-                                prefix,
-                            ) {
-                                Ok(o) => json!({
-                                    "mode": "query", "kind": "onion",
-                                    "channels": o.channels.len(),
-                                    "onion": o
-                                }),
-                                Err(e) => tool_error(format!("code_index onion failed: {e:#}")),
-                            }
-                        }
-                        "touches" => {
-                            let Some(sym) = symbol else {
-                                return tool_error(
-                                    "code_index kind=touches requires `symbol` — a bare name like \"build_tree\", not an id"
-                                        .to_string(),
-                                );
-                            };
-                            match crate::core::code_graph::touches_symbol(&conn, sym, prefix) {
-                                Ok(t) => json!({
-                                    "mode": "query", "kind": "touches",
-                                    "outgoing": t.outgoing.len(), "incoming": t.incoming.len(),
-                                    "touches": t
-                                }),
-                                Err(e) => tool_error(format!("code_index touches failed: {e:#}")),
-                            }
-                        }
-                        "file_graph" => {
-                            // path_prefix is the SCOPE here (edges incident to
-                            // the subtree, from OR to) — the same meaning it
-                            // has for coverage, so one argument does not mean
-                            // substring in one kind and prefix in another.
-                            match crate::core::code_graph::file_graph(&conn, prefix) {
-                                Ok(g) => json!({
-                                    "mode": "query", "kind": "file_graph",
-                                    "scope": prefix,
-                                    "files": g.files, "edge_pairs": g.edges.len(),
-                                    "edges": g.edges,
-                                    "attributed_edges": g.attributed_edges,
-                                    "unattributed_edges": g.unattributed_edges,
-                                    "coverage": g.coverage, "note": g.note
-                                }),
-                                Err(e) => {
-                                    tool_error(format!("code_index file_graph failed: {e:#}"))
-                                }
-                            }
-                        }
-                        "changed" => {
-                            let files =
-                                crate::core::code_index::changed_files_from_git(&index_root);
-                            let mut entries = Vec::new();
-                            for file in &files {
-                                match crate::core::code_graph::touches_file(&conn, file, None) {
-                                    Ok(t) => entries.push(json!({
-                                        "file": file,
-                                        "triple_in_store": !t.outgoing.is_empty()
-                                            || !t.incoming.is_empty(),
-                                        "outgoing": t.outgoing,
-                                        "incoming": t.incoming,
-                                    })),
+                                };
+                                match crate::core::code_graph::impact(
+                                    &conn,
+                                    sym,
+                                    depth.unwrap_or(3),
+                                ) {
+                                    Ok(report) => json!({
+                                        "mode": "query", "kind": "impact",
+                                        "count": report.reachable.len(), "impact": report
+                                    }),
                                     Err(e) => {
-                                        return tool_error(format!(
-                                            "code_index changed failed on {file}: {e:#}"
-                                        ))
+                                        tool_error(format!("code_index impact failed: {e:#}"))
                                     }
                                 }
                             }
-                            json!({
-                                "mode": "query", "kind": "changed",
-                                "changed_files": files.len(),
-                                "entries": entries,
-                                "note": "Files come from `git diff --name-only HEAD` plus untracked. triple_in_store:false means the store has no edges for that path — isolated, or the index is older than the change."
-                            })
-                        }
-                        "relations" => match code_index_db::load_relations(&conn, prefix) {
-                            Ok(rows) => {
-                                // Motor2-incident 2026-11-18 (GTW_MCP_ISSUE_LOG):
-                                // a ~92k-row store pushed >16 MiB through stdio
-                                // and KILLED the daemon mid-session. A bulk dump
-                                // is not an answer — cap it and say so.
-                                const RELATIONS_RESPONSE_CAP: usize = 5_000;
-                                let matched = rows.len();
-                                let truncated = matched > RELATIONS_RESPONSE_CAP;
-                                let relations: Vec<_> =
-                                    rows.into_iter().take(RELATIONS_RESPONSE_CAP).collect();
-                                let returned = relations.len();
+                            "history" => {
+                                match crate::core::code_graph::history(
+                                    &conn,
+                                    symbol,
+                                    last.unwrap_or(5),
+                                    prefix,
+                                ) {
+                                    Ok(h) => json!({
+                                        "mode": "query", "kind": "history",
+                                        "revisions": h.revisions.len(),
+                                        "most_recent_revision": h.most_recent_revision,
+                                        "matches_in_store": h.matches_in_store,
+                                        "history_starts_now": h.history_starts_now,
+                                        "report": h
+                                    }),
+                                    Err(e) => {
+                                        tool_error(format!("code_index history failed: {e:#}"))
+                                    }
+                                }
+                            }
+                            "onion" => {
+                                match crate::core::code_graph::onion(
+                                    &conn,
+                                    symbol,
+                                    last.unwrap_or(3),
+                                    prefix,
+                                ) {
+                                    Ok(o) => json!({
+                                        "mode": "query", "kind": "onion",
+                                        "channels": o.channels.len(),
+                                        "onion": o
+                                    }),
+                                    Err(e) => tool_error(format!("code_index onion failed: {e:#}")),
+                                }
+                            }
+                            "touches" => {
+                                let Some(sym) = symbol else {
+                                    return tool_error(
+                                    "code_index kind=touches requires `symbol` — a bare name like \"build_tree\", not an id"
+                                        .to_string(),
+                                );
+                                };
+                                match crate::core::code_graph::touches_symbol(&conn, sym, prefix) {
+                                    Ok(t) => json!({
+                                        "mode": "query", "kind": "touches",
+                                        "outgoing": t.outgoing.len(), "incoming": t.incoming.len(),
+                                        "touches": t
+                                    }),
+                                    Err(e) => {
+                                        tool_error(format!("code_index touches failed: {e:#}"))
+                                    }
+                                }
+                            }
+                            "file_graph" => {
+                                // path_prefix is the SCOPE here (edges incident to
+                                // the subtree, from OR to) — the same meaning it
+                                // has for coverage, so one argument does not mean
+                                // substring in one kind and prefix in another.
+                                match crate::core::code_graph::file_graph(&conn, prefix) {
+                                    Ok(g) => json!({
+                                        "mode": "query", "kind": "file_graph",
+                                        "scope": prefix,
+                                        "files": g.files, "edge_pairs": g.edges.len(),
+                                        "edges": g.edges,
+                                        "attributed_edges": g.attributed_edges,
+                                        "unattributed_edges": g.unattributed_edges,
+                                        "coverage": g.coverage, "note": g.note
+                                    }),
+                                    Err(e) => {
+                                        tool_error(format!("code_index file_graph failed: {e:#}"))
+                                    }
+                                }
+                            }
+                            "changed" => {
+                                let files =
+                                    crate::core::code_index::changed_files_from_git(&index_root);
+                                let mut entries = Vec::new();
+                                for file in &files {
+                                    match crate::core::code_graph::touches_file(&conn, file, None) {
+                                        Ok(t) => entries.push(json!({
+                                            "file": file,
+                                            "triple_in_store": !t.outgoing.is_empty()
+                                                || !t.incoming.is_empty(),
+                                            "outgoing": t.outgoing,
+                                            "incoming": t.incoming,
+                                        })),
+                                        Err(e) => {
+                                            return tool_error(format!(
+                                                "code_index changed failed on {file}: {e:#}"
+                                            ))
+                                        }
+                                    }
+                                }
                                 json!({
-                                    "mode": "query", "kind": "relations",
-                                    "count": returned,
-                                    "matched": matched,
-                                    "returned": returned,
-                                    "result_cap": RELATIONS_RESPONSE_CAP,
-                                    "truncated": truncated,
-                                    "note": if truncated {
-                                        "relations capped — narrow with path_prefix, or query the SQLite store directly (gnawdriver db-surf filters server-side without the dump)"
-                                    } else { "" },
-                                    "relations": relations
+                                    "mode": "query", "kind": "changed",
+                                    "changed_files": files.len(),
+                                    "entries": entries,
+                                    "note": "Files come from `git diff --name-only HEAD` plus untracked. triple_in_store:false means the store has no edges for that path — isolated, or the index is older than the change."
                                 })
                             }
-                            Err(e) => tool_error(format!("code_index query failed: {e:#}")),
-                        },
-                        "symbols" => match code_index_db::load_symbols(&conn) {
-                            Ok(rows) => json!({
-                                "mode": "query", "kind": "symbols",
-                                "count": rows.len(), "symbols": rows
-                            }),
-                            Err(e) => tool_error(format!("code_index query failed: {e:#}")),
-                        },
-                        _ => match code_index_db::load_index(&conn) {
-                            Ok(files) => {
-                                let files: Vec<_> = files
-                                    .into_iter()
-                                    .filter(|f| prefix.is_none_or(|p| f.path.starts_with(p)))
-                                    .collect();
-                                let count = files.len();
-                                json!({ "mode": "query", "kind": "items", "files": files, "count": count })
+                            "relations" => match code_index_db::load_relations(&conn, prefix) {
+                                Ok(rows) => {
+                                    // Motor2-incident 2026-11-18 (GTW_MCP_ISSUE_LOG):
+                                    // a ~92k-row store pushed >16 MiB through stdio
+                                    // and KILLED the daemon mid-session. A bulk dump
+                                    // is not an answer — cap it and say so.
+                                    const RELATIONS_RESPONSE_CAP: usize = 5_000;
+                                    let matched = rows.len();
+                                    let truncated = matched > RELATIONS_RESPONSE_CAP;
+                                    let relations: Vec<_> =
+                                        rows.into_iter().take(RELATIONS_RESPONSE_CAP).collect();
+                                    let returned = relations.len();
+                                    json!({
+                                        "mode": "query", "kind": "relations",
+                                        "count": returned,
+                                        "matched": matched,
+                                        "returned": returned,
+                                        "result_cap": RELATIONS_RESPONSE_CAP,
+                                        "truncated": truncated,
+                                        "note": if truncated {
+                                            "relations capped — narrow with path_prefix, or query the SQLite store directly (gnawdriver db-surf filters server-side without the dump)"
+                                        } else { "" },
+                                        "relations": relations
+                                    })
+                                }
+                                Err(e) => tool_error(format!("code_index query failed: {e:#}")),
+                            },
+                            "symbols" => match code_index_db::load_symbols(&conn) {
+                                Ok(rows) => json!({
+                                    "mode": "query", "kind": "symbols",
+                                    "count": rows.len(), "symbols": rows
+                                }),
+                                Err(e) => tool_error(format!("code_index query failed: {e:#}")),
+                            },
+                            _ => match code_index_db::load_index(&conn) {
+                                Ok(files) => {
+                                    let files: Vec<_> = files
+                                        .into_iter()
+                                        .filter(|f| prefix.is_none_or(|p| f.path.starts_with(p)))
+                                        .collect();
+                                    let count = files.len();
+                                    json!({ "mode": "query", "kind": "items", "files": files, "count": count })
+                                }
+                                Err(e) => tool_error(format!("code_index query failed: {e:#}")),
+                            },
+                        };
+                        // T2 (inline always): attach the investigation-status
+                        // block to every query answer. Refusals (tool_error)
+                        // already carry their own guidance and skip this.
+                        if result.is_object()
+                            && result.get("mode").and_then(Value::as_str) == Some("query")
+                        {
+                            let (completeness, denominator, resolved_only, mut next) =
+                                describe_query(kind, &result, prefix, symbol, last, depth);
+                            if stale {
+                                next.insert(0, "mode=refresh".to_string());
                             }
-                            Err(e) => tool_error(format!("code_index query failed: {e:#}")),
-                        },
-                    },
+                            result["query_status"] = query_status_json(
+                                prefix,
+                                stale,
+                                completeness,
+                                denominator,
+                                resolved_only,
+                                next,
+                            );
+                        }
+                        result
+                    }
                     Err(e) => tool_error(format!("code_index query: {e:#}")),
                 }
             }
