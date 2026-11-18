@@ -6,7 +6,7 @@ buggar, inte skuldsatta items: verktygen bygger på lagret vi redan driftar
 (store + gate + graf) och har bevisat värde (Motor2-fynden dag 1). Prioritet
 gäller inom spåret.
 **Proveniens:** Motor2-session 2026-11-02. Original-idé: användaren. Utkast: agent (GLM 5.3 Flash).
-**Annan relevans:** `docs/CODE_INDEX_SQLITE_DESIGN.md` (index-lagring), `GAP-REPORT-2026-10-04.md` (genren "hål-rapport" finns redan i repot).
+**Annan relevans:** `docs/CODE_INDEX_SQLITE_DESIGN.md` (index-lagring), `GAP-REPORT-2026-10-04.md` (genren "hål-rapport" finns redan i repot), `docs/CODE_INDEX_AGENT_ADOPTION.md` (hur agenter i OpenCode/Motor2 faktiskt börjar använda förmågorna — antagandeplan).
 
 ---
 
