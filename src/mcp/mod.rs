@@ -524,8 +524,28 @@ pub mod mcp_server {
                             .and_then(Value::as_u64)
                             .map(|d| d as usize);
                         let to = arguments.get("to").and_then(Value::as_str);
+                        let relation_type = arguments.get("relation_type").and_then(Value::as_str);
+                        let name_prefix = arguments.get("name_prefix").and_then(Value::as_str);
+                        let external = arguments.get("external").and_then(Value::as_bool);
+                        let limit = arguments
+                            .get("limit")
+                            .and_then(Value::as_u64)
+                            .map(|v| v as usize);
                         Ok(envelope_code_index(handle_code_index_mcp(
-                            mode, root, intro, prefix, fix, kind, symbol, depth, last, to,
+                            mode,
+                            root,
+                            intro,
+                            prefix,
+                            fix,
+                            kind,
+                            symbol,
+                            depth,
+                            last,
+                            to,
+                            relation_type,
+                            name_prefix,
+                            external,
+                            limit,
                         )))
                     }
                     "get_semantic_report" => {
@@ -697,11 +717,15 @@ pub mod mcp_server {
                         "root": { "type": "string", "description": "Project root (default .)" },
                         "intro_file": { "type": "string", "description": "Optional intro splice file for refresh/check renders" },
                         "path_prefix": { "type": "string", "description": "query: only paths starting with this prefix" },
-                        "kind": { "type": "string", "description": "query payload: items (default) | relations (from/to_name/to_id/type; capped at 5000 rows with honest matched/returned/truncated accounting — bulk dumps killed the stdio daemon, Motor2 2026-11-18) | symbols (unresolved+external names) | cycles (dependency cycles, rotation-deduped) | file_cycles (file-level dependency cycles, grouped, largest first) | chain (shortest resolved-edge path between two names; requires symbol=FROM and to=TO) | impact (what is affected by changing `symbol`; requires symbol) | touches (what `symbol` uses in OTHER files, with target file+line, plus who uses it; requires symbol) | file_graph (which files depend on which, by weight; path_prefix focuses both directions) | changed (files in the working-tree diff, each with its cross-file targets and users) | history (relation deltas per revision; `symbol` filters the relation key, `last` revisions) | onion (each edge's count across the last `last` revisions, ending at now — the past-to-present view)" },
+                        "kind": { "type": "string", "description": "query payload: items (default) | relations (from/to_name/to_id/type; server-side filters: path_prefix + relation_type + symbol involvement + limit; capped at 5000 with honest matched/returned/truncated accounting — bulk dumps killed the stdio daemon, Motor2 2026-11-18) | symbols (unresolved+external names; filters: name_prefix + external) | cycles (dependency cycles, rotation-deduped) | file_cycles (file-level dependency cycles, grouped, largest first) | chain (shortest resolved-edge path between two names; requires symbol=FROM and to=TO) | impact (what is affected by changing `symbol`; requires symbol) | touches (what `symbol` uses in OTHER files, with target file+line, plus who uses it; requires symbol) | file_graph (which files depend on which, by weight; path_prefix focuses both directions) | changed (files in the working-tree diff, each with its cross-file targets and users) | history (relation deltas per revision; `symbol` filters the relation key, `last` revisions) | onion (each edge's count across the last `last` revisions, ending at now — the past-to-present view)" },
                         "last": { "type": "integer", "description": "kind=history|onion: how many revisions/frames back (default 5 / 3)" },
                         "symbol": { "type": "string", "description": "kind=impact|touches: the DEFINING name to analyse (e.g. parse_file). A name in several files yields several seeds, all reported" },
                         "depth": { "type": "integer", "description": "kind=impact|cycles: hop bound (impact default 3, cycles default 64)" },
                         "to": { "type": "string", "description": "kind=chain: the TARGET name (bare name like parse_file); symbol is the starting point" },
+                        "relation_type": { "type": "string", "description": "kind=relations: exact relation_type filter (calls | imports | uses | implements)" },
+                        "name_prefix": { "type": "string", "description": "kind=symbols: name starts-with filter" },
+                        "external": { "type": "boolean", "description": "kind=symbols: true = only external names, false = only unresolved-local names" },
+                        "limit": { "type": "integer", "description": "kind=relations: max rows returned (default and hard cap 5000; matched/returned/truncated stay honest)" },
                         "fix": { "type": "boolean", "description": "check: rewrite the artifact when stale (default false)" }
                     },
                     "required": []
@@ -3466,6 +3490,10 @@ or list_nodes for a flat index of this file.",
         depth: Option<usize>,
         last: Option<usize>,
         to: Option<&str>,
+        relation_type: Option<&str>,
+        name_prefix: Option<&str>,
+        external: Option<bool>,
+        limit: Option<usize>,
     ) -> Value {
         use crate::core::code_index::{self as ci, CodeIndexOptions};
         use crate::core::code_index_db;
@@ -3726,17 +3754,27 @@ or list_nodes for a flat index of this file.",
                                     "note": "Files come from `git diff --name-only HEAD` plus untracked. triple_in_store:false means the store has no edges for that path — isolated, or the index is older than the change."
                                 })
                             }
-                            "relations" => match code_index_db::load_relations(&conn, prefix) {
+                            "relations" => match code_index_db::load_relations_filtered(
+                                &conn,
+                                prefix,
+                                relation_type,
+                                symbol,
+                            ) {
                                 Ok(rows) => {
                                     // Motor2-incident 2026-11-18 (GTW_MCP_ISSUE_LOG):
                                     // a ~92k-row store pushed >16 MiB through stdio
                                     // and KILLED the daemon mid-session. A bulk dump
-                                    // is not an answer — cap it and say so.
+                                    // is not an answer — cap it and say so. The
+                                    // client `limit` tunes the cap down (never up):
+                                    // matched stays the PRE-cap count, or the
+                                    // denominator would quietly become top-N (M7).
                                     const RELATIONS_RESPONSE_CAP: usize = 5_000;
+                                    let cap = limit
+                                        .unwrap_or(RELATIONS_RESPONSE_CAP)
+                                        .clamp(1, RELATIONS_RESPONSE_CAP);
                                     let matched = rows.len();
-                                    let truncated = matched > RELATIONS_RESPONSE_CAP;
-                                    let relations: Vec<_> =
-                                        rows.into_iter().take(RELATIONS_RESPONSE_CAP).collect();
+                                    let truncated = matched > cap;
+                                    let relations: Vec<_> = rows.into_iter().take(cap).collect();
                                     let returned = relations.len();
                                     json!({
                                         "mode": "query", "kind": "relations",
@@ -3753,7 +3791,11 @@ or list_nodes for a flat index of this file.",
                                 }
                                 Err(e) => tool_error(format!("code_index query failed: {e:#}")),
                             },
-                            "symbols" => match code_index_db::load_symbols(&conn) {
+                            "symbols" => match code_index_db::load_symbols_filtered(
+                                &conn,
+                                name_prefix,
+                                external,
+                            ) {
                                 Ok(rows) => json!({
                                     "mode": "query", "kind": "symbols",
                                     "count": rows.len(), "symbols": rows

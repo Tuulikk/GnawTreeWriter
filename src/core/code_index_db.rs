@@ -1413,12 +1413,29 @@ pub fn load_items(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_j
 
 /// MCP query surface: relations for a path prefix.
 pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>> {
+    load_relations_filtered(conn, prefix, None, None)
+}
+
+/// MCP query surface: relation rows with server-side filters - relation_type,
+/// bare-name involvement (`symbol` matches to_name exactly or the from_id
+/// tail) and a client-tunable limit (the 5000 hard cap stays at the MCP
+/// edge). Tests and legacy callers use `load_relations`, which delegates
+/// with no filters.
+pub fn load_relations_filtered(
+    conn: &Connection,
+    prefix: Option<&str>,
+    relation_type: Option<&str>,
+    symbol: Option<&str>,
+) -> Result<Vec<serde_json::Value>> {
     let mut stmt = conn.prepare(
         "SELECT from_id, to_name, to_id, relation_type, line, file
-         FROM relations WHERE (?1 IS NULL OR file LIKE ?1 || '%')
+         FROM relations
+         WHERE (?1 IS NULL OR file LIKE ?1 || '%')
+           AND (?2 IS NULL OR relation_type = ?2)
+           AND (?3 IS NULL OR to_name = ?3 OR from_id LIKE '%:' || ?3)
          ORDER BY file, line",
     )?;
-    let rows = stmt.query_map(params![prefix], |r| {
+    let rows = stmt.query_map(params![prefix, relation_type, symbol], |r| {
         Ok(serde_json::json!({
             "from": r.get::<_, String>(0)?,
             "to_name": r.get::<_, String>(1)?,
@@ -1435,13 +1452,22 @@ pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<ser
     Ok(out)
 }
 
-/// MCP query surface: unresolved/external symbols with occurrence counts.
-pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>> {
+/// MCP query surface: unresolved/external symbols with occurrence counts,
+/// filterable by name prefix and by external/local. `load_symbols`
+/// delegates with no filters.
+pub fn load_symbols_filtered(
+    conn: &Connection,
+    name_prefix: Option<&str>,
+    external: Option<bool>,
+) -> Result<Vec<serde_json::Value>> {
     let mut stmt = conn.prepare(
         "SELECT name, file, external, occurrences
-         FROM symbols ORDER BY occurrences DESC, name",
+         FROM symbols
+         WHERE (?1 IS NULL OR name LIKE ?1 || '%')
+           AND (?2 IS NULL OR external = ?2)
+         ORDER BY occurrences DESC, name",
     )?;
-    let rows = stmt.query_map([], |r| {
+    let rows = stmt.query_map(params![name_prefix, external], |r| {
         Ok(serde_json::json!({
             "name": r.get::<_, String>(0)?,
             "file": r.get::<_, String>(1)?,
@@ -1454,6 +1480,11 @@ pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>> {
         out.push(row?);
     }
     Ok(out)
+}
+
+/// MCP query surface: unresolved/external symbols with occurrence counts.
+pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>> {
+    load_symbols_filtered(conn, None, None)
 }
 
 /// P5: classify lock-class failures so the caller can degrade to the direct
