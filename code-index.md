@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 2c290a71216befb364af2306bc859942
+> Body-hash: 0743fdb2706a6f6a61f144c6b91b7d0e
 
 ## Träd
 
@@ -93,10 +93,10 @@ src/core/
   blast.rs (310 rader)
   blueprint.rs (182 rader)
   capabilities.rs (366 rader)
-  code_graph.rs (1656 rader)
+  code_graph.rs (1670 rader)
   code_index.rs (722 rader)
   code_index_coverage.rs (683 rader)
-  code_index_db.rs (1638 rader)
+  code_index_db.rs (1657 rader)
   compress.rs (487 rader)
   create_file.rs (99 rader)
   curator.rs (709 rader)
@@ -151,7 +151,7 @@ src/llm/
   relational_index.rs (684 rader)
   semantic_index.rs (1458 rader)
 src/mcp/
-  mod.rs (4916 rader)
+  mod.rs (4917 rader)
 src/parser/
   bash.rs (84 rader)
   c.rs (84 rader)
@@ -817,7 +817,7 @@ _(inga toppnivå-items)_
 - `fn dir_size_mb(path: &std::path::Path) -> u64` :218
 - `pub fn render(project_root: &std::path::Path) -> String` :240
 
-### code_graph.rs (1656 rader)
+### code_graph.rs (1670 rader)
 - `pub struct Reach` :27
 - `pub struct Cycle` :33
 - `pub fn reachable(conn: &Connection, start: &str, max_depth: usize) -> Result<Vec<Reach>>` :44
@@ -827,29 +827,30 @@ _(inga toppnivå-items)_
 - `fn files_of(conn: &Connection, nodes: &[String]) -> Result<Vec<String>>` :194
 - `pub struct SymbolSeed` :219
 - `pub struct GraphCoverage` :231
-- `pub fn graph_coverage(conn: &Connection) -> Result<GraphCoverage>` :244
-- `pub struct FileEdge` :276
-- `pub struct FileGraph` :295
-- `fn file_adjacency(conn: &Connection) -> Result<HashMap<String, Vec<String>>>` :308
-- `pub fn file_graph(conn: &Connection, scope: Option<&str>) -> Result<FileGraph>` :328
-- `pub fn file_cycles(conn: &Connection) -> Result<Vec<Vec<String>>>` :388
-- `pub struct OutEdge` :451
-- `pub struct InEdge` :464
-- `pub struct Touches` :482
-- `const TOUCHES_NOTE: &str = "Cross-file edges only. Outgoing = what the subject uses elsewhere (target file + s…` :502
-- `pub fn touches_file(conn: &Connection, file: &str, scope: Option<&str>) -> Result<Touches>` :510
-- `pub fn touches_symbol(conn: &Connection, symbol: &str, scope: Option<&str>) -> Result<Touches>` :566
-- `pub struct HistoryChange` :664
-- `pub struct HistoryRevision` :676
-- `pub struct HistoryReport` :695
-- `pub fn history(` :712
-- `pub struct OnionFrame` :818
-- `pub struct OnionChannel` :832
-- `pub struct OnionReport` :843
-- `pub fn onion(` :854
-- `pub struct ImpactReport` :994
-- `pub fn resolve_symbols(conn: &Connection, symbol: &str) -> Result<Vec<SymbolSeed>>` :1006
-- `pub fn impact(conn: &Connection, symbol: &str, max_depth: usize) -> Result<ImpactReport>` :1021
+- `pub fn graph_coverage_scoped(conn: &Connection, prefix: Option<&str>) -> Result<GraphCoverage>` :244
+- `pub fn graph_coverage(conn: &Connection) -> Result<GraphCoverage>` :277
+- `pub struct FileEdge` :283
+- `pub struct FileGraph` :302
+- `fn file_adjacency(conn: &Connection) -> Result<HashMap<String, Vec<String>>>` :315
+- `pub fn file_graph(conn: &Connection, scope: Option<&str>) -> Result<FileGraph>` :335
+- `pub fn file_cycles(conn: &Connection) -> Result<Vec<Vec<String>>>` :395
+- `pub struct OutEdge` :458
+- `pub struct InEdge` :471
+- `pub struct Touches` :489
+- `const TOUCHES_NOTE: &str = "Cross-file edges only. Outgoing = what the subject uses elsewhere (target file + s…` :509
+- `pub fn touches_file(conn: &Connection, file: &str, scope: Option<&str>) -> Result<Touches>` :517
+- `pub fn touches_symbol(conn: &Connection, symbol: &str, scope: Option<&str>) -> Result<Touches>` :573
+- `pub struct HistoryChange` :671
+- `pub struct HistoryRevision` :683
+- `pub struct HistoryReport` :702
+- `pub fn history(` :719
+- `pub struct OnionFrame` :825
+- `pub struct OnionChannel` :839
+- `pub struct OnionReport` :850
+- `pub fn onion(` :861
+- `pub struct ImpactReport` :1001
+- `pub fn resolve_symbols(conn: &Connection, symbol: &str) -> Result<Vec<SymbolSeed>>` :1013
+- `pub fn impact(` :1030
 
 ### code_index.rs (722 rader)
 - `fn item_category(kind: &str) -> Option<&'static str>` :33
@@ -888,7 +889,7 @@ _(inga toppnivå-items)_
 - `pub fn measure_scoped(conn: &Connection, scope: Option<&str>) -> Result<CoverageReport>` :186
 - `fn relations_total(conn: &Connection, scope: &str) -> anyhow::Result<i64>` :453
 
-### code_index_db.rs (1638 rader)
+### code_index_db.rs (1657 rader)
 - `pub const EXTRACTOR_VERSION: &str = "4"` :47
 - `const SCHEMA_VERSION: i32 = 4` :49
 - `const BUSY_TIMEOUT_MS: u64 = 5000` :50
@@ -935,10 +936,10 @@ _(inga toppnivå-items)_
 - `pub fn load_entities(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1364
 - `pub fn load_items(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1389
 - `pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1415
-- `pub fn load_relations_filtered(` :1424
-- `pub fn load_symbols_filtered(` :1458
-- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :1486
-- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :1492
+- `pub fn load_relations_filtered(` :1428
+- `pub fn load_symbols_filtered(` :1477
+- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :1505
+- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :1511
 
 ### compress.rs (487 rader)
 - `pub struct CompressedOutput` :12
@@ -1948,7 +1949,7 @@ _(inga toppnivå-items)_
 
 ## src/mcp/
 
-### mod.rs (4916 rader)
+### mod.rs (4917 rader)
 _(inga toppnivå-items)_
 
 ## src/parser/
