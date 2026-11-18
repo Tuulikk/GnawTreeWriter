@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 0743fdb2706a6f6a61f144c6b91b7d0e
+> Body-hash: d326ce8cdd95ec9c14bab98be7a3fc02
 
 ## Träd
 
@@ -96,7 +96,7 @@ src/core/
   code_graph.rs (1670 rader)
   code_index.rs (722 rader)
   code_index_coverage.rs (683 rader)
-  code_index_db.rs (1657 rader)
+  code_index_db.rs (1799 rader)
   compress.rs (487 rader)
   create_file.rs (99 rader)
   curator.rs (709 rader)
@@ -151,7 +151,7 @@ src/llm/
   relational_index.rs (684 rader)
   semantic_index.rs (1458 rader)
 src/mcp/
-  mod.rs (4917 rader)
+  mod.rs (4971 rader)
 src/parser/
   bash.rs (84 rader)
   c.rs (84 rader)
@@ -889,7 +889,7 @@ _(inga toppnivå-items)_
 - `pub fn measure_scoped(conn: &Connection, scope: Option<&str>) -> Result<CoverageReport>` :186
 - `fn relations_total(conn: &Connection, scope: &str) -> anyhow::Result<i64>` :453
 
-### code_index_db.rs (1657 rader)
+### code_index_db.rs (1799 rader)
 - `pub const EXTRACTOR_VERSION: &str = "4"` :47
 - `const SCHEMA_VERSION: i32 = 4` :49
 - `const BUSY_TIMEOUT_MS: u64 = 5000` :50
@@ -938,8 +938,9 @@ _(inga toppnivå-items)_
 - `pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1415
 - `pub fn load_relations_filtered(` :1428
 - `pub fn load_symbols_filtered(` :1477
-- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :1505
-- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :1511
+- `pub fn load_map(` :1513
+- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :1583
+- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :1589
 
 ### compress.rs (487 rader)
 - `pub struct CompressedOutput` :12
@@ -1949,7 +1950,7 @@ _(inga toppnivå-items)_
 
 ## src/mcp/
 
-### mod.rs (4917 rader)
+### mod.rs (4971 rader)
 _(inga toppnivå-items)_
 
 ## src/parser/
