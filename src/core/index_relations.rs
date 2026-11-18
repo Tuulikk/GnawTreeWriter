@@ -30,7 +30,8 @@ pub struct Relation {
     /// is external or ambiguous — those live in the `symbols` store, not as
     /// entity references. FK integrity exists only on this column.
     pub to_id: Option<String>,
-    /// Relation type (calls, imports, implements, uses, defines, contains)
+    /// Relation type — one of `calls`, `imports`, `implements`, `uses`
+    /// (the four the extractor actually emits)
     pub relation_type: String,
     /// Line number where the relation occurs
     pub line: usize,

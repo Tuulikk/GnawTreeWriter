@@ -148,13 +148,41 @@ fn severity_rank(severity: &str) -> u8 {
     }
 }
 
+/// Every .rs file under src/, POSIX-relative to the root (sorted, so the
+/// report is deterministic). The default population when no crate-root doc
+/// file exists.
+fn walk_rust_sources(root: &Path) -> Vec<String> {
+    fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, root, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    out.push(rel.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&root.join("src"), root, &mut out);
+    out.sort();
+    out
+}
+
 pub fn claim_scan(conn: &Connection, root: &Path, files: &[String]) -> Result<ClaimScanReport> {
     let truth = load_truth_sets(conn)?;
     let resolved: Vec<String> = if files.is_empty() {
-        ["src/lib.rs", "src/main.rs", "lib.rs", "main.rs"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
+        // Default scope: every .rs under src/. NOT "the crate-root doc file
+        // when it exists" - GTW's lib.rs/main.rs exist but carry neither
+        // /// nor //! lines, so that rule produced 2 sources, 0 claims and
+        // a vacuous "0 findings" that reads like health (measured
+        // 2026-11-19). The walk can only be empty in a tree without src/,
+        // which the caller must then be told about loudly.
+        walk_rust_sources(root)
     } else {
         files.to_vec()
     };
@@ -296,5 +324,48 @@ mod claim_scan_tests {
             "findings must be rank-sorted: {ranks:?}"
         );
         assert!(report.findings[0].file.contains("docs.rs"));
+    }
+
+    /// M14 (2026-11-19): the DEFAULT surface must read problems. A default
+    /// that scans files without doc lines reports "0 findings" and looks
+    /// healthy — the measured bug was exactly that (src/lib.rs existed,
+    /// carried neither /// nor //!, and the scan said nothing).
+    #[test]
+    fn default_surface_scans_src_and_is_never_vacuously_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src/core")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "pub fn nothing_documented() {}\n").unwrap();
+        std::fs::write(
+            root.join("src/core/documented.rs"),
+            "//! This header claims `ghost_symbol` exists.\npub fn real() {}\n",
+        )
+        .unwrap();
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        migrate_connection(&conn).unwrap();
+        let opts = CodeIndexOptions::default();
+        refresh(&mut conn, root, &opts).unwrap();
+
+        // No `files`: the default walk must find BOTH files under src/,
+        // not just the crate root (which has no doc lines here).
+        let report = claim_scan(&conn, root, &[]).unwrap();
+        assert_eq!(
+            report.sources_scanned, 2,
+            "default must walk every .rs under src/: {report:?}"
+        );
+        assert!(
+            report.claims_total > 0,
+            "a documented file in scope means claims > 0: {report:?}"
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.identifier == "ghost_symbol"),
+            "the lie in a nested file must be found by the default walk: {:?}",
+            report.findings
+        );
     }
 }

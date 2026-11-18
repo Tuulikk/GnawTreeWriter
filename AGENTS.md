@@ -28,9 +28,9 @@ ett resultat.**
 | **M11** | Lång session = avtagande observation; minnet är inte en källa | läs om `git status`, `git diff`, senaste testloggen, `uppslag.md` |
 | **M12** | Mät ytan innan du rör den | `--help`, `doctor`, ett litet prov i en temp-katalog |
 | **M13** | Repots hela tillstånd är vårt att äga — även okommittat arbete från tidigare sessioner | påträffade ändringar utreds (diff, mtimes, `history`), bevisas sammanhängande (bygg + test) och committas med ärlig härkomst — eller dokumenteras med motivering i `uppslag.md`; "någon annans WIP" är ingen disposition |
+| **M14** | Ett verktyg som ingen använder, eller som inte **läser problem**, är inte klart | bevisa båda: en **trigger** (CI-grind, agent-pekare, session-default) OCH att det **fångar klassen det ämnar fånga** (kör det på en känd dålig indata); plus att **default-ytan inte kan vara tom** — 0 träffar som ser friskt ut är ett fel, inte ett resultat |
 
 **Konkreta fel dessa regler finns för** (imitera inte mönstret):
-
 - *"`insert` ignorerar positionen"* — fel: `0` är **första barnet**, inte roten.
   Felet var en enda grep på första `+`-raden i diffen. (M6)
 - *"GTW kan inte skapa filer"* — fel: `scaffold` fanns hela tiden. (M6, M12)
@@ -45,6 +45,12 @@ ett resultat.**
   release-byggets dirty-grind och var ouppspårbart om det tvekas bort.
   Disposition (utred → bevisa → committa) är den aktiva agentens ansvar,
   alltid. (M13)
+- *"claim_scan är klar — den byggdes, testades, installerades"* — fel: dess
+  default-yta (`src/lib.rs`, `src/main.rs`) fanns men hade noll doc-rader →
+  **0 källor, 0 fynd, såg friskt ut**; och `--files` tog inte flera värden.
+  Klarhetskravet är inte "den finns" utan "den används OCH läser problem":
+  grind i CI + bevisad fångst på känd dålig indata + icke-tom default.
+  (M14, 2026-11-19)
 
 ### Definition of done — skriv ut den punkt för punkt innan du säger klart
 

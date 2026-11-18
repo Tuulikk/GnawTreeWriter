@@ -406,8 +406,10 @@ enum Commands {
         /// Project root (default: current directory)
         #[arg(default_value = ".")]
         path: String,
-        /// Source files to scan, relative to root (default: crate-root doc files)
-        #[arg(long)]
+        /// Source files to scan, relative to root. Repeatable
+        /// (--files a.rs --files b.rs) or comma-separated; default: every
+        /// .rs file under src/
+        #[arg(long, value_delimiter = ',')]
         files: Vec<String>,
     },
     /// Compress source code by replacing function bodies with placeholders

@@ -26,6 +26,16 @@ jobs:
       - name: Check skill package is in sync
         run: scripts/pack-skill.sh --check
 
+      # claim-scan gate (T4 §3.1): doc claims the code-index store cannot
+      # verify. HIGH-severity candidates fail; MEDIUM report and never fail.
+      # A gate nobody runs is decoration (uppslag #17) — this one found its
+      # own motivating case on day one.
+      - name: Build claim-scan gate store
+        run: cargo run --quiet -- code-index . --db
+
+      - name: Claim-scan doc drift (HIGH blocks)
+        run: GTW_BIN="$(pwd)/target/debug/gnawtreewriter" scripts/claim-scan-gate.sh .
+
       - name: Run unit tests
         run: cargo test
 

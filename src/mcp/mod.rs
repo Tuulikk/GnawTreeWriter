@@ -3955,6 +3955,10 @@ or list_nodes for a flat index of this file.",
             }
         };
         match crate::core::claim_scan::claim_scan(&conn, root_path, &files) {
+            Ok(report) if report.sources_scanned == 0 => tool_error(format!(
+                "claim_scan scanned 0 sources under {} - the `files` paths are relative to the root and none resolved; pass real paths (e.g. [\"src/core/index_relations.rs\"]) or omit them to walk every .rs under src/",
+                root
+            )),
             Ok(report) => tool_success(
                 format!(
                     "claim_scan: {} source(s), {} claims, {} verified, {} lie-CANDIDATES ({} shown) - candidates, not verdicts; grep to disambiguate",

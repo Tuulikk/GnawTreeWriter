@@ -13,7 +13,41 @@
 
 ---
 
-## 2026-11-18 — Motor2-fynd 3: `create_goal` i indexet men `touches` hittar inga anropare  ⚠️ BELAGT (metoden-vakten — by design, men osynlig design)
+## 2026-11-19 — claim_scan: först byggd, sedan **använd** — första fångsten stängd  ✅
+
+**Ägarens invändning (ordagrant i sak):** *"om saker inte används eller läser
+problem så är det inte helt klart, fortfarande."* Mätt och bekräftat samma
+timme — verktyget var byggt, testat, installerat **och trasigt på sin egen
+default-yta**:
+
+1. **Default-ytan var tom.** `src/lib.rs` och `src/main.rs` existerar men har
+   varken `///` eller `//!` → `sources_scanned: 2, claims_total: 0,
+   findings_total: 0` = **såg friskt ut**. Fix: default är nu alltid
+   `src/`-vandringen (109 filer → 560 claims, 368 verifierade).
+2. **`--files` tog inte flera värden** (`value_delimiter` saknades).
+3. **0 källor svarade som tomt resultat** — nu högljutt fel med körbart råd
+   (M14: 0 träffar som ser friskt ut är ett fel, inte ett resultat).
+
+**Första fångsten stängdes:** `index_relations.rs:33` lovade relationstyperna
+`defines`/`contains` — de finns inte i extraktionen. Doc-texten rättad till de
+fyra verkliga (`calls`, `imports`, `implements`, `uses`) och formulerad så
+att den egna grinden inte kan läsa den som en lögn igen.
+
+**Användningen institutionaliserad (M14:s trigger-halva):**
+`scripts/claim-scan-gate.sh` + CI-steg i `validate.yml` — HIGH-severity
+kandidater failar bygget, MEDIUM rapporteras (parameternamn, env-vars och
+testfixturer är legitim prosa). **Bevisat båda riktningarna:** känd dålig
+indata (`/tmp`-probe med `Nonexistent::qualified_thing`) → exit 1 med
+fil:rad-ankare; verkligt repo (192 MEDIUM, 0 HIGH) → exit 0 med ärlig
+sammanfattning.
+
+**Om det är fel:** grinden blir tyst om `claim-scan` saknar store (exit 2 —
+grindar som inte kan döma är inte gröna), och MEDIUM-taket kan dölja en
+riktig lögn om den råkar vara backtickad utan `::`. §8.4-policyn (när
+eskaleras en kandidat till lint?) är fortfarande ägarbeslut.
+
+---
+
 
 **Påståendet från Motor2-agenten:** grafen saknar `create_goal`:s konsumenter.
 
