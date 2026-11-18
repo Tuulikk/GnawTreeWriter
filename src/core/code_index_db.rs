@@ -765,9 +765,8 @@ pub fn refresh(
         }
     }
 
-    // Cross-file resolution + symbol aggregation (T6/review #12): every
-    // relation the per-file pass left NULL gets one shot against the FULL
-    // entity set; what remains unresolved is a symbol, not a reference.
+    // Recheck all relation targets against the full entity set, including
+    // callers reused from unchanged files. Remaining NULL targets become symbols.
     resolve_unresolved_in_db(conn)?;
 
     // Deltas are computed AFTER the cross-file pass: before that, `to_id` is
@@ -1211,13 +1210,13 @@ fn store_entities_relations(
     Ok(())
 }
 
-/// One resolution shot for all still-unresolved relations against the
-/// FULL entity set (cross-file edges). Same-file candidates win; a unique
-/// candidate wins; ambiguous/external stay NULL (symbols, decision #12).
+/// Re-evaluate every relation against the full entity set. Same-file candidates
+/// win; a unique cross-file candidate wins; ambiguous/external stay NULL.
 fn resolve_unresolved_in_db(conn: &Connection) -> Result<()> {
-    // Delmål C (H4, 2026-11-10): implements resolves against kind=trait
-    // only — same rule as the per-file pass (name collisions between
-    // impl:Foo and trait:Foo must not leave the honest target unresolved).
+    // Recheck every stored target against the current entity population.
+    // A new competing definition can invalidate an already resolved edge
+    // whose caller file was reused. Only write rows whose target changes.
+    // Implements resolves against kind=trait only, as in the per-file pass.
     let mut by_name: std::collections::HashMap<String, Vec<(String, String, String)>> =
         Default::default();
     {
@@ -1235,19 +1234,19 @@ fn resolve_unresolved_in_db(conn: &Connection) -> Result<()> {
             by_name.entry(name).or_default().push((file, id, kind));
         }
     }
-    let mut stmt =
-        conn.prepare("SELECT id, to_name, file, relation_type FROM relations WHERE to_id IS NULL")?;
+    let mut stmt = conn.prepare("SELECT id, to_name, file, relation_type, to_id FROM relations")?;
     let rows = stmt.query_map([], |r| {
         Ok((
             r.get::<_, i64>(0)?,
             r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
             r.get::<_, String>(3)?,
+            r.get::<_, Option<String>>(4)?,
         ))
     })?;
-    let mut updates: Vec<(i64, String)> = Vec::new();
+    let mut updates: Vec<(i64, Option<String>)> = Vec::new();
     for row in rows {
-        let (rid, to_name, file, relation_type) = row?;
+        let (rid, to_name, file, relation_type, previous) = row?;
         let bare = to_name.rsplit("::").next().unwrap_or(&to_name).to_string();
         let mut cands = by_name.get(&bare).cloned().unwrap_or_default();
         if to_name.contains("::") {
@@ -1263,11 +1262,8 @@ fn resolve_unresolved_in_db(conn: &Connection) -> Result<()> {
         let pick = match (same_file.len(), cands.len()) {
             (1, _) => Some(same_file[0].1.clone()),
             (0, 1) => {
-                // Same guard as `resolve_relations` (the rule lives in two
-                // places — this is the authoritative cross-file pass). A
-                // globally "unique" METHOD name is not unique in reality: std
-                // is not indexed, so `clone`/`len`/`is_empty`/`get` look
-                // singletons. Cross-file method targets stay unresolved.
+                // A globally "unique" METHOD name may actually refer to an
+                // unindexed std or trait method. Do not fabricate that edge.
                 if crate::core::index_relations::is_method_entity_id(&cands[0].1) {
                     None
                 } else {
@@ -1276,8 +1272,8 @@ fn resolve_unresolved_in_db(conn: &Connection) -> Result<()> {
             }
             _ => None,
         };
-        if let Some(id) = pick {
-            updates.push((rid, id));
+        if pick != previous {
+            updates.push((rid, pick));
         }
     }
     for (rid, id) in &updates {

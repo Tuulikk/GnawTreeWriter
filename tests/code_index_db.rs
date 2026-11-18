@@ -154,6 +154,76 @@ fn generation_key_covers_population_not_presentation() {
 }
 
 #[test]
+fn new_competing_definition_reconsiders_existing_cross_file_call() {
+    let incremental = tempfile::tempdir().unwrap();
+    let full = tempfile::tempdir().unwrap();
+    for root in [incremental.path(), full.path()] {
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join(".git"), "gitdir: nowhere\n").unwrap();
+        std::fs::write(
+            root.join("src/caller.rs"),
+            "pub fn invoke() { target(); steady(); }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/one.rs"),
+            "pub fn target() {}\npub fn steady() {}\n",
+        )
+        .unwrap();
+    }
+
+    let (mut inc_db, _) = code_index_db::open_or_recreate(incremental.path()).unwrap();
+    code_index_db::refresh(&mut inc_db, incremental.path(), &opts()).unwrap();
+    let before = code_index_db::load_relations(&inc_db, None).unwrap();
+    let call = |rows: &[serde_json::Value], name: &str| {
+        rows.iter()
+            .find(|r| {
+                r["file"] == "src/caller.rs"
+                    && r["to_name"] == name
+                    && r["relation_type"] == "calls"
+            })
+            .unwrap()["to_id"]
+            .clone()
+    };
+    let original_target = call(&before, "target");
+    let original_steady = call(&before, "steady");
+    assert!(original_target.is_string(), "initial target must resolve");
+    assert!(original_steady.is_string(), "control call must resolve");
+
+    for root in [incremental.path(), full.path()] {
+        std::fs::write(root.join("src/two.rs"), "pub fn target() {}\n").unwrap();
+    }
+    let stats = code_index_db::refresh(&mut inc_db, incremental.path(), &opts()).unwrap();
+    assert_eq!(stats.files_parsed, 1, "only the new definition is parsed");
+    assert_eq!(
+        stats.files_reused, 2,
+        "caller and original definition are reused"
+    );
+    let after_incremental = code_index_db::load_relations(&inc_db, None).unwrap();
+    assert_eq!(call(&after_incremental, "steady"), original_steady);
+
+    let (mut full_db, _) = code_index_db::open_or_recreate(full.path()).unwrap();
+    code_index_db::refresh(&mut full_db, full.path(), &opts()).unwrap();
+    let after_full = code_index_db::load_relations(&full_db, None).unwrap();
+    assert!(
+        call(&after_full, "target").is_null(),
+        "fresh rebuild sees ambiguity"
+    );
+    assert_eq!(call(&after_full, "steady"), original_steady);
+
+    let mut incremental_rows: Vec<_> = after_incremental
+        .into_iter()
+        .map(|r| r.to_string())
+        .collect();
+    let mut full_rows: Vec<_> = after_full.into_iter().map(|r| r.to_string()).collect();
+    incremental_rows.sort();
+    full_rows.sort();
+    assert_eq!(
+        incremental_rows, full_rows,
+        "incremental and full relation graphs must agree"
+    );
+}
+#[test]
 fn removed_files_are_pruned() {
     let dir = tempfile::tempdir().unwrap();
     make_repo(dir.path());
@@ -186,4 +256,135 @@ fn corrupt_db_is_rebuilt_not_fatal() {
         run.notices
     );
     assert!(run.doc.contains("beta"), "rebuilt index has content");
+}
+#[test]
+fn removed_definitions_reconsider_ambiguous_and_resolved_calls() {
+    let incremental = tempfile::tempdir().unwrap();
+    let one_removed = tempfile::tempdir().unwrap();
+    let both_removed = tempfile::tempdir().unwrap();
+    let prepare = |root: &Path, include_one: bool, include_two: bool| {
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join(".git"), "gitdir: nowhere\n").unwrap();
+        std::fs::write(
+            root.join("src/caller.rs"),
+            "pub fn invoke() { target(); steady(); }\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("src/stable.rs"), "pub fn steady() {}\n").unwrap();
+        if include_one {
+            std::fs::write(root.join("src/one.rs"), "pub fn target() {}\n").unwrap();
+        }
+        if include_two {
+            std::fs::write(root.join("src/two.rs"), "pub fn target() {}\n").unwrap();
+        }
+    };
+    prepare(incremental.path(), true, true);
+    prepare(one_removed.path(), false, true);
+    prepare(both_removed.path(), false, false);
+
+    let rows = |root: &Path| {
+        let (mut conn, _) = code_index_db::open_or_recreate(root).unwrap();
+        code_index_db::refresh(&mut conn, root, &opts()).unwrap();
+        code_index_db::load_relations(&conn, None).unwrap()
+    };
+    let target = |relations: &[serde_json::Value], name: &str| {
+        relations
+            .iter()
+            .find(|r| {
+                r["file"] == "src/caller.rs"
+                    && r["to_name"] == name
+                    && r["relation_type"] == "calls"
+            })
+            .unwrap()["to_id"]
+            .clone()
+    };
+    let normalized = |relations: Vec<serde_json::Value>| {
+        let mut values: Vec<_> = relations.into_iter().map(|r| r.to_string()).collect();
+        values.sort();
+        values
+    };
+
+    let (mut conn, _) = code_index_db::open_or_recreate(incremental.path()).unwrap();
+    code_index_db::refresh(&mut conn, incremental.path(), &opts()).unwrap();
+    let initial = code_index_db::load_relations(&conn, None).unwrap();
+    assert!(
+        target(&initial, "target").is_null(),
+        "two definitions are ambiguous"
+    );
+    let stable = target(&initial, "steady");
+    assert!(stable.is_string());
+
+    std::fs::remove_file(incremental.path().join("src/one.rs")).unwrap();
+    let stats = code_index_db::refresh(&mut conn, incremental.path(), &opts()).unwrap();
+    assert_eq!(stats.files_removed, 1);
+    assert_eq!(stats.files_parsed, 0, "unchanged callers must be reused");
+    let after_one = code_index_db::load_relations(&conn, None).unwrap();
+    assert_eq!(
+        target(&after_one, "target"),
+        serde_json::json!("gtw:src/two.rs:function:target")
+    );
+    assert_eq!(target(&after_one, "steady"), stable);
+    assert_eq!(normalized(after_one), normalized(rows(one_removed.path())));
+
+    std::fs::remove_file(incremental.path().join("src/two.rs")).unwrap();
+    let stats = code_index_db::refresh(&mut conn, incremental.path(), &opts()).unwrap();
+    assert_eq!(stats.files_removed, 1);
+    assert_eq!(stats.files_parsed, 0);
+    let after_both = code_index_db::load_relations(&conn, None).unwrap();
+    assert!(
+        target(&after_both, "target").is_null(),
+        "removed target must be rejected"
+    );
+    assert_eq!(target(&after_both, "steady"), stable);
+    assert_eq!(
+        normalized(after_both),
+        normalized(rows(both_removed.path()))
+    );
+}
+#[test]
+fn unchanged_refresh_keeps_targets_without_relation_updates() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join(".git"), "gitdir: nowhere\n").unwrap();
+    std::fs::write(
+        root.join("src/caller.rs"),
+        "pub fn invoke() { target(); }\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/target.rs"), "pub fn target() {}\n").unwrap();
+
+    let (mut conn, _) = code_index_db::open_or_recreate(root).unwrap();
+    code_index_db::refresh(&mut conn, root, &opts()).unwrap();
+    let before = code_index_db::load_relations(&conn, None).unwrap();
+    assert_eq!(before.len(), 1);
+    assert!(before[0]["to_id"].is_string());
+
+    conn.execute_batch(
+        "CREATE TEMP TABLE relation_update_audit (n INTEGER);
+         CREATE TEMP TRIGGER count_relation_updates AFTER UPDATE OF to_id ON relations
+         BEGIN INSERT INTO relation_update_audit(n) VALUES (1); END;",
+    )
+    .unwrap();
+    let changes_before: i64 = conn
+        .query_row("SELECT total_changes()", [], |r| r.get(0))
+        .unwrap();
+    let stats = code_index_db::refresh(&mut conn, root, &opts()).unwrap();
+    let changes_after: i64 = conn
+        .query_row("SELECT total_changes()", [], |r| r.get(0))
+        .unwrap();
+    let target_updates: i64 = conn
+        .query_row("SELECT COUNT(*) FROM relation_update_audit", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(stats.files_parsed, 0);
+    assert_eq!(stats.files_reused, 2);
+    assert_eq!(target_updates, 0, "unchanged target must not be rewritten");
+    assert_eq!(code_index_db::load_relations(&conn, None).unwrap(), before);
+    eprintln!(
+        "no-op refresh: {} total SQLite changes, {} relation target updates",
+        changes_after - changes_before,
+        target_updates
+    );
 }

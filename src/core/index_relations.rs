@@ -38,6 +38,46 @@ pub struct Relation {
     pub file: String,
 }
 
+/// Syntax observed at a call site, independent of relation resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallForm {
+    Identifier,
+    Qualified,
+    Method,
+    Macro,
+}
+
+/// Position of the whole call expression or macro invocation.
+/// Lines and character columns are 1-based; end positions are exclusive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceAnchor {
+    pub file: String,
+    pub node_path: String,
+    pub start_line: usize,
+    pub start_col: usize,
+    pub end_line: usize,
+    pub end_col: usize,
+}
+
+/// One AST call site and the relation it emitted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallObservation {
+    /// Index in the owning `RelationIndex.relations` vector.
+    pub relation_index: usize,
+    pub form: CallForm,
+    /// Exact callee spelling from the AST, including qualification or `!`.
+    pub written_target: String,
+    pub anchor: SourceAnchor,
+}
+
+/// Additive extraction view for consumers that need AST call sites.
+#[derive(Debug, Clone)]
+pub struct RelationExtraction {
+    pub index: RelationIndex,
+    /// Each entry points into `index.relations` by `relation_index`.
+    pub call_observations: Vec<CallObservation>,
+}
+
 /// Result of relation extraction.
 #[derive(Debug, Clone, Serialize)]
 pub struct RelationIndex {
@@ -74,16 +114,41 @@ pub fn extract_relations_from_tree(
     source: &str,
     file_path: &str,
 ) -> RelationIndex {
+    extract_relations_impl(tree, source, file_path, false).index
+}
+
+/// Extract call observations alongside relations without changing the legacy result.
+pub fn extract_relations_with_observations_from_tree(
+    tree: &TreeNode,
+    source: &str,
+    file_path: &str,
+) -> RelationExtraction {
+    extract_relations_impl(tree, source, file_path, true)
+}
+
+fn extract_relations_impl(
+    tree: &TreeNode,
+    source: &str,
+    file_path: &str,
+    capture_observations: bool,
+) -> RelationExtraction {
     let lines: Vec<&str> = source.lines().collect();
 
     let mut relations = Vec::new();
+    let mut call_observations = Vec::new();
     let mut summary = std::collections::HashMap::new();
 
     // Extract imports as relations
     extract_imports(tree, file_path, &lines, &mut relations);
 
     // Extract function calls
-    extract_calls(tree, file_path, &lines, &mut relations);
+    extract_calls(
+        tree,
+        file_path,
+        &mut relations,
+        &mut call_observations,
+        capture_observations,
+    );
 
     // Extract type usage (struct, enum references)
     extract_type_usage(tree, file_path, &lines, &mut relations);
@@ -96,10 +161,13 @@ pub fn extract_relations_from_tree(
         *summary.entry(rel.relation_type.clone()).or_insert(0) += 1;
     }
 
-    RelationIndex {
-        file: file_path.to_string(),
-        relations,
-        summary,
+    RelationExtraction {
+        index: RelationIndex {
+            file: file_path.to_string(),
+            relations,
+            summary,
+        },
+        call_observations,
     }
 }
 
@@ -368,8 +436,22 @@ fn extract_import_target(import_line: &str) -> Option<String> {
     None
 }
 
-fn extract_calls(tree: &TreeNode, file_path: &str, lines: &[&str], relations: &mut Vec<Relation>) {
-    find_calls_in_scope(tree, file_path, lines, relations, None, None);
+fn extract_calls(
+    tree: &TreeNode,
+    file_path: &str,
+    relations: &mut Vec<Relation>,
+    observations: &mut Vec<CallObservation>,
+    capture_observations: bool,
+) {
+    find_calls_in_scope(
+        tree,
+        file_path,
+        relations,
+        observations,
+        capture_observations,
+        None,
+        None,
+    );
 }
 
 /// Function-like nodes whose name (when present) becomes the caller scope.
@@ -383,8 +465,9 @@ fn is_function_like(node_type: &str) -> bool {
 fn find_calls_in_scope(
     tree: &TreeNode,
     file_path: &str,
-    _lines: &[&str],
     relations: &mut Vec<Relation>,
+    observations: &mut Vec<CallObservation>,
+    capture_observations: bool,
     enclosing: Option<&str>,
     impl_of: Option<&str>,
 ) {
@@ -403,9 +486,9 @@ fn find_calls_in_scope(
     //
     // Delmål C (proposal 2026-11-10): callee shapes beyond the bare
     // identifier now land too —
-    // - scoped_identifier (super::/crate::/path::call): get_name() yields
-    //   the BARE name (the last identifier child), so same-file resolution
-    //   still works and unresolved paths fall into their honest classes;
+    // - scoped_identifier (super::/crate::/path::call): get_name() supplies
+    //   the reduced to_name; it can select the first identifier in a path.
+    //   The written qualification is kept separately in the observation;
     // - field_expression (obj.method()): the METHOD name is the LAST
     //   identifier child — never the receiver (get_name would return the
     //   receiver for `w.describe()` — H1, the biggest resolution lift);
@@ -456,6 +539,7 @@ fn find_calls_in_scope(
                         Some(name) => format!("gtw:{}:function:{}", file_path, name),
                         None => format!("gtw:{}:callsite:{}", file_path, tree.start_line),
                     };
+                    let relation_index = relations.len();
                     relations.push(Relation {
                         from,
                         to_name: callee,
@@ -464,6 +548,27 @@ fn find_calls_in_scope(
                         line: tree.start_line,
                         file: file_path.to_string(),
                     });
+                    if capture_observations {
+                        let form = match child.node_type.as_str() {
+                            "identifier" => CallForm::Identifier,
+                            "scoped_identifier" => CallForm::Qualified,
+                            "field_expression" => CallForm::Method,
+                            _ => unreachable!(),
+                        };
+                        observations.push(CallObservation {
+                            relation_index,
+                            form,
+                            written_target: child.content.clone(),
+                            anchor: SourceAnchor {
+                                file: file_path.to_string(),
+                                node_path: tree.path.clone(),
+                                start_line: tree.start_line,
+                                start_col: tree.start_col,
+                                end_line: tree.end_line,
+                                end_col: tree.end_col,
+                            },
+                        });
+                    }
                 }
                 break;
             }
@@ -484,6 +589,7 @@ fn find_calls_in_scope(
                     Some(n) => format!("gtw:{}:function:{}", file_path, n),
                     None => format!("gtw:{}:callsite:{}", file_path, tree.start_line),
                 };
+                let relation_index = relations.len();
                 relations.push(Relation {
                     from,
                     to_name: format!("{name}!"),
@@ -492,12 +598,37 @@ fn find_calls_in_scope(
                     line: tree.start_line,
                     file: file_path.to_string(),
                 });
+                if capture_observations {
+                    if let Some(bang) = tree.content.find('!') {
+                        observations.push(CallObservation {
+                            relation_index,
+                            form: CallForm::Macro,
+                            written_target: tree.content[..=bang].to_string(),
+                            anchor: SourceAnchor {
+                                file: file_path.to_string(),
+                                node_path: tree.path.clone(),
+                                start_line: tree.start_line,
+                                start_col: tree.start_col,
+                                end_line: tree.end_line,
+                                end_col: tree.end_col,
+                            },
+                        });
+                    }
+                }
             }
         }
     }
 
     for child in &tree.children {
-        find_calls_in_scope(child, file_path, _lines, relations, current, impl_next);
+        find_calls_in_scope(
+            child,
+            file_path,
+            relations,
+            observations,
+            capture_observations,
+            current,
+            impl_next,
+        );
     }
 }
 

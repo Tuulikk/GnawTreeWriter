@@ -36,6 +36,8 @@ Håll minst fyra dimensioner åtskilda:
 
 Ett befintligt `to_id` betyder att GTW:s regel valde ett mål. Det betyder inte att en kompilator verifierade den faktiska anropsmottagaren.
 
+Skilj också **klassificeringens ursprung** från dimensionerna ovan: *observerad* klassificering läser en egenskap direkt ur källan (till exempel AST-form), *härledd* klassificering använder ytterligare analys eller regler (till exempel möjlig lokal import), och *användarstyrd* klassificering väljer vad som är relevant i en viss undersökning. De kan samverka: en sparad observation kan ligga till grund för en omprövningsbar härledning, medan en läsvy använder båda för ett kontextbundet urval utan att skriva om grundinformationen. Ursprunget säger varken hur säkert ett mål är upplöst eller om påståendet har verifierats. Börja med att redovisa ursprunget för några befintliga klasser; beständiga användarkategorier och dynamiska filter kan vänta.
+
 | Klassificering | Underlag som finns | Litet första steg | Gräns |
 |---|---|---|---|
 | Identifierar-, kvalificerat, fält-/metod- och makroanrop | AST-typen vid extraktion | Bevara syntaxform och källankare i resultatet. | `obj.metod()` ger inte mottagarens statiska typ eller faktisk dispatch. Kvalificerad väg förloras delvis när `get_name()` ger sista namnet. |
@@ -59,6 +61,8 @@ Kontraktet kan först vara ett **läsformat ovanpå befintliga API:er**. Ingen g
 GTW har redan delar av underlaget: filhashar och generationsnyckel i [indexdatabasen](../src/core/code_index_db.rs), `index_stale` och `history_gap` i [coverage](../src/core/code_index_coverage.rs) samt `graph_coverage` i [grafresultat](../src/core/code_graph.rs). En synlig sökgräns behövs även för reservvägar: [lexikal reservsökning](../src/core/gnaw_find.rs) tar högst 400 filer och kan stoppa när träffbudgeten nåtts.
 
 **Omprövning:** Behåll observationen när dess tolkning förkastas. Om en ny kandidat gör ett tidigare mål tvetydigt är `resolved_by_rule → unresolved/ambiguous` ett legitimt förbättrat resultat. Först måste indexpassagen återbesöka berörda mål. Därefter kan man besluta om slutsatsändringar ska ingå i `relation_changes` eller få en separat, tydligt benämnd historik. Ändra inte dagens kantantalshistorik tyst.
+
+**Ändrad analysmetod är också en ändring:** En slutsats bör kunna hänvisa till producerande metod/regel, version och relevanta parametrar. Då kan en ny resolverregel göra just dess tidigare mål inaktuella även när filhashen är oförändrad. GTW:s `generation_key` omfattar redan schema-, extraktor- och identitetsversion samt filpopulation; [indexdatabasen](../src/core/code_index_db.rs) gör full återuppbyggnad när nyckeln ändras. Det är en befintlig korrekthetsväg, inte bevis för att varje enskild slutsats redan har metodproveniens. Pröva riktad omprövning av de slutsatser som en ändrad regel kan påverka mot full omanalys som facit. Återanvänd källobservationer vars hash och extraktionsmetod fortfarande gäller; tolka om dem bara där härledningen ändrats. Om beroendena inte kan avgränsas tillförlitligt ska full omanalys väljas före en skenbart billig men ofullständig riktad passering. Ingen ny generell store krävs för försöket.
 
 ## 4. Mät relationskvalitet som övergångar
 
@@ -94,6 +98,8 @@ Skilj **motorns kvalitet** (relationer, omprövning, frågeresultat) från **exp
 - återanvänder delresultat bara när hash, scope och metodversion matchar;
 - gör samma maskinläsbara mellanresultat granskningsbart för människa och liten lokal modell.
 
+För att minska **resonemangs- och kontrollarbetet**, inte bara antal token, kan samma resultat visas i tre steg: **översikt** (träffar, omfattning, täckning, begränsningar), **beslutsunderlag** (uppgiftsrelevanta fynd, varför de valts och vilket underlag som finns) och **fördjupning** (relationer, källankare, alternativa kandidater och möjliga nästa kontroller). Detta behöver inte bli tre API:er. En liten modell, en människa och ett deterministiskt program bör kunna läsa samma strukturerade data. GTW kan själv göra avgränsning, deduplicering, regelkontroll, kandidaträkning och källkontroll där de är mekaniskt definierade; konsumenten ska inte behöva rekonstruera dessa steg ur en stor rålista. Urvalets regel, bortvalda/okända antal och gränser måste redovisas så att ett kort beslutsunderlag inte låtsas vara ett komplett facit.
+
 **Konkret exponeringslucka:** MCP:s `code_index kind=relations` läser alla matchande rader och returnerar en lista; något `limit` eller sidformat syns inte i den granskade vägen. Ett tidigare `kind=items`-anrop gav också ett stort projektsvar, medan `get_skeleton` för en fil var kompakt. Begränsade eller paginerade läsresultat ger därför omedelbar nytta före nya specialverktyg. [MCP-frågevägen](../src/mcp/mod.rs), [databasläsningen](../src/core/code_index_db.rs).
 
 `guide` och verktygsbeskrivningarna bör säga **vad verktygen kan fastställa**: exempelvis ”upplösta kanter enligt GTW:s regel”, ”endast inom vald sökgräns” och ”saknat lokalt mål är inte bevisad extern import”. GTW behöver inget eget agentplaneringssystem för detta.
@@ -118,6 +124,8 @@ En minimal förmågepost kan ha: **ID · syfte · CLI/MCP-ingång · nödvändig
 
 Härled maskinellt det som redan finns i CLI-/MCP-registreringar; underhåll manuellt bara semantiska påståenden och begränsningar. Märk varje post **verifierad**, **dokumenterad men oprövad** eller **föreslagen** och länka verifierade påståenden till namngivna tester eller mätningar. Ett kontraktstest bör upptäcka saknad post för registrerad yta och post som pekar på borttaget test. Den dokumenterade `commands`-driften motiverar en sådan kontroll. Katalogen kan ge `guide` bättre svar och stödja framtida verktygsjämförelser utan obestyrkta konkurrenspåståenden.
 
+Pröva ett **gemensamt maskinläsbart register** som en tunn projektion av dessa befintliga källor: förmåga, indata och förutsättningar, möjliga resultat, vad resultatet faktiskt kan fastställa, begränsningar, möjliga följdoperationer och verifierande test/mätning. Börja med några Code Index-förmågor och kontrollera hur långt `capabilities`, `commands`, MCP-scheman och `guide` redan räcker innan mer metadata införs. Registret kan mata dokumentation och verktygsupptäckt samt låta enkel deterministisk planering välja en tillgänglig nästa kontroll. Det förutsätter inget nytt flödessystem; om registreringarna ger motstridiga uppgifter ska skillnaden bli ett verifierbart fynd, inte döljas i en sammanfogad beskrivning.
+
 ## 8. Utvecklingsspår, beroenden och flera samtidiga vinster
 
 | Spår | Direkt nytta | Hårt beroende | Kan göras parallellt |
@@ -129,6 +137,8 @@ Härled maskinellt det som redan finns i CLI-/MCP-registreringar; underhåll man
 | Återanvändbar crate | Potentiell nytta för Motor2 och andra Rust-program. | Faktisk gräns och migrationskontrakt; inte ett beroende för spåren ovan. | En read-only gränsspike kan göras oberoende. |
 
 **Hårda beroenden:** kvalitetsanspråk kräver facit; korrekta mängdoperationer kräver gemensam identitets-, versions- och scope-semantik; omprövning kräver att relevanta befintliga relationer återbesöks. **Rekommenderad ordning:** facit före resolverändringar, litet läskontrakt före brett fråge-API, verklig andra konsument före stabil crate.
+
+En ändrad analysmetod kräver dessutom en giltighetskontroll av de slutsatser som metoden producerat; den kräver inte att källobservationer med oförändrat underlag kastas bort. Förmågeregistrets lilla försöksyta och mätning av praktisk uppgiftsnytta kan göras parallellt med facit- och resolverarbetet. De är inte grindar för de första korrigeringarna.
 
 Högst prioritet får **inkrementell omprövning och förklarad upplösning**: en förbättring kan samtidigt stärka indexet, grafen, påverkananalys, agenters arbete och framtida sökkomposition. Näst högst kommer **scope- och fullständighetskontraktet**, som förbättrar flera ytor på en gång. Generalisering utan uppmätt konsument prioriteras lägre.
 
@@ -154,6 +164,10 @@ Fyra små experiment kan genomföras utan att först besluta hela arkitekturen:
 3. **Dynamiskt filter:** Applicera två tillfälliga vyer över samma graf med ett oklassificerat objekt och en oklassificerad relation. Mät determinism, egen nämnare och att okända förblir synliga. Om vyn behöver ändra grundstore är gränsen fel vald.
 4. **Crate-gräns:** Kartlägg beroenden mellan `code_index_db`, `code_graph`, `index_relations`, parser och CLI; pröva sedan enbart läsning/frågor mot teststore. Mät vilka GTW-typer och beroenden som följer med. Om parser eller CLI måste in i den smala kärnan är snittet för brett.
 
+Lägg till en variant av relationsförsöket där **källfilerna hålls oförändrade men resolverregeln eller dess version byts**. Jämför riktad omprövning med full omanalys: samma slutliga mål/status, antal omkontrollerade relationer och tid. Ett avvikande slutresultat talar emot den riktade metoden. Detta är en variant av experiment 1, inte en ny arkitekturförtur.
+
+**Praktisk uppgiftsförmåga:** Välj ett litet reproducerbart batteri av verkliga uppgifter, till exempel ”hitta alla berörda kodställen före en signaturändring” och ”avgör om en dokumenterad registrering saknas”. Kör samma uppgifter med GTW:s befintliga ytor, med ett föreslaget kompakt beslutsunderlag och där det är relevant helt utan LLM. Registrera korrekt slutförda uppgifter, felaktiga slutsatser/ändringar, manuella kontrollsteg, verktygsanrop/omtag, tid och resurskostnad; när en LLM används även token och nödvändig kontext. Redovisa uppgift, facit, verktygsversion och modell separat så att minsta tillförlitliga modellkapacitet kan undersökas. Om ett nytt gränssnitt bara kortar svaret men inte förbättrar korrekt slutförande eller minskar kontrollarbetet är nyttan oprövad. På längre sikt kan samma batteri jämföra funktionell uppgiftsförmåga med då relativt aktuella språkmodeller (normalt senaste 4–8 månaderna, undantagsvis upp till ett år), utan att sådana jämförelser krävs nu. En implementerad förmåga är inte fullt realiserad förrän den också är korrekt, understödd, begriplig och praktiskt användbar för sina avsedda konsumenter.
+
 ## 10. Beslutspunkter som kan vänta
 
 | Fråga | Rimliga vägar | Vad avgör? |
@@ -169,7 +183,7 @@ Fyra små experiment kan genomföras utan att först besluta hela arkitekturen:
 
 Efter granskning av denna plan: **(1)** före/efter-facit, **(2)** inkrementellt konkurrensfall och omprövningsmätning, **(3)** litet läskontrakt för klass, underlag, scope och fullständighet, **(4)** kompakt Code Index-svar med bättre vägledning. Uppgifterna kan granskas var för sig. Ingen crate, generell motor, ny parser eller modellinsats krävs.
 
-**Acceptans för omgången:** mått med ägare och nämnare; redovisade falska och okända fall; samma semantik via relevanta CLI-/MCP-ytor när nya gränssnitt väljs; uppmätt frågekostnad; samt ett uttalat beslut om vad som är värt att produktifiera.
+**Acceptans för omgången:** mått med ägare och nämnare; redovisade falska och okända fall; samma semantik via relevanta CLI-/MCP-ytor när nya gränssnitt väljs; uppmätt frågekostnad och manuellt kontrollarbete för minst en representativ uppgift; samt ett uttalat beslut om vad som är värt att produktifiera.
 
 ## Ändrat jämfört med den första planen
 
