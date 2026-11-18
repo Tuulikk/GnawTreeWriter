@@ -1419,7 +1419,11 @@ pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<ser
 /// MCP query surface: relation rows with server-side filters - relation_type,
 /// bare-name involvement (`symbol` matches to_name exactly or the from_id
 /// tail) and a client-tunable limit (the 5000 hard cap stays at the MCP
-/// edge). Tests and legacy callers use `load_relations`, which delegates
+/// edge). Each row carries `resolution` — the per-edge provenance field
+/// (T5-rest) using the SAME taxonomy as coverage's target_classes:
+/// `resolved` (GTW's rule picked the target — not compiler-verified),
+/// `unresolved_macro`, `unresolved_qualified_path`, `unresolved_plain_name`.
+/// Tests and legacy callers use `load_relations`, which delegates
 /// with no filters.
 pub fn load_relations_filtered(
     conn: &Connection,
@@ -1436,10 +1440,25 @@ pub fn load_relations_filtered(
          ORDER BY file, line",
     )?;
     let rows = stmt.query_map(params![prefix, relation_type, symbol], |r| {
+        let to_name: String = r.get(1)?;
+        let to_id: Option<String> = r.get(2)?;
+        // Per-edge provenance (T5-rest): the SAME predicates as coverage's
+        // target_classes — one taxonomy, two surfaces. "resolved" means
+        // GTW's rule picked the target; it is NOT compiler-verified.
+        let resolution = if to_id.is_some() {
+            "resolved"
+        } else if to_name.ends_with('!') {
+            "unresolved_macro"
+        } else if to_name.contains("::") {
+            "unresolved_qualified_path"
+        } else {
+            "unresolved_plain_name"
+        };
         Ok(serde_json::json!({
             "from": r.get::<_, String>(0)?,
-            "to_name": r.get::<_, String>(1)?,
-            "to_id": r.get::<_, Option<String>>(2)?,
+            "to_name": to_name,
+            "to_id": to_id,
+            "resolution": resolution,
             "relation_type": r.get::<_, String>(3)?,
             "line": r.get::<_, i64>(4)?,
             "file": r.get::<_, String>(5)?

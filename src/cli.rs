@@ -2587,7 +2587,7 @@ Use --no-preview to actually perform the restore"
             );
         }
         if let Some(symbol) = impact {
-            let report = crate::core::code_graph::impact(&conn, symbol, depth.unwrap_or(3))?;
+            let report = crate::core::code_graph::impact(&conn, symbol, depth.unwrap_or(3), None)?;
             if report.seeds.is_empty() {
                 // Empty seeds is a RESULT (the name is not in the store),
                 // not a failure — say so instead of printing a bare zero.

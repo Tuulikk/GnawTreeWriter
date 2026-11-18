@@ -241,20 +241,22 @@ pub struct GraphCoverage {
 
 /// Measure what a walk can see. One pass; the name table is built inline so a
 /// caller needs nothing but the connection.
-pub fn graph_coverage(conn: &Connection) -> Result<GraphCoverage> {
+pub fn graph_coverage_scoped(conn: &Connection, prefix: Option<&str>) -> Result<GraphCoverage> {
+    let like = prefix.map(|p| format!("{p}%"));
     let (resolved, local): (i64, i64) = conn.query_row(
         "SELECT COALESCE(SUM(r.to_id IS NOT NULL), 0),
                 COALESCE(SUM(r.to_id IS NULL AND nc.name IS NOT NULL), 0)
          FROM relations r
          LEFT JOIN (SELECT name, COUNT(*) FROM entities GROUP BY name) nc
-                ON nc.name = r.to_name",
-        [],
+                ON nc.name = r.to_name
+         WHERE (?1 IS NULL OR r.file LIKE ?1)",
+        params![like],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     let total = resolved
         + conn.query_row(
-            "SELECT COUNT(*) FROM relations WHERE to_id IS NULL",
-            [],
+            "SELECT COUNT(*) FROM relations WHERE to_id IS NULL AND (?1 IS NULL OR file LIKE ?1)",
+            params![like],
             |r| r.get::<_, i64>(0),
         )?;
     let local_rate = if resolved + local > 0 {
@@ -267,8 +269,13 @@ pub fn graph_coverage(conn: &Connection) -> Result<GraphCoverage> {
         unresolved_edges: total - resolved,
         unresolved_with_local_candidate: local,
         local_rate: (local_rate * 1000.0).round() / 1000.0,
-        note: "A walk follows RESOLVED edges only. unresolved_edges includes std/prelude calls that cannot resolve without indexing std; unresolved_with_local_candidate is the recoverable remainder (run `code-index --coverage`).",
+        note: "A walk follows RESOLVED edges only. unresolved_edges includes std/prelude calls that cannot resolve without indexing std; unresolved_with_local_candidate is the recoverable remainder (run `code-index --coverage`). When a path_prefix scope is given, the DENOMINATOR is scoped to those files - the walk itself is not.",
     })
+}
+
+/// Global coverage: the unscoped form (CLI graph meta, legacy callers).
+pub fn graph_coverage(conn: &Connection) -> Result<GraphCoverage> {
+    graph_coverage_scoped(conn, None)
 }
 
 /// One aggregated file→file dependency.
@@ -1018,7 +1025,14 @@ pub fn resolve_symbols(conn: &Connection, symbol: &str) -> Result<Vec<SymbolSeed
 /// `max_depth` from every entity that defines the name, merged to the
 /// shortest hop per node. Unknown name ⇒ empty `seeds` and empty
 /// `reachable` (an empty answer that is visibly empty, not a silent zero).
-pub fn impact(conn: &Connection, symbol: &str, max_depth: usize) -> Result<ImpactReport> {
+/// `prefix` scopes the COVERAGE denominator to files under it (T5-rest);
+/// the walk itself is not scoped.
+pub fn impact(
+    conn: &Connection,
+    symbol: &str,
+    max_depth: usize,
+    prefix: Option<&str>,
+) -> Result<ImpactReport> {
     let seeds = resolve_symbols(conn, symbol)?;
     let mut merged: HashMap<String, usize> = HashMap::new();
     for seed in &seeds {
@@ -1038,7 +1052,7 @@ pub fn impact(conn: &Connection, symbol: &str, max_depth: usize) -> Result<Impac
         symbol: symbol.to_string(),
         seeds,
         reachable: reachable_out,
-        graph_coverage: graph_coverage(conn)?,
+        graph_coverage: graph_coverage_scoped(conn, prefix)?,
     })
 }
 
@@ -1264,7 +1278,7 @@ mod impact_tests {
     #[test]
     fn impact_resolves_a_bare_name_and_reports_every_seed() {
         let conn = fixture();
-        let r = impact(&conn, "beta", 3).unwrap();
+        let r = impact(&conn, "beta", 3, None).unwrap();
         assert_eq!(
             r.seeds.len(),
             2,
@@ -1278,7 +1292,7 @@ mod impact_tests {
     #[test]
     fn impact_of_an_unknown_name_is_visibly_empty() {
         let conn = fixture();
-        let r = impact(&conn, "does_not_exist", 3).unwrap();
+        let r = impact(&conn, "does_not_exist", 3, None).unwrap();
         assert!(r.seeds.is_empty(), "no seeds invented");
         assert!(r.reachable.is_empty());
         assert_eq!(r.symbol, "does_not_exist");
@@ -1288,7 +1302,7 @@ mod impact_tests {
     fn impact_respects_the_depth_bound() {
         let conn = fixture();
         // depth 0 reaches nothing from a seed (the start is excluded).
-        let r = impact(&conn, "beta", 0).unwrap();
+        let r = impact(&conn, "beta", 0, None).unwrap();
         assert_eq!(r.seeds.len(), 2);
         assert!(r.reachable.is_empty());
     }
