@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 58080ba72aff26c384303b1e5ccf4ca8
+> Body-hash: f4e83bc99591fdbd4112e5cc46873a69
 
 ## Träd
 
@@ -89,13 +89,14 @@ src/core/
   attribution.rs (397 rader)
   backup.rs (293 rader)
   batch.rs (933 rader)
+  binding_observations.rs (457 rader)
   blast.rs (310 rader)
   blueprint.rs (182 rader)
   capabilities.rs (366 rader)
-  code_graph.rs (1545 rader)
+  code_graph.rs (1656 rader)
   code_index.rs (722 rader)
   code_index_coverage.rs (683 rader)
-  code_index_db.rs (1611 rader)
+  code_index_db.rs (1607 rader)
   compress.rs (487 rader)
   create_file.rs (99 rader)
   curator.rs (709 rader)
@@ -113,11 +114,11 @@ src/core/
   healer.rs (297 rader)
   index_entities.rs (1118 rader)
   index_levels.rs (312 rader)
-  index_relations.rs (839 rader)
+  index_relations.rs (970 rader)
   inspect.rs (514 rader)
   label_manager.rs (90 rader)
   macro_dispatcher.rs (249 rader)
-  mod.rs (2685 rader)
+  mod.rs (2819 rader)
   pack.rs (749 rader)
   parse_cache.rs (119 rader)
   project_root.rs (186 rader)
@@ -150,7 +151,7 @@ src/llm/
   relational_index.rs (684 rader)
   semantic_index.rs (1458 rader)
 src/mcp/
-  mod.rs (4519 rader)
+  mod.rs (4610 rader)
 src/parser/
   bash.rs (84 rader)
   c.rs (84 rader)
@@ -200,11 +201,13 @@ test_dir/
 tests/
   ai_modernbert_tests.rs (184 rader)
   b1_path_validation.rs (106 rader)
+  binding_negative.rs (52 rader)
+  binding_observations.rs (106 rader)
   cli_behaviour.rs (194 rader)
   cli_contract.rs (33 rader)
   code_index_check.rs (117 rader)
-  code_index_db.rs (189 rader)
-  code_index_fixtures.rs (231 rader)
+  code_index_db.rs (390 rader)
+  code_index_fixtures.rs (563 rader)
   doc_comment_handling.rs (123 rader)
   edit_multibyte_regression.rs (113 rader)
   edit_node_insert_regression.rs (99 rader)
@@ -751,6 +754,29 @@ _(inga toppnivå-items)_
 - `fn insert_text_splice(` :541
 - `fn format_diff(before: &str, after: &str) -> String` :578
 
+### binding_observations.rs (457 rader)
+- `pub enum Language` :6
+- `pub enum BindingKind` :12
+- `pub struct Binding` :22
+- `pub enum OperationKind` :32
+- `pub enum Requirement` :43
+- `pub enum PossibleEffect` :50
+- `pub struct OperationObservation` :58
+- `pub enum FindingKind` :71
+- `pub struct BindingFinding` :77
+- `pub struct BindingAnalysis` :86
+- `fn anchor(file: &str, n: &TreeNode) -> SourceAnchor` :95
+- `fn scope_node(n: &TreeNode) -> bool` :106
+- `fn pattern_identifiers<'a>(n: &'a TreeNode, out: &mut Vec<&'a TreeNode>)` :119
+- `struct Walker<'a>` :140
+- `impl Walker<'_>` :146
+  - `fn declare(&mut self, n: &TreeNode, kind: BindingKind)` :147
+  - `fn resolve(&self, name: &str) -> Option<String>` :170
+  - `fn emit(` :179
+  - `fn visit(&mut self, n: &TreeNode)` :198
+- `fn derive_findings(result: &mut BindingAnalysis)` :406
+- `pub fn analyze_bindings_from_tree(` :442
+
 ### blast.rs (310 rader)
 - `pub enum ImpactLevel` :11
 - `impl std::fmt::Display for ImpactLevel` :18
@@ -791,7 +817,7 @@ _(inga toppnivå-items)_
 - `fn dir_size_mb(path: &std::path::Path) -> u64` :218
 - `pub fn render(project_root: &std::path::Path) -> String` :240
 
-### code_graph.rs (1545 rader)
+### code_graph.rs (1656 rader)
 - `pub struct Reach` :27
 - `pub struct Cycle` :33
 - `pub fn reachable(conn: &Connection, start: &str, max_depth: usize) -> Result<Vec<Reach>>` :44
@@ -810,20 +836,20 @@ _(inga toppnivå-items)_
 - `pub struct OutEdge` :451
 - `pub struct InEdge` :464
 - `pub struct Touches` :482
-- `const TOUCHES_NOTE: &str = "Cross-file edges only. Outgoing = what the subject uses elsewhere (target file + s…` :491
-- `pub fn touches_file(conn: &Connection, file: &str, scope: Option<&str>) -> Result<Touches>` :499
-- `pub fn touches_symbol(conn: &Connection, symbol: &str, scope: Option<&str>) -> Result<Touches>` :551
-- `pub struct HistoryChange` :615
-- `pub struct HistoryRevision` :627
-- `pub struct HistoryReport` :646
-- `pub fn history(` :663
-- `pub struct OnionFrame` :769
-- `pub struct OnionChannel` :783
-- `pub struct OnionReport` :794
-- `pub fn onion(` :805
-- `pub struct ImpactReport` :945
-- `pub fn resolve_symbols(conn: &Connection, symbol: &str) -> Result<Vec<SymbolSeed>>` :957
-- `pub fn impact(conn: &Connection, symbol: &str, max_depth: usize) -> Result<ImpactReport>` :972
+- `const TOUCHES_NOTE: &str = "Cross-file edges only. Outgoing = what the subject uses elsewhere (target file + s…` :502
+- `pub fn touches_file(conn: &Connection, file: &str, scope: Option<&str>) -> Result<Touches>` :510
+- `pub fn touches_symbol(conn: &Connection, symbol: &str, scope: Option<&str>) -> Result<Touches>` :566
+- `pub struct HistoryChange` :664
+- `pub struct HistoryRevision` :676
+- `pub struct HistoryReport` :695
+- `pub fn history(` :712
+- `pub struct OnionFrame` :818
+- `pub struct OnionChannel` :832
+- `pub struct OnionReport` :843
+- `pub fn onion(` :854
+- `pub struct ImpactReport` :994
+- `pub fn resolve_symbols(conn: &Connection, symbol: &str) -> Result<Vec<SymbolSeed>>` :1006
+- `pub fn impact(conn: &Connection, symbol: &str, max_depth: usize) -> Result<ImpactReport>` :1021
 
 ### code_index.rs (722 rader)
 - `fn item_category(kind: &str) -> Option<&'static str>` :33
@@ -862,7 +888,7 @@ _(inga toppnivå-items)_
 - `pub fn measure_scoped(conn: &Connection, scope: Option<&str>) -> Result<CoverageReport>` :186
 - `fn relations_total(conn: &Connection, scope: &str) -> anyhow::Result<i64>` :453
 
-### code_index_db.rs (1611 rader)
+### code_index_db.rs (1607 rader)
 - `pub const EXTRACTOR_VERSION: &str = "4"` :47
 - `const SCHEMA_VERSION: i32 = 4` :49
 - `const BUSY_TIMEOUT_MS: u64 = 5000` :50
@@ -893,24 +919,24 @@ _(inga toppnivå-items)_
 - `fn resolution_of(resolved: i64, count: i64) -> &'static str` :563
 - `fn diff_relations(` :574
 - `pub fn refresh(` :633
-- `pub(crate) fn record_revision(` :808
-- `pub fn upsert_prose(` :874
-- `pub(crate) fn sweep_prose_freshness(conn: &mut Connection) -> Result<()>` :904
-- `pub(crate) fn load_index(conn: &Connection) -> Result<Vec<FileIndex>>` :1010
-- `fn load_warnings(conn: &Connection) -> Result<Vec<String>>` :1075
-- `pub fn render(` :1088
-- `pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun>` :1102
-- `fn store_entities_relations(` :1151
-- `fn resolve_unresolved_in_db(conn: &Connection) -> Result<()>` :1217
-- `pub fn mark_stale(root: &Path, file_path: &str)` :1297
-- `pub fn content_hash(path: &Path) -> Option<String>` :1319
-- `pub fn is_stale(root: &Path, file: &str) -> bool` :1328
-- `pub fn stale_files(root: &Path) -> std::collections::BTreeSet<String>` :1347
-- `pub fn load_entities(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1368
-- `pub fn load_items(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1393
-- `pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1419
-- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :1443
-- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :1465
+- `pub(crate) fn record_revision(` :807
+- `pub fn upsert_prose(` :873
+- `pub(crate) fn sweep_prose_freshness(conn: &mut Connection) -> Result<()>` :903
+- `pub(crate) fn load_index(conn: &Connection) -> Result<Vec<FileIndex>>` :1009
+- `fn load_warnings(conn: &Connection) -> Result<Vec<String>>` :1074
+- `pub fn render(` :1087
+- `pub fn generate_with_db(root: &Path, opts: &CodeIndexOptions) -> Result<DbRun>` :1101
+- `fn store_entities_relations(` :1150
+- `fn resolve_unresolved_in_db(conn: &Connection) -> Result<()>` :1215
+- `pub fn mark_stale(root: &Path, file_path: &str)` :1293
+- `pub fn content_hash(path: &Path) -> Option<String>` :1315
+- `pub fn is_stale(root: &Path, file: &str) -> bool` :1324
+- `pub fn stale_files(root: &Path) -> std::collections::BTreeSet<String>` :1343
+- `pub fn load_entities(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1364
+- `pub fn load_items(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1389
+- `pub fn load_relations(conn: &Connection, prefix: Option<&str>) -> Result<Vec<serde_json::Value>>` :1415
+- `pub fn load_symbols(conn: &Connection) -> Result<Vec<serde_json::Value>>` :1439
+- `pub fn is_busy_error(err: &anyhow::Error) -> bool` :1461
 
 ### compress.rs (487 rader)
 - `pub struct CompressedOutput` :12
@@ -1210,24 +1236,30 @@ _(inga toppnivå-items)_
 - `fn embeddings_db(root: &Path) -> std::path::PathBuf` :211
 - `fn embeddings_legacy_stores(root: &Path) -> Vec<String>` :220
 
-### index_relations.rs (839 rader)
+### index_relations.rs (970 rader)
 - `pub struct Relation` :14
-- `pub struct RelationIndex` :43
-- `pub fn index_relations(file_path: &str) -> Result<RelationIndex>` :53
-- `pub fn index_relations_in(` :59
-- `pub fn extract_relations_from_tree(` :72
-- `pub fn resolve_relations(relations: &mut [Relation], entities: &[Entity])` :112
-- `pub(crate) fn is_method_entity_id(id: &str) -> bool` :181
-- `fn get_line(lines: &[&str], line_num: usize) -> String` :264
-- `fn extract_imports(` :273
-- `fn extract_import_target(import_line: &str) -> Option<String>` :346
-- `fn extract_calls(tree: &TreeNode, file_path: &str, lines: &[&str], relations: &mut Vec<Relation>)` :371
-- `fn is_function_like(node_type: &str) -> bool` :376
-- `fn find_calls_in_scope(` :383
-- `fn extract_type_usage(` :504
-- `fn extract_type_refs(` :537
-- `fn extract_impl_relations(` :563
-- `fn extract_trait_from_impl(impl_text: &str) -> Option<String>` :606
+- `pub enum CallForm` :43
+- `pub struct SourceAnchor` :53
+- `pub struct CallObservation` :64
+- `pub struct RelationExtraction` :75
+- `pub struct RelationIndex` :83
+- `pub fn index_relations(file_path: &str) -> Result<RelationIndex>` :93
+- `pub fn index_relations_in(` :99
+- `pub fn extract_relations_from_tree(` :112
+- `pub fn extract_relations_with_observations_from_tree(` :121
+- `fn extract_relations_impl(` :129
+- `pub fn resolve_relations(relations: &mut [Relation], entities: &[Entity])` :180
+- `pub(crate) fn is_method_entity_id(id: &str) -> bool` :249
+- `fn get_line(lines: &[&str], line_num: usize) -> String` :332
+- `fn extract_imports(` :341
+- `fn extract_import_target(import_line: &str) -> Option<String>` :414
+- `fn extract_calls(` :439
+- `fn is_function_like(node_type: &str) -> bool` :458
+- `fn find_calls_in_scope(` :465
+- `fn extract_type_usage(` :635
+- `fn extract_type_refs(` :668
+- `fn extract_impl_relations(` :694
+- `fn extract_trait_from_impl(impl_text: &str) -> Option<String>` :737
 
 ### inspect.rs (514 rader)
 - `pub enum InspectMode` :12
@@ -1278,56 +1310,57 @@ _(inga toppnivå-items)_
 - `pub fn is_token_tree(node: &TreeNode) -> bool` :147
 - `pub fn try_expand_macro(` :152
 
-### mod.rs (2685 rader)
-- `pub struct GnawTreeWriter` :75
-- `pub enum EditOperation` :102
-- `pub struct EditReceipt` :126
-- `pub(crate) fn skeleton_outline(` :149
-- `pub(crate) fn detect_replacement_remnant(` :229
-- `pub(crate) fn check_duplicate_attribute_above(` :298
-- `fn flatten_comment_children(node: &mut TreeNode)` :350
-- `impl GnawTreeWriter` :360
-  - `pub fn new(file_path: &str) -> Result<Self>` :361
-  - `pub fn new_with_boundary(file_path: &str, boundary: Option<&Path>) -> Result<Self>` :371
-  - `pub fn new_lenient(file_path: &str) -> Result<(Self, Option<crate::parser::SyntaxError>)>` :405
-  - `pub fn new_lenient_with_boundary(` :412
-  - `pub fn last_backup_path(&self) -> Option<PathBuf>` :447
-  - `pub fn last_transaction_id(&self) -> Option<String>` :453
-  - `pub fn last_edit_receipt(&self) -> Option<&EditReceipt>` :460
-  - `pub fn last_edit_verdict(&self) -> Option<&serde_json::Value>` :468
-  - `fn set_verdict(` :472
-  - `pub fn last_edit_impact(&self) -> Option<&serde_json::Value>` :490
-  - `pub(crate) fn store_content_blob(&self, content: &str) -> Result<String>` :504
-  - `pub fn set_attribution(&mut self, attribution: crate::core::attribution::Attribution)` :512
-  - `pub fn attribution(&self) -> &crate::core::attribution::Attribution` :516
-  - `pub(crate) fn create_backup(&mut self) -> Result<PathBuf>` :520
-  - `pub fn analyze(&self) -> &TreeNode` :562
-  - `pub fn show_node(&self, node_path: &str) -> Result<String>` :566
-  - `pub fn node_count(&self) -> usize` :579
-  - `pub fn node_exists(&self, node_path: &str) -> bool` :588
-  - `pub fn expect_node(` :599
-  - `pub fn edit(&mut self, operation: EditOperation, force: bool) -> Result<()>` :641
-  - `fn is_json_document(&self) -> bool` :1100
-  - `pub fn preview_edit(&self, operation: EditOperation) -> Result<String>` :1108
-  - `fn resolve_path<'a>(&'a self, query: &str) -> Option<&'a TreeNode>` :1152
-  - `fn find_node_by_path<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :1168
-  - `fn find_node_by_name<'a>(` :1183
-  - `fn doc_block_start_line(&self, node: &TreeNode) -> usize` :1235
-  - `pub fn describe_node(&self, query: &str) -> Option<(String, String, Option<String>)>` :1257
-  - `fn json_semantic_edit(&self, node_path: &str, new_content: &str) -> Result<String>` :1278
-  - `fn json_new_value(content: &str, allow_string: bool) -> Option<serde_json::Value>` :1381
-  - `fn json_content_error(content: &str, target: &str) -> anyhow::Error` :1391
-  - `fn json_render(v: &serde_json::Value) -> String` :1403
-  - `fn join_preserving_newline<S: AsRef<str>>(lines: &[S], source: &str) -> String` :1418
-  - `fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String>` :1437
-  - `fn insert_node_at_path(` :1548
-  - `fn delete_node_at_path(&self, node_path: &str) -> Result<String>` :1696
-  - `pub fn get_source(&self) -> &str` :1740
-- `pub fn find_project_root(start_path: &Path) -> PathBuf` :1747
-- `pub fn find_project_root_in(start_path: &Path, boundary: Option<&Path>) -> PathBuf` :1760
-- `fn count_changed_bytes(before: &str, after: &str) -> usize` :1798
-- `pub(crate) fn verdict_json(` :1810
-- `pub(crate) fn signature_impact_for(` :1829
+### mod.rs (2819 rader)
+- `pub struct GnawTreeWriter` :76
+- `pub enum EditOperation` :103
+- `pub struct EditReceipt` :127
+- `pub(crate) fn skeleton_outline(` :150
+- `pub(crate) fn detect_replacement_remnant(` :230
+- `pub(crate) fn check_duplicate_definitions(` :306
+- `pub(crate) fn check_duplicate_attribute_above(` :380
+- `fn flatten_comment_children(node: &mut TreeNode)` :432
+- `impl GnawTreeWriter` :442
+  - `pub fn new(file_path: &str) -> Result<Self>` :443
+  - `pub fn new_with_boundary(file_path: &str, boundary: Option<&Path>) -> Result<Self>` :453
+  - `pub fn new_lenient(file_path: &str) -> Result<(Self, Option<crate::parser::SyntaxError>)>` :487
+  - `pub fn new_lenient_with_boundary(` :494
+  - `pub fn last_backup_path(&self) -> Option<PathBuf>` :529
+  - `pub fn last_transaction_id(&self) -> Option<String>` :535
+  - `pub fn last_edit_receipt(&self) -> Option<&EditReceipt>` :542
+  - `pub fn last_edit_verdict(&self) -> Option<&serde_json::Value>` :550
+  - `fn set_verdict(` :554
+  - `pub fn last_edit_impact(&self) -> Option<&serde_json::Value>` :572
+  - `pub(crate) fn store_content_blob(&self, content: &str) -> Result<String>` :586
+  - `pub fn set_attribution(&mut self, attribution: crate::core::attribution::Attribution)` :594
+  - `pub fn attribution(&self) -> &crate::core::attribution::Attribution` :598
+  - `pub(crate) fn create_backup(&mut self) -> Result<PathBuf>` :602
+  - `pub fn analyze(&self) -> &TreeNode` :644
+  - `pub fn show_node(&self, node_path: &str) -> Result<String>` :648
+  - `pub fn node_count(&self) -> usize` :661
+  - `pub fn node_exists(&self, node_path: &str) -> bool` :670
+  - `pub fn expect_node(` :681
+  - `pub fn edit(&mut self, operation: EditOperation, force: bool) -> Result<()>` :723
+  - `fn is_json_document(&self) -> bool` :1182
+  - `pub fn preview_edit(&self, operation: EditOperation) -> Result<String>` :1190
+  - `fn resolve_path<'a>(&'a self, query: &str) -> Option<&'a TreeNode>` :1234
+  - `fn find_node_by_path<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :1250
+  - `fn find_node_by_name<'a>(` :1265
+  - `fn doc_block_start_line(&self, node: &TreeNode) -> usize` :1317
+  - `pub fn describe_node(&self, query: &str) -> Option<(String, String, Option<String>)>` :1339
+  - `fn json_semantic_edit(&self, node_path: &str, new_content: &str) -> Result<String>` :1360
+  - `fn json_new_value(content: &str, allow_string: bool) -> Option<serde_json::Value>` :1463
+  - `fn json_content_error(content: &str, target: &str) -> anyhow::Error` :1473
+  - `fn json_render(v: &serde_json::Value) -> String` :1485
+  - `fn join_preserving_newline<S: AsRef<str>>(lines: &[S], source: &str) -> String` :1500
+  - `fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String>` :1519
+  - `fn insert_node_at_path(` :1636
+  - `fn delete_node_at_path(&self, node_path: &str) -> Result<String>` :1784
+  - `pub fn get_source(&self) -> &str` :1828
+- `pub fn find_project_root(start_path: &Path) -> PathBuf` :1835
+- `pub fn find_project_root_in(start_path: &Path, boundary: Option<&Path>) -> PathBuf` :1848
+- `fn count_changed_bytes(before: &str, after: &str) -> usize` :1886
+- `pub(crate) fn verdict_json(` :1898
+- `pub(crate) fn signature_impact_for(` :1917
 
 ### pack.rs (749 rader)
 - `pub enum PackFormat` :15
@@ -1913,7 +1946,7 @@ _(inga toppnivå-items)_
 
 ## src/mcp/
 
-### mod.rs (4519 rader)
+### mod.rs (4610 rader)
 _(inga toppnivå-items)_
 
 ## src/parser/
@@ -2366,6 +2399,16 @@ _(inga toppnivå-items)_
 - `fn the_2026_11_03_incident_is_caught_by_expect()` :79
 - `fn missing_path_is_a_clear_stale_path_error()` :99
 
+### binding_negative.rs (52 rader)
+- `fn typescript_shadowing_and_parameter_reassignment()` :7
+- `fn rust_mutable_reference_is_not_mutable_binding()` :35
+
+### binding_observations.rs (106 rader)
+- `fn analyze(` :6
+- `fn rust_shadowing_borrow_and_indirect_write()` :17
+- `fn javascript_const_object_and_destructuring()` :61
+- `fn unresolved_identifier_stays_unresolved()` :97
+
 ### cli_behaviour.rs (194 rader)
 - `const BIN: &str = env!("CARGO_BIN_EXE_gnawtreewriter")` :16
 - `fn tmp(name: &str, content: &str) -> std::path::PathBuf` :18
@@ -2390,7 +2433,7 @@ _(inga toppnivå-items)_
 - `fn fix_rewrites_and_then_passes()` :74
 - `fn legacy_artifact_without_hash_header_is_flagged()` :99
 
-### code_index_db.rs (189 rader)
+### code_index_db.rs (390 rader)
 - `fn opts() -> CodeIndexOptions` :13
 - `fn make_repo(dir: &Path)` :20
 - `fn normalize(doc: &str) -> String` :46
@@ -2398,15 +2441,19 @@ _(inga toppnivå-items)_
 - `fn db_render_matches_direct_json()` :73
 - `fn incremental_refresh_reuses_and_reparses()` :88
 - `fn generation_key_covers_population_not_presentation()` :129
-- `fn removed_files_are_pruned()` :157
-- `fn corrupt_db_is_rebuilt_not_fatal()` :169
+- `fn new_competing_definition_reconsiders_existing_cross_file_call()` :157
+- `fn removed_files_are_pruned()` :227
+- `fn corrupt_db_is_rebuilt_not_fatal()` :239
+- `fn removed_definitions_reconsider_ambiguous_and_resolved_calls()` :261
+- `fn unchanged_refresh_keeps_targets_without_relation_updates()` :345
 
-### code_index_fixtures.rs (231 rader)
+### code_index_fixtures.rs (563 rader)
 - `const LIB_RS: &str = r#"// fixture mirror: F1-F7 markers, see FACTS.md` :14
 - `const CALLER_RS: &str = r#"use crate::module_a::run` :52
 - `const METHODS_RS: &str = r#"// [F8] impl + method entity / [F9] method_call — H1 flipped: extracted` :61
 - `fn build_fixture() -> (tempfile::TempDir, std::path::PathBuf)` :95
 - `fn fixture_baseline_post_c()` :114
+- `fn ast_observation_facit_keeps_syntax_separate_from_relation_and_store()` :233
 
 ### doc_comment_handling.rs (123 rader)
 - `fn make_file(dir: &std::path::Path, name: &str, content: &str) -> std::path::PathBuf` :14
