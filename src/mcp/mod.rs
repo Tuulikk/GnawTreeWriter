@@ -553,6 +553,20 @@ pub mod mcp_server {
                             budget,
                         )))
                     }
+                    "claim_scan" => {
+                        let files = arguments
+                            .get("files")
+                            .and_then(Value::as_array)
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(Value::as_str)
+                                    .map(|s| s.to_string())
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        let root = arguments.get("root").and_then(Value::as_str).unwrap_or(".");
+                        Ok(handle_claim_scan_mcp(root, files))
+                    }
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
                         Ok(handle_get_semantic_report(state, fp).await)
@@ -733,6 +747,18 @@ pub mod mcp_server {
                         "limit": { "type": "integer", "description": "kind=relations: max rows returned (default and hard cap 5000; matched/returned/truncated stay honest)" },
                         "budget": { "type": "integer", "description": "kind=map: token budget for the orientation map (default 1024, clamped 64..8192)" },
                         "fix": { "type": "boolean", "description": "check: rewrite the artifact when stale (default false)" }
+                    },
+                    "required": []
+                }
+            }),
+            json!({
+                "name": "claim_scan",
+                "title": "Doc-claims vs store facts (T4 claim_scan: lie-CANDIDATES)",
+                "description": "Scan doc comments for claims the code-index store cannot verify. WHAT: extracts backticked identifiers and parenthesized enumerations (>= 2 commas) from /// and //! lines, then joins them against the store's truth sets (entities, items, relation types, symbols, file paths). Findings are LIE-CANDIDATES anchored to file:line with severity (HIGH = qualified path), never verdicts - a backtick can name a parameter or a command (grep to disambiguate). WHEN: gating docs against drift, triaging doc-rot, the claim-side of the scan-tools family (SCAN_TOOLS §3.1). RETURNS: {sources_scanned, claims_total, verified, findings_total, findings[{identifier, file, line, severity, claim_kind, why}], note}. files: relative paths (default: src/lib.rs, src/main.rs, lib.rs, main.rs when present). Example: {\"files\": [\"src/core/index_relations.rs\"]}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "files": { "type": "array", "items": { "type": "string" }, "description": "Source files to scan, relative to root (default: crate-root doc files)" }
                     },
                     "required": []
                 }
@@ -3908,6 +3934,39 @@ or list_nodes for a flat index of this file.",
                 }
             }
             _ => tool_error("mode must be one of: refresh | query | check | coverage".to_string()),
+        }
+    }
+
+    /// T4 claim_scan (SCAN_TOOLS §3.1): doc-claims vs store facts.
+    /// The refusal carries the executable next step (what-now contract):
+    /// no store -> mode=refresh; too-broad root -> the root guard's advice.
+    fn handle_claim_scan_mcp(root: &str, files: Vec<String>) -> Value {
+        let root_path = std::path::Path::new(root);
+        if let Err(reason) = crate::core::project_root::guard(root_path) {
+            return broad_root_error("claim_scan", &reason);
+        }
+        let index_root = crate::core::code_index_db::resolve_index_root(root_path);
+        let conn = match crate::core::code_index_db::open_existing(&index_root) {
+            Ok(c) => c,
+            Err(e) => {
+                return tool_error(format!(
+                "claim_scan needs the code-index store - run code_index mode=refresh first ({e:#})"
+            ))
+            }
+        };
+        match crate::core::claim_scan::claim_scan(&conn, root_path, &files) {
+            Ok(report) => tool_success(
+                format!(
+                    "claim_scan: {} source(s), {} claims, {} verified, {} lie-CANDIDATES ({} shown) - candidates, not verdicts; grep to disambiguate",
+                    report.sources_scanned,
+                    report.claims_total,
+                    report.verified,
+                    report.findings_total,
+                    report.findings.len()
+                ),
+                Some(serde_json::to_value(&report).unwrap_or_default()),
+            ),
+            Err(e) => tool_error(format!("claim_scan failed: {e:#}")),
         }
     }
 

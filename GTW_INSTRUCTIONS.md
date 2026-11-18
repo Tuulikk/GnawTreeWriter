@@ -1,6 +1,6 @@
 GnawTreeWriter MCP-server är registrerad för alla OpenCode-sessioner.
 
-38 GTW-verktyg finns tillgängliga (synkhanteras av kontraktstestet
+39 GTW-verktyg finns tillgängliga (synkhanteras av kontraktstestet
 `integration_mcp_instructions_listed` — varje registrerat verktyg måste
 finnas i tabellen här nedan; nya verktyg läggs till här samtidigt):
 
@@ -17,6 +17,7 @@ finnas i tabellen här nedan; nya verktyg läggs till här samtidigt):
 | AI-kontext | `compress`, `pack`, `curate`, `diff_since`, `save_state` | Token-medveten analys, projekt-paketering, ändringsspårning |
 | Indexera | `index_project`, `index_entities`, `index_relations`, `code_index` | `index_project` bygger VEKTORINDEXET som satellit-`sense` söker (start/status i bakgrund); de två andra bygger KUNSKAPSGRAFEN; `code_index` är strukturlagret — refresh (inkrementell SQLite-store, parsar bara ändrade filer) / query via `kind`: **map (T1-orientering: grafrankad top-symbol-lista inom token-budget, `budget` param; store-krävande — deterministisk för givet store+budget)**, items, relations, symbols, cycles, file_cycles, chain (kortaste vägen, `symbol`=FRÅN + `to`=TILL), impact (graph_coverage-nämnaren scopas av `path_prefix`; själva walken gör inte det), touches, file_graph, changed, history, onion — **varje query-svar bär `query_status`** (completeness/denominator/index_stale/next_checks/resolved_edges_only/scope — T2-kontraktet; index_stale → `mode=refresh` ligger först i next_checks); relations har server-side-filter (`relation_type`, `symbol`-inblandning, klient-`limit` — matched räknas FÖRE cap) och per-kant-provenans i `resolution`-fältet (resolved \| unresolved_macro \| unresolved_qualified_path \| unresolved_plain_name — samma taxonomi som coverage); symbols har `name_prefix` + `external`; relations bär `to_name`+`to_id` enligt T6; walks följer ENDAST upplösta kanter (impact bär `graph_coverage`, touches bär `unresolved_incoming`) / check (content-hash-grind mot committad code-index.md) / coverage (fas 1-kvalitetsmätning av store-grafen: upplösningsgrad per relationstyp + D7-källklasser + unresolved-targetklasser; read-only) |
 | Lint & regler | `lint`, `add_rule` | Mönsterlintering (`fix`/`preview` för automatisering); skriv egna regler |
+| Skanna | `claim_scan` | T4 §3.1: doc-claims mot store-fakta — backticks + parentes-uppräkningar (≥2 komman) joinas mot entiteter/items/relationstyper/symboler/filer; **lie-KANDIDATER** med fil:rad-ankare och severity, aldrig domar (en backtick kan namna en parameter — grep för att skilja). Store-krävande. |
 | AI-rapporter | `get_semantic_report` | Kodkvalitetsrapport med källcitat (`sources`) |
 
 ## Diagnostisk kedja (standard-arbetsflöde)

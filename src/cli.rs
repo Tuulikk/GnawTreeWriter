@@ -400,6 +400,16 @@ enum Commands {
         #[arg(long)]
         stdout: bool,
     },
+    /// Scan doc comments for claims the code-index store cannot verify
+    /// (T4 claim_scan: lie-CANDIDATES, anchored and ranked — not verdicts)
+    ClaimScan {
+        /// Project root (default: current directory)
+        #[arg(default_value = ".")]
+        path: String,
+        /// Source files to scan, relative to root (default: crate-root doc files)
+        #[arg(long)]
+        files: Vec<String>,
+    },
     /// Compress source code by replacing function bodies with placeholders
     Compress {
         file_path: String,
@@ -1376,6 +1386,23 @@ impl Cli {
             } => {
                 let preview = preview || global_dry_run;
                 Self::handle_rename(&symbol_name, &new_name, &path, recursive, preview)?;
+            }
+            Commands::ClaimScan { path, files } => {
+                // Same guard as the MCP tool (core::project_root, one rule).
+                if let Err(reason) = crate::core::project_root::guard(Path::new(&path)) {
+                    eprintln!("{reason}");
+                    std::process::exit(2);
+                }
+                let index_root = crate::core::code_index_db::resolve_index_root(Path::new(&path));
+                let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
+                    anyhow::anyhow!(
+                        "claim-scan reads the code-index store — run `gnawtreewriter code-index {path} --db` first ({e:#})"
+                    )
+                })?;
+                let source_list: Vec<String> = files.iter().map(|f| f.to_string()).collect();
+                let report =
+                    crate::core::claim_scan::claim_scan(&conn, Path::new(&path), &source_list)?;
+                println!("{}", serde_json::to_string_pretty(&report)?);
             }
             Commands::Clone {
                 source_file,

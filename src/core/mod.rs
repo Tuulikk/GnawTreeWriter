@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use std::collections::HashMap;
 pub mod binding_observations;
+pub mod claim_scan;
 use std::fs;
 use std::path::{Path, PathBuf};
 
