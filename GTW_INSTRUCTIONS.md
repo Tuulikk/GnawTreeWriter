@@ -1,6 +1,6 @@
 GnawTreeWriter MCP-server är registrerad för alla OpenCode-sessioner.
 
-42 GTW-verktyg finns tillgängliga (synkhanteras av kontraktstestet
+44 GTW-verktyg finns tillgängliga (synkhanteras av kontraktstestet
 `integration_mcp_instructions_listed` — varje registrerat verktyg måste
 finnas i tabellen här nedan; nya verktyg läggs till här samtidigt):
 

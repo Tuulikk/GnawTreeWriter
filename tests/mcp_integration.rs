@@ -1433,6 +1433,19 @@ fn integration_mcp_instructions_listed() {
             name
         );
     }
+
+    // The count line used to drift silently: it said 40 while 42 tools were
+    // registered (island_scan and one more had slipped in), because this test
+    // only checked PRESENCE. A number in the docs that nobody verifies is the
+    // same class as a generated file citing its own creation rev — it looks
+    // authoritative and is stale. Pin it to the registry.
+    let expected = format!("{} GTW-verktyg", names.len());
+    assert!(
+        doc.contains(&expected),
+        "GTW_INSTRUCTIONS.md must state the registry size: expected a line containing \
+         \"{expected}\" (the registry has {} tools)",
+        names.len()
+    );
 }
 
 /// Motor2 plan #23: duplex metrics persist at
