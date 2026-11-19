@@ -1,6 +1,7 @@
 # Lokal modell-bake-off: LFM2.5 vs LFM3 vs Qwen3.5
 
-**Status:** plan, ej påbörjad. **Datum:** 2026-11-11.
+**Status:** plan (§1–7, 2026-11-11) + **baslinjen mätt (§8, 2026-11-19)**.
+Återstår: kandidatmätningen. **Datum:** 2026-11-11, uppdaterad 2026-11-19.
 **Frågan den ska besvara:** vilken lokal modell ska GTW:s L4 (explain / summarize /
 investigate / propose_edit / query expansion) använda — och väger den mindre än
 det vi kör i dag utan att bli sämre?
@@ -217,5 +218,91 @@ Om LFM3-1.7B visar sig **snabbare** än LFM2.5-1.2B på vår maskin (Cera:s
 trådkalibrering kan ge det), då var storleksargumentet aldrig giltigt — och då
 är kvalitetsvinsten gratis. Det är den enda frågan som kan vända hela beslutet,
 och den kostar en kväll att mäta.
+
+---
+
+## 8. Baslinjen mätt (2026-11-19) — och två premisser rättade
+
+Allt i §1–7 skrevs 2026-11-11. Detta avsnitt är mätt 2026-11-19 på samma maskin
+och **ersätter siffror där de krockar**.
+
+### 8.1 Baslinjen, replikerad
+
+Release-binär, `cargo build --release --features ai,mcp,mamba`, CPU,
+LFM2.5-1.2B QAD-Q4_0 (730 895 168 B GGUF, installerad 25 aug):
+
+| Körning | Genereringar | Wall | Tokens (in/out) |
+|---|---|---|---|
+| `explain src/core/age.rs` | 1 | **81 s** | 1203 / 86 |
+| `summarize src/llm` (15 filer) | **18** | **297 s** | 4115 / 459 |
+| `summarize` på en 1-fils-katalog | 2 | **19 s** | 152 / 100 |
+
+`ai calibrate` (persisterad `TimingProfile`):
+
+```
+prefill: 0.103 s/token
+decode:  0.075 s/token      ← 13 tok/s
+overhead: 0.5 s/call
+```
+
+**§4:s baslinje 96 s står alltså** (81 s idag för samma uppgift). Decode är den
+dominerande kostnaden: 13 tok/s på CPU. Det är den siffra §4:s abortvillkor ska
+jämföras mot.
+
+### 8.2 Rättelse: candle 0.9.2 HAR qwen — men inte `qwen35`
+
+§1 säger *"Candle 0.9:s modellkatalog innehåller llama, phi, phi3, quantized_lfm2
+— och inget qwen"*. **Falsifierat** mot låst version `candle-transformers 0.9.2`:
+
+```
+quantized_qwen2.rs  quantized_qwen3.rs  quantized_qwen3_moe.rs
+qwen3_moe.rs        qwen2_moe.rs        mixtral.rs  qwen3_vl/
+```
+
+**Slutsatsen i §1 står dock**: det finns ingen `qwen35`-modul, och Qwen3.5:s
+Gated DeltaNet-lager (3:1 hybrid, `S_t = β_t ⊙ S_{t-1} + Δ_t ⊗ (K_t ⊗ V_t)`)
+kräver kärnor candle saknar. Motorbytet behövs — av rätt anledning.
+
+`cera 0.7.4` (MSRV 1.94; vi kör 1.98) dispatchar på `general.architecture` och
+listar: `lfm2`, `lfm2moe`, `lfm3`, `qwen2`, `qwen3`, **`qwen35`**, `llama`,
+`granite`, `minicpm`, `phi3`/`phi`, `mistral3`, `bailingmoe3`/`bailingmoe`, plus
+Mamba-2 och hybrider på CPU-lastaren.
+
+### 8.3 Nya fakta: AMD-vägen och livscykeln
+
+**AMD.** Maskinen har två GPU:er i samma Vulkan-instans:
+
+```
+GPU0  AMD Radeon RX 580 (RADV POLARIS10, Mesa 26.2.4)   4.0 GB VRAM
+GPU1  NVIDIA GeForce RTX 4070 SUPER                     12 GB
+```
+
+`candle-core 0.9.2` har `Device { Cpu, Cuda, Metal }` — **ingen ROCm/HIP**. GTW:s
+`DeviceType` är lika smal. Cera:s `gpu`-feature är **wgpu**, som talar Vulkan, och
+RX 580 rapporterar Vulkan 1.4 → **Cera är den enda observerade AMD-vägen**, och
+det argumentet fanns inte i §1–7.
+
+**Livscykeln (A vs B, utrett).** `AiManager::new()` anropas **per MCP-anrop** (6
+ställen i `mcp/mod.rs`); ingen instans cachas. `cached_lfm25: OnceLock` är alltså
+per anrop — men den bär hela sin vikt **inom** ett anrop: `investigate` gör 4
+genereringar, `summarize src/llm` gjorde **18**. Att äga `AiManager` i `AppState`
+(B) skulle spara ~0,5 s per anrop (`overhead: 0.5 s/call`, och 1-fils-provet tog
+19 s för 2 anrop) mot 81–297 s körning = **~0,6 %**. Slutsats: **B är inte
+motiverad av laddningstid**; `OnceLock` ska stå orörd. Det som är dyrt är decode.
+
+**Installationsgapet (M14-klass).** `commit-build.sh` installerade
+`--features ai,mcp` och `build-gpu.sh` byggde `--features cuda` — **båda utan
+`mamba`**. Följden mättes live: `gnawtreewriter explain …` i den installerade
+binären svarar *"LFM2.5 commands require the 'mamba' feature"*, och MCP-verktyget
+`explain` svarar samma. Hela L4 var alltså byggt, testat, installerat och
+**oåtkomligt** i den binär agenterna kör. Åtgärdat 2026-11-19 i båda skripten.
+
+### 8.4 Nästa mätpunkt (oförändrad fråga, nu med tal)
+
+Qwen3.5-0.8B, text-only Q4 (508 MB, **−27 %** mot i dag), via Cera bakom
+`generate_lfm25`. Frågan är om 0,8B-GDN slår 13 tok/s på den här CPU:n — och
+samtidigt öppnar wgpu-vägen RX 580. Abortvillkoren i §4 gäller oförändrat, med
+**81 s** som baslinje för `explain`.
+
 
 

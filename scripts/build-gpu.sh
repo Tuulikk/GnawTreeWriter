@@ -62,7 +62,11 @@ fi
 export PATH="$CARGO_HOME/bin:$PATH"
 echo "== $(rustc --version)"
 rm -rf /work && cp -a /src /work && cd /work
-cargo build --release --features cuda
+# `mamba` måste med (samma fynd som commit-build.sh, 2026-11-19): default
+# features är ["ai","mcp"], och utan `mamba` saknar GPU-binären hela L4
+# (explain/summarize/investigate) — den byggs då med CUDA men kan bara
+# indexera. Ett GPU-bygge som inte kan generera är halva produkten.
+cargo build --release --features cuda,mamba
 cp "$CARGO_TARGET_DIR/release/gnawtreewriter" /libs/gnawtreewriter-cuda
 echo "== BUILD_OK =="
 BUILD

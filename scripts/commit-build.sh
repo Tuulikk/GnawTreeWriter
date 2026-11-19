@@ -88,9 +88,17 @@ fi
 #    ~/.cargo/bin/gnawtreewriter, inte target-katalogen. Utan detta steg
 #    bygger vi en binär som ingen klient någonsin startar (uppmätt 2026-11-10:
 #    en hel session där "fixen inte tog" berodde på exakt detta glapp).
-#    Ingen omkompilering — samma features (default = ai + mcp) och
+#    Ingen omkompilering — samma features (se feature-listan nedan) och
 #    samma CARGO_TARGET_DIR, så det är en kopiering.
-cargo install --path . --features ai,mcp
+#
+#    `mamba` MÅSTE med (fynd 2026-11-19, mätt live): default-features är
+#    ["ai", "mcp"] och `mamba` gatar HELA det generativa lagret (L4:
+#    explain / summarize / investigate / edit_ask). Utan den installeras en
+#    binär där varje L4-verktyg svarar "requires the 'mamba' feature" —
+#    alltså byggt, testat, installerat och oåtkomligt. Samma M14-klass som
+#    en grind ingen kör. Namnet beskriver ingen modell (den gatar LFM2.5,
+#    inte Mamba); det är en separat, medveten namnfråga.
+cargo install --path . --features ai,mcp,mamba
 rc=$?
 if [[ $rc -ne 0 ]]; then
     echo "FEL: cargo install misslyckades (RC=$rc) — MCP ser fortfarande den gamla binären." >&2
