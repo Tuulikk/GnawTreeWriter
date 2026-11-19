@@ -154,6 +154,80 @@ pub fn explain_node(
     Ok((clean_output(&gen.text), budget))
 }
 
+/// `describe <file>` — produce a CLAIM about a file and persist it.
+///
+/// The producer half of the prose layer (`docs/L2_MODEL_ASSISTED_CLASSIFICATION.md`
+/// §8 step 1). It reuses `explain_node`'s generation and adds the three things
+/// that make the result a first-class, self-invalidating part of Code Index:
+///
+/// 1. **An anchor from the STORE**, not from a fresh read: `files.hash` is what
+///    `sweep_prose_freshness` compares against, so both agree by construction.
+///    A claim whose anchor cannot be found is refused — never written unanchored.
+/// 2. **`producer` + `model`** so a model claim can never pass for an extracted
+///    fact (ROADMAP: "index facts and prose claims never merge silently").
+/// 3. **Optional enrichment.** A missing store or model is REPORTED, never
+///    blocking (ROADMAP: "staleness surfaces, it does not punish").
+pub fn describe_file_persisted(
+    mgr: &AiManager,
+    root: &std::path::Path,
+    file_path: &str,
+    producer: &str,
+    model: &str,
+    language: &str,
+) -> Result<(String, crate::llm::TokenBudget, serde_json::Value)> {
+    use crate::core::code_index_db as db;
+
+    let index_root = db::resolve_index_root(root);
+    let mut conn = db::open_existing(&index_root).with_context(|| {
+        format!(
+            "no code-index store under {} — run `gnawtreewriter code-index --db` first \
+             (claims are anchored to store hashes, so there is nothing to anchor to yet)",
+            index_root.display()
+        )
+    })?;
+
+    // The anchor comes from the store: this is the same hash the freshness
+    // sweep will compare against, so the claim's lifetime is exact.
+    let rel = {
+        let abs = std::fs::canonicalize(file_path).unwrap_or_else(|_| file_path.into());
+        abs.strip_prefix(&index_root)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| file_path.to_string())
+    };
+    let anchor_hash = db::file_hash(&conn, &rel).with_context(|| {
+        format!(
+            "{rel} is not in the code-index store — refresh it (`code-index --db`) before \
+             describing it; an unanchored claim would never go stale"
+        )
+    })?;
+
+    let (text, budget) = explain_node(mgr, file_path, None, crate::llm::Resolution::Auto)?;
+
+    let revision_id = conn
+        .query_row(
+            "SELECT id FROM index_revisions WHERE status = 'completed' ORDER BY id DESC LIMIT 1",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .ok();
+
+    db::upsert_prose(
+        &mut conn,
+        "file",
+        &rel,
+        &anchor_hash,
+        file_path,
+        &text,
+        producer,
+        Some(model),
+        language,
+        revision_id,
+    )?;
+
+    let summary = db::prose_summary(&conn, true);
+    Ok((text, budget, summary))
+}
+
 /// `summarize <dir>` — hierarchical map-reduce over files → dirs → project.
 /// Returns (result, budget) with full token accounting.
 ///

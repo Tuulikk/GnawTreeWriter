@@ -710,6 +710,28 @@ enum Commands {
         #[arg(long, default_value = "auto")]
         resolution: String,
     },
+    /// Describe a file and persist the description as a CLAIM in the code index
+    ///
+    /// The description is anchored to the store's content hash, so it turns
+    /// `stale` when the file changes and `invalid` when it disappears. Claims
+    /// are optional enrichment (ROADMAP: never a gate) and always carry the
+    /// producer that wrote them.
+    Describe {
+        file: PathBuf,
+        /// Producer recorded with the claim (who said this)
+        #[arg(long, default_value = "lfm25")]
+        producer: String,
+        /// Model note recorded with the claim
+        #[arg(long, default_value = "LFM2.5-1.2B")]
+        model: String,
+        #[arg(long, default_value = "en")]
+        language: String,
+    },
+    /// List persisted claims from the code index (read-only)
+    Claims {
+        /// Only this file (default: every claim)
+        file: Option<String>,
+    },
     /// Summarize a directory hierarchically (LFM2.5)
     Summarize {
         path: PathBuf,
@@ -1846,6 +1868,17 @@ impl Cli {
                 resolution,
             } => {
                 Self::handle_explain(&file, node.as_deref(), &resolution)?;
+            }
+            Commands::Describe {
+                file,
+                producer,
+                model,
+                language,
+            } => {
+                Self::handle_describe(&file, &producer, &model, &language)?;
+            }
+            Commands::Claims { file } => {
+                Self::handle_claims(file.as_deref())?;
             }
             Commands::Summarize {
                 path,
@@ -4021,6 +4054,80 @@ fi
     #[cfg(not(feature = "mamba"))]
     fn handle_explain(_file: &PathBuf, _node: Option<&str>, _resolution: &str) -> Result<()> {
         Self::err_mamba_disabled()
+    }
+
+    /// `describe` — generate a description and persist it as a CLAIM.
+    #[cfg(feature = "mamba")]
+    fn handle_describe(file: &PathBuf, producer: &str, model: &str, language: &str) -> Result<()> {
+        let json_mode = std::env::var("GNAW_JSON").is_ok();
+        let project_root = find_project_root(&std::env::current_dir()?);
+        let mgr = crate::llm::AiManager::new(&project_root)?;
+        let (text, budget, prose) = crate::llm::pipeline::describe_file_persisted(
+            &mgr,
+            &project_root,
+            file.to_str().unwrap_or(""),
+            producer,
+            model,
+            language,
+        )?;
+        if json_mode {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "claim": text, "tokens": budget, "prose": prose,
+                    "producer": producer, "model": model
+                })
+            );
+        } else {
+            println!("{text}\n");
+            Self::print_budget(&budget);
+            println!(
+                "claim stored: producer={producer} model={model} language={language} \
+                 — anchored to the store hash (goes stale when the file changes)"
+            );
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "mamba"))]
+    fn handle_describe(_f: &PathBuf, _p: &str, _m: &str, _l: &str) -> Result<()> {
+        Self::err_mamba_disabled()
+    }
+
+    /// `claims` — read persisted claims (never a gate: reporting only).
+    fn handle_claims(file: Option<&str>) -> Result<()> {
+        use crate::core::code_index_db as db;
+        let project_root = find_project_root(&std::env::current_dir()?);
+        let index_root = db::resolve_index_root(&project_root);
+        let conn = db::open_existing(&index_root)?;
+        let rows = db::load_prose(&conn, file)?;
+        // "No producer wired up" and "producer has not run" are different
+        // states; zero claims must not read as healthy (M14 class).
+        let summary = db::prose_summary(&conn, cfg!(feature = "mamba"));
+        if std::env::var("GNAW_JSON").is_ok() {
+            println!(
+                "{}",
+                serde_json::json!({ "claims": rows, "summary": summary })
+            );
+            return Ok(());
+        }
+        println!(
+            "claims: {} fresh · {} stale · {} invalid (state: {})",
+            summary["fresh"], summary["stale"], summary["invalid"], summary["state"]
+        );
+        if let Some(note) = summary["note"].as_str() {
+            println!("note: {note}");
+        }
+        for row in &rows {
+            println!(
+                "\n[{}] {} · producer={} model={}\n{}",
+                row["status"].as_str().unwrap_or("?"),
+                row["anchor_key"].as_str().unwrap_or("?"),
+                row["producer"].as_str().unwrap_or("?"),
+                row["model"].as_str().unwrap_or("-"),
+                row["body"].as_str().unwrap_or("")
+            );
+        }
+        Ok(())
     }
 
     /// `summarize` — hierarchical directory summary with LFM2.5.

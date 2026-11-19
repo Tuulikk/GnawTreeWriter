@@ -667,11 +667,24 @@ pub fn refresh(
     let exts: Vec<&str> = opts.extensions.iter().map(|s| s.as_str()).collect();
     let mut files = crate::core::file_walker::walk_source_files_filtered(root, &exts);
     if files.is_empty() {
-        anyhow::bail!(
-            "no source files found under {} (extensions: {}) — wrong root?",
-            root.display(),
-            exts.join(",")
-        );
+        // A directory can legitimately end up with no source files when the
+        // last one is deleted — and then the rows for the deleted files must
+        // still be pruned, or the store keeps describing files that no longer
+        // exist (found 2026-11-19 via the prose layer: a claim first went
+        // `stale` and could never reach `invalid`, because `files` still held
+        // the vanished path). Refuse only when the store is empty too: that
+        // really is a wrong root.
+        let known_rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
+            .unwrap_or(0);
+        if known_rows == 0 {
+            anyhow::bail!(
+                "no source files found under {} (extensions: {}) — wrong root?",
+                root.display(),
+                exts.join(",")
+            );
+        }
+        // Falling through prunes every stale row below; `current` stays empty.
     }
     files.sort();
 
@@ -1006,6 +1019,97 @@ pub(crate) fn sweep_prose_freshness(conn: &mut Connection) -> Result<()> {
 /// in line order; methods reattach to their parent row. Orphaned children
 /// (impossible in practice — cascades prevent them) are promoted, never
 /// dropped: an index that hides items lies.
+/// Read the claims for one file (or all files when `path` is None).
+///
+/// The reader half of the prose layer. Claims are shown WITH their lifecycle
+/// status and producer, never merged into facts — the display requirement in
+/// `docs/L2_MODEL_ASSISTED_CLASSIFICATION.md` §5 (ROADMAP: "never a gate").
+pub fn load_prose(conn: &Connection, path: Option<&str>) -> Result<Vec<serde_json::Value>> {
+    let sql = "SELECT anchor_kind, anchor_key, anchor_name, body, producer, model,
+                      language, generated_at, status, invalid_reason, suggested_key
+               FROM prose_annotations
+               WHERE (?1 IS NULL OR anchor_key = ?1)
+               ORDER BY anchor_key, producer, language";
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt.query_map(params![path], |r| {
+        Ok(serde_json::json!({
+            "anchor_kind": r.get::<_, String>(0)?,
+            "anchor_key": r.get::<_, String>(1)?,
+            "anchor_name": r.get::<_, String>(2)?,
+            "body": r.get::<_, String>(3)?,
+            "producer": r.get::<_, String>(4)?,
+            "model": r.get::<_, Option<String>>(5)?,
+            "language": r.get::<_, String>(6)?,
+            "generated_at": r.get::<_, i64>(7)?,
+            "status": r.get::<_, String>(8)?,
+            "invalid_reason": r.get::<_, Option<String>>(9)?,
+            "suggested_key": r.get::<_, Option<String>>(10)?,
+        }))
+    })?;
+    Ok(rows.flatten().collect())
+}
+
+/// Current content hash for one file, straight from the store.
+///
+/// The anchor a claim binds to. Reading it from here (not recomputing) is the
+/// point: a claim must go stale exactly when the STORE's view of the file
+/// changes, or `sweep_prose_freshness` and the claim's own hash disagree.
+pub fn file_hash(conn: &Connection, path: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT hash FROM files WHERE path = ?1",
+        params![path],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
+}
+
+/// Aggregate prose counts for `--coverage` / `code_index` answers.
+///
+/// `no_producer` is the honest state that "0 claims" hides (M14 class): a store
+/// with zero annotations either has no producer wired up, or a producer that
+/// has not run. Those are different, and the answer must say which.
+pub fn prose_summary(conn: &Connection, producer_available: bool) -> serde_json::Value {
+    let mut fresh = 0i64;
+    let mut stale = 0i64;
+    let mut invalid = 0i64;
+    if let Ok(mut stmt) =
+        conn.prepare("SELECT status, COUNT(*) FROM prose_annotations GROUP BY status")
+    {
+        if let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+        {
+            for (status, n) in rows.flatten() {
+                match status.as_str() {
+                    "fresh" => fresh = n,
+                    "stale" => stale = n,
+                    "invalid" => invalid = n,
+                    _ => {}
+                }
+            }
+        }
+    }
+    let total = fresh + stale + invalid;
+    let state = if !producer_available {
+        "no_producer"
+    } else if total == 0 {
+        "producer_available_nothing_written"
+    } else {
+        "populated"
+    };
+    serde_json::json!({
+        "fresh": fresh,
+        "stale": stale,
+        "invalid": invalid,
+        "total": total,
+        // Never `0` alone: zero claims is a STATE, not a quality score.
+        "state": state,
+        "note": if producer_available {
+            "claims are optional enrichment (ROADMAP: never a gate); stale/invalid are reported, never blocking"
+        } else {
+            "no producer is wired into this build — the table being empty is expected, not healthy"
+        },
+    })
+}
+
 pub(crate) fn load_index(conn: &Connection) -> Result<Vec<FileIndex>> {
     let mut stmt = conn.prepare(
         "SELECT f.path, f.lines, i.id, i.parent_id, i.kind, i.name, i.signature, i.line, i.node_path
@@ -1795,5 +1899,127 @@ mod version_guard_tests {
         // No false refusals: a future non-numeric version must not lock users out.
         assert!(!store_is_newer("v3-beta", "3"));
         assert!(!store_is_newer("3", ""));
+    }
+}
+
+/// The prose (claim) layer: an empty table must never read as healthy, and the
+/// two "nothing here" states must be distinguishable — the M14 class that made
+/// `upsert_prose` sit unwired for a week while `--coverage` showed `fresh: 0`.
+#[cfg(test)]
+mod prose_state_tests {
+    use super::*;
+
+    fn store_with_prose() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate_connection(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO files (path, hash, lines, warning, parsed_at) VALUES ('a.rs','h1',1,NULL,0)",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn no_producer_is_reported_as_its_own_state() {
+        let conn = store_with_prose();
+        let s = prose_summary(&conn, false);
+        assert_eq!(s["total"], 0);
+        assert_eq!(
+            s["state"], "no_producer",
+            "without a producer, an empty table is EXPECTED — not healthy"
+        );
+        assert!(
+            s["note"].as_str().unwrap_or("").contains("not healthy"),
+            "the note must say the emptiness is not a verdict: {s}"
+        );
+    }
+
+    #[test]
+    fn a_producer_that_has_not_run_is_distinguishable() {
+        let conn = store_with_prose();
+        let s = prose_summary(&conn, true);
+        assert_eq!(s["state"], "producer_available_nothing_written");
+        assert_ne!(
+            s["state"], "no_producer",
+            "the two zero states must not collapse into one answer"
+        );
+    }
+
+    #[test]
+    fn a_claim_is_readable_with_its_producer_and_status() {
+        let mut conn = store_with_prose();
+        upsert_prose(
+            &mut conn,
+            "file",
+            "a.rs",
+            "h1",
+            "a.rs",
+            "does a thing",
+            "lfm25",
+            Some("LFM2.5-1.2B"),
+            "en",
+            None,
+        )
+        .unwrap();
+        let rows = load_prose(&conn, Some("a.rs")).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["producer"], "lfm25");
+        assert_eq!(rows[0]["status"], "fresh");
+        assert_eq!(rows[0]["model"], "LFM2.5-1.2B");
+        let s = prose_summary(&conn, true);
+        assert_eq!(s["fresh"], 1);
+        assert_eq!(s["state"], "populated");
+    }
+
+    /// The lifecycle, without a model: content change -> stale, file gone ->
+    /// invalid. Both directions, on the same anchor.
+    #[test]
+    fn the_sweep_turns_a_claim_stale_then_invalid() {
+        let mut conn = store_with_prose();
+        upsert_prose(
+            &mut conn, "file", "a.rs", "h1", "a.rs", "claim", "lfm25", None, "en", None,
+        )
+        .unwrap();
+
+        // Same hash: stays fresh (this is the `touch` case — mtime is not content).
+        sweep_prose_freshness(&mut conn).unwrap();
+        assert_eq!(prose_summary(&conn, true)["fresh"], 1);
+
+        // Content changed: the store's hash moves -> stale.
+        conn.execute("UPDATE files SET hash = 'h2' WHERE path = 'a.rs'", [])
+            .unwrap();
+        sweep_prose_freshness(&mut conn).unwrap();
+        assert_eq!(
+            prose_summary(&conn, true)["stale"],
+            1,
+            "a changed anchor must make the claim stale"
+        );
+        let reason: Option<String> = conn
+            .query_row(
+                "SELECT invalid_reason FROM prose_annotations WHERE anchor_key = 'a.rs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(reason.as_deref(), Some("content_changed"));
+
+        // File gone: invalid, with a reason — never silently dropped.
+        conn.execute("DELETE FROM files WHERE path = 'a.rs'", [])
+            .unwrap();
+        sweep_prose_freshness(&mut conn).unwrap();
+        let s = prose_summary(&conn, true);
+        assert_eq!(
+            s["invalid"], 1,
+            "a vanished anchor must invalidate the claim"
+        );
+        let reason: Option<String> = conn
+            .query_row(
+                "SELECT invalid_reason FROM prose_annotations WHERE anchor_key = 'a.rs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(reason.as_deref(), Some("anchor_removed"));
     }
 }
