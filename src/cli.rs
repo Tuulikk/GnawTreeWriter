@@ -412,6 +412,16 @@ enum Commands {
         #[arg(long, value_delimiter = ',')]
         files: Vec<String>,
     },
+    /// Find pub surfaces nothing outside their own file refers to
+    /// (T4 island_scan: island-CANDIDATES, ranked by method surface)
+    IslandScan {
+        /// Project root (default: current directory)
+        #[arg(default_value = ".")]
+        path: String,
+        /// Only scan files under this path prefix (default: src/)
+        #[arg(long)]
+        prefix: Option<String>,
+    },
     /// Compress source code by replacing function bodies with placeholders
     Compress {
         file_path: String,
@@ -1404,6 +1414,33 @@ impl Cli {
                 let source_list: Vec<String> = files.iter().map(|f| f.to_string()).collect();
                 let report =
                     crate::core::claim_scan::claim_scan(&conn, Path::new(&path), &source_list)?;
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+            Commands::IslandScan { path, prefix } => {
+                // Same guard as the MCP tool (core::project_root, one rule).
+                if let Err(reason) = crate::core::project_root::guard(Path::new(&path)) {
+                    eprintln!("{reason}");
+                    std::process::exit(2);
+                }
+                let index_root = crate::core::code_index_db::resolve_index_root(Path::new(&path));
+                let conn = crate::core::code_index_db::open_existing(&index_root).map_err(|e| {
+                    anyhow::anyhow!(
+                        "island-scan reads the code-index store — run `gnawtreewriter code-index {path} --db` first ({e:#})"
+                    )
+                })?;
+                let report = crate::core::island_scan::island_scan(
+                    &conn,
+                    Path::new(&path),
+                    prefix.as_deref(),
+                )?;
+                if report.population == 0 {
+                    // M14: an empty population that reads as health is a bug.
+                    anyhow::bail!(
+                        "island-scan found 0 pub surfaces under prefix {:?} in {} — wrong root or prefix? (the store must be built first)",
+                        prefix.as_deref().unwrap_or(crate::core::island_scan::DEFAULT_PREFIX),
+                        path
+                    );
+                }
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
             Commands::Clone {

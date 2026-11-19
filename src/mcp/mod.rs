@@ -567,6 +567,11 @@ pub mod mcp_server {
                         let root = arguments.get("root").and_then(Value::as_str).unwrap_or(".");
                         Ok(handle_claim_scan_mcp(root, files))
                     }
+                    "island_scan" => {
+                        let prefix = arguments.get("prefix").and_then(Value::as_str);
+                        let root = arguments.get("root").and_then(Value::as_str).unwrap_or(".");
+                        Ok(handle_island_scan_mcp(root, prefix))
+                    }
                     "get_semantic_report" => {
                         let fp = validate_arg("file_path")?;
                         Ok(handle_get_semantic_report(state, fp).await)
@@ -759,6 +764,18 @@ pub mod mcp_server {
                     "type": "object",
                     "properties": {
                         "files": { "type": "array", "items": { "type": "string" }, "description": "Source files to scan, relative to root (default: crate-root doc files)" }
+                    },
+                    "required": []
+                }
+            }),
+            json!({
+                "name": "island_scan",
+                "title": "Pub surfaces with no external coupling (T4 island_scan)",
+                "description": "Find pub functions/structs/traits that NO file outside their own refers to — built but never wired (SCAN_TOOLS §3.2). WHAT: population is the store's pub declarations under the prefix (default src/), coupling evidence is relation edges whose ORIGIN lives in a different file, in production scope. Test files and #[cfg(test)] modules are excluded as coupling proof (green unit tests calling a hook directly masked a dispatch hole - the motivating case). Findings are ISLAND CANDIDATES ranked by severity then method surface, never verdicts: a lib crate's pub item can be deliberate API for consumers the store cannot see, and the index sees structure, not bodies (\"called but result discarded\" is invisible). WHEN: after building a subsystem, before claiming it is wired; auditing dead architecture; the coupling-side of the scan-tools family. RETURNS: {population, with_external_refs, findings_total, excluded_test_files, excluded_test_scope, findings[{name, kind, file, line, signature, node_path, method_surface, severity, why}], note}. Example: {\"prefix\": \"src/core/\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "prefix": { "type": "string", "description": "Only scan files under this path prefix (default src/)" }
                     },
                     "required": []
                 }
@@ -3971,6 +3988,53 @@ or list_nodes for a flat index of this file.",
                 Some(serde_json::to_value(&report).unwrap_or_default()),
             ),
             Err(e) => tool_error(format!("claim_scan failed: {e:#}")),
+        }
+    }
+
+    /// T4 island_scan (SCAN_TOOLS §3.2): pub surfaces with no external
+    /// coupling. Same refusal discipline as claim_scan: no store and an
+    /// empty population both FAIL LOUDLY with the executable next step
+    /// (M14 - a scan that finds nothing because it looked nowhere reads
+    /// like health).
+    fn handle_island_scan_mcp(root: &str, prefix: Option<&str>) -> Value {
+        let root_path = std::path::Path::new(root);
+        if let Err(reason) = crate::core::project_root::guard(root_path) {
+            return broad_root_error("island_scan", &reason);
+        }
+        let index_root = crate::core::code_index_db::resolve_index_root(root_path);
+        let conn = match crate::core::code_index_db::open_existing(&index_root) {
+            Ok(c) => c,
+            Err(e) => {
+                return tool_error(format!(
+                    "island_scan needs the code-index store - run code_index mode=refresh first ({e:#})"
+                ))
+            }
+        };
+        match crate::core::island_scan::island_scan(&conn, root_path, prefix) {
+            Ok(report) if report.population == 0 => tool_error(format!(
+                "island_scan considered 0 pub surfaces under prefix {:?} in {} - wrong root or prefix? The store must be built from the same tree (run mode=refresh), and the default prefix is src/",
+                prefix.unwrap_or(crate::core::island_scan::DEFAULT_PREFIX),
+                root
+            )),
+            Ok(report) => {
+                let top = report
+                    .findings
+                    .first()
+                    .map(|f| format!(" - worst: {} ({} method(s), {})", f.name, f.method_surface, f.file))
+                    .unwrap_or_default();
+                tool_success(
+                    format!(
+                        "island_scan: {} pub surface(s) in scope, {} have external references, {} island-CANDIDATES ({} shown){} - candidates, not verdicts",
+                        report.population,
+                        report.with_external_refs,
+                        report.findings_total,
+                        report.findings.len(),
+                        top
+                    ),
+                    Some(serde_json::to_value(&report).unwrap_or_default()),
+                )
+            }
+            Err(e) => tool_error(format!("island_scan failed: {e:#}")),
         }
     }
 
