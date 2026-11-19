@@ -224,27 +224,91 @@ två-procent-fyndet.
 3. **Ett mått**: `--coverage` får `claim_coverage` + `claim_freshness`, med
    nämnare.
 4. **Ett bevis åt båda håll**: en claim blir `stale` när filen ändras (hash),
-   `invalid` när filen försvinner — och en modell som inte finns ger ett
-   högljutt fel, aldrig en tyst tom tabell.
+   `invalid` när filen försvinner — och avsaknad av producent **rapporteras**
+   som ett tillstånd (`no_producer`), aldrig som en tyst tom tabell.
 
 Steg 4 är det som gör skivan till en *mätning* i stället för en yta: tabellen
 är idag tom, så "0 claims" ser friskt ut (M14-klassen). En tom
-`prose_annotations` **måste** skiljas från "ingen producent finns".
+`prose_annotations` **måste** skiljas från "ingen producent finns" — men
+skillnaden **rapporteras, den blockerar inte** (ROADMAP: *"Staleness surfaces,
+it does not punish … reported, never blocking"*). En modell som saknas när du
+*ber* om en beskrivning ska däremot svara högljutt: där är frånvaron svaret på
+frågan, inte ett bakgrundstillstånd.
+
 
 ---
 
-## 9. Öppna frågor (ägarbeslut)
+## 9. Besluten är redan tagna — av repot, inte av mig
 
-1. **Vilken modell för nivå 1?** Den inbyggda (LFM2.5, CPU, 81 s för en
-   `explain`) eller en mindre? En mindre modell kan bara användas här om den
-   skriver TEXT (vilket claims är) — den är alltså frikopplad från L3-frågan.
-2. **Körningstid:** bakgrund (som `index_project`) eller on-demand? Claims är
-   billiga att läsa och dyra att producera — bakgrund passar, men kräver
-   `revision_id`-bindning (§8 steg 1).
-3. **Ska `claim_coverage` vara en grind i CI?** En tom tabell som ser grön ut är
-   precis vad `claim_scan`-läxan varnar för.
-4. **Nivå 2 (klassificering) — alls?** Den rör den enda kant repot aktivt
-   skyddar mot att fabricera. Om ja: vilket facit mäts den mot?
+§9 var först fyra frågor till ägaren. Det var fel: **`ROADMAP.md` besvarar dem
+alla**, och de svaren är äldre än den här specen. Att fråga igen hade varit att
+bjuda in en avvikelse från utstakningen.
+
+### 9.1 Vad ROADMAP säger (ordagrant, 2026-11-10)
+
+> **"Prose enrichment — optional pass, never a gate"**
+>
+> Prose summaries … are part of the code-index foundation — `code-index.md` is
+> the human/agent projection — but they are **MODEL work**, so they ship as an
+> **OPTIONAL enrichment layer, never a required pass and never a gate**:
+>
+> - **Producers:** GTW's local model (`investigate`/`explain`), real agents
+>   (working sessions), later a dedicated background-agent tool.
+> - **Every prose bit carries provenance:** which model/agent wrote it, which
+>   index revision it describes, CLAIM status — index facts and prose claims
+>   **never merge silently**.
+> - **Staleness surfaces, it does not punish:** a missing or stale prose
+>   annotation is **reported, never blocking**.
+
+Detta är exakt den form §4 i den här specen beskrev — oberoende av varandra.
+
+### 9.2 Följderna, utskrivna
+
+| Fråga jag ställde | Repots svar | Källa |
+|---|---|---|
+| Vilken modell? | **Vilken producent som helst** — lokal modell, agent, framtida bakgrundsverktyg. `producer`-fältet finns för att de ska kunna samexistera | ROADMAP "Producers" |
+| Bakgrund eller on-demand? | **Båda är legitima.** "later a dedicated background-agent tool" är uttryckligen en tillåten framtid | ROADMAP "Producers" |
+| Ska `claim_coverage` vara CI-grind? | **NEJ.** "never a gate" · "reported, never blocking" | ROADMAP (2 ställen) |
+| Nivå 2 (klassificering) alls? | **Inte som gate.** Den får existera som claim, aldrig som `relations.to_id` | §4 regel 3 + ROADMAP |
+
+Det gör §9.1:s "never a gate" till en **hård regel för den här specen**: ingen
+claim får blockera ett bygge, en edit eller ett svar. Den **syns** — och
+frånvaro av claims är ett *rapporterat* tillstånd, inte ett fel som stoppar.
+
+### 9.3 Fyra principer som gäller oavsett beslut
+
+`CODE_INDEX_SCAN_TOOLS_PROPOSAL.md` §2, som ROADMAP pekar ut som
+"the scan-tools principle":
+
+1. **Index = fakta, prosa = claims.** Varje verktyg äger EN sömnadstyp.
+2. **En scan, ett syfte.** Inga "gör allt".
+3. **Determinism** — *"samma rev + samma input → samma utdata. Det är det som
+   gör utdata jämförbar över modeller (stora och små ser SAMMA fakta)."*
+4. **Ankare i allt.** Ett fynd utan ankare är en gissning.
+
+**Princip 3 är den viktigaste för din fråga** och jag missade den i första
+utkastet: *"stora och små [modeller] ser SAMMA fakta."* Repot har alltså redan
+bestämt att modellstorlek **inte får ändra vad som ses** — bara vad som sägs om
+det. Det är därför en mindre modell hör i claim-lagret och aldrig i L2.
+
+### 9.4 Det som ÄR ett ägarbeslut (och varför det är ofarligt)
+
+Bara en sak återstår, och den rör inte arkitekturen: **om och när** enrichment
+ska köras i det här repot. Det är en driftsfråga (kostnad i tid), inte en
+designfråga — och den kan inte bli "förräderi" eftersom varje möjlig inställning
+(av, manuell, bakgrund) är tillåten av ROADMAP.
+
+---
+
+## 10. Om specen själv (M13: ärlig härkomst)
+
+Den här specen lades till **efter** att §1–8 var skrivna, och §9 skrevs om
+eftersom första versionen ställde frågor som repot redan besvarat. Det är värt
+att stå här: en spec som ber ägaren välja mellan alternativ som utstakningen
+redan avgjort är inte neutral — den flyttar ansvar till någon som inte har
+underlaget. Rätt form är att **läsa utstakningen först** och fråga bara om det
+den inte täcker.
+
 
 ---
 
