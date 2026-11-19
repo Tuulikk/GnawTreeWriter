@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 674c8b34ed9cfb6bb173a7f21efceb34
+> Body-hash: 4d24dfac6111ce48e14bfc48287b39cf
 
 ## Träd
 
@@ -223,7 +223,7 @@ tests/
   heal_advice.rs (48 rader)
   insert_position.rs (555 rader)
   legacy_parser_surgical_edit.rs (194 rader)
-  mcp_integration.rs (2508 rader)
+  mcp_integration.rs (2521 rader)
   phase3_graph.rs (106 rader)
   phase4_runners.rs (161 rader)
   relational_integration.rs (55 rader)
@@ -2598,7 +2598,7 @@ _(inga toppnivå-items)_
 - `fn collect_kinds(node: &TreeNode) -> Vec<String>` :170
 - `fn dotfile_resolves_to_the_bash_parser()` :180
 
-### mcp_integration.rs (2508 rader)
+### mcp_integration.rs (2521 rader)
 - `async fn integration_mcp_auth() -> Result<(), Box<dyn std::error::Error>>` :16
 - `async fn integration_mcp_tools_list() -> Result<(), Box<dyn std::error::Error>>` :85
 - `async fn integration_mcp_tools_call_missing_args() -> Result<(), Box<dyn std::error::Error>>` :164
@@ -2617,15 +2617,15 @@ _(inga toppnivå-items)_
 - `fn integration_error_codes_documented()` :1245
 - `async fn integration_mcp_index_project_status() -> Result<(), Box<dyn std::error::Error>>` :1301
 - `fn integration_mcp_instructions_listed()` :1404
-- `fn integration_duplex_metrics_persist()` :1441
-- `async fn integration_mcp_partial_parse_read_paths() -> Result<(), Box<dyn std::error::Error>>` :1484
-- `async fn integration_mcp_phase10_surfaces() -> Result<(), Box<dyn std::error::Error>>` :1629
-- `async fn integration_mcp_write_receipts_idempotent() -> Result<(), Box<dyn std::error::Error>>` :1880
-- `async fn integration_mcp_edit_rejection_carries_edit_verdict(` :1986
-- `async fn integration_mcp_edit_reports_impact_on_signature_change(` :2090
-- `async fn integration_mcp_batch_rejection_carries_edit_verdict(` :2201
-- `async fn integration_mcp_search_nodes_alternation() -> Result<(), Box<dyn std::error::Error>>` :2297
-- `async fn integration_mcp_edit_node_expect_name_guard() -> Result<(), Box<dyn std::error::Error>>` :2409
+- `fn integration_duplex_metrics_persist()` :1454
+- `async fn integration_mcp_partial_parse_read_paths() -> Result<(), Box<dyn std::error::Error>>` :1497
+- `async fn integration_mcp_phase10_surfaces() -> Result<(), Box<dyn std::error::Error>>` :1642
+- `async fn integration_mcp_write_receipts_idempotent() -> Result<(), Box<dyn std::error::Error>>` :1893
+- `async fn integration_mcp_edit_rejection_carries_edit_verdict(` :1999
+- `async fn integration_mcp_edit_reports_impact_on_signature_change(` :2103
+- `async fn integration_mcp_batch_rejection_carries_edit_verdict(` :2214
+- `async fn integration_mcp_search_nodes_alternation() -> Result<(), Box<dyn std::error::Error>>` :2310
+- `async fn integration_mcp_edit_node_expect_name_guard() -> Result<(), Box<dyn std::error::Error>>` :2422
 
 ### phase3_graph.rs (106 rader)
 - `fn opts() -> CodeIndexOptions` :8
