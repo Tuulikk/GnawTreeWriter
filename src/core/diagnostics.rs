@@ -701,6 +701,23 @@ impl DoctorReport {
     /// Outside the gnawtreewriter repo this is a no-op: freshness vs this
     /// repo says nothing about other projects.
     pub fn check_binary_freshness(&mut self, project_root: &std::path::Path) {
+        self.check_binary_freshness_with(&crate::version::current(), project_root);
+    }
+
+    /// Build-identity–aware freshness check (the testable half).
+    ///
+    /// ONE source of truth for "is the running binary the current source?":
+    /// `version::current().stale` — the same verdict MCP's `initialize` and
+    /// every `_build_warning` carry. Comparing version triples alone was a
+    /// lie, measured 2026-11-19: a touched source file made `initialize`
+    /// report `stale: true` while `doctor` said "binary matches repo
+    /// (0.26.1, installed ...)" — two answers to one question, and the older
+    /// one was wrong. Version equality cannot prove code equality.
+    pub fn check_binary_freshness_with(
+        &mut self,
+        build: &crate::version::BuildInfo,
+        project_root: &std::path::Path,
+    ) {
         let Ok(text) = std::fs::read_to_string(project_root.join("Cargo.toml")) else {
             return;
         };
@@ -711,21 +728,45 @@ impl DoctorReport {
             return;
         };
         let binary_version = env!("CARGO_PKG_VERSION");
-        let installed = installed_binary_date();
+
+        // Staleness first: a build that predates the source is stale whatever
+        // the version numbers say (a dev tree usually shares the released
+        // version until it is bumped).
+        if build.stale {
+            self.warn(
+                "binary",
+                "freshness",
+                &format!(
+                    "STALE BINARY: running build {} ({}) is older than this repo's source \
+                     (repo version {}). Matching version numbers are not proof of matching code \
+                     — the build identity is. Redeploy: scripts/commit-build.sh (CPU) or \
+                     scripts/build-gpu.sh (CUDA), then restart the host so MCP loads it.",
+                    build.git_sha, build.built_at, repo_version
+                ),
+            );
+            return;
+        }
+
+        // The source IS what runs. What remains is the release-level question:
+        // is this repo ahead of (or behind) the binary's version?
         match compare_version_triples(binary_version, &repo_version) {
             std::cmp::Ordering::Less => self.warn(
                 "binary",
                 "freshness",
                 &format!(
-                    "STALE BINARY: running {binary_version} (installed {installed}) but this repo \
-                     builds {repo_version}. Fixes in source are NOT what executes. Redeploy: \
-                     scripts/build-gpu.sh (CUDA) or cargo install --path . (CPU), then reconnect MCP."
+                    "STALE BINARY: running {binary_version} (built {}) but this repo builds \
+                     {repo_version}. Fixes in source are NOT what executes. Redeploy: \
+                     scripts/build-gpu.sh (CUDA) or cargo install --path . (CPU), then reconnect MCP.",
+                    build.built_at
                 ),
             ),
             std::cmp::Ordering::Equal => self.pass(
                 "binary",
                 "freshness",
-                &format!("binary matches repo ({binary_version}, installed {installed})"),
+                &format!(
+                    "binary matches source ({binary_version}, build {}, built {})",
+                    build.git_sha, build.built_at
+                ),
             ),
             // Newer-than-repo is the normal dev-build state (built from a
             // dirty tree or an uncommitted bump) — informational, not a nag.
@@ -733,8 +774,9 @@ impl DoctorReport {
                 "binary",
                 "freshness",
                 &format!(
-                    "dev build ahead of repo: running {binary_version} (installed {installed}), \
-                     repo at {repo_version} — commit + release to sync"
+                    "dev build ahead of repo: running {binary_version} (build {}, built {}), \
+                     repo at {repo_version} — commit + release to sync",
+                    build.git_sha, build.built_at
                 ),
             ),
         }
@@ -904,21 +946,14 @@ fn compare_version_triples(a: &str, b: &str) -> std::cmp::Ordering {
     std::cmp::Ordering::Equal
 }
 
-/// Install/build date of the RUNNING binary: cargo writes a fresh file on
-/// install/rebuild, so the executable's mtime is the deploy date.
-fn installed_binary_date() -> String {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.metadata().ok())
-        .and_then(|m| m.modified().ok())
-        .map(|t| {
-            chrono::DateTime::<chrono::Utc>::from(t)
-                .format("%Y-%m-%d")
-                .to_string()
-        })
-        .unwrap_or_else(|| "unknown date".to_string())
-}
-
+/// The build identity in `version::current()` (`build.rs`-baked git sha +
+/// build epoch) is the only truthful "which code is this?" answer. The old
+/// `installed_binary_date` read `current_exe()`'s mtime and called it the
+/// install date: that is the mtime of the *link/copy cargo happened to
+/// write*, measured 2026-11-19 as 19:06 while the build itself said 18:05.
+/// Wrong number, right-sounding name — the `file_hash`-held-a-path-hash
+/// class. It is deleted, not fixed: a date nobody can trust is worse than
+/// no date, and `built_at` is already in the message.
 pub fn run_full_doctor(project_root: &std::path::Path) -> DoctorReport {
     let mut report = DoctorReport::new();
     report.capability = capability_level(project_root);
@@ -1032,6 +1067,90 @@ mod binary_freshness_tests {
         assert_eq!(cargo_toml_version("[package]\nname = \"x\"\n"), None);
     }
 
+    /// Fresh-build fixture: tests must not inherit the real binary's state.
+    fn fresh() -> crate::version::BuildInfo {
+        crate::version::BuildInfo {
+            git_sha: "abc1234",
+            built_at: "2026-11-19 18:05 UTC".to_string(),
+            dirty: false,
+            stale: false,
+        }
+    }
+
+    /// A build that predates the source is stale — whatever the version
+    /// numbers say. This is the measured 2026-11-19 lie: `initialize`
+    /// reported `stale: true` while `doctor` said "binary matches repo
+    /// (0.26.1, ...)", because the check compared versions only. Equal
+    /// versions are NOT proof of equal code; the build identity is.
+    #[test]
+    fn a_stale_build_warns_even_when_versions_match() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            // Same version the binary reports: the old check passed here.
+            format!(
+                "[package]\nname = \"gnawtreewriter\"\nversion = \"{}\"\n",
+                env!("CARGO_PKG_VERSION")
+            ),
+        )
+        .unwrap();
+        let stale = crate::version::BuildInfo {
+            git_sha: "old1234",
+            built_at: "2026-11-19 10:00 UTC".to_string(),
+            dirty: false,
+            stale: true,
+        };
+        let mut report = DoctorReport::new();
+        report.check_binary_freshness_with(&stale, dir.path());
+        assert_eq!(report.total_checks, 1);
+        assert_eq!(
+            report.warnings, 1,
+            "a stale build must WARN even when the version triple matches: {:?}",
+            report.checks[0].message
+        );
+        let msg = &report.checks[0].message;
+        assert!(msg.contains("STALE BINARY"), "{msg}");
+        assert!(
+            msg.contains("old1234"),
+            "the warning must name the running build: {msg}"
+        );
+        assert!(
+            msg.contains("not proof of matching code"),
+            "it must say why version equality was insufficient: {msg}"
+        );
+    }
+
+    /// The other direction: a fresh build with a matching version passes —
+    /// the fix must not turn every healthy doctor red.
+    #[test]
+    fn a_fresh_build_passes_and_names_its_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            format!(
+                "[package]\nname = \"gnawtreewriter\"\nversion = \"{}\"\n",
+                env!("CARGO_PKG_VERSION")
+            ),
+        )
+        .unwrap();
+        let fresh = crate::version::BuildInfo {
+            git_sha: "new5678",
+            built_at: "2026-11-19 18:05 UTC".to_string(),
+            dirty: false,
+            stale: false,
+        };
+        let mut report = DoctorReport::new();
+        report.check_binary_freshness_with(&fresh, dir.path());
+        assert_eq!(report.total_checks, 1);
+        assert_eq!(report.warnings, 0, "{:?}", report.checks[0].message);
+        let msg = &report.checks[0].message;
+        assert!(msg.contains("matches source"), "{msg}");
+        assert!(
+            msg.contains("new5678") && msg.contains("18:05"),
+            "build identity (sha + time) must be in the pass message too: {msg}"
+        );
+    }
+
     #[test]
     fn staleness_inside_gtw_repo_warns_with_redeploy_hint() {
         let dir = tempfile::tempdir().unwrap();
@@ -1041,7 +1160,7 @@ mod binary_freshness_tests {
         )
         .unwrap();
         let mut report = DoctorReport::new();
-        report.check_binary_freshness(dir.path());
+        report.check_binary_freshness_with(&fresh(), dir.path());
         assert_eq!(report.total_checks, 1);
         assert_eq!(report.warnings, 1);
         let check = &report.checks[0];
@@ -1063,7 +1182,7 @@ mod binary_freshness_tests {
         )
         .unwrap();
         let mut report = DoctorReport::new();
-        report.check_binary_freshness(dir.path());
+        report.check_binary_freshness_with(&fresh(), dir.path());
         assert_eq!(report.total_checks, 1);
         assert_eq!(report.warnings, 0);
         assert!(report.checks[0].message.contains("dev build"));
@@ -1080,12 +1199,12 @@ mod binary_freshness_tests {
         )
         .unwrap();
         let mut report = DoctorReport::new();
-        report.check_binary_freshness(dir.path());
+        report.check_binary_freshness_with(&fresh(), dir.path());
         assert_eq!(report.total_checks, 0);
 
         let empty = tempfile::tempdir().unwrap();
         let mut report2 = DoctorReport::new();
-        report2.check_binary_freshness(empty.path());
+        report2.check_binary_freshness_with(&fresh(), empty.path());
         assert_eq!(report2.total_checks, 0);
     }
 }

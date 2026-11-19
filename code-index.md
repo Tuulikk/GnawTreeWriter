@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 817d1f66ac1b5e63453c1f0551799cd5
+> Body-hash: 0a45ea2d0b0956eae81a3eda8a70c722
 
 ## Träd
 
@@ -106,7 +106,7 @@ src/core/
   compress.rs (487 rader)
   create_file.rs (99 rader)
   curator.rs (709 rader)
-  diagnostics.rs (1091 rader)
+  diagnostics.rs (1210 rader)
   diff_parser.rs (586 rader)
   edit_delta.rs (749 rader)
   experiment.rs (556 rader)
@@ -1007,7 +1007,7 @@ _(inga toppnivå-items)_
 - `fn score_by_dependencies(files: &[PathBuf], root: &Path, target: &str) -> Vec<CuratedFile>` :303
 - `fn check_if_definition(tree: &TreeNode, target: &str) -> bool` :382
 
-### diagnostics.rs (1091 rader)
+### diagnostics.rs (1210 rader)
 - `pub struct DiagnosticReport` :7
 - `pub struct DiagnosticError` :22
 - `pub struct VerboseTrace` :36
@@ -1051,17 +1051,17 @@ _(inga toppnivå-items)_
   - `pub fn check_knowledge_graph(&mut self, project_root: &std::path::Path)` :590
   - `pub fn check_code_index_store(&mut self, project_root: &std::path::Path)` :665
   - `pub fn check_binary_freshness(&mut self, project_root: &std::path::Path)` :703
-- `fn extract_line_number(msg: &str) -> Option<usize>` :746
-- `fn generate_suggestion(error_type: &str, language: &str, _msg: &str) -> Option<String>` :768
-- `fn collect_node_types(node: &TreeNode) -> std::collections::HashMap<String, usize>` :801
-- `fn count_nodes(node: &TreeNode) -> usize` :813
-- `fn max_depth(node: &TreeNode, current: usize) -> usize` :817
-- `fn is_important_node_type(ntype: String) -> bool` :829
-- `fn is_gnawtreewriter_manifest(text: &str) -> bool` :848
-- `fn cargo_toml_version(text: &str) -> Option<String>` :859
-- `fn compare_version_triples(a: &str, b: &str) -> std::cmp::Ordering` :886
-- `fn installed_binary_date() -> String` :909
-- `pub fn run_full_doctor(project_root: &std::path::Path) -> DoctorReport` :922
+  - `pub fn check_binary_freshness_with(` :716
+- `fn extract_line_number(msg: &str) -> Option<usize>` :788
+- `fn generate_suggestion(error_type: &str, language: &str, _msg: &str) -> Option<String>` :810
+- `fn collect_node_types(node: &TreeNode) -> std::collections::HashMap<String, usize>` :843
+- `fn count_nodes(node: &TreeNode) -> usize` :855
+- `fn max_depth(node: &TreeNode, current: usize) -> usize` :859
+- `fn is_important_node_type(ntype: String) -> bool` :871
+- `fn is_gnawtreewriter_manifest(text: &str) -> bool` :890
+- `fn cargo_toml_version(text: &str) -> Option<String>` :901
+- `fn compare_version_triples(a: &str, b: &str) -> std::cmp::Ordering` :928
+- `pub fn run_full_doctor(project_root: &std::path::Path) -> DoctorReport` :957
 
 ### diff_parser.rs (586 rader)
 - `pub struct DiffHunk` :20
