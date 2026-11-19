@@ -102,6 +102,17 @@ pub struct ProseSummary {
     /// stale + invalid > 0 → producers should regenerate (a
     /// recommendation surfaced in coverage/doctor — never a gate).
     pub regenerate_recommended: bool,
+    /// How much of the code base carries a FRESH claim — a different question
+    /// from graph resolution, so it gets its own denominator (docs/
+    /// L2_MODEL_ASSISTED_CLASSIFICATION.md §6). A file can have 0 % graph
+    /// coverage and 100 % claim coverage without that being a contradiction.
+    pub files_with_fresh_claim: i64,
+    /// Denominator: files in the store.
+    pub files_total: i64,
+    /// The three "nothing here" states are NOT one answer (M14 class): a store
+    /// with no producer is expected to be empty, one whose producer has not run
+    /// yet is a different fact.
+    pub state: String,
 }
 
 #[derive(Serialize)]
@@ -405,11 +416,32 @@ pub fn measure_scoped(conn: &Connection, scope: Option<&str>) -> Result<Coverage
                 _ => {}
             }
         }
+        // Denominator of the claim axis: distinct FILES carrying a fresh claim,
+        // not claim rows (a file may hold claims from several producers).
+        let files_with_fresh_claim: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT anchor_key) FROM prose_annotations \
+                 WHERE status = 'fresh' AND anchor_kind = 'file'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
         ProseSummary {
             fresh,
             stale,
             invalid,
             regenerate_recommended: stale + invalid > 0,
+            files_with_fresh_claim,
+            files_total: files,
+            // Coverage never knows whether a producer exists (it is not a
+            // build-time fact of this module) — it reports what is IN the
+            // table and names the state from the data alone.
+            state: if fresh + stale + invalid == 0 {
+                "empty"
+            } else {
+                "populated"
+            }
+            .to_string(),
         }
     };
     let relations_total: i64 = relations_total(conn, scope_str)?;

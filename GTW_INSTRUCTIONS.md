@@ -1,6 +1,6 @@
 GnawTreeWriter MCP-server är registrerad för alla OpenCode-sessioner.
 
-40 GTW-verktyg finns tillgängliga (synkhanteras av kontraktstestet
+42 GTW-verktyg finns tillgängliga (synkhanteras av kontraktstestet
 `integration_mcp_instructions_listed` — varje registrerat verktyg måste
 finnas i tabellen här nedan; nya verktyg läggs till här samtidigt):
 
@@ -9,6 +9,7 @@ finnas i tabellen här nedan; nya verktyg läggs till här samtidigt):
 | Orientera | `guide`, `explore`, `summarize`, `analyze`, `get_skeleton`, `list_nodes` | `guide {situation}` → vilket verktyg passar; Kartlägg projekt/fil utan att läsa hela källor |
 | Hitta | `sense`, `search_semantic`, `search_nodes`, `investigate` | "Var är X?" utan att veta filnamn — returnerar nod-sökvägar; `search_nodes` stödjer alternation (`"alpha|beta"` = ELLER, svaret bär `matched_pattern`; B4); satellit-svar har `search_quality` (suspect/prior_failures), `expand: true` lägger en LFM2.5-kanal |
 | Läsa | `read_node`, `explain`, `validate` | Exakt en nods källkod eller förklaring — ingen fil-dump (trasiga filer svarar delvis med `syntax_warning`); `validate` = strikt syntaxgate före edit |
+| Claims (L2-tillägg) | `describe`, `claims` | `describe` genererar EN beskrivning och sparar den som CLAIM anknuten till storens innehållshash (`stale` vid ändring, `invalid` vid borttagning) med `producer`/`model` — aldrig som fakta. `claims` läser dem read-only; `state` skiljer `no_producer` från `producer_available_nothing_written` från `populated` (noll claims är ett TILLSTÅND, inte ett betyg). Optional enrichment — ROADMAP: "never a gate" |
 | Redigera | `edit_node`, `insert_node`, `move_node`, `preview_edit`, `edit_ask`, `diff` | AST-validerad precision — syntax kontrolleras FÖRE skrivning; `edit_node` tar `expect_name`/`expect_kind` (B1: stale path nekas med E_PATH_STALE i stället för fel nod; svaret bär `new_node_path` + `node_content_hash`); `diff` = oberoende verifiering efter skrivning |
 | Semantisk redigering | `semantic_edit`, `semantic_insert` | Beskriv VAD ska ändras, GTW hittar noden (svarar med `semantic_match`: nod + confidence + kandidater) |
 | Koordinera | `batch`, `undo` | Atomära multi-fil-transaktioner; snabb återställning |

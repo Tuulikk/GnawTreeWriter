@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: bc085bb3349bf25d8c86428201e4986c
+> Body-hash: 674c8b34ed9cfb6bb173a7f21efceb34
 
 ## Träd
 
@@ -101,7 +101,7 @@ src/core/
   claim_scan.rs (371 rader)
   code_graph.rs (1670 rader)
   code_index.rs (722 rader)
-  code_index_coverage.rs (683 rader)
+  code_index_coverage.rs (715 rader)
   code_index_db.rs (2025 rader)
   compress.rs (487 rader)
   create_file.rs (99 rader)
@@ -158,7 +158,7 @@ src/llm/
   relational_index.rs (684 rader)
   semantic_index.rs (1458 rader)
 src/mcp/
-  mod.rs (5412 rader)
+  mod.rs (5553 rader)
 src/parser/
   bash.rs (84 rader)
   c.rs (84 rader)
@@ -920,18 +920,18 @@ _(inga toppnivå-items)_
 - `pub struct CheckResult` :556
 - `pub fn check_index(` :567
 
-### code_index_coverage.rs (683 rader)
+### code_index_coverage.rs (715 rader)
 - `pub struct TypeCoverage` :27
 - `pub struct SourceClass` :40
 - `pub struct TargetClass` :48
 - `pub struct SymbolSummary` :54
 - `pub struct LocalResolution` :83
 - `pub struct ProseSummary` :98
-- `pub struct CoverageReport` :108
-- `fn source_coverage_for(conn: &Connection, scope: &str) -> Result<Vec<SourceClass>>` :145
-- `pub fn measure(conn: &Connection) -> Result<CoverageReport>` :182
-- `pub fn measure_scoped(conn: &Connection, scope: Option<&str>) -> Result<CoverageReport>` :186
-- `fn relations_total(conn: &Connection, scope: &str) -> anyhow::Result<i64>` :453
+- `pub struct CoverageReport` :119
+- `fn source_coverage_for(conn: &Connection, scope: &str) -> Result<Vec<SourceClass>>` :156
+- `pub fn measure(conn: &Connection) -> Result<CoverageReport>` :193
+- `pub fn measure_scoped(conn: &Connection, scope: Option<&str>) -> Result<CoverageReport>` :197
+- `fn relations_total(conn: &Connection, scope: &str) -> anyhow::Result<i64>` :485
 
 ### code_index_db.rs (2025 rader)
 - `pub const EXTRACTOR_VERSION: &str = "4"` :47
@@ -2021,7 +2021,7 @@ _(inga toppnivå-items)_
 
 ## src/mcp/
 
-### mod.rs (5412 rader)
+### mod.rs (5553 rader)
 _(inga toppnivå-items)_
 
 ## src/parser/

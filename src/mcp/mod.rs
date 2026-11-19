@@ -427,6 +427,26 @@ pub mod mcp_server {
                         let node = arguments.get("node").and_then(Value::as_str);
                         Ok(handle_explain(fp, node))
                     }
+                    "describe" => {
+                        let fp = validate_arg("file_path")?;
+                        let producer = arguments
+                            .get("producer")
+                            .and_then(Value::as_str)
+                            .unwrap_or("lfm25");
+                        let model = arguments
+                            .get("model")
+                            .and_then(Value::as_str)
+                            .unwrap_or("LFM2.5-1.2B");
+                        let language = arguments
+                            .get("language")
+                            .and_then(Value::as_str)
+                            .unwrap_or("en");
+                        Ok(handle_describe(fp, producer, model, language))
+                    }
+                    "claims" => {
+                        let file = arguments.get("file").and_then(Value::as_str);
+                        Ok(handle_claims_mcp(file))
+                    }
                     "edit_ask" => {
                         let fp = validate_arg("file_path")?;
                         let request = validate_arg("request")?;
@@ -962,6 +982,33 @@ pub mod mcp_server {
                         "target": { "type": "string", "description": "Path to explore (file or directory, default: project root)" },
                         "level": { "type": "string", "enum": ["0", "1", "2", "3", "overview", "directory", "file", "full"], "description": "Zoom level (default: auto)" }
                     }
+                }
+            }),
+            json!({
+                "name": "describe",
+                "title": "Describe a file as a persisted CLAIM",
+                "description": "Generate a description with the local model and PERSIST it in the code index as a CLAIM (not a fact). WHAT: unlike explain, which answers a question right now, describe leaves a durable record anchored to the store's content hash — so it turns `stale` when the file changes and `invalid` when it disappears, and it always carries the producer that wrote it. WHEN: building coverage over a codebase (describe the files nobody has asked about yet), or when a later reader should not pay the generation cost again. RETURNS: {claim, producer, model, language, device, anchored, prose{state,fresh,stale,invalid}}. Claims are OPTIONAL enrichment and never a gate — a stale claim is reported, never blocking. Example: {\"file_path\": \"src/core/age.rs\", \"producer\": \"lfm25\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Path to the file to describe" },
+                        "producer": { "type": "string", "description": "Who is making the claim (default lfm25) — recorded and always shown" },
+                        "model": { "type": "string", "description": "Model note recorded with the claim" },
+                        "language": { "type": "string", "description": "Language of the claim text (default en)" }
+                    },
+                    "required": ["file_path"]
+                }
+            }),
+            json!({
+                "name": "claims",
+                "title": "Read persisted claims from the code index",
+                "description": "List CLAIMS stored in the code index with their lifecycle status and producer. WHAT: the reader half of the prose layer — index facts and prose claims are never merged silently, so every row names the producer that wrote it and whether it is fresh/stale/invalid. WHEN: before trusting a stored description, or to see what a producer has covered. RETURNS: {claims[], summary{state, fresh, stale, invalid, total, note}} where state distinguishes no_producer from producer_available_nothing_written from populated — zero claims is a STATE, never a quality score. Read-only; never a gate. Example: {\"file\": \"src/core/age.rs\"}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file": { "type": "string", "description": "Only this file (optional; default: every claim)" }
+                    },
+                    "required": []
                 }
             }),
             json!({
@@ -2937,6 +2984,100 @@ or list_nodes for a flat index of this file.",
         tool_error(
             "explain requires the 'mamba' feature. Recompile with --features mamba".to_string(),
         )
+    }
+
+    /// `describe`: generate a description and PERSIST it as a claim.
+    ///
+    /// The producer half of the prose layer. Separate from `explain` on
+    /// purpose: `explain` answers a question now, `describe` leaves a durable,
+    /// self-invalidating record with a producer attached.
+    #[cfg(feature = "mamba")]
+    fn handle_describe(file_path: &str, producer: &str, model: &str, language: &str) -> Value {
+        let root = std::env::current_dir().unwrap_or_default();
+        let project_root = crate::core::find_project_root(&root);
+        match crate::llm::AiManager::new(&project_root) {
+            Ok(mgr) => match crate::llm::pipeline::describe_file_persisted(
+                &mgr,
+                &project_root,
+                file_path,
+                producer,
+                model,
+                language,
+            ) {
+                Ok((text, budget, prose)) => tool_success(
+                    "Described file; claim stored".to_string(),
+                    Some(json!({
+                        "claim": text,
+                        "tokens": budget,
+                        "producer": producer,
+                        "model": model,
+                        "language": language,
+                        "device": crate::llm::ai_manager::capability_report(
+                            cfg!(feature = "ai"),
+                            cfg!(feature = "mamba"),
+                        )
+                        .l4_device,
+                        // The claim is anchored to the store hash: it turns
+                        // stale when the file changes, invalid when it goes.
+                        "anchored": true,
+                        "prose": prose,
+                    })),
+                ),
+                Err(e) => tool_error(format!(
+                    "Describe failed: {e:#} — claims are anchored to the store, so \
+                     `code_index {{mode:\"refresh\"}}` must have seen the file first; \
+                     model trouble: `gnawtreewriter ai status`"
+                )),
+            },
+            Err(e) => tool_error_code(
+                format!(
+                    "AiManager init failed: {e} — download the local models first with \
+                     `gnawtreewriter ai setup`, then retry"
+                ),
+                "E_MODEL_UNAVAILABLE",
+            ),
+        }
+    }
+    #[cfg(not(feature = "mamba"))]
+    fn handle_describe(_f: &str, _p: &str, _m: &str, _l: &str) -> Value {
+        tool_error(
+            "describe requires the 'mamba' feature. Recompile with --features mamba".to_string(),
+        )
+    }
+
+    /// `claims`: read persisted claims. Never a gate — reporting only.
+    fn handle_claims_mcp(file: Option<&str>) -> Value {
+        use crate::core::code_index_db as db;
+        let root = std::env::current_dir().unwrap_or_default();
+        let project_root = crate::core::find_project_root(&root);
+        let index_root = db::resolve_index_root(&project_root);
+        let conn = match db::open_existing(&index_root) {
+            Ok(c) => c,
+            Err(e) => {
+                return tool_error(format!(
+                    "claims: no code-index store under {} — run \
+                     code_index {{mode:\"refresh\"}} first ({e:#})",
+                    index_root.display()
+                ))
+            }
+        };
+        match db::load_prose(&conn, file) {
+            Ok(rows) => {
+                let summary = db::prose_summary(&conn, cfg!(feature = "mamba"));
+                tool_success(
+                    format!(
+                        "{} claim(s) — {} fresh, {} stale, {} invalid (state: {})",
+                        summary["total"],
+                        summary["fresh"],
+                        summary["stale"],
+                        summary["invalid"],
+                        summary["state"]
+                    ),
+                    Some(json!({ "claims": rows, "summary": summary })),
+                )
+            }
+            Err(e) => tool_error(format!("claims: {e:#}")),
+        }
     }
 
     /// `edit_ask`: propose a validated AST edit. Returns the target node,
