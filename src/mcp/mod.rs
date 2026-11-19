@@ -447,6 +447,14 @@ pub mod mcp_server {
                         let file = arguments.get("file").and_then(Value::as_str);
                         Ok(handle_claims_mcp(file))
                     }
+                    "describe_queue" => {
+                        let prefix = arguments.get("prefix").and_then(Value::as_str);
+                        let limit = arguments
+                            .get("limit")
+                            .and_then(Value::as_u64)
+                            .map(|v| v as usize);
+                        Ok(handle_describe_queue_mcp(state.clone(), prefix, limit))
+                    }
                     "edit_ask" => {
                         let fp = validate_arg("file_path")?;
                         let request = validate_arg("request")?;
@@ -982,6 +990,19 @@ pub mod mcp_server {
                         "target": { "type": "string", "description": "Path to explore (file or directory, default: project root)" },
                         "level": { "type": "string", "enum": ["0", "1", "2", "3", "overview", "directory", "file", "full"], "description": "Zoom level (default: auto)" }
                     }
+                }
+            }),
+            json!({
+                "name": "describe_queue",
+                "title": "Rank what is worth describing first",
+                "description": "Deterministically rank files by how much they are worth describing, so a coverage pass has an ORDER instead of a guess. WHAT: ranks come only from signals already in the store (incoming edges = how much depends on the file, outgoing edges = how much it does, entities = surface exposed) plus claim lifecycle (a stale claim sorts first because regeneration is due now; a fresh claim removes the file). No model participates, so a large and a small model see the SAME order — they differ only in what they say about a file. WHEN: before running describe over many files, or to find regeneration work. RETURNS: {population, covered, matched, returned, truncated, scope, queue[{path, relations_in, relations_out, entities, claim_stale, is_test, rank, why}]}. Test files rank last by a named flag, never silently. Never a gate. Example: {\"prefix\": \"src/\", \"limit\": 20}.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "prefix": { "type": "string", "description": "Only files under this prefix (default src/)" },
+                        "limit": { "type": "integer", "description": "Max rows returned (default 40; matched is counted before the cap)" }
+                    },
+                    "required": []
                 }
             }),
             json!({
@@ -3077,6 +3098,57 @@ or list_nodes for a flat index of this file.",
                 )
             }
             Err(e) => tool_error(format!("claims: {e:#}")),
+        }
+    }
+
+    /// `describe_queue`: rank what is worth describing first.
+    ///
+    /// Deterministic and model-free — the order is the same for a large and a
+    /// small model (SCAN_TOOLS §2 principle 3), because ranking reads only
+    /// store facts. Never a gate: it queues work, it does not block any.
+    fn handle_describe_queue_mcp(
+        state: Arc<AppState>,
+        prefix: Option<&str>,
+        limit: Option<usize>,
+    ) -> Value {
+        use crate::core::code_index_db as db;
+        let index_root = db::resolve_index_root(&state.project_root);
+        let conn = match db::open_existing(&index_root) {
+            Ok(c) => c,
+            Err(e) => {
+                return tool_error(format!(
+                    "describe_queue: no code-index store under {} — run \
+                     code_index {{mode:\"refresh\"}} first ({e:#})",
+                    index_root.display()
+                ))
+            }
+        };
+        match crate::core::describe_queue::describe_queue(&conn, prefix, limit) {
+            Ok(report) => tool_success(
+                format!(
+                    "{} candidate(s) of {} file(s) — {} already carry a fresh claim (scope: {}){}",
+                    report.matched,
+                    report.population,
+                    report.covered,
+                    report.scope,
+                    if report.truncated {
+                        format!(" — showing {} of {}", report.returned, report.matched)
+                    } else {
+                        String::new()
+                    }
+                ),
+                Some(json!({
+                    "population": report.population,
+                    "covered": report.covered,
+                    "matched": report.matched,
+                    "returned": report.returned,
+                    "truncated": report.truncated,
+                    "scope": report.scope,
+                    "note": report.note,
+                    "queue": report.queue,
+                })),
+            ),
+            Err(e) => tool_error(format!("describe_queue: {e:#}")),
         }
     }
 

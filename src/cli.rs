@@ -732,6 +732,19 @@ enum Commands {
         /// Only this file (default: every claim)
         file: Option<String>,
     },
+    /// Rank files by how much they are worth describing first (read-only)
+    ///
+    /// Deterministic: ranks come from signals already in the store (in-edges,
+    /// out-edges, entities) plus claim lifecycle. No model participates, so a
+    /// large and a small model see the same order.
+    DescribeQueue {
+        /// Only files under this prefix (default src/)
+        #[arg(long, default_value = "src/")]
+        prefix: String,
+        /// Max rows (default 40)
+        #[arg(long)]
+        limit: Option<usize>,
+    },
     /// Summarize a directory hierarchically (LFM2.5)
     Summarize {
         path: PathBuf,
@@ -1879,6 +1892,9 @@ impl Cli {
             }
             Commands::Claims { file } => {
                 Self::handle_claims(file.as_deref())?;
+            }
+            Commands::DescribeQueue { prefix, limit } => {
+                Self::handle_describe_queue(&prefix, limit)?;
             }
             Commands::Summarize {
                 path,
@@ -4125,6 +4141,44 @@ fi
                 row["producer"].as_str().unwrap_or("?"),
                 row["model"].as_str().unwrap_or("-"),
                 row["body"].as_str().unwrap_or("")
+            );
+        }
+        Ok(())
+    }
+
+    /// `describe-queue` — rank files by how much they are worth describing.
+    fn handle_describe_queue(prefix: &str, limit: Option<usize>) -> Result<()> {
+        use crate::core::code_index_db as db;
+        use crate::core::describe_queue;
+        let project_root = find_project_root(&std::env::current_dir()?);
+        let index_root = db::resolve_index_root(&project_root);
+        let conn = db::open_existing(&index_root)?;
+        let report = describe_queue::describe_queue(&conn, Some(prefix), limit)?;
+        if std::env::var("GNAW_JSON").is_ok() {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            return Ok(());
+        }
+        println!(
+            "describe-queue: {} candidate(s) of {} file(s), {} already covered by a fresh claim (scope: {})",
+            report.matched, report.population, report.covered, report.scope
+        );
+        if report.truncated {
+            println!(
+                "(showing {} of {} — raise --limit for the rest)",
+                report.returned, report.matched
+            );
+        }
+        for (i, row) in report.queue.iter().enumerate() {
+            println!(
+                "{:>3}. {}  [{}]{}",
+                i + 1,
+                row.path,
+                row.why,
+                if row.claim_stale {
+                    "  ← regenerate now"
+                } else {
+                    ""
+                }
             );
         }
         Ok(())

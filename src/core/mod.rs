@@ -24,6 +24,7 @@ pub mod code_index_db;
 pub mod compress;
 pub mod create_file;
 pub mod curator;
+pub mod describe_queue;
 pub mod diagnostics;
 
 pub mod capabilities;
