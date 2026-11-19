@@ -441,6 +441,282 @@ GnawTreeWriter/
 
 The best way to contribute to GnawTreeWriter is to use it! This practice—eating your own dog food—helps identify issues and validate the tool's capabilities.
 
+### Rekommenderat: dogfooda Gnaw Software-verktygen — inte bara GTW
+
+**Rekommendationen:** använd Gnaw Software-verktygen som **primär väg** för
+det arbete de är byggda för, även när du jobbar i ett annat Gnaw-projekt.
+Ett verkligt anrop på en verklig uppgift är ett test som inget enhetstest
+ersätter — och varje omväg du tvingas ta är en bugg du just hittade. Ett
+verktyg som ingen använder på riktigt är ett verktyg ingen vet om det håller.
+
+Vilka verktyg du har tillgång till varierar per session. Känn igen dem på att
+de kommer från `Gnaw-Software/`-katalogen och att de har varsin projektmapp,
+README och egen issue-logg. Exempel (inte en uttömmande lista):
+
+| Verktyg | Använd när | Vad du vinner |
+|---|---|---|
+| **GnawTreeWriter** (`Gnaw-Software/GnawTreeWriter`) | Kod i en AST-stödd fil: ändra/infoga en nod, rename, multi-fil-batch, "var är X implementerat?" utan filnamn | Nod-sökvägar istället för radnummer; syntax valideras **före** skrivning; `undo` istället för `git checkout` |
+| **gnawdriver** (`Gnaw-Software/gnawdriver`) | Köra en app E2E: flöden, batt-pass, sessionsprov, webbskrapning, nedsläckningsrapport | Headless HTTP-driver + evidensartefakt; `Pass^N`-räknare; en grind som faktiskt kördes |
+| **memory-server** (`Gnaw-Software/memory-server`) | Sessionsstart, beslut, lärdomar, överlämning mellan sessioner | Kontext du inte behöver återupptäcka — `memory_context`/`memory_search` före grep |
+| **Gnaw-Dokubase** (`Gnaw-Software/Gnaw-Dokubase`) | Dokumentera mål/arkitektur/implementation som data, inte som markdown-filer | Strukturerad dokumentation med `dirty`-flagg och nivåer |
+
+#### GTW: `code-index` först, grep sist
+
+**Regeln:** i ett GTW-indexerat projekt är `code-index` orienteringslagret.
+`grep` svarar "var finns strängen X" — `code-index` svarar "var **ligger**
+funktionen X, i vilken fil, på vilken rad, med vilken nod-sökväg, och vad
+påverkas om jag ändrar den". Den senare frågan är nästan alltid den du
+egentligen ställde.
+
+```bash
+# Bygg/uppdatera strukturkartan (träd + per-fil items med rad + node_path)
+gnawtreewriter code-index .                 # stdout
+gnawtreewriter code-index . -o code-index.md --intro docs/code-index-intros.md
+
+# Inkrementell store: parsar BARA ändrade filer (SQLite under .gnawtreewriter_ai/)
+gnawtreewriter code-index . --db
+gnawtreewriter code-index . --install-hook   # post-commit: håller artefakten färsk
+
+# Grinden — committad artefakt mot arbetskoden (körs i CI; fångar handredigering)
+gnawtreewriter code-index . --check          # non-zero exit vid drift
+
+# Frågorna grep inte kan svara på (symbol = ett BEFINTLIGT namn i storen;
+# okänt namn svarar "no entity named X in the store — 0 seeds" + re-run-råd,
+# aldrig tyst tomt — det är den ärligheten som gör svaret användbart)
+gnawtreewriter code-index . --impact <symbol>        # vad påverkas om jag ändrar X?
+gnawtreewriter code-index . --touches <symbol>       # vad rör X i andra filer?
+gnawtreewriter code-index . --changed                # vad rör MIN aktuella ändring?
+gnawtreewriter code-index . --cycles                 # beroendecykler
+gnawtreewriter code-index . --file-graph             # fil-till-fil-beroenden
+gnawtreewriter code-index . --why <symbol>           # varför finns kanten? (upplöst/ambiguös/olöst)
+gnawtreewriter code-index . --coverage               # grafkvalitet: upplösningsgrad + nämnaren
+```
+
+**Kräver storen:** `--impact`/`--touches`/`--cycles`/`--why`/`--file-graph`
+läser SQLite-storen (`.gnawtreewriter_ai/code_index.db`), inte arbetskoden —
+kör `--db` först om svaret säger "no entity named X".
+`--impact` följer **endast upplösta kanter** och redovisar nämnaren i
+`graph_coverage` (`resolved_edges`, `unresolved_edges`, `local_rate`). Läs den
+innan du citerar ett tal: upplösta kanter är en **delmängd** (mätt i detta repo
+2026-11-19: 3483 upplösta mot 23 950 olösta, `local_rate` 0,438) — "påverkas"
+gäller alltså bara den del grafen faktiskt kunde lösa.
+`--coverage` säger vilka relationstyper som löses sämst.
+
+Samma sak över MCP: `code_index {mode: "query", kind: "map"|"items"|"impact"|"touches"|"changed"|"cycles"|"file_cycles"|"chain"|"file_graph"|"relations"|"symbols"|"history"|"onion", …}`
+(och `mode: "refresh"` / `"check"` / `"coverage"`; `kind: "impact"`/`"touches"` kräver `symbol`,
+`chain` kräver `symbol` + `to`).
+**Läs `query_status` i varje svar** — den bär `completeness`, `denominator`,
+`index_stale` och `next_checks`. `index_stale: true` betyder att `mode=refresh`
+ligger först i `next_checks`: svaret är då ett svar om ett gammalt träd, inte om
+koden.
+
+| Fråga | Rätt väg | Fel väg (och varför) |
+|---|---|---|
+| "Var är X implementerat?" | `sense` (semantisk) → `code_index` (struktur) | `grep -rn` — hittar anrop, kommentarer och strängar lika gärna som definitionen |
+| "Vad innehåller filen?" | `get_skeleton` (CLI: `skeleton`) | `cat` — 2000 rader för att se 12 signaturer |
+| "Vad påverkas om jag ändrar X?" | `code_index --impact` (CLI) / `code_index {kind:"impact"}` (MCP) | gissa, eller läs hela repot |
+| "Vilka filer är värda att läsa för uppgift Y?" | `curate` / `investigate` | läsa allt, eller hugga i blindo |
+
+`grep` är fortfarande rätt verktyg för **text** — prosa, config-nycklar,
+strängliteraler, en snabb bekräftelse att en rad finns. Det `code-index`
+tillför är **strukturen**: nod-sökvägar som `read_node`/`edit_node` kan adressera,
+och en nämnare för varje påstående om påverkan. Använd grep som *komplement*,
+aldrig som första svar på en strukturfråga.
+
+#### gnawdriver: `surf`/`db-surf`/`evidence` först, grep/sed/tail sist
+
+**Regeln:** gnawdriver är inte bara en E2E-driver — det är **läsytan för
+strukturerad data**. `grep`, `sed`, `jq`, `cat`, `tail`, `head` och `sqlite3`
+mot datafiler är den halvautomatiserade vägen: du hoppas att mönstret är vad du
+söker, och du får inget facit. `gnawdriver surf` frågar efter **fält och
+villkor** och redovisar vad den inte kunde läsa (skräprader, icke-numeriska
+jämförelser, kapning — allt räknas).
+
+`surf` gäller **alla lokala filer** (json/jsonl/ndjson/csv/tsv/toml/text/xlsx,
+`.gz` dekomprimeras), inte bara driverns egna artefakter. `grep`/`rg` i
+källkod utan datafil-suffix är fortsatt legitimt — garden träffar **data**, inte
+kod. Full ersättningstabell: `gnawdriver help` (§ `replacements`).
+
+```bash
+# surf — strukturerad filläsning: json/jsonl/ndjson/csv/tsv/toml/text/xlsx (+ .gz)
+gnawdriver surf --path ~/.gnawdriver/flow-history.jsonl --where 'ok eq false' --fields ts,file,model --last 20
+gnawdriver surf --path data.csv   --where 'status contains fail' --where 'n gte 3'
+gnawdriver surf --path state.json --json-path 'servers[-1].model'
+gnawdriver surf --path app.log    --contains "ERROR" --context 3   # = grep -C 3
+gnawdriver surf --path big.jsonl  --from 1 --to 100                 # = head -100 (--to kräver --from, se issue-loggen)
+gnawdriver surf --path big.jsonl  --last 100                        # = tail -100
+
+# db-surf — LOKALA databaser, read-only (SQLite + redb), aldrig sqlite3 i skalet
+gnawdriver db-surf --path app.db                                   # tabellista + radantal
+gnawdriver db-surf --path app.db --table sessions --full            # schema
+gnawdriver db-surf --path app.db --table sessions --where 'state eq active' --last 20
+
+# Driverns EGNA artefakter läses genom drivern, inte med jq/python
+gnawdriver evidence --last 3            # evidens-artefakterna
+gnawdriver flow-history --last 5        # Pass^N-räknaren
+gnawdriver tools-usage --last 30        # verktygstelemetri
+gnawdriver brief --json                 # startläget i ETT dokument
+gnawdriver log-grep --filter "pattern" --last 50   # appens logg via endpoint
+```
+
+| Du gör nu | Gör i stället | Varför |
+|---|---|---|
+| `tail -50 x.jsonl` | `surf --path x.jsonl --last 50` | radnummer + räkenskap + kapat flaggas |
+| `grep -C3 ERROR app.log` | `surf --path app.log --contains ERROR --context 3` | samma svar, men `match:true` per post |
+| `jq '.a[0].b' x.json` | `surf --path x.json --json-path 'a[0].b'` | ingen pipe, inget parserlager |
+| `sqlite3 app.db "select …"` | `db-surf --path app.db --table t --where …` | read-only, validerat tabellnamn, samma where-semantik; skrivningar = tvåfas med plan-hash + backup + undo-journal |
+| `cat ~/.gnawdriver/flow-active.json` | `flow-status` / `brief` | fältet du letar efter är redan tolkat |
+| `grep … → jq … → python3` på driverns utdata | läs svaret rakt av (`--fields a,b.c`) | svaret ÄR dokumentet |
+
+**Ärlighetskontraktet (K1):** 0 träffar är ett **fynd**, inte tystnad. `surf`
+och `read_text` noterar frånvaro (`no-matches`/`empty-view`) — "inga rader
+matchade" ska leda till "då är antagandet fel", aldrig till en tyst omväg.
+
+**Vakterna finns mekaniskt:** `gnawdriver-guard` (i `opencode-plugins`)
+blockerar `grep/sed/awk/jq/cat/rg/tail/head` mot `.jsonl/.ndjson/.csv` och
+`~/.gnawdriver`, `sqlite3` i kommandoposition, python/jq mot artefakter, och
+pipelinad parser på driverns utdata — varje stopp pekar på rätt verktyg. Blir du
+blockerad är svaret inte "hitta en omväg runt garden", det är **att använda
+verktyget garden pekade på** (eller att rapportera att det verktyget saknas).
+
+#### Filläsning: `cat` är aldrig svaret
+
+Samma princip på alla ytor — **läs det minsta som svarar på frågan, inte hela
+filen**:
+
+| Behov | Verktyg |
+|---|---|
+| En namngiven funktion/struct | `read_node` (GTW) — exakt källkod, ingen dump |
+| Filens struktur (vilka fn/impl finns) | `get_skeleton` / `code_index kind=items` |
+| En strukturerad datafil (jsonl/csv/logg) | `gnawdriver surf` |
+| En lokal databas | `gnawdriver db-surf` (read-only, validerat tabellnamn) |
+| Driverns egna artefakter (evidence/flow-*/telemetri) | `evidence`, `flow-history`, `flow-status`, `tools-usage` |
+| Fil som ska bli ett *svar* du citerar | hostens `read`-verktyg (radnummer, `offset`/`limit`) |
+| Okänt var i repot något bor | `sense` → `code_index` → först därefter grep |
+
+`cat`/`less`/hel-fil-dump kostar kontext utan att ge struktur — det stoppas
+inte mekaniskt, det är bara slöseri. `sed -i`, `tee`, `dd`, `truncate` och
+heredoc-skrivningar **stoppas** däremot av `tool-guard` i `opencode-plugins`
+(§35: blint skrivande utan shadow-checkpoint eller validering), och
+`gnawdriver-guard` stoppar grep/sed/jq/tail mot datafiler. Blir du stoppad:
+använd verktyget garden pekade på.
+
+#### Vad "dogfooding" betyder konkret
+
+1. **Använd verktyget för det är byggt för — inte en omväg.** Ska du ändra en
+   Rust-funktion? `edit_node`/`semantic_edit`, inte hela filen på nytt. Ska du
+   bevisa att ett flöde fungerar? `motor2_flow_run` (MCP), inte `curl`+ögat.
+2. **Låt verktyget äga sin egen yta.** Gnawdriver äger E2E-frågan, GTW äger
+   kodedit-frågan, `code-index` äger strukturfrågan, `surf`/`db-surf` äger
+   datafrågan. Använd inte grep där `sense` gäller, och inte curl där
+   `flow` gäller — men **bytlös inte tid**: ett fel → EN omväg, sedan vidare
+   (se eskaleringsregeln ovan). Omvägen är data, inte nederlag.
+3. **Kör i verkliga projekt, inte bara i verktygets egna exempel.** En bugg som
+   bara syns mot Motor2, Jobseeker eller en främmande kodbas är den bugg som
+   spelar roll. Testflöden i `flows/` är startpunkten, inte taket.
+4. **Verifiera med verktygets eget facit.** GTW: `git diff`/`cargo check` +
+   `history`. gnawdriver: `flow-history`, `evidence`, `handover`. Ett påstående
+   utan kommandots utskrift är inte ett resultat (M1).
+5. **Mät innan du uttalar dig.** `--help`, `doctor`, `mcp_selftest`, `brief`,
+   `flows` — billigare än att gissa, och svaret bär version och tillstånd.
+6. **CLI är fallback när kanalen är död — men bara för det CLI:n faktiskt når.**
+   Saknas `tools.gnawdriver`/`tools.gnawtreewriter` i sessionens katalog är
+   MCP-vägen nere: GTW:s CLI-kommandon (`analyze`, `edit`, `validate`,
+   `code-index`, …) är fullgoda ersättare, men **flödes-START hör ändå inte i
+   bash** (processgruppen dör med bash-timeouten) och en nere bas nås inte
+   bättre av curl. Då begär du host-omstart hos operatören och rapporterar
+   kanal-felet — du bygger inte en sidoväg.
+7. **Mekaniska vakter är inte hinder, de är dokumentation.** Blir du stoppad av
+   `tool-guard`/`gnawdriver-guard`/`gtw-nudge` säger feltexten vilket verktyg
+   som gäller. Behöver du ändå en omväg är det ett **fynd om verktyget**, inte
+   ett kryphål att hitta: logga det i ägande projekts issue-logg.
+
+#### Kodexempel — samma uppgift, rätt verktyg
+
+```bash
+# GTW: hitta målet, läs det, ändra det, verifiera
+# (CLI-namnen skiljer sig från MCP-namnen: skeleton/edit/validate/semantic-edit
+#  i skalet; get_skeleton/edit_node/validate/semantic_edit över MCP)
+gnawtreewriter code-index . --impact <symbol>        # vad påverkas? (innan du rör något)
+gnawtreewriter skeleton src/cli.rs                  # struktur + nod-sökvägar
+gnawtreewriter semantic-edit src/main.rs "add Validate arm to Commands dispatch" --dry-run
+gnawtreewriter validate src/main.rs                 # syntaxgate före/efter
+git diff --stat && cargo check                      # M1: verifiera skrivningen
+
+# gnawdriver: startläge → hitta rätt flöde → läs facit (flödes-START går via MCP, se nedan)
+gnawdriver brief --json                             # state + trend + postlåda i ETT anrop
+gnawdriver flows                                    # katalogen: Pass^N + kvarstående --var
+gnawdriver flow-wait --wait-timeout 1800             # blocka tills klart, exit 2 vid RÖTT
+gnawdriver flow-history --last 3                    # Pass^N-räknaren
+gnawdriver evidence --last 1 --full                  # evidensartefakten, inte en gissning
+gnawdriver handover                                  # nedsläckning: glöder något kvar?
+```
+
+```js
+// OpenCode Code Mode: GTW + gnawdriver via execute (inga direkta *_*-anrop finns)
+const nodes = await tools.gnawtreewriter.search_nodes({ file_path: "src/cli.rs", pattern: "Commands" });
+const preview = await tools.gnawtreewriter.preview_edit({ file_path: "src/cli.rs", node_path: "<path>", content: "<ny nod>" });
+// läs preview → edit_node med samma parametrar → verifiera
+
+// Flödes-START hör hit — aldrig `gnawdriver flow` i bash (garden blockerar det:
+// bash-verktygets timeout dödar processgruppen och lämnar en föräldralös tur utan facit).
+// Saknas tools.gnawdriver i sessionen: begär host-omstart hos operatören —
+// kör inte långflödet i eget skal, och hitta inte på en omväg.
+await tools.gnawdriver.motor2_flow_run({ input: "flows/motor2-b2-gtw.json", background: true });
+await tools.gnawdriver.motor2_wait_events({});   // vakning via postlådan, inte sleep (§37)
+```
+
+#### Rapportera fel och saknade funktioner — till rätt projektkatalog
+
+Dogfooding är bara halva jobbet. **Ett fel du inte rapporterar är ett fel som
+kommer tillbaka.** Rapporten går till projektet som **äger verktyget** — inte
+till projektet där du råkade hitta det:
+
+| Du hittade felet i | Rapportera i |
+|---|---|
+| GnawTreeWriter (MCP **eller** CLI) | `GnawTreeWriter/GTW_MCP_ISSUE_LOG.md` |
+| gnawdriver (`motor2_*`-verktyg, `flow`, `brief`, `mcp-ping`, …) | `gnawdriver/GNAWDRIVER_ISSUE_LOG.md` |
+| memory-server / Gnaw-Dokubase / annat Gnaw-verktyg | motsvarande projekts egen issue-logg (saknas den: skapa den med samma rubrik och format) |
+| Obevisad misstanke, halv utredning, olöst tråd | `uppslag.md` i det ägande projektet |
+
+**Formatet (samma i båda loggarna):**
+
+```
+## <datum> — <kort rubrik>
+
+**Kontext:** vad du försökte göra, i vilket projekt, mot vilken rev/version.
+
+| Anrop | Parametrar (exakt) | Förväntat | Faktiskt |
+|---|---|---|---|
+| `sense` | query="…", file_path=… | träffar | `MCP error -32001: Request timed out` |
+
+**Omväg som användes:** <vad du gjorde i stället — grep, CLI, curl …>
+
+**Bedömning (vid triage):**
+- [ ] Använt fel?
+- [ ] Bugg?
+- [ ] Saknad funktion?
+- [ ] Under förmåga?
+```
+
+Regler som gör rapporten användbar istället för brus:
+
+- **Två observationer krävs** för en buggrapport (M6): kör om kommandot, läs
+  **hela** svaret, jämför med `--help`. Ett enstaka timeout kan vara en död
+  daemon — det är också ett fynd, men ett annat.
+- **Exakta parametrar och fullt svar** — kopieringsbart, aldrig parafraserat.
+  Ta med version: `gnawtreewriter --version`, `gnawdriver --version`,
+  `mcp_selftest`, `doctor`.
+- **Saknad funktion är ett fynd av samma värde som en bugg.** Skriv vad du
+  behövde göra, vad du försökte, och varför ingen av de befintliga vägarna bar
+  ("jag behövde X, Y fanns, Z: fel för att …"). En lucka som dokumenteras blir
+  en roadmap-post; en lucka som tigs blir en återkommande omväg.
+- **Föreslå inte bara, flytta nålen:** om du kan, avboka en kategori i loggen
+  (`[x] Bugg` + rad i `uppslag.md`/`CHANGELOG`) eller öppna en post i ägande
+  projekts `ROADMAP.md`. Rapporten är klar först när någon kan agera på den.
+- **Rapportera i samma session.** Inte "senare" — kontexten, parametrarna och
+  det faktiska svaret är färskvara (M11).
+
 ### Getting Started
 
 1. **Install GnawTreeWriter** (from source if contributing):
