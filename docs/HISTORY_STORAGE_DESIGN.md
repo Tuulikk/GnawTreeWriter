@@ -1,6 +1,9 @@
 # Historiklagring: backuper, store och onion skin
 
-**Datum:** 2026-11-19 · **Status:** mätning + förslag. Ingen kodändring gjord.
+**Datum:** 2026-11-19 · **Status:** mätning + förslag (§1–7). **§8 tillkommit
+samma dag: ägarbeslut om målbilden (temporal store, rest-permanens,
+ankar-gitter, retention) — §8 ersätter §4 som stegordning.** Ingen kodändring
+gjord utöver de som redan redovisas.
 **Föregångare:** `docs/BACKUP_STORAGE_AND_TIME_TRAVEL.md` (2026-11-12) — den mätte
 backuperna och genomförde steg 1 (`tree` bort). Det här dokumentet täcker det
 som *inte* täcktes där: **storens historik, `before_hash`-gapet och vad onion
@@ -263,6 +266,9 @@ delta-kedjan, eftersom onion räknar kanter, inte filinnehåll.
 
 ## 4. Föreslagen ordning
 
+> **Ersatt av §8 (2026-11-19, ägarbeslut).** Behållen som underlag.
+> Steg 2 och steg 3 hör inte längre till ordningen — se §8.1 korrigeringarna.
+
 Ingen del är gjord. Ordningen är vald så att varje steg är självständigt
 levererbart och mätbart.
 
@@ -368,6 +374,196 @@ cargo run --example measure_history2 -- .gnawtreewriter_ai/code_index.db
 
 ---
 
+## 8. Målbild: temporal store, rest-permanens och ankar-gitter (2026-11-19, ägarbeslut)
+
+**Detta avsnitt är huvudspåret och ersätter §4 som stegordning.** Utgångspunkten
+är ägarens beslut: **GTW:s historik flyttas i helhet till Code Index — det
+handlar inte bara om onion.** `code_index.db` blir projektets temporal store
+(graf + historik + undo), och övergången sker genom bevisgrinder, aldrig som en
+switch-punkt.
+
+### 8.1 Korrigeringar mot tidigare avsnitt (läs först)
+
+1. **§4 steg 3 är delvis byggt — och klassnamnet stavas annorlunda.**
+   `66fa00f` (2026-11-12) levererade `relation_changes`-skrivaren: riktiga
+   `count_before`/`count_after`, `before_json`/`after_json` med
+   resolved-räknare, och klassen **`count_changed`** (`code_index_db.rs:598`)
+   — inte "modified" som §3/§4 kallar den. Mätt 2026-11-19: revision 565/566
+   bär riktiga före-värden (`count_changed 3→4, 19→20`; `removed` med
+   `count_before=1`). Gapet i §1.5 (78 % nollor) är **gamla rader**, inte
+   avsaknad av skrivare.
+2. **"Historiken kan inte räddas" (§3) gäller endast observed resolution.**
+   Räknare för filnivå-historik går att återfå: backuperna ÄR fullupplösta
+   punkter utspridda i mörka åldrarna, på edit-granularitet. Materialiserade
+   på begäran blir de räkne-ankare, märkta `derived(current_extractor)`.
+   Det som är obevekligt är resolution *som observerades då* (store + resolver
+   state vid tidpunkten).
+3. **§4 steg 2 (`before_hash` i `file_versions`) ströks.** Tabellen ersätts av
+   `file_states` i målbilden; att skriva before-hash där är att investera i en
+   deprecierad yta. (Nuvarande skrivare lägger dessutom NULL explicit och en
+   rad per fil per revision — `code_index_db.rs:855` — redundansen fortgår.)
+
+### 8.2 Grundmodellen: två oberoende axlar
+
+Data degraderas längs två axlar. De blandas inte.
+
+| Axel | Vad som varierar | Styr |
+|---|---|---|
+| **Lösningsdjup** | aggregat/räknare → kant-identitet → innehåll | vilka frågor som kan svaras |
+| **Ålder** | färskt rått → gammalt degraderat | bara innehållslagret |
+
+Rest-lagret — lösningsdjupets permanenta grund:
+
+- `relation_changes`: count_before/after, before/after_json (count + resolved),
+  resolution_status, relation_key (identiteten på kanter som *ändrades*)
+- journal-tabeller: edit-händelser + undo/redo-reactions
+- **Invariant: rest prunas aldrig.** Motiverad av mätning, inte sentiment:
+  2 265 rader i denna store (2026-11-19) — trivialt liten för alltid.
+
+Onion arbetar enbart på resten. Pruna allt innehåll hur gammalt som helst —
+onion räknar fortfarande exakt, givet hel kedja.
+
+### 8.3 Ankar-gittret: upplösning är fläckig, inte en åldersfunktion
+
+Ankare = punkter med full eller hög upplösning, var som helst på tidslinjen —
+inte bara vid HEAD. De förstärker båda grannskapen: en fråga rullar från
+*närmaste upplösbara ankar* (bakåt via `count_before`, framåt via
+`count_after`), och ett brutet span begränsas till spannet mellan ankare.
+
+| Grad | Innehåll | Kan ge |
+|---|---|---|
+| A | innehåll (blob) | allt — re-extrahera → B → C |
+| B | kanlista (identitet per kant) | C direkt |
+| C | aggregat `{key → (count, resolved)}` | onion-aritmetik + resolution-aggregat (kB) |
+
+Ankare uppstår **organiskt** (write-behind: varje `--at`-materialisering
+lämnas kvar; backup-migreringen sådder grad-A-ankare i mörka åldrarna) och kan
+**schemaläggas som beredskap med utlösningsvillkor** (se 8.6 config).
+Retention: ankare är cache med refs — tas ett ankar bort degraderas djupet i
+dess grannskap, aldrig aritmetiken. Undantag: ankare utan git-bakgrund (dirty)
+tillhör den råa kärnan (8.6).
+
+### 8.4 Onion: ankarbaserad med proveniens per frame
+
+Varje frame i ett onion-`--at`-svar bär sin proveniens:
+
+```
+exact        — rest-kedjan intakt till ankar
+anchored     — materialiserad via ankar M, rullat ±k
+derived      — återlösad via git-innehåll, med aktuell extraktor (märkt)
+unresolvable — varken kedja eller fungerande pekare; rapporteras, aldrig
+               tyst approximerat ("from_symbol: null"-regeln)
+```
+
+Regler: bruten kedja → `chain_broken`, aldrig tyst rullning.
+`{git_rev}`-pekare verifieras vid anrop (`git cat-file`-kontroll); en dangle
+→ `unresolvable`, aldrig "0 kanter" som ser friskt ut (M14-klass).
+
+**Git:s plats:** kompletterande källa för committat innehåll — det GTW medvetet
+inte äger (hierarkin i 2026-11-12-dokumentet §3). Dirty-innehåll kan git inte
+täcka: dirty-blobbar är den råa kärnan.
+
+### 8.5 Konsolidering: fyra ytor → en store
+
+| Idag | Målbild i store |
+|---|---|
+| Transaktionsjournal (`.gnawtreewriter_session.json`) | rest-tabeller (edit-nivå, permanent) |
+| Backup-filer (v3-namn, `137c1d4`) | `blobs` + `file_states` (content-addressed) |
+| Head (`.gnawtreewriter_head.json`) | härledd projektion (bevisat derivbar — test raderar filen, identisk projektion) |
+| `relation_changes` / `entity_changes` | redan i store |
+
+Bron finns redan i schemat: `revisions_tx_links (revision_id, transaction_id)`
+(`code_index_db.rs:151`, schema v4 "phase 2"). Målbildens tidslinje: **edits =
+fin kedja, revisioner = ankare/sammanfattningar**, bundna av länken.
+
+### 8.6 Retention — ägarbeslut tagna (2026-11-19)
+
+| Yta | Beslut |
+|---|---|
+| Rest (deltas, journal) | permanent — prunas aldrig |
+| Committat innehåll | git-pekare räcker; inget eget lagras |
+| **Dirty-innehåll** | **behåll tills tillståndet committas + golv; golv = 30 dagar (default), användarkonfigurerbart; därefter prune** |
+| Ankare (materialiseringar) | cache med storlekstak; densitet konfigurerbar |
+
+Schemalagd ankarsådd: **organisk först; schemalagd som beredskap med
+utlösningsvillkor** — aktiveras endast om `max_roll_distance` överstiger
+tröskeln. Startvärden i config (kod/JSON på engelska enligt språkregeln):
+
+```yaml
+history:
+  dirty_retention_days: 30       # floor; dirty blobs prunable after this
+  anchor_seeding_interval: null  # null = organic only; set N = every Nth revision
+  max_roll_distance_alarm: 200   # doctor alarm: longest anchor-free span
+```
+
+Värdena är startpunkter som justeras utifrån hur systemet mår (8.10).
+
+### 8.7 Utväg (export)
+
+Historiken får inte bli en svart låda. **Tidigt:** dokumenterad
+materialiseringsväg — varje rad går att skriva tillbaka till filer (det är
+migreringen baklänges) — plus integrity-check i doctor. **Senare:**
+`history export`/`import`-kommando vid behov. SQLite är öppet format; utvägen
+ska vara dokumenterad innan målbilden kallas trovärdig.
+
+### 8.8 Övergången: bevisgrinder, inga switch-punkter (ägarprincip)
+
+Ägarens regel: **nya funktioner och Code Index-bitar bevisar sig bitvis; den
+gamla metoden stängs av först efter bevis och tas bort ännu senare.** Mönstret
+upprepas per steg:
+
+| Fas | Vad händer | Grind till nästa fas |
+|---|---|---|
+| Skugga | nya vägen skriver; gamla äger läsning | data finns i båda |
+| Paritetsbevis | samma operation genom båda vägarna, jämför resultat | identiskt över N verkliga operationer |
+| Läs-flip | läsning byter källa; båda skriver fortfarande | flip-back = flagga, inte kodändring |
+| Stäng av | gamla skrivvägen av | legacy-läsning kvar (mönster: backup-v3) |
+| Rensa | gamla filer/kod tas bort | senare release, aldrig samma |
+
+### 8.9 Stegordning (ersätter §4)
+
+1. **Hash-unifiering** (oförändrad från §4 steg 1) — MD5 av bytes +
+   `hash_scheme`-markör; `parse_backup_file` räknar båda hasharna under
+   övergången. Självbevisande: att gamla undo:n fortsätter fungera ÄR
+   paritetsprovet.
+2. **Rest-kompletthet** — `entity_changes`-skrivare (D1-aggregat, som
+   relationerna), bevisad med känt facit; invarianten "rest prunas aldrig"
+   inbyggd i prune-designen.
+3. **Innehåll + edits i store (skugga)** — `blobs` + `file_states` +
+   journal-tabeller; dual-write; läsning styrs av flagga (DB är inte källa än).
+4. **Paritetsbevis + läs-flip** — `undo` läser DB först när pariteten varit
+   grön över verkligt arbete (bevisat via migrerade v1- och v2-blobbar i båda
+   riktningarna). Flip-back = flagga.
+5. **`--at` + ankarbaserad onion** — bevisad mot känt facit: rekonstruera ett
+   känt tillstånd och jämför mot git, med proveniens per frame (8.4).
+6. **Backup-migrering = ankarsådd** — samma disciplin som §4 steg 6 (manifest,
+   verifiera-läs-tillbaka före radering), ny betydelse: grad-A-ankare i mörka
+   åldrarna.
+7. **Decay/prune** enligt 8.6 + refs=0-regeln (avd #2.3), dirty-golvet som
+   enda retention-talet utöver cachetaket.
+8. **doctor-mått** enligt 8.10.
+
+### 8.10 doctor-mått (M7: nämnaren skrivs ut)
+
+- `stored_bytes_per_unique_source_byte` (oförändrad från §4 steg 8; larm > 3)
+- `anchor_density` — ankare per kedjespan + andel revisioner inom ±k från ett
+  ankar
+- `max_roll_distance` — längsta kedjespan utan ankar (ärlighets-horisonten: 
+  längst bak som svaret fortfarande kan vara exakt);
+  larmtröskel i config, startvärde 200
+
+### 8.11 Kvar öppet (små)
+
+- zstd-nivå (§6.1 #4) — opåverkad av §8, väntar mätning
+- v1-backupernas livslängd om migration uteblir (§6.1 #5) — besvaras av när
+  steg 6 körs
+- paritets-N i steg 4 (föreslaget: 2 veckors verkligt arbete i detta repo)
+- exakt gränssnitt för flip-flaggan (namn, default, placering)
+
+---
+
 *Skapad 2026-11-19 (session med DeepSeek V4.1 Flash); ägare: Tuulikk.
 Alla siffror är mätta i denna arbetskatalog med kommandona i §7 — inga
-påståenden utan facit (M1–M14).*
+påståenden utan facit (M1–M14). §8 tillkommen samma dag (session med
+GLM 5.3 Flash) efter ägardialog: målbilden, retentionstalen och
+bevisgrinder-principen är ägarbeslut, inte agentens förslag.*
