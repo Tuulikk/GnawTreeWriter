@@ -507,6 +507,25 @@ pub mod mcp_server {
                             .get("fix")
                             .and_then(Value::as_bool)
                             .unwrap_or(false);
+                        let allow_stale = arguments
+                            .get("allow_stale_binary")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        // A stale build must not rewrite the store/artifact a
+                        // fresh build will later trust (see stale_write_refusal).
+                        // The refusal IS already envelope-shaped (content +
+                        // isError), and returning it unwrapped keeps `_refused`
+                        // and `_build_warning` that the envelope would drop.
+                        if let Some(refusal) = stale_write_refusal(
+                            "code_index",
+                            Some(mode),
+                            false,
+                            fix,
+                            &crate::version::current(),
+                            allow_stale,
+                        ) {
+                            return Ok(refusal);
+                        }
                         let kind = arguments
                             .get("kind")
                             .and_then(Value::as_str)
@@ -674,6 +693,20 @@ pub mod mcp_server {
                             .get("files")
                             .and_then(Value::as_bool)
                             .unwrap_or(false);
+                        let allow_stale = arguments
+                            .get("allow_stale_binary")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        if let Some(refusal) = stale_write_refusal(
+                            "undo",
+                            None,
+                            preview,
+                            false,
+                            &crate::version::current(),
+                            allow_stale,
+                        ) {
+                            return Ok(refusal);
+                        }
                         Ok(handle_undo_mcp(state.clone(), steps, preview, files))
                     }
                     _ => {
@@ -756,7 +789,8 @@ pub mod mcp_server {
                         "external": { "type": "boolean", "description": "kind=symbols: true = only external names, false = only unresolved-local names" },
                         "limit": { "type": "integer", "description": "kind=relations: max rows returned (default and hard cap 5000; matched/returned/truncated stay honest)" },
                         "budget": { "type": "integer", "description": "kind=map: token budget for the orientation map (default 1024, clamped 64..8192)" },
-                        "fix": { "type": "boolean", "description": "check: rewrite the artifact when stale (default false)" }
+                        "fix": { "type": "boolean", "description": "check: rewrite the artifact when stale (default false)" },
+                        "allow_stale_binary": { "type": "boolean", "description": "Deliberately allow mode=refresh / check --fix to rewrite the store and artifact from a build older than the source (default false — the refusal explains why). Say why when you use it." }
                     },
                     "required": []
                 }
@@ -1182,7 +1216,8 @@ pub mod mcp_server {
                     "properties": {
                         "steps": { "type": "integer", "description": "Number of operations to undo (default 1)" },
                         "preview": { "type": "boolean", "description": "true = show what WOULD be reverted (newest first, resolved to file/op/description) and change nothing; default false" },
-                        "files": { "type": "boolean", "description": "FILE scope: undo the newest file CREATION (removes the file, and only when it is still byte-identical to what GTW wrote). Without this flag undo never deletes files — it only reverts content inside them." }
+                        "files": { "type": "boolean", "description": "FILE scope: undo the newest file CREATION (removes the file, and only when it is still byte-identical to what GTW wrote). Without this flag undo never deletes files — it only reverts content inside them." },
+                        "allow_stale_binary": { "type": "boolean", "description": "Deliberately allow an undo reaction to be journalled by a build older than the source (default false — the refusal explains why). Say why when you use it." }
                     }
                 }
             }),
@@ -1445,6 +1480,63 @@ pub mod mcp_server {
 
     fn tool_error(msg: String) -> Value {
         json!({"content": [{ "type": "text", "text": msg }], "isError": true})
+    }
+
+    /// A stale binary may still READ (diagnosis must always work), but a
+    /// narrow set of WRITES is refused — owner decision 2026-11-19, option 2
+    /// ("smalast möjliga yta där skadan är verklig").
+    ///
+    /// Why these and not `edit_node`: editing a file is recoverable — the
+    /// content is wrong and you can see it. What is NOT recoverable is a
+    /// historical claim written by the wrong build:
+    ///
+    /// - `undo` appends an `Undo` reaction to the journal; a stale binary
+    ///   then reports "reverted txn X" for history it did not write.
+    /// - `code_index` refresh / check `--fix` rewrites the store and the
+    ///   committed artifact, i.e. the map future readers trust.
+    ///
+    /// Those two make "what happened" a lie, which no later fix can undo.
+    /// Everything else stays allowed with the `_build_warning` annotation.
+    ///
+    /// `preview`/dry-run paths write nothing and are never refused.
+    fn stale_write_refusal(
+        tool: &str,
+        mode: Option<&str>,
+        preview: bool,
+        fix: bool,
+        build: &crate::version::BuildInfo,
+        allow: bool,
+    ) -> Option<Value> {
+        if !build.stale || allow {
+            return None;
+        }
+        let what = match (tool, mode) {
+            ("undo", _) if !preview => "writing an undo reaction to the transaction journal",
+            ("code_index", Some("refresh")) => "rebuilding the code-index store",
+            ("code_index", Some("check")) if fix => "rewriting code-index.md",
+            _ => return None,
+        };
+        Some(json!({
+            "content": [{
+                "type": "text",
+                "text": format!(
+                    "{tool}: refusing to write — {what} from a build that is older than \
+                     the source (build {}, source is newer). The result would be a \
+                     historical claim made by the wrong code, which no later fix can \
+                     repair. READ paths still work (doctor, history, query, preview). \
+                     Next: rebuild (scripts/commit-build.sh) and restart the host; or \
+                     pass allow_stale_binary=true deliberately and say why.",
+                    build.git_sha
+                )
+            }],
+            "isError": true,
+            "_refused": "stale_binary",
+            "_build_warning": {
+                "git": build.git_sha,
+                "built_at": build.built_at,
+                "note": "refused a historical write from a stale build",
+            }
+        }))
     }
 
     /// Build identity for the MCP handshake. Pure, so both directions are
@@ -5078,6 +5170,74 @@ or list_nodes for a flat index of this file.",
 
         fn tool_answer() -> Value {
             tool_success("ok".to_string(), Some(json!({"n": 1})))
+        }
+
+        /// The refusal is NARROW on purpose (owner decision 2026-11-19):
+        /// edits are recoverable, historical claims are not. A fresh build is
+        /// never refused; a stale build is refused only for the two writes
+        /// that make "what happened" a lie.
+        #[test]
+        fn a_stale_build_is_refused_only_where_the_write_is_historical() {
+            let stale = build(true);
+            let fresh = build(false);
+
+            // Fresh: nothing is ever refused, not even journal writes.
+            assert!(stale_write_refusal("undo", None, false, false, &fresh, false).is_none());
+
+            // Stale + journal write -> refused, and it says WHY.
+            let refusal = stale_write_refusal("undo", None, false, false, &stale, false)
+                .expect("a stale build must not journal an undo reaction");
+            assert_eq!(refusal["isError"], true);
+            assert_eq!(refusal["_refused"], "stale_binary");
+            let text = refusal["content"][0]["text"].as_str().unwrap_or("");
+            assert!(
+                text.contains("older than the source") && text.contains("rebuild"),
+                "the refusal must say which way it is wrong and how to fix it: {text}"
+            );
+
+            // The dry-run sibling writes nothing -> allowed even when stale.
+            assert!(
+                stale_write_refusal("undo", None, true, false, &stale, false).is_none(),
+                "preview reverts nothing and must stay available"
+            );
+
+            // Store/artifact rewrites -> refused.
+            assert!(stale_write_refusal(
+                "code_index",
+                Some("refresh"),
+                false,
+                false,
+                &stale,
+                false
+            )
+            .is_some());
+            assert!(
+                stale_write_refusal("code_index", Some("check"), false, true, &stale, false)
+                    .is_some()
+            );
+            // ...but the read modes of the same tool stay open.
+            assert!(
+                stale_write_refusal("code_index", Some("query"), false, false, &stale, false)
+                    .is_none(),
+                "querying the store is read-only and must never be refused"
+            );
+            assert!(
+                stale_write_refusal("code_index", Some("check"), false, false, &stale, false)
+                    .is_none(),
+                "check WITHOUT fix writes nothing"
+            );
+
+            // Escape hatch: deliberate override is honoured.
+            assert!(
+                stale_write_refusal("undo", None, false, false, &stale, true).is_none(),
+                "allow_stale_binary must be able to override the refusal"
+            );
+
+            // Editing files is NOT in the narrow set — recoverable work stays open.
+            assert!(
+                stale_write_refusal("edit_node", None, false, false, &stale, false).is_none(),
+                "edits must stay available; only historical writes are refused"
+            );
         }
 
         /// A fresh build must stay silent: no `_build_warning` field at all.
