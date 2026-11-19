@@ -4,6 +4,7 @@ use chrono::Utc;
 use std::collections::HashMap;
 pub mod binding_observations;
 pub mod claim_scan;
+pub mod island_scan;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -601,13 +602,23 @@ impl GnawTreeWriter {
     }
 
     pub(crate) fn create_backup(&mut self) -> Result<PathBuf> {
-        let file_name = Path::new(&self.file_path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
-
-        let timestamp = Utc::now().format("%Y%m%d_%H%M%S_%3f");
-        let backup_name = format!("{}_backup_{}.json", file_name, timestamp);
+        let timestamp = Utc::now().format("%Y%m%dT%H%M%S%3f");
+        // v3 (2026-11-19): the name carries the content hash AND the mangled
+        // original path, so a lookup costs one directory listing and ZERO
+        // content reads. Two measured defects in the old name:
+        //   1. <basename>_backup_<ts>.json collided: two files named mod.rs
+        //      edited within the same millisecond wrote the SAME filename and
+        //      the second overwrote the first (silent history loss).
+        //   2. find_backup_by_hash had to open and HASH every backup in the
+        //      directory - 3m21s for two undos at 1147 files (measured).
+        // The hash is calculate_content_hash, the SAME function the
+        // transaction log uses for before_hash, so name and log agree by
+        // construction. It is still DefaultHasher (unstable across Rust
+        // versions) - unifying it with the store MD5 is step 1 of
+        // docs/HISTORY_STORAGE_DESIGN.md and is NOT this change.
+        let content_hash = crate::core::transaction_log::calculate_content_hash(&self.source_code);
+        let mangled = crate::core::backup::mangle_path_for_name(&self.file_path);
+        let backup_name = format!("{mangled}_backup_{content_hash}_{timestamp}.json");
 
         // Backup should also be in project root to avoid scattering
         let project_root = find_project_root(Path::new(&self.file_path));
@@ -619,24 +630,24 @@ impl GnawTreeWriter {
 
         // v2 (2026-11-12): the AST is deliberately NOT stored.
         //
-        // It is derivable by parsing `source_code`, and it measured 15.31 of
-        // 15.45 GiB (99.1%) of every backup ever written here — a frozen claim
-        // about what a PAST parser said, read by TODAY's extractor. Readers
-        // only ever used `source_code` (`undo_redo.rs:953`, `backup.rs:93/169`),
+        // It is derivable by parsing source_code, and it measured 15.31 of
+        // 15.45 GiB (99.1%) of every backup ever written here - a frozen claim
+        // about what a PAST parser said, read by TODAY extractor. Readers
+        // only ever used source_code (undo_redo.rs:953, backup.rs:93/169),
         // so v1 blobs (with "tree") remain readable byte for byte.
         // Measured and argued in docs/BACKUP_STORAGE_AND_TIME_TRAVEL.md.
         let backup_data = serde_json::json!({
-            "format": "gtw-backup-v2",
+            "format": "gtw-backup-v3",
             "file_path": self.file_path,
+            "content_hash": content_hash,
             "timestamp": Utc::now().to_rfc3339(),
             "source_code": self.source_code
         });
-
         fs::write(&backup_path, serde_json::to_string_pretty(&backup_data)?)
             .context(format!("Failed to write backup: {}", backup_path.display()))?;
 
-        // Spec-gtw-backup-id.md (Väg A): spara sökvägen så last_backup_path()
-        // kan exponera backup-id:t för motor2-gtw (work_unit → gtw_backup).
+        // Spec-gtw-backup-id.md (Vag A): spara sokvagen sa last_backup_path()
+        // kan exponera backup-id:t for motor2-gtw (work_unit -> gtw_backup).
         self.last_backup = Some(backup_path.clone());
 
         Ok(backup_path)
@@ -1647,97 +1658,150 @@ impl GnawTreeWriter {
         let lines: Vec<&str> = self.source_code.lines().collect();
         let mut new_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
 
-        let insert_pos = match position {
-            0 => {
-                // If it starts with a brace, insert after it
-                if parent.content.trim_start().starts_with('{') {
-                    parent.start_line
+        let insert_pos = {
+            // ── Annotation guard (2026-11-19) ───────────────────────────
+            // A comment node has no INTERIOR: it annotates what follows it.
+            // Positions 0/1/2 used to compute an offset INSIDE the node, which
+            // split the comment block. Measured 2026-11-19 on four languages,
+            // same operation (insert <file> 0 1):
+            //   Rust  //! header      -> E0753, the doc header split in two
+            //   Bash  #!/usr/bin/env  -> the code landed ABOVE the shebang
+            //   Go    //go:build      -> the build constraint is ignored
+            //   JS    /* block */     -> the code landed INSIDE the comment:
+            //                            valid syntax, exit 0, edit does nothing
+            // The predicate reads the PARSE TREE, never a language comment
+            // token, so one rule covers every parser.
+            let is_annotation = parent.node_type.contains("comment");
+
+            // The file-leading comment block (shebang, doc header, build tags,
+            // license banner) as a 1-based end line, read from the ROOT
+            // children: the same tree-based rule, no per-language tokens.
+            let mut header_end = 0usize;
+            for child in &self.tree.children {
+                if child.node_type.contains("comment") {
+                    header_end = header_end.max(child.end_line);
                 } else {
-                    parent.start_line - 1
+                    break;
                 }
             }
-            1 => {
-                // Insert at the end of the parent node.
-                // For source_file: TreeSitter end_line can exceed lines.len()
-                // (trailing newline counted as extra line), so we clamp.
-                // For other nodes (blocks, etc.): end_line points to the closing
-                // delimiter line, so we subtract 1 to insert BEFORE it.
-                if parent.node_type == "source_file" {
-                    parent.end_line.min(lines.len())
-                } else {
-                    parent.end_line.saturating_sub(1)
-                }
-            }
-            2 => {
-                let mut last_prop_line = parent.start_line;
-                let mut found = false;
-                for child in &parent.children {
-                    if (child.node_type == "ui_property" || child.node_type == "ui_binding")
-                        && child.end_line < parent.end_line
-                    {
-                        last_prop_line = child.end_line;
-                        found = true;
+
+            let computed = if is_annotation {
+                // end_line is the last line of the comment (a block comment is
+                // ONE node spanning every line), so this is the 0-based index
+                // immediately AFTER it.
+                let end = parent.end_line.min(lines.len());
+                eprintln!(
+                    "⚠️  insert: parent {} is a {} — a comment has no interior; inserting AFTER it (line {})",
+                    node_path, parent.node_type, end
+                );
+                end
+            } else {
+                match position {
+                    0 => {
+                        // If it starts with a brace, insert after it
+                        if parent.content.trim_start().starts_with('{') {
+                            parent.start_line
+                        } else {
+                            parent.start_line.saturating_sub(1)
+                        }
+                    }
+                    1 => {
+                        // Insert at the end of the parent node.
+                        // For source_file: TreeSitter end_line can exceed lines.len()
+                        // (trailing newline counted as extra line), so we clamp.
+                        // For other nodes (blocks, etc.): end_line points to the closing
+                        // delimiter line, so we subtract 1 to insert BEFORE it.
+                        if parent.node_type == "source_file" {
+                            parent.end_line.min(lines.len())
+                        } else {
+                            parent.end_line.saturating_sub(1)
+                        }
+                    }
+                    2 => {
+                        let mut last_prop_line = parent.start_line;
+                        let mut found = false;
+                        for child in &parent.children {
+                            if (child.node_type == "ui_property" || child.node_type == "ui_binding")
+                                && child.end_line < parent.end_line
+                            {
+                                last_prop_line = child.end_line;
+                                found = true;
+                            }
+                        }
+                        if found {
+                            last_prop_line
+                        } else {
+                            // Fallback to top (after brace if exists)
+                            parent.start_line
+                        }
+                    }
+                    // SUPPORT FOR ARBITRARY INDICES
+                    idx => {
+                        // Documented modes are 0 (first / after opening brace),
+                        // 1 (append to parent / before closing brace) and 2 (after
+                        // UI properties). Larger values address a sibling slot:
+                        // idx - 3 is the 0-based child to insert BEFORE, at that
+                        // child start boundary — never inside a sibling. A position
+                        // BEYOND the child count is the common append-at-the-end
+                        // encoding (Motor2 bridge sends children.len() + 1) and must
+                        // land AFTER the LAST child.
+                        // History: this branch previously used
+                        // children[idx - 3].end_line as a raw insert index, which
+                        // landed in the MIDDLE of a sibling for single-line or token
+                        // children (anonymous fn/identifier nodes): Motor2 batt
+                        // 2026-10-13, and triage 2026-10-31 (T2), where position 3
+                        // of 5 root fns nested the new fn inside the first one.
+                        if parent.children.is_empty() {
+                            // A LEAF parent has no slot to insert INTO. This used to
+                            // fall back to start_line - 1 — the top of the file — and
+                            // still report success (Motor2 finding 2026-11-12: a
+                            // position beyond the child count inside an identifier put
+                            // the new code above everything). Insert AFTER the leaf,
+                            // which is the only reading that leaves the parent intact,
+                            // and SAY SO instead of silently choosing.
+                            eprintln!(
+                                "⚠️  insert: parent {} ({}) has no children — inserting AFTER it, not inside it",
+                                node_path, parent.node_type
+                            );
+                            parent.end_line
+                        } else if idx > parent.children.len() {
+                            // Clamp to the parent own end AND SAY SO. For a braced
+                            // container that is BEFORE its closing brace; for the file
+                            // it is the end of the file. Previously the raw end_line of
+                            // the last child was used, which for mod m { … } placed the
+                            // content AFTER the closing brace — outside the parent —
+                            // while reporting success (Motor2 finding 2026-11-12).
+                            eprintln!(
+                                "⚠️  insert: position {idx} exceeds {} child slot(s) — clamped to append",
+                                parent.children.len()
+                            );
+                            if parent.node_type == "source_file" {
+                                lines.len()
+                            } else if parent.content.trim_end().ends_with('}') {
+                                parent.end_line.saturating_sub(1)
+                            } else {
+                                parent.end_line
+                            }
+                        } else {
+                            // start_line is 1-based, so start_line - 1 is the
+                            // 0-based insert index of the line BEFORE the sibling.
+                            parent.children[idx - 3].start_line.saturating_sub(1)
+                        }
                     }
                 }
-                if found {
-                    last_prop_line
-                } else {
-                    // Fallback to top (after brace if exists)
-                    parent.start_line
-                }
-            }
-            // SUPPORT FOR ARBITRARY INDICES
-            idx => {
-                // Documented modes are 0 (first / after opening brace),
-                // 1 (append to parent / before closing brace) and 2 (after
-                // UI properties). Larger values address a sibling slot:
-                // `idx - 3` is the 0-based child to insert BEFORE, at that
-                // child's start boundary — never inside a sibling. A
-                // position BEYOND the child count is the common "append at
-                // the end" encoding (Motor2's GTW bridge sends
-                // children.len() + 1) and must land AFTER the LAST child.
-                // History: this branch previously used
-                // `children[idx - 3].end_line` as a raw insert index, which
-                // landed in the MIDDLE of a sibling for single-line or token
-                // children (anonymous `fn`/`identifier` nodes): Motor2 batt
-                // 2026-10-13, and triage 2026-10-31 (T2), where position 3
-                // of 5 root fns nested the new fn inside the first one.
-                if parent.children.is_empty() {
-                    // A LEAF parent has no slot to insert INTO. This used to
-                    // fall back to `start_line - 1` — the top of the file — and
-                    // still report success (Motor2 finding 2026-11-12: a
-                    // position beyond the child count inside an identifier put
-                    // the new code above everything). Insert AFTER the leaf,
-                    // which is the only reading that leaves the parent intact,
-                    // and SAY SO instead of silently choosing.
-                    eprintln!(
-                        "⚠️  insert: parent '{}' ({}) has no children — inserting AFTER it, not inside it",
-                        node_path, parent.node_type
-                    );
-                    parent.end_line
-                } else if idx > parent.children.len() {
-                    // Clamp to the parent's own end AND SAY SO. For a braced
-                    // container that is BEFORE its closing brace; for the file
-                    // it is the end of the file. Previously the raw end_line of
-                    // the last child was used, which for `mod m { … }` placed the
-                    // content AFTER the closing brace — outside the parent —
-                    // while reporting success (Motor2 finding 2026-11-12).
-                    eprintln!(
-                        "⚠️  insert: position {idx} exceeds {} child slot(s) — clamped to append",
-                        parent.children.len()
-                    );
-                    if parent.node_type == "source_file" {
-                        lines.len()
-                    } else if parent.content.trim_end().ends_with('}') {
-                        parent.end_line.saturating_sub(1)
-                    } else {
-                        parent.end_line
-                    }
-                } else {
-                    // start_line is 1-based, so start_line - 1 is the
-                    // 0-based insert index of the line BEFORE the sibling.
-                    parent.children[idx - 3].start_line.saturating_sub(1)
-                }
+            };
+
+            // An insert landing at or above the file-leading comment block would
+            // split it (E0753, a lost shebang, an ignored build tag, code swallowed
+            // by a block comment). Move it to the first line after the block.
+            if computed < header_end {
+                eprintln!(
+                    "⚠️  insert: position lands inside the file header (lines 1-{}) — moving it after the header",
+                    header_end
+                );
+                header_end
+            } else {
+                computed
             }
         };
 
@@ -1951,6 +2015,137 @@ pub(crate) fn signature_impact_for(
         payload["unresolved"] = serde_json::json!(ir.unresolved_calls);
     }
     Some(payload)
+}
+
+#[cfg(test)]
+mod annotation_insert_regression {
+    use super::*;
+
+    #[test]
+    fn insert_into_a_comment_lands_after_it_never_inside() {
+        // ── Regression (2026-11-19) ────────────────────────────────────────
+        // A comment node has no interior. Positions 0/1/2 used to compute an
+        // offset INSIDE it, which broke four languages at once (measured:
+        // Rust //! header -> E0753; Bash -> code above the shebang; Go ->
+        // build tag ignored; JS -> code swallowed by the block comment,
+        // valid syntax and exit 0). The fix reads node_type (tree-based, no
+        // per-language tokens), and MUST keep saying so on stderr.
+        let cases: [(&str, &str, &str, &str); 4] = [
+            (
+                "doc.rs",
+                "//! Header one.\n//! Header two.\n//! Header three.\n\npub fn a() {}\n",
+                "pub fn appended() {}",
+                "//! Header one.",
+            ),
+            (
+                "s.sh",
+                "#!/usr/bin/env bash\n# Deploy helper.\n\necho one\n",
+                "echo injected",
+                "#!/usr/bin/env bash",
+            ),
+            (
+                "g.go",
+                "//go:build linux\n\npackage main\n",
+                "var injected = 1",
+                "//go:build linux",
+            ),
+            (
+                "j.js",
+                "/* Block header.\n * Second line.\n */\n\nfunction alpha() {}\n",
+                "const injected = 1;",
+                "/* Block header.",
+            ),
+        ];
+
+        for (name, code, payload, header_line) in cases {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join(name);
+            std::fs::write(&path, code).unwrap();
+            let path_str = path.to_str().unwrap().to_string();
+
+            let mut gtw = GnawTreeWriter::new(&path_str).unwrap();
+            // Path "0" is the FIRST CHILD (the header comment), which is the
+            // exact call that used to split the header.
+            gtw.edit(
+                EditOperation::Insert {
+                    parent_path: "0".to_string(),
+                    position: 1,
+                    content: payload.to_string(),
+                },
+                false,
+            )
+            .unwrap_or_else(|e| panic!("{name}: insert must not fail: {e}"));
+
+            let after = std::fs::read_to_string(&path).unwrap();
+            let lines: Vec<&str> = after.lines().collect();
+
+            assert_eq!(
+                lines[0].trim(),
+                header_line,
+                "{name}: the header line must stay FIRST (got {after:?})"
+            );
+
+            let header_end = lines
+                .iter()
+                .position(|l| l.trim() == header_line)
+                .expect("header present");
+            let payload_at = lines
+                .iter()
+                .position(|l| l.contains(payload))
+                .unwrap_or_else(|| panic!("{name}: payload missing: {after:?}"));
+            assert!(
+                payload_at > header_end,
+                "{name}: payload must land AFTER the header, not inside/before it: {after:?}"
+            );
+
+            // The payload must never sit inside a block comment: the closing
+            // marker has to come BEFORE it.
+            if let Some(close) = lines.iter().position(|l| l.contains("*/")) {
+                assert!(
+                    payload_at > close,
+                    "{name}: payload swallowed by the block comment: {after:?}"
+                );
+            }
+        }
+    }
+
+    /// The file header is a RUN of comment nodes: a shebang plus a license
+    /// banner, or a doc header plus blank-ish continuation. Landing between two
+    /// lines of that run is the same defect, so the whole run must be cleared.
+    #[test]
+    fn insert_clears_the_whole_leading_comment_run() {
+        let code = "# one\n# two\n# three\n\nset -e\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.sh");
+        std::fs::write(&path, code).unwrap();
+        let path_str = path.to_str().unwrap().to_string();
+
+        let mut gtw = GnawTreeWriter::new(&path_str).unwrap();
+        gtw.edit(
+            EditOperation::Insert {
+                parent_path: "0".to_string(),
+                position: 1,
+                content: "echo injected".to_string(),
+            },
+            false,
+        )
+        .unwrap();
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = after.lines().collect();
+        let last_header = lines
+            .iter()
+            .position(|l| l.trim() == "# three")
+            .expect("third header line present");
+        let payload = lines
+            .iter()
+            .position(|l| l.contains("echo injected"))
+            .expect("payload present");
+        assert!(
+            payload > last_header,
+            "payload must clear the WHOLE comment run, not just the first node: {after:?}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2691,7 +2886,7 @@ mod tests {
                 "v2 får inte serialisera AST:n: {}",
                 path.display()
             );
-            assert!(raw.contains("\"format\": \"gtw-backup-v2\""));
+            assert!(raw.contains("\"format\": \"gtw-backup-v3\""));
         }
 
         let before_blob = entries
