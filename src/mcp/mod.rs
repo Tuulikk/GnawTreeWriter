@@ -2914,7 +2914,18 @@ or list_nodes for a flat index of this file.",
             ) {
                 Ok((explanation, budget)) => tool_success(
                     "Explained node".to_string(),
-                    Some(json!({ "explanation": explanation, "tokens": budget })),
+                    Some(json!({
+                        "explanation": explanation,
+                        "tokens": budget,
+                        // One owner for "where did this run": the build's L4
+                        // device. An answer that hides it invites the reader to
+                        // assume the GPU did the work (owner finding 2026-11-19).
+                        "device": crate::llm::ai_manager::capability_report(
+                            cfg!(feature = "ai"),
+                            cfg!(feature = "mamba"),
+                        )
+                        .l4_device,
+                    })),
                 ),
                 Err(e) => tool_error(format!("Explain failed: {} — local model problem? `gnawtreewriter ai status`; fallback: read_node + read the code yourself", e)),
             },
@@ -3058,7 +3069,15 @@ or list_nodes for a flat index of this file.",
             ) {
                 Ok((result, budget)) => tool_success(
                     "Summarized directory".to_string(),
-                    Some(json!({ "result": result, "tokens": budget })),
+                    Some(json!({
+                        "result": result,
+                        "tokens": budget,
+                        "device": crate::llm::ai_manager::capability_report(
+                            cfg!(feature = "ai"),
+                            cfg!(feature = "mamba"),
+                        )
+                        .l4_device,
+                    })),
                 ),
                 Err(e) => tool_error(format!("Summarize failed: {} — local model problem? `gnawtreewriter ai status`; fallback: get_skeleton for structure", e)),
             },

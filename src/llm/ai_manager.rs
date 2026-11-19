@@ -107,6 +107,76 @@ pub enum DeviceType {
     Metal,
 }
 
+/// What a feature build can actually DO with a model — the honest answer
+/// `ai status` and the L4 tools must give.
+///
+/// Why this exists (owner observation 2026-11-19): the GPU/CPU split is a
+/// deliberate design — `ai index` (bge-base, L3) benefits from the GPU while
+/// L4 generation does not — but until now that split was **only documented**
+/// (`build-gpu.sh`: "WHAT THIS GIVES YOU: ai index may then use the GPU"), never
+/// stated by the binary itself. A GPU build without `mamba` looked complete and
+/// answered "requires the mamba feature" on every L4 call.
+///
+/// `device` is where the model actually runs. L4's device is hardcoded CPU at
+/// the load site today, so a CUDA build still reports CPU for generation — and
+/// says so, instead of letting a reader assume the GPU is in play.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct CapabilityReport {
+    /// L3 (vectors): does this build have the candle AI stack at all?
+    pub index_l3: bool,
+    /// L4 (generation): compiled in?
+    pub generate_l4: bool,
+    /// Can `ai index` use a GPU in this build?
+    pub index_device: &'static str,
+    /// Where L4 generation actually runs. One owner: the load site.
+    pub l4_device: &'static str,
+    /// One line naming the gap, when there is one. None = nothing to warn about.
+    pub note: Option<String>,
+}
+
+/// Pure: derives the report from the two build switches that decide it, so
+/// both directions are testable without a model or a GPU.
+pub fn capability_report(ai_compiled: bool, mamba_compiled: bool) -> CapabilityReport {
+    let index_l3 = ai_compiled;
+    let generate_l4 = mamba_compiled;
+
+    // `--features cuda` is what makes the GPU reachable for indexing. The
+    // generation path has no device policy at its load site (hardcoded CPU),
+    // so it reports CPU even on a CUDA build — that is the honest answer, not
+    // an omission to be papered over.
+    let (index_device, l4_device) = if cfg!(feature = "cuda") {
+        ("cuda", "cpu (no GPU path for L4)")
+    } else {
+        ("cpu", "cpu")
+    };
+
+    let note = if !generate_l4 {
+        Some(
+            "L4 (explain/summarize/investigate/edit_ask) is NOT in this build — \
+             those tools answer \"requires the 'mamba' feature\". Build with \
+             --features ai,mcp,mamba for the full binary."
+                .to_string(),
+        )
+    } else if cfg!(feature = "cuda") && l4_device.starts_with("cpu") {
+        Some(
+            "indexing can use the GPU; generation cannot (L4 has no device policy \
+             yet — it loads on CPU). Same binary, two different devices: read \
+             `device` in each L4 answer before assuming the GPU did the work."
+                .to_string(),
+        )
+    } else {
+        None
+    };
+
+    CapabilityReport {
+        index_l3,
+        generate_l4,
+        index_device,
+        l4_device,
+        note,
+    }
+}
+
 impl From<&str> for DeviceType {
     fn from(s: &str) -> Self {
         match s.to_lowercase().as_str() {
@@ -1629,5 +1699,63 @@ mod resolution_tests {
         assert_eq!(st.models.len(), 1);
         assert_eq!(st.models[0].model.id(), "bge-base-en-v1.5");
         assert_eq!(st.models[0].source, ModelSource::Global);
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    /// The measured 2026-11-19 failure: a GPU build without `mamba` looked
+    /// complete and answered "requires the mamba feature" on every L4 call.
+    /// The report must NAME that gap, not leave it to be discovered.
+    #[test]
+    fn a_build_without_l4_says_so_loudly() {
+        let caps = capability_report(true, false);
+        assert!(caps.index_l3, "the AI stack is present");
+        assert!(!caps.generate_l4, "L4 is compiled out");
+        let note = caps.note.expect("a missing L4 layer must be reported");
+        assert!(note.contains("NOT in this build"), "{note}");
+        assert!(
+            note.contains("mamba"),
+            "the note must name the feature that fixes it: {note}"
+        );
+    }
+
+    /// The other direction: a full build carries no note (a warning that
+    /// always fires is one people learn to ignore), and states both devices.
+    #[test]
+    fn a_full_cpu_build_is_quiet_and_names_one_device() {
+        let caps = capability_report(true, true);
+        assert!(caps.index_l3 && caps.generate_l4);
+        assert_eq!(caps.l4_device, "cpu");
+        assert_eq!(caps.note, None, "nothing to warn about on a full build");
+    }
+
+    /// L4's device is the LOAD SITE's truth, not an aspiration: it is CPU even
+    /// when CUDA is compiled, because `load_lfm25_model` hardcodes it. The
+    /// report says that instead of implying the GPU did the work.
+    #[test]
+    fn l4_reports_where_it_actually_runs() {
+        let caps = capability_report(true, true);
+        if cfg!(feature = "cuda") {
+            assert_eq!(caps.index_device, "cuda");
+            assert!(
+                caps.l4_device.starts_with("cpu"),
+                "generation has no GPU path yet — say cpu, not cuda: {}",
+                caps.l4_device
+            );
+            assert!(
+                caps.note
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("generation cannot"),
+                "the asymmetry must be stated, not implied: {:?}",
+                caps.note
+            );
+        } else {
+            assert_eq!(caps.index_device, "cpu");
+            assert_eq!(caps.l4_device, "cpu");
+        }
     }
 }

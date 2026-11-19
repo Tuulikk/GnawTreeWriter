@@ -4583,7 +4583,19 @@ fi
             }
         }
         println!("Cache Dir:  {}", status.cache_dir.display());
-        println!("Device:     CPU");
+        // The build's actual capabilities, not a fixed string: a GPU build
+        // without `mamba` used to look identical to a full one (2026-11-19).
+        let caps = crate::llm::ai_manager::capability_report(
+            cfg!(feature = "ai"),
+            cfg!(feature = "mamba"),
+        );
+        println!(
+            "Device:     {} (index) · {} (L4 generation)",
+            caps.index_device, caps.l4_device
+        );
+        if let Some(note) = &caps.note {
+            println!("⚠️  {note}");
+        }
         println!();
         Ok(())
     }

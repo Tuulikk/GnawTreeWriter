@@ -5,6 +5,13 @@
 # `indexing.device: auto` in gnawtreewriter.yaml, or run with --gpu).
 # The 20%-VRAM safety gate still decides at every run.
 #
+# NOT INCLUDED, BY DESIGN (owner, restated 2026-11-19): L4 generation
+# (explain/summarize/investigate). The CPU/GPU split is deliberate — the
+# bge-base embedder is the part that benefits from the GPU; L4 is slow in
+# vector space and its load site has no device policy. `ai status` now states
+# the gap (`capability_report`) instead of letting the binary look complete.
+# For a full CPU binary use scripts/commit-build.sh (ai,mcp,mamba).
+#
 # REQUIREMENTS (any Linux + NVIDIA GPU, nothing distro-specific):
 #   - podman (or docker: CONTAINER_CMD=docker)
 #   - NVIDIA driver (nvidia-smi works)
@@ -62,11 +69,15 @@ fi
 export PATH="$CARGO_HOME/bin:$PATH"
 echo "== $(rustc --version)"
 rm -rf /work && cp -a /src /work && cd /work
-# `mamba` måste med (samma fynd som commit-build.sh, 2026-11-19): default
-# features är ["ai","mcp"], och utan `mamba` saknar GPU-binären hela L4
-# (explain/summarize/investigate) — den byggs då med CUDA men kan bara
-# indexera. Ett GPU-bygge som inte kan generera är halva produkten.
-cargo build --release --features cuda,mamba
+# NO `mamba` ON PURPOSE (owner design, restated 2026-11-19): this build is the
+# INDEXING binary. `ai index` (bge-base, L3) is what benefits from the GPU; L4
+# generation is slow enough in vector space that putting it on the GPU buys
+# little, and its load site has no device policy yet (it loads on CPU even
+# here). Adding `mamba` would make the binary *look* complete while its L4
+# still ran on CPU — the silent-half-truth this repo keeps hunting.
+# If you want L4 in a GPU build, first give the load site a device policy;
+# until then `ai status` states the gap explicitly (capability_report).
+cargo build --release --features cuda
 cp "$CARGO_TARGET_DIR/release/gnawtreewriter" /libs/gnawtreewriter-cuda
 echo "== BUILD_OK =="
 BUILD
