@@ -18,9 +18,9 @@ och intelligens lagrad i databas och funktion."*
    den enda ägaren av vilken embedder som gäller, och storen lagrar
    `model_name` + `dimension` för att kunna vägra.
 2. **L2 är öppet** — men L2 har idag **ingen modell alls**. Det är disciplinerat
-   (extraherat, inte gissat) och det är där täckningsgapet sitter: **82 % av
-   upplösta-missar är `unresolved_plain_name`**, en klass som kräver
-   typinferens, inte en språkmodell.
+   (extraherat, inte gissat) och det är där täckningsgapet sitter: av 28 088
+   relationer är 19 758 (70 %) `unresolved_plain_name` — 80,6 % av de *olösta*.
+   Den klassen kräver typinferens, inte en språkmodell (§3).
 3. **Den rätta platsen för en mindre modell är inte L2:s sanning utan ett
    CLAIM-lager ovanpå den** — och det lagret finns redan: `prose_annotations`
    med `producer`, `model`, `anchor_hash`, `status`, `invalid_reason`.
@@ -162,13 +162,17 @@ Läsare: `explain` kan citera en färsk claim i stället för att generera om, o
 **Vinst:** täckning (alla filer, inte bara de någon frågat om) och att svaret är
 beständigt. **Kostnad:** en bakgrundskörning, cachelagrad per `anchor_hash`.
 
-### Nivå 2 — klassificering av det ambivalenta (kräver grind)
+### Nivå 2 — klassificering av det ambivalenta (visningskrav, inte grind)
 
 För de `ambiguous: 2 350`-fallen: låt modellen föreslå vilken `to_id` som avses,
 **som claim** (`producer = "model:classify"`), aldrig som `relations.to_id`.
 Ett `code-index query kind=relations` kan visa båda sidor: `to_id` (fakta) och
-`claim` (förslag). En grind krävs: claim får bara presenteras när
-`graph_coverage`-nämnaren är utskriven, och aldrig räknas in i `impact`.
+`claim` (förslag).
+
+Villkoret är ett **visningskrav, inte en grind** (ROADMAP: *"never a gate"*): en
+claim får bara *presenteras* tillsammans med `graph_coverage`-nämnaren, och får
+aldrig räknas in i `impact`/`chain`. Skillnaden är avgörande — ett visningskrav
+gör svaret ärligt, en grind stoppar arbete som utstakningen säger ska flöda.
 
 **Risk:** exakt 1 840-fabricerade-kanter-läxan, i ny skrud. Därför nivå 2 efter
 nivå 1, med mätning på facit.
