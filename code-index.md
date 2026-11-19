@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 0a45ea2d0b0956eae81a3eda8a70c722
+> Body-hash: dcd62d93379925521ae444d1f59a80b1
 
 ## Träd
 
@@ -67,10 +67,10 @@ extensions/zed/src/
   lib.rs (34 rader)
 scripts/
   benchmark_ai.sh (66 rader)
-  build-gpu.sh (113 rader)
+  build-gpu.sh (117 rader)
   check-license.sh (14 rader)
   claim-scan-gate.sh (56 rader)
-  commit-build.sh (160 rader)
+  commit-build.sh (168 rader)
   daemon-hygiene.sh (89 rader)
   gtw_adoption_report.py (118 rader)
   mcp-client.sh (127 rader)
@@ -493,7 +493,7 @@ _(inga toppnivå-items)_
 - `bench()` :11
 - `mcp()` :21
 
-### build-gpu.sh (113 rader)
+### build-gpu.sh (117 rader)
 - `die() { echo "ERROR: $*" >&2; exit 1; }` :29
 
 ### check-license.sh (14 rader)
@@ -502,8 +502,8 @@ _(inga toppnivå-items)_
 ### claim-scan-gate.sh (56 rader)
 _(inga toppnivå-items)_
 
-### commit-build.sh (160 rader)
-- `ask_reap()` :113
+### commit-build.sh (168 rader)
+- `ask_reap()` :121
 
 ### daemon-hygiene.sh (89 rader)
 _(inga toppnivå-items)_
