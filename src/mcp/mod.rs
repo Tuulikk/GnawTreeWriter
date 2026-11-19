@@ -174,16 +174,13 @@ pub mod mcp_server {
                         a.client_version = Some(v);
                     }
                 });
-                Ok(json!({
-                    "protocolVersion": "2024-11-05",
-                    "serverInfo": {
-                        "name": env!("CARGO_PKG_NAME"),
-                        "version": env!("CARGO_PKG_VERSION")
-                    },
-                    "capabilities": {
-                        "tools": { "listChanged": true }
-                    }
-                }))
+                // Build identity at the handshake (parity with gnawdriver's
+                // `initialize`, owner finding 2026-11-19): the client learns
+                // immediately whether the tooling it just connected to is the
+                // current source. A stale binary is invisible until a tool
+                // misbehaves otherwise — and the host keeps that build for the
+                // whole session (process-bound stdin daemon).
+                Ok(handshake_payload(&crate::version::current()))
             }
 
             "tools/list" => Ok(json!({ "tools": tool_definitions() })),
@@ -211,7 +208,7 @@ pub mod mcp_server {
                     })
                 };
 
-                match name {
+                let tool_outcome = match name {
                     "analyze" => {
                         let fp = validate_arg("file_path")?;
                         Ok(handle_analyze(fp))
@@ -688,7 +685,15 @@ pub mod mcp_server {
                         );
                         Err(serde_json::to_value(err).unwrap())
                     }
-                }
+                };
+                // Per-response stale guard (parity with gnawdriver): every
+                // answer that leaves the tool dispatch says so when the binary
+                // is older than the source. Silent when fresh — see
+                // `annotate_build_staleness`.
+                Ok(annotate_build_staleness(
+                    tool_outcome?,
+                    &crate::version::current(),
+                ))
             }
             _ => {
                 let err =
@@ -1440,6 +1445,66 @@ pub mod mcp_server {
 
     fn tool_error(msg: String) -> Value {
         json!({"content": [{ "type": "text", "text": msg }], "isError": true})
+    }
+
+    /// Build identity for the MCP handshake. Pure, so both directions are
+    /// testable without a git checkout: a fresh build carries `stale: false`
+    /// and NO note; a stale build carries both, loudly.
+    fn handshake_payload(build: &crate::version::BuildInfo) -> Value {
+        let mut payload = json!({
+            "protocolVersion": "2024-11-05",
+            "serverInfo": {
+                "name": env!("CARGO_PKG_NAME"),
+                "version": env!("CARGO_PKG_VERSION")
+            },
+            "capabilities": {
+                "tools": { "listChanged": true }
+            },
+            "build": {
+                "git_sha": build.git_sha,
+                "built_at": build.built_at,
+                "dirty": build.dirty,
+                "stale": build.stale
+            }
+        });
+        if build.stale {
+            // Absent when fresh: a note that always fires is one people learn
+            // to ignore (the `ai status` lesson).
+            payload["build"]["stale_note"] = json!(
+                "this MCP process runs a build older than the source — \
+                 rebuild (scripts/commit-build.sh) and restart the host to load fresh tooling"
+            );
+        }
+        payload
+    }
+
+    /// Every tool answer carries `_build_warning` when the running binary is
+    /// older than the source — parity with gnawdriver's per-response stale
+    /// guard (owner finding 2026-11-19). Before this, a stale MCP process was
+    /// invisible outside `doctor`: an agent could spend a whole session
+    /// "confirming" edits against tooling that predates the code it reads.
+    /// Silent when fresh — the field is absent, not false.
+    fn annotate_build_staleness(result: Value, build: &crate::version::BuildInfo) -> Value {
+        if !build.stale {
+            return result;
+        }
+        match result {
+            Value::Object(mut obj) => {
+                obj.insert(
+                    "_build_warning".into(),
+                    json!({
+                        "git": build.git_sha,
+                        "built_at": build.built_at,
+                        "note": "the running gnawtreewriter binary is OLDER than the source — \
+                                 answers may describe old behaviour. Rebuild \
+                                 (scripts/commit-build.sh) and restart the host. \
+                                 `doctor` carries the same verdict as data.",
+                    }),
+                );
+                Value::Object(obj)
+            }
+            other => other,
+        }
     }
 
     /// Loud refusal for a too-broad root: the REASON comes from
@@ -4994,6 +5059,76 @@ or list_nodes for a flat index of this file.",
             assert!(
                 c.contains("refusing to use"),
                 "the reason must be carried through: {c}"
+            );
+        }
+    }
+
+    #[cfg(test)]
+    mod build_staleness_tests {
+        use super::*;
+
+        fn build(stale: bool) -> crate::version::BuildInfo {
+            crate::version::BuildInfo {
+                git_sha: if stale { "old1234" } else { "new5678" },
+                built_at: "2026-11-19 10:00 UTC".to_string(),
+                dirty: false,
+                stale,
+            }
+        }
+
+        fn tool_answer() -> Value {
+            tool_success("ok".to_string(), Some(json!({"n": 1})))
+        }
+
+        /// A fresh build must stay silent: no `_build_warning` field at all.
+        /// A warning that always fires is one people learn to ignore — that is
+        /// the `ai status` lesson, and the reason the field is absent rather
+        /// than `false`.
+        #[test]
+        fn a_fresh_build_adds_no_warning() {
+            let out = annotate_build_staleness(tool_answer(), &build(false));
+            assert!(
+                out.get("_build_warning").is_none(),
+                "fresh build must not carry a warning: {out}"
+            );
+            assert_eq!(out["content"][0]["text"], "ok", "payload must pass through");
+        }
+
+        /// A stale build must SAY SO on the same answer, and not destroy it:
+        /// the original payload (content + data) has to survive the annotation.
+        #[test]
+        fn a_stale_build_warns_without_losing_the_payload() {
+            let out = annotate_build_staleness(tool_answer(), &build(true));
+            let warning = out
+                .get("_build_warning")
+                .expect("stale build must warn on every tool answer");
+            assert_eq!(warning["git"], "old1234", "the build must be identifiable");
+            assert!(
+                warning["note"].as_str().unwrap_or("").contains("OLDER"),
+                "the note must say which way it is wrong: {warning}"
+            );
+            assert_eq!(out["content"][0]["text"], "ok", "payload must survive");
+            assert_eq!(out["n"], 1, "structured payload must survive");
+        }
+
+        /// The handshake carries the build identity in BOTH cases, and only
+        /// the stale case carries `stale_note` — same absent-not-false rule.
+        #[test]
+        fn the_handshake_carries_build_identity_and_notes_staleness() {
+            let fresh = handshake_payload(&build(false));
+            assert_eq!(fresh["protocolVersion"], "2024-11-05");
+            assert_eq!(fresh["build"]["git_sha"], "new5678");
+            assert_eq!(fresh["build"]["stale"], false);
+            assert!(
+                fresh["build"].get("stale_note").is_none(),
+                "fresh handshake must not carry a note: {fresh}"
+            );
+
+            let stale = handshake_payload(&build(true));
+            assert_eq!(stale["build"]["stale"], true);
+            assert!(
+                stale["build"]["stale_note"].is_string(),
+                "stale handshake must explain itself: {stale}"
             );
         }
     }

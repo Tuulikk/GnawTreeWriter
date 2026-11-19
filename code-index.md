@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: c101eb51322e05074bdaa6565efa60a9
+> Body-hash: d5f3600b2e12a892839309d7682017f1
 
 ## Träd
 
@@ -92,7 +92,7 @@ src/core/
   alf.rs (122 rader)
   anchor.rs (166 rader)
   attribution.rs (397 rader)
-  backup.rs (293 rader)
+  backup.rs (549 rader)
   batch.rs (933 rader)
   binding_observations.rs (457 rader)
   blast.rs (310 rader)
@@ -125,7 +125,7 @@ src/core/
   island_scan.rs (668 rader)
   label_manager.rs (90 rader)
   macro_dispatcher.rs (249 rader)
-  mod.rs (3005 rader)
+  mod.rs (3015 rader)
   pack.rs (749 rader)
   parse_cache.rs (119 rader)
   project_root.rs (186 rader)
@@ -158,7 +158,7 @@ src/llm/
   relational_index.rs (684 rader)
   semantic_index.rs (1458 rader)
 src/mcp/
-  mod.rs (5098 rader)
+  mod.rs (5233 rader)
 src/parser/
   bash.rs (84 rader)
   c.rs (84 rader)
@@ -749,14 +749,18 @@ _(inga toppnivå-items)_
   - `pub fn as_str(&self) -> &'static str` :303
   - `pub fn parse(s: &str) -> Option<Role>` :315
 
-### backup.rs (293 rader)
+### backup.rs (549 rader)
 - `pub struct BackupFile` :18
 - `pub fn list_backup_files<P: AsRef<Path>>(backup_dir: P) -> Result<Vec<BackupFile>>` :32
 - `pub fn parse_backup_file<P: AsRef<Path>>(backup_path: P) -> Result<BackupFile>` :66
 - `pub fn find_backup_by_content_hash<P: AsRef<Path>>(` :108
-- `pub fn find_backup_by_content_hash_for_file<P: AsRef<Path>>(` :125
-- `pub fn write_after_blob(project_root: &Path, file_path: &str, content: &str) -> Result<String>` :157
-- `pub fn restore_from_backup<P: AsRef<Path>, Q: AsRef<Path>>(` :185
+- `pub(crate) fn parse_backup_name(name: &str) -> Option<(String, String)>` :145
+- `pub(crate) fn mangle_path_for_name(path: &str) -> String` :162
+- `fn name_timestamp(name: &str) -> Option<DateTime<Utc>>` :169
+- `fn find_v3_by_hash_and_path<P: AsRef<Path>>(` :180
+- `pub fn find_backup_by_content_hash_for_file<P: AsRef<Path>>(` :208
+- `pub fn write_after_blob(project_root: &Path, file_path: &str, content: &str) -> Result<String>` :245
+- `pub fn restore_from_backup<P: AsRef<Path>, Q: AsRef<Path>>(` :277
 
 ### batch.rs (933 rader)
 - `pub enum BatchOp` :31
@@ -1372,7 +1376,7 @@ _(inga toppnivå-items)_
 - `pub fn is_token_tree(node: &TreeNode) -> bool` :147
 - `pub fn try_expand_macro(` :152
 
-### mod.rs (3005 rader)
+### mod.rs (3015 rader)
 - `pub struct GnawTreeWriter` :78
 - `pub enum EditOperation` :105
 - `pub struct EditReceipt` :129
@@ -1396,33 +1400,33 @@ _(inga toppnivå-items)_
   - `pub fn set_attribution(&mut self, attribution: crate::core::attribution::Attribution)` :596
   - `pub fn attribution(&self) -> &crate::core::attribution::Attribution` :600
   - `pub(crate) fn create_backup(&mut self) -> Result<PathBuf>` :604
-  - `pub fn analyze(&self) -> &TreeNode` :646
-  - `pub fn show_node(&self, node_path: &str) -> Result<String>` :650
-  - `pub fn node_count(&self) -> usize` :663
-  - `pub fn node_exists(&self, node_path: &str) -> bool` :672
-  - `pub fn expect_node(` :683
-  - `pub fn edit(&mut self, operation: EditOperation, force: bool) -> Result<()>` :725
-  - `fn is_json_document(&self) -> bool` :1184
-  - `pub fn preview_edit(&self, operation: EditOperation) -> Result<String>` :1192
-  - `fn resolve_path<'a>(&'a self, query: &str) -> Option<&'a TreeNode>` :1236
-  - `fn find_node_by_path<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :1252
-  - `fn find_node_by_name<'a>(` :1267
-  - `fn doc_block_start_line(&self, node: &TreeNode) -> usize` :1319
-  - `pub fn describe_node(&self, query: &str) -> Option<(String, String, Option<String>)>` :1341
-  - `fn json_semantic_edit(&self, node_path: &str, new_content: &str) -> Result<String>` :1362
-  - `fn json_new_value(content: &str, allow_string: bool) -> Option<serde_json::Value>` :1465
-  - `fn json_content_error(content: &str, target: &str) -> anyhow::Error` :1475
-  - `fn json_render(v: &serde_json::Value) -> String` :1487
-  - `fn join_preserving_newline<S: AsRef<str>>(lines: &[S], source: &str) -> String` :1502
-  - `fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String>` :1521
-  - `fn insert_node_at_path(` :1638
-  - `fn delete_node_at_path(&self, node_path: &str) -> Result<String>` :1839
-  - `pub fn get_source(&self) -> &str` :1883
-- `pub fn find_project_root(start_path: &Path) -> PathBuf` :1890
-- `pub fn find_project_root_in(start_path: &Path, boundary: Option<&Path>) -> PathBuf` :1903
-- `fn count_changed_bytes(before: &str, after: &str) -> usize` :1941
-- `pub(crate) fn verdict_json(` :1953
-- `pub(crate) fn signature_impact_for(` :1972
+  - `pub fn analyze(&self) -> &TreeNode` :656
+  - `pub fn show_node(&self, node_path: &str) -> Result<String>` :660
+  - `pub fn node_count(&self) -> usize` :673
+  - `pub fn node_exists(&self, node_path: &str) -> bool` :682
+  - `pub fn expect_node(` :693
+  - `pub fn edit(&mut self, operation: EditOperation, force: bool) -> Result<()>` :735
+  - `fn is_json_document(&self) -> bool` :1194
+  - `pub fn preview_edit(&self, operation: EditOperation) -> Result<String>` :1202
+  - `fn resolve_path<'a>(&'a self, query: &str) -> Option<&'a TreeNode>` :1246
+  - `fn find_node_by_path<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :1262
+  - `fn find_node_by_name<'a>(` :1277
+  - `fn doc_block_start_line(&self, node: &TreeNode) -> usize` :1329
+  - `pub fn describe_node(&self, query: &str) -> Option<(String, String, Option<String>)>` :1351
+  - `fn json_semantic_edit(&self, node_path: &str, new_content: &str) -> Result<String>` :1372
+  - `fn json_new_value(content: &str, allow_string: bool) -> Option<serde_json::Value>` :1475
+  - `fn json_content_error(content: &str, target: &str) -> anyhow::Error` :1485
+  - `fn json_render(v: &serde_json::Value) -> String` :1497
+  - `fn join_preserving_newline<S: AsRef<str>>(lines: &[S], source: &str) -> String` :1512
+  - `fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String>` :1531
+  - `fn insert_node_at_path(` :1648
+  - `fn delete_node_at_path(&self, node_path: &str) -> Result<String>` :1849
+  - `pub fn get_source(&self) -> &str` :1893
+- `pub fn find_project_root(start_path: &Path) -> PathBuf` :1900
+- `pub fn find_project_root_in(start_path: &Path, boundary: Option<&Path>) -> PathBuf` :1913
+- `fn count_changed_bytes(before: &str, after: &str) -> usize` :1951
+- `pub(crate) fn verdict_json(` :1963
+- `pub(crate) fn signature_impact_for(` :1982
 
 ### pack.rs (749 rader)
 - `pub enum PackFormat` :15
@@ -2008,7 +2012,7 @@ _(inga toppnivå-items)_
 
 ## src/mcp/
 
-### mod.rs (5098 rader)
+### mod.rs (5233 rader)
 _(inga toppnivå-items)_
 
 ## src/parser/
