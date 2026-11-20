@@ -572,7 +572,8 @@ gnawdriver log-grep --filter "pattern" --last 50   # appens logg via endpoint
 och `read_text` noterar frånvaro (`no-matches`/`empty-view`) — "inga rader
 matchade" ska leda till "då är antagandet fel", aldrig till en tyst omväg.
 
-**Vakterna finns mekaniskt:** `gnawdriver-guard` (i `opencode-plugins`)
+**Vakterna finns mekaniskt:** `gnawdriver-guard` (i `gnaw-agent-addons` —
+hette `opencode-plugins` till 2026-11-20)
 blockerar `grep/sed/awk/jq/cat/rg/tail/head` mot `.jsonl/.ndjson/.csv` och
 `~/.gnawdriver`, `sqlite3` i kommandoposition, python/jq mot artefakter, och
 pipelinad parser på driverns utdata — varje stopp pekar på rätt verktyg. Blir du
@@ -596,7 +597,7 @@ filen**:
 
 `cat`/`less`/hel-fil-dump kostar kontext utan att ge struktur — det stoppas
 inte mekaniskt, det är bara slöseri. `sed -i`, `tee`, `dd`, `truncate` och
-heredoc-skrivningar **stoppas** däremot av `tool-guard` i `opencode-plugins`
+heredoc-skrivningar **stoppas** däremot av `tool-guard` i `gnaw-agent-addons`
 (§35: blint skrivande utan shadow-checkpoint eller validering), och
 `gnawdriver-guard` stoppar grep/sed/jq/tail mot datafiler. Blir du stoppad:
 använd verktyget garden pekade på.
@@ -1044,14 +1045,16 @@ AI agents can contribute to several areas of the project:
 - Update CHANGELOG.md for version changes
 - Document breaking changes clearly
 
-### OpenCode-plugins (2026-10-09)
-Edits in this repo run under the Gnaw OpenCode plugins (checkpoint shadows,
-tool-guard, memory-integration). Their source lives in the sibling repo
-**`Gnaw-Software/opencode-plugins`** (deployed via symlink to
-`~/.config/opencode/plugins`) — edit plugins there, never in the config
-directory. Contract: V1 format (`export default { id, server }`), never
-named function exports (the legacy loader calls every function export as a
-plugin factory — see that repo's README.md).
+### Agent-addons (2026-10-09; namnbyte 2026-11-20)
+Edits in this repo run under the Gnaw agent addons (checkpoint shadows,
+tool-guard, memory-integration, gtw-nudge). Their source lives in the sibling
+repo **`Gnaw-Software/gnaw-agent-addons`** (was `opencode-plugins` until
+2026-11-20; deployed via symlink to `~/.config/opencode/plugins`) — edit
+addons there, never in the config directory. The symlinks are the ONLY way
+in: `opencode.jsonc` does not point at the directory. Contract: V2 format
+(`Plugin.define({ id, setup })`) — named function exports are HARMLESS in V2
+(the loader reads only the default export's `id` + `setup`); the V1 incident
+2026-10-08 is history, see that repo's README.md.
 
 ### Error Handling Patterns
 ```rust
