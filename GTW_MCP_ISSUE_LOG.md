@@ -2137,6 +2137,45 @@ gnawtreewriter batch batch-probe2.json --preview            # → tre inserts p�
 
 **Sidofynd samma ändring:** quick-replace sök-text med fel typ (`"type": "string"` mot `"type": "integer"`) avvisades högljutt med 0 byte skrivna — gardet fungerar som tänkt (M6: läsa hela svaret; feltexten pekade direkt på re-läsning).
 
+---
+
+## 2026-11-20 — `analyze` på en 9 700-raders Rust-fil dödade MCP-servern (Motor2)
+
+**Kontext:** Motor2-sessionen, efter flera ändringar i
+`crates/motor2-llama/src/model_runtime.rs` (9 699 rader). Jag ville
+verifiera filstrukturen med GTW i stället för att grepa — GTW:s kärnförebild.
+
+**Verktyg + parametrar:** `analyze { file_path: "crates/motor2-llama/src/model_runtime.rs" }` (inga andra argument).
+
+**Förväntat:** en struktursammanfattning (moduler, items, djup), storlek
+proportionell mot filen och begränsad av ett svarstak.
+
+**Faktiskt:**
+`MCP tool "analyze" on server "gnawtreewriter" failed: Connection closed: MCP server gnawtreewriter wrote more than 16 MiB to stdout without a message boundary`
+
+Servern dog av att ha skrivit >16 MiB utan meddelandegräns. Hela
+`gnawtreewriter`-namespacet försvann ur tools-katalogen för resten av
+sessionen — alltså inte bara ett misslyckat anrop utan **förlorad
+verktygsyta**, vilket tvingade mig till grep/edit för resten av arbetet.
+
+**Omväg som användes:** `read` + `edit` + `cargo check` (kompilatorn som
+facit). Det fungerade, men var exakt det §35 vill undvika.
+
+**Bedömning (preliminär, triage kvarstår):** klass (c) **saknad funktion**
++ (d) **lever under vad den borde**: `analyze` saknar svars-tak (paginering
+eller `max_depth`/`max_items`), och ett för stort svar dödar processen i
+stället för att trunkeras med en `truncated`-flagga. En 9 700-raders fil är
+normal storlek i Motor2 — inte ett extremfall.
+
+**Fix-riktning:** (1) hård gräns på serialiserad svarsstorlek med
+`truncated: true` + hänvisning till `get_skeleton {max_depth}`; (2) eller
+tvinga `max_depth`-parameter för filer över N rader. (3) MCP-lagret bör
+aldrig kunna döda servern på ett för stort svar — det är en
+tillgänglighetsbugg oavsett verktygets semantik.
+
+**Reproducerbart:** ja, deterministiskt på samma fil.
+
+
 
 
 
