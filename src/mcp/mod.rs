@@ -441,7 +441,11 @@ pub mod mcp_server {
                             .get("language")
                             .and_then(Value::as_str)
                             .unwrap_or("en");
-                        Ok(handle_describe(fp, producer, model, language))
+                        let detail = arguments
+                            .get("detail")
+                            .and_then(Value::as_str)
+                            .unwrap_or("skeleton");
+                        Ok(handle_describe(fp, producer, model, language, detail))
                     }
                     "claims" => {
                         let file = arguments.get("file").and_then(Value::as_str);
@@ -1008,14 +1012,15 @@ pub mod mcp_server {
             json!({
                 "name": "describe",
                 "title": "Describe a file as a persisted CLAIM",
-                "description": "Generate a description with the local model and PERSIST it in the code index as a CLAIM (not a fact). WHAT: unlike explain, which answers a question right now, describe leaves a durable record anchored to the store's content hash — so it turns `stale` when the file changes and `invalid` when it disappears, and it always carries the producer that wrote it. WHEN: building coverage over a codebase (describe the files nobody has asked about yet), or when a later reader should not pay the generation cost again. RETURNS: {claim, producer, model, language, device, anchored, prose{state,fresh,stale,invalid}}. Claims are OPTIONAL enrichment and never a gate — a stale claim is reported, never blocking. Example: {\"file_path\": \"src/core/age.rs\", \"producer\": \"lfm25\"}.",
+                "description": "Generate a description with the local model and PERSIST it in the code index as a CLAIM (not a fact). WHAT: unlike explain, which answers a question right now, describe leaves a durable record anchored to the store's content hash — so it turns `stale` when the file changes and `invalid` when it disappears, and it always carries the producer that wrote it. WHEN: building coverage over a codebase (describe the files nobody has asked about yet), or when a later reader should not pay the generation cost again. `detail` is a measured TRADE, not a free win (same 37 KB file): skeleton = 43 s and one useful line; source = 86 s and names the types and flow. Skeleton is the default for coverage breadth. RETURNS: {claim, producer, model, language, detail, device, anchored, prose{state,fresh,stale,invalid}}. Claims are OPTIONAL enrichment and never a gate — a stale claim is reported, never blocking. Example: {\"file_path\": \"src/core/age.rs\", \"producer\": \"lfm25\"}.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "file_path": { "type": "string", "description": "Path to the file to describe" },
                         "producer": { "type": "string", "description": "Who is making the claim (default lfm25) — recorded and always shown" },
                         "model": { "type": "string", "description": "Model note recorded with the claim" },
-                        "language": { "type": "string", "description": "Language of the claim text (default en)" }
+                        "language": { "type": "string", "description": "Language of the claim text (default en)" },
+                        "detail": { "type": "string", "description": "What the model reads: skeleton (default — signatures+structure, measured 43 s and one useful line) or source (reads the bodies, measured 86 s and names the types/flow). This is a TRADE, not a free win: half the time buys half the content. Pick skeleton for coverage breadth, source for depth." }
                     },
                     "required": ["file_path"]
                 }
@@ -3013,9 +3018,16 @@ or list_nodes for a flat index of this file.",
     /// purpose: `explain` answers a question now, `describe` leaves a durable,
     /// self-invalidating record with a producer attached.
     #[cfg(feature = "mamba")]
-    fn handle_describe(file_path: &str, producer: &str, model: &str, language: &str) -> Value {
+    fn handle_describe(
+        file_path: &str,
+        producer: &str,
+        model: &str,
+        language: &str,
+        detail: &str,
+    ) -> Value {
         let root = std::env::current_dir().unwrap_or_default();
         let project_root = crate::core::find_project_root(&root);
+        let detail = crate::llm::pipeline::DescribeDetail::parse(detail);
         match crate::llm::AiManager::new(&project_root) {
             Ok(mgr) => match crate::llm::pipeline::describe_file_persisted(
                 &mgr,
@@ -3024,6 +3036,7 @@ or list_nodes for a flat index of this file.",
                 producer,
                 model,
                 language,
+                detail,
             ) {
                 Ok((text, budget, prose)) => tool_success(
                     "Described file; claim stored".to_string(),
@@ -3033,6 +3046,9 @@ or list_nodes for a flat index of this file.",
                         "producer": producer,
                         "model": model,
                         "language": language,
+                        // What the model actually read — the reading cost is
+                        // 3.3x apart, so the answer names which one it paid.
+                        "detail": detail.as_str(),
                         "device": crate::llm::ai_manager::capability_report(
                             cfg!(feature = "ai"),
                             cfg!(feature = "mamba"),
@@ -3060,7 +3076,7 @@ or list_nodes for a flat index of this file.",
         }
     }
     #[cfg(not(feature = "mamba"))]
-    fn handle_describe(_f: &str, _p: &str, _m: &str, _l: &str) -> Value {
+    fn handle_describe(_f: &str, _p: &str, _m: &str, _l: &str, _d: &str) -> Value {
         tool_error(
             "describe requires the 'mamba' feature. Recompile with --features mamba".to_string(),
         )

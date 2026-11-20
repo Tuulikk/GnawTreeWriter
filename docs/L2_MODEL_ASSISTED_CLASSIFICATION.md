@@ -162,6 +162,30 @@ Läsare: `explain` kan citera en färsk claim i stället för att generera om, o
 **Vinst:** täckning (alla filer, inte bara de någon frågat om) och att svaret är
 beständigt. **Kostnad:** en bakgrundskörning, cachelagrad per `anchor_hash`.
 
+#### Kostnaden, mätt (2026-11-20) — och det val den tvingar fram
+
+90 s per fil var den ursprungliga siffran. Orsaken är trefaldig, mätt:
+
+| Lager | Andel | Varför |
+|---|---|---|
+| **Decode** | ~0,075 s/token | **minnesbandbredd**: 697 MB läses per genererad token |
+| **Prefill** | ~0,061 s/token | ~O(seq²) i candle — promptlängden är kvadratiskt dyr |
+| **Modelladdning** | ~6 s/anrop | per process; `OnceLock` räddar den bara *inom* ett anrop |
+
+`detail` gör därför en **mätt skillnad** på samma 37 KB-fil:
+
+| mode | prompt | wall | claimen |
+|---|---|---|---|
+| `skeleton` (default) | 593 t | **43 s** | en rad: vad modulen hanterar |
+| `source` | 1190 t | **86 s** | namnger typerna, strategierna, flödet |
+
+**Det är ett byte, inte en gratis vinst** — halva tiden ger halva innehållet.
+`skeleton` är default för *täckningsbredd* (en användbar rad per fil slår en rik
+rad för en tredjedel av filerna); `source` är en flagga bort när djupet väger
+tyngre. Siffrorna står här så valet görs på belägg, inte på antagandet att
+billigare är bättre.
+
+
 ### Nivå 2 — klassificering av det ambivalenta (visningskrav, inte grind)
 
 För de `ambiguous: 2 350`-fallen: låt modellen föreslå vilken `to_id` som avses,

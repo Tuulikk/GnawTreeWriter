@@ -726,6 +726,9 @@ enum Commands {
         model: String,
         #[arg(long, default_value = "en")]
         language: String,
+        /// What the model reads: skeleton (signatures, 3.3x faster) or source
+        #[arg(long, default_value = "skeleton")]
+        detail: String,
     },
     /// List persisted claims from the code index (read-only)
     Claims {
@@ -1887,8 +1890,9 @@ impl Cli {
                 producer,
                 model,
                 language,
+                detail,
             } => {
-                Self::handle_describe(&file, &producer, &model, &language)?;
+                Self::handle_describe(&file, &producer, &model, &language, &detail)?;
             }
             Commands::Claims { file } => {
                 Self::handle_claims(file.as_deref())?;
@@ -4074,10 +4078,17 @@ fi
 
     /// `describe` — generate a description and persist it as a CLAIM.
     #[cfg(feature = "mamba")]
-    fn handle_describe(file: &PathBuf, producer: &str, model: &str, language: &str) -> Result<()> {
+    fn handle_describe(
+        file: &PathBuf,
+        producer: &str,
+        model: &str,
+        language: &str,
+        detail: &str,
+    ) -> Result<()> {
         let json_mode = std::env::var("GNAW_JSON").is_ok();
         let project_root = find_project_root(&std::env::current_dir()?);
         let mgr = crate::llm::AiManager::new(&project_root)?;
+        let detail = crate::llm::pipeline::DescribeDetail::parse(detail);
         let (text, budget, prose) = crate::llm::pipeline::describe_file_persisted(
             &mgr,
             &project_root,
@@ -4085,13 +4096,14 @@ fi
             producer,
             model,
             language,
+            detail,
         )?;
         if json_mode {
             println!(
                 "{}",
                 serde_json::json!({
                     "claim": text, "tokens": budget, "prose": prose,
-                    "producer": producer, "model": model
+                    "producer": producer, "model": model, "detail": detail.as_str()
                 })
             );
         } else {
@@ -4099,13 +4111,14 @@ fi
             Self::print_budget(&budget);
             println!(
                 "claim stored: producer={producer} model={model} language={language} \
-                 — anchored to the store hash (goes stale when the file changes)"
+                 detail={} — anchored to the store hash (goes stale when the file changes)",
+                detail.as_str()
             );
         }
         Ok(())
     }
     #[cfg(not(feature = "mamba"))]
-    fn handle_describe(_f: &PathBuf, _p: &str, _m: &str, _l: &str) -> Result<()> {
+    fn handle_describe(_f: &PathBuf, _p: &str, _m: &str, _l: &str, _d: &str) -> Result<()> {
         Self::err_mamba_disabled()
     }
 

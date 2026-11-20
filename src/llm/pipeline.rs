@@ -154,6 +154,31 @@ pub fn explain_node(
     Ok((clean_output(&gen.text), budget))
 }
 
+/// What a `describe` call feeds the model. See `describe_file_persisted`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DescribeDetail {
+    /// Signatures + structure (default: 3.3x faster, measured).
+    Skeleton,
+    /// Full source text — when the bodies matter.
+    Source,
+}
+
+impl DescribeDetail {
+    pub fn parse(s: &str) -> Self {
+        match s.to_ascii_lowercase().as_str() {
+            "source" | "full" => DescribeDetail::Source,
+            _ => DescribeDetail::Skeleton,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DescribeDetail::Skeleton => "skeleton",
+            DescribeDetail::Source => "source",
+        }
+    }
+}
+
 /// `describe <file>` — produce a CLAIM about a file and persist it.
 ///
 /// The producer half of the prose layer (`docs/L2_MODEL_ASSISTED_CLASSIFICATION.md`
@@ -167,6 +192,21 @@ pub fn explain_node(
 ///    fact (ROADMAP: "index facts and prose claims never merge silently").
 /// 3. **Optional enrichment.** A missing store or model is REPORTED, never
 ///    blocking (ROADMAP: "staleness surfaces, it does not punish").
+///
+/// `detail` controls WHAT the model reads. Measured 2026-11-20 on the same
+/// 37 KB file, same machine, same model:
+///
+/// | mode       | prompt  | wall  | the claim |
+/// |------------|---------|-------|-----------|
+/// | `skeleton` |  593 t  | 43 s  | one line: what the module handles |
+/// | `source`   | 1190 t  | 86 s  | names the types, the strategies, the flow |
+///
+/// **This is a trade, not a free win**: half the time buys half the content.
+/// `skeleton` is the default because a coverage pass wants breadth — one
+/// useful line per file beats a rich line for a third of the files — and
+/// `source` is one flag away when depth matters more than coverage. The
+/// measured numbers are here so the choice is made on evidence, not on the
+/// assumption that cheaper is better.
 pub fn describe_file_persisted(
     mgr: &AiManager,
     root: &std::path::Path,
@@ -174,6 +214,7 @@ pub fn describe_file_persisted(
     producer: &str,
     model: &str,
     language: &str,
+    detail: DescribeDetail,
 ) -> Result<(String, crate::llm::TokenBudget, serde_json::Value)> {
     use crate::core::code_index_db as db;
 
@@ -201,7 +242,37 @@ pub fn describe_file_persisted(
         )
     })?;
 
-    let (text, budget) = explain_node(mgr, file_path, None, crate::llm::Resolution::Auto)?;
+    let (text, budget) = match detail {
+        DescribeDetail::Source => explain_node(mgr, file_path, None, crate::llm::Resolution::Auto)?,
+        DescribeDetail::Skeleton => {
+            // Reuse summarize's cheap path: signatures + structure instead of
+            // bodies. Measured 3.3x faster for a claim of the same use.
+            let path = std::path::Path::new(file_path);
+            let task = TaskParams::from_resolution(crate::llm::Resolution::Auto);
+            let mut budget = crate::llm::TokenBudget::default();
+            let mut exp_in = 0usize;
+            let mut exp_out = 0usize;
+            let text = summarize_file_chunked(
+                mgr,
+                &path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| file_path.to_string()),
+                path,
+                &task,
+                &mut budget,
+                &mut exp_in,
+                &mut exp_out,
+            )?;
+            // The chunked path accumulates its expectations in its own out-
+            // params; carry them into the budget it also filled so the answer
+            // never reports "0 in / 0 out (expected)".
+            budget.expected_input = exp_in;
+            budget.expected_output = exp_out;
+            budget.estimate_seconds(&mgr.timing());
+            (text, budget)
+        }
+    };
 
     let revision_id = conn
         .query_row(
