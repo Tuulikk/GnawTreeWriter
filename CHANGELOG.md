@@ -1,5 +1,31 @@
 ## [Unreleased]
 
+### Added — hash-unifiering (§8.9 steg 1: temporal store, förutsättningen)
+
+`calculate_content_hash` är nu **md5 av bytes** — samma schema som Code Index-storens
+`files.hash`. Tidigare var den DefaultHasher (SipHash, 16-hex, instabil över
+Rust-versioner); nu är en hash sanningskällan för hela systemet.
+
+* **`hash_scheme`-märkning per transaktion:** varje transaktion med
+  innehållshashar stämplar `metadata["hash_scheme"] = "md5"`. Gamla journalrader
+  saknar märket och läses som `"siphash"` — det är paritetskontraktet: gamla
+  undo:n fortsätter fungera oförändrat (`undo_create_file` hashar nu med
+  transaktionens EGET schema via `content_hash_matching`).
+* **`parse_backup_file` räknar båda hasharna** över samma bytes (`content_hash`
+  = md5, ny `legacy_content_hash` = siphash), och backup-sökningarna matchar
+  båda schemana. `parse_backup_name` godtar nu 16- OCH 32-hex i v3-namn.
+* Nya nycklar i journalen: `hash_scheme` i transaktion-metadata; `"hash_scheme"`
+  i nya backup-blobbar (proveniens). Nya offentliga namn: `legacy_content_hash`,
+  `content_hash_for_scheme`, `HASH_SCHEME_MD5`, `HASH_SCHEME_LEGACY`,
+  `Transaction::hash_scheme`, `Transaction::content_hash_matching`.
+* **Känd konsekvens (drift, ej förlust):** vektorindexets fingeravtryck byter
+  schema → nästa `ai index` bygger om inbäddningarna en gång. Ett gammalt
+  mottaget MCP-kvitto (`node_content_hash`, B1) kan ge en engångs
+  `E_PATH_STALE` mot ny binär — det säkra felet: sök om noden och försök igen.
+  `label_manager` är medvetet FROSTAD på legacy-schemat (persistade nycklar
+  går inte att härleda utan nodinnehållet; migrering hör till
+  store-konsolideringen).
+
 ### Fixed — attributionen nådde inte alla skrivvägar
 
 Attributionen var kopplad i `edit`, `quick-insert` och `quick-replace`, men inte i

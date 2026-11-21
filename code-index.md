@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 632db5f321b42295ee7acbd97be810cb
+> Body-hash: 37c87e99812cdbd16fe5377f25d70af3
 
 ## Träd
 
@@ -82,7 +82,7 @@ scripts/hooks/
   block-text-replace.py (258 rader)
 src/
   auth_demo.rs (19 rader)
-  cli.rs (7873 rader)
+  cli.rs (7882 rader)
   lib.rs (11 rader)
   main.rs (77 rader)
   network.rs (14 rader)
@@ -92,7 +92,7 @@ src/core/
   alf.rs (122 rader)
   anchor.rs (166 rader)
   attribution.rs (397 rader)
-  backup.rs (549 rader)
+  backup.rs (659 rader)
   batch.rs (933 rader)
   binding_observations.rs (457 rader)
   blast.rs (310 rader)
@@ -120,28 +120,28 @@ src/core/
   guardian.rs (332 rader)
   healer.rs (297 rader)
   index_entities.rs (1118 rader)
-  index_levels.rs (312 rader)
+  index_levels.rs (313 rader)
   index_relations.rs (971 rader)
   inspect.rs (514 rader)
   island_scan.rs (668 rader)
-  label_manager.rs (90 rader)
+  label_manager.rs (95 rader)
   macro_dispatcher.rs (249 rader)
-  mod.rs (3016 rader)
+  mod.rs (3018 rader)
   pack.rs (749 rader)
   parse_cache.rs (119 rader)
   project_root.rs (186 rader)
   report.rs (86 rader)
-  restoration_engine.rs (446 rader)
+  restoration_engine.rs (451 rader)
   rules.rs (1289 rader)
   scaffold.rs (274 rader)
   secrets.rs (401 rader)
   state.rs (164 rader)
-  state_head.rs (461 rader)
+  state_head.rs (465 rader)
   stats.rs (335 rader)
   tag_manager.rs (297 rader)
   token_count.rs (150 rader)
-  transaction_log.rs (758 rader)
-  undo_redo.rs (1290 rader)
+  transaction_log.rs (906 rader)
+  undo_redo.rs (1294 rader)
   visualizer.rs (200 rader)
   visualizer_test.rs (82 rader)
 src/llm/
@@ -547,7 +547,7 @@ _(inga toppnivå-items)_
 ### auth_demo.rs (19 rader)
 _(inga toppnivå-items)_
 
-### cli.rs (7873 rader)
+### cli.rs (7882 rader)
 - `enum McpSubcommands` :28
 - `pub struct Cli` :73
 - `impl Cli` :109
@@ -633,36 +633,36 @@ _(inga toppnivå-items)_
   - `fn handle_restore_files(since: &str, file_patterns: &[String], preview: bool) -> Result<()>` :4956
   - `fn handle_restore_session(session_id: &str, preview: bool) -> Result<()>` :5021
   - `fn handle_debug_hash(content: &str) -> Result<()>` :5066
-  - `fn handle_commands(json: bool) -> Result<()>` :5084
-  - `fn handle_examples(topic: Option<&str>) -> Result<()>` :5192
-  - `fn handle_wizard(task: Option<&str>) -> Result<()>` :5529
-  - `fn show_visual_pulse(writer: &GnawTreeWriter, focus_path: &str, narrative: Option<&str>)` :5748
-  - `fn show_visual_diff(` :5774
-  - `fn handle_analyze(paths: &[String], format: &str, recursive: bool) -> Result<()>` :5848
-  - `fn handle_quick_insert(` :5944
-  - `fn find_supported_files(dir: &std::path::Path) -> Result<Vec<String>>` :6058
-  - `fn handle_quick_replace(` :6087
-  - `fn handle_rename(` :6200
-  - `fn handle_clone(` :6212
-  - `fn handle_move(` :6289
-  - `fn find_node_by_path<'a>(tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :6368
-  - `fn handle_lint(` :6381
-  - `fn handle_rules_add(` :6506
-  - `fn handle_rules_list() -> Result<()>` :6550
-  - `fn handle_lint_discover(paths: &[String]) -> Result<()>` :6577
-  - `fn handle_lint_discover(_paths: &[String]) -> Result<()>` :6710
-  - `fn parse_rule_proposals(s: &str) -> Result<Vec<serde_json::Value>>` :6718
-  - `fn handle_capabilities(json: bool) -> Result<()>` :6730
-  - `fn handle_doctor(format: Option<&str>) -> Result<()>` :6746
-  - `fn handle_head(verify: bool, json: bool, save: bool, trace: bool) -> Result<()>` :6825
-  - `async fn handle_health_check() -> Result<()>` :6998
-- `const SENSE_COSINE_WARN: f32 = crate::llm::gnaw_sense::SENSE_ANSWERABLE_COSINE` :7233
-- `fn sense_confidence(` :7251
-- `fn print_diff(old: &str, new: &str)` :7280
-- `fn show_hint()` :7293
-- `fn list_nodes(` :7323
-- `fn resolve_content(` :7384
-- `fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>>` :7421
+  - `fn handle_commands(json: bool) -> Result<()>` :5093
+  - `fn handle_examples(topic: Option<&str>) -> Result<()>` :5201
+  - `fn handle_wizard(task: Option<&str>) -> Result<()>` :5538
+  - `fn show_visual_pulse(writer: &GnawTreeWriter, focus_path: &str, narrative: Option<&str>)` :5757
+  - `fn show_visual_diff(` :5783
+  - `fn handle_analyze(paths: &[String], format: &str, recursive: bool) -> Result<()>` :5857
+  - `fn handle_quick_insert(` :5953
+  - `fn find_supported_files(dir: &std::path::Path) -> Result<Vec<String>>` :6067
+  - `fn handle_quick_replace(` :6096
+  - `fn handle_rename(` :6209
+  - `fn handle_clone(` :6221
+  - `fn handle_move(` :6298
+  - `fn find_node_by_path<'a>(tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :6377
+  - `fn handle_lint(` :6390
+  - `fn handle_rules_add(` :6515
+  - `fn handle_rules_list() -> Result<()>` :6559
+  - `fn handle_lint_discover(paths: &[String]) -> Result<()>` :6586
+  - `fn handle_lint_discover(_paths: &[String]) -> Result<()>` :6719
+  - `fn parse_rule_proposals(s: &str) -> Result<Vec<serde_json::Value>>` :6727
+  - `fn handle_capabilities(json: bool) -> Result<()>` :6739
+  - `fn handle_doctor(format: Option<&str>) -> Result<()>` :6755
+  - `fn handle_head(verify: bool, json: bool, save: bool, trace: bool) -> Result<()>` :6834
+  - `async fn handle_health_check() -> Result<()>` :7007
+- `const SENSE_COSINE_WARN: f32 = crate::llm::gnaw_sense::SENSE_ANSWERABLE_COSINE` :7242
+- `fn sense_confidence(` :7260
+- `fn print_diff(old: &str, new: &str)` :7289
+- `fn show_hint()` :7302
+- `fn list_nodes(` :7332
+- `fn resolve_content(` :7393
+- `fn parse_user_timestamp(timestamp: &str) -> Result<chrono::DateTime<chrono::Utc>>` :7430
 
 ### lib.rs (11 rader)
 _(inga toppnivå-items)_
@@ -754,18 +754,18 @@ _(inga toppnivå-items)_
   - `pub fn as_str(&self) -> &'static str` :303
   - `pub fn parse(s: &str) -> Option<Role>` :315
 
-### backup.rs (549 rader)
+### backup.rs (659 rader)
 - `pub struct BackupFile` :18
-- `pub fn list_backup_files<P: AsRef<Path>>(backup_dir: P) -> Result<Vec<BackupFile>>` :32
-- `pub fn parse_backup_file<P: AsRef<Path>>(backup_path: P) -> Result<BackupFile>` :66
-- `pub fn find_backup_by_content_hash<P: AsRef<Path>>(` :108
-- `pub(crate) fn parse_backup_name(name: &str) -> Option<(String, String)>` :145
-- `pub(crate) fn mangle_path_for_name(path: &str) -> String` :162
-- `fn name_timestamp(name: &str) -> Option<DateTime<Utc>>` :169
-- `fn find_v3_by_hash_and_path<P: AsRef<Path>>(` :180
-- `pub fn find_backup_by_content_hash_for_file<P: AsRef<Path>>(` :208
-- `pub fn write_after_blob(project_root: &Path, file_path: &str, content: &str) -> Result<String>` :245
-- `pub fn restore_from_backup<P: AsRef<Path>, Q: AsRef<Path>>(` :277
+- `pub fn list_backup_files<P: AsRef<Path>>(backup_dir: P) -> Result<Vec<BackupFile>>` :37
+- `pub fn parse_backup_file<P: AsRef<Path>>(backup_path: P) -> Result<BackupFile>` :71
+- `pub fn find_backup_by_content_hash<P: AsRef<Path>>(` :118
+- `pub(crate) fn parse_backup_name(name: &str) -> Option<(String, String)>` :160
+- `pub(crate) fn mangle_path_for_name(path: &str) -> String` :181
+- `fn name_timestamp(name: &str) -> Option<DateTime<Utc>>` :188
+- `fn find_v3_by_hash_and_path<P: AsRef<Path>>(` :199
+- `pub fn find_backup_by_content_hash_for_file<P: AsRef<Path>>(` :230
+- `pub fn write_after_blob(project_root: &Path, file_path: &str, content: &str) -> Result<String>` :268
+- `pub fn restore_from_backup<P: AsRef<Path>, Q: AsRef<Path>>(` :300
 
 ### batch.rs (933 rader)
 - `pub enum BatchOp` :31
@@ -1287,16 +1287,16 @@ _(inga toppnivå-items)_
 - `fn extract_static(` :788
 - `fn extract_module(` :818
 
-### index_levels.rs (312 rader)
+### index_levels.rs (313 rader)
 - `pub struct LevelStatus` :26
 - `pub struct LevelsReport` :46
-- `fn content_fingerprint(text: &str) -> String` :57
-- `fn disk_hash(path: &Path) -> Option<String>` :63
-- `fn disk_fingerprint(path: &Path) -> Option<String>` :69
-- `pub fn measure(root: &Path) -> Result<LevelsReport>` :77
-- `fn measure_vectors(root: &Path, ast_paths: &[(String, String)]) -> LevelStatus` :142
-- `fn embeddings_db(root: &Path) -> std::path::PathBuf` :211
-- `fn embeddings_legacy_stores(root: &Path) -> Vec<String>` :220
+- `fn content_fingerprint(text: &str) -> String` :58
+- `fn disk_hash(path: &Path) -> Option<String>` :64
+- `fn disk_fingerprint(path: &Path) -> Option<String>` :70
+- `pub fn measure(root: &Path) -> Result<LevelsReport>` :78
+- `fn measure_vectors(root: &Path, ast_paths: &[(String, String)]) -> LevelStatus` :143
+- `fn embeddings_db(root: &Path) -> std::path::PathBuf` :212
+- `fn embeddings_legacy_stores(root: &Path) -> Vec<String>` :221
 
 ### index_relations.rs (971 rader)
 - `pub struct Relation` :14
@@ -1362,16 +1362,16 @@ _(inga toppnivå-items)_
 - `struct Scope` :516
 - `fn severity_rank(severity: &str) -> u8` :522
 
-### label_manager.rs (90 rader)
-- `pub struct LabelInfo` :9
-- `pub struct LabelStore` :16
-- `pub struct LabelManager` :20
-- `impl LabelManager` :25
-  - `pub fn load(project_root: &Path) -> Result<Self>` :26
-  - `pub fn save(&self) -> Result<()>` :38
-  - `pub fn add_label(&mut self, file_path: &str, node_content: &str, label: &str) -> Result<()>` :44
-  - `pub fn get_labels(&self, file_path: &str, node_content: &str) -> Vec<String>` :61
-  - `pub fn remove_label(` :71
+### label_manager.rs (95 rader)
+- `pub struct LabelInfo` :14
+- `pub struct LabelStore` :21
+- `pub struct LabelManager` :25
+- `impl LabelManager` :30
+  - `pub fn load(project_root: &Path) -> Result<Self>` :31
+  - `pub fn save(&self) -> Result<()>` :43
+  - `pub fn add_label(&mut self, file_path: &str, node_content: &str, label: &str) -> Result<()>` :49
+  - `pub fn get_labels(&self, file_path: &str, node_content: &str) -> Vec<String>` :66
+  - `pub fn remove_label(` :76
 
 ### macro_dispatcher.rs (249 rader)
 - `pub trait MacroParser: Send + Sync` :14
@@ -1393,57 +1393,57 @@ _(inga toppnivå-items)_
 - `pub fn is_token_tree(node: &TreeNode) -> bool` :147
 - `pub fn try_expand_macro(` :152
 
-### mod.rs (3016 rader)
-- `pub struct GnawTreeWriter` :79
-- `pub enum EditOperation` :106
-- `pub struct EditReceipt` :130
-- `pub(crate) fn skeleton_outline(` :153
-- `pub(crate) fn detect_replacement_remnant(` :233
-- `pub(crate) fn check_duplicate_definitions(` :309
-- `pub(crate) fn check_duplicate_attribute_above(` :383
-- `fn flatten_comment_children(node: &mut TreeNode)` :435
-- `impl GnawTreeWriter` :445
-  - `pub fn new(file_path: &str) -> Result<Self>` :446
-  - `pub fn new_with_boundary(file_path: &str, boundary: Option<&Path>) -> Result<Self>` :456
-  - `pub fn new_lenient(file_path: &str) -> Result<(Self, Option<crate::parser::SyntaxError>)>` :490
-  - `pub fn new_lenient_with_boundary(` :497
-  - `pub fn last_backup_path(&self) -> Option<PathBuf>` :532
-  - `pub fn last_transaction_id(&self) -> Option<String>` :538
-  - `pub fn last_edit_receipt(&self) -> Option<&EditReceipt>` :545
-  - `pub fn last_edit_verdict(&self) -> Option<&serde_json::Value>` :553
-  - `fn set_verdict(` :557
-  - `pub fn last_edit_impact(&self) -> Option<&serde_json::Value>` :575
-  - `pub(crate) fn store_content_blob(&self, content: &str) -> Result<String>` :589
-  - `pub fn set_attribution(&mut self, attribution: crate::core::attribution::Attribution)` :597
-  - `pub fn attribution(&self) -> &crate::core::attribution::Attribution` :601
-  - `pub(crate) fn create_backup(&mut self) -> Result<PathBuf>` :605
-  - `pub fn analyze(&self) -> &TreeNode` :657
-  - `pub fn show_node(&self, node_path: &str) -> Result<String>` :661
-  - `pub fn node_count(&self) -> usize` :674
-  - `pub fn node_exists(&self, node_path: &str) -> bool` :683
-  - `pub fn expect_node(` :694
-  - `pub fn edit(&mut self, operation: EditOperation, force: bool) -> Result<()>` :736
-  - `fn is_json_document(&self) -> bool` :1195
-  - `pub fn preview_edit(&self, operation: EditOperation) -> Result<String>` :1203
-  - `fn resolve_path<'a>(&'a self, query: &str) -> Option<&'a TreeNode>` :1247
-  - `fn find_node_by_path<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :1263
-  - `fn find_node_by_name<'a>(` :1278
-  - `fn doc_block_start_line(&self, node: &TreeNode) -> usize` :1330
-  - `pub fn describe_node(&self, query: &str) -> Option<(String, String, Option<String>)>` :1352
-  - `fn json_semantic_edit(&self, node_path: &str, new_content: &str) -> Result<String>` :1373
-  - `fn json_new_value(content: &str, allow_string: bool) -> Option<serde_json::Value>` :1476
-  - `fn json_content_error(content: &str, target: &str) -> anyhow::Error` :1486
-  - `fn json_render(v: &serde_json::Value) -> String` :1498
-  - `fn join_preserving_newline<S: AsRef<str>>(lines: &[S], source: &str) -> String` :1513
-  - `fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String>` :1532
-  - `fn insert_node_at_path(` :1649
-  - `fn delete_node_at_path(&self, node_path: &str) -> Result<String>` :1850
-  - `pub fn get_source(&self) -> &str` :1894
-- `pub fn find_project_root(start_path: &Path) -> PathBuf` :1901
-- `pub fn find_project_root_in(start_path: &Path, boundary: Option<&Path>) -> PathBuf` :1914
-- `fn count_changed_bytes(before: &str, after: &str) -> usize` :1952
-- `pub(crate) fn verdict_json(` :1964
-- `pub(crate) fn signature_impact_for(` :1983
+### mod.rs (3018 rader)
+- `pub struct GnawTreeWriter` :80
+- `pub enum EditOperation` :107
+- `pub struct EditReceipt` :131
+- `pub(crate) fn skeleton_outline(` :154
+- `pub(crate) fn detect_replacement_remnant(` :234
+- `pub(crate) fn check_duplicate_definitions(` :310
+- `pub(crate) fn check_duplicate_attribute_above(` :384
+- `fn flatten_comment_children(node: &mut TreeNode)` :436
+- `impl GnawTreeWriter` :446
+  - `pub fn new(file_path: &str) -> Result<Self>` :447
+  - `pub fn new_with_boundary(file_path: &str, boundary: Option<&Path>) -> Result<Self>` :457
+  - `pub fn new_lenient(file_path: &str) -> Result<(Self, Option<crate::parser::SyntaxError>)>` :491
+  - `pub fn new_lenient_with_boundary(` :498
+  - `pub fn last_backup_path(&self) -> Option<PathBuf>` :533
+  - `pub fn last_transaction_id(&self) -> Option<String>` :539
+  - `pub fn last_edit_receipt(&self) -> Option<&EditReceipt>` :546
+  - `pub fn last_edit_verdict(&self) -> Option<&serde_json::Value>` :554
+  - `fn set_verdict(` :558
+  - `pub fn last_edit_impact(&self) -> Option<&serde_json::Value>` :576
+  - `pub(crate) fn store_content_blob(&self, content: &str) -> Result<String>` :590
+  - `pub fn set_attribution(&mut self, attribution: crate::core::attribution::Attribution)` :598
+  - `pub fn attribution(&self) -> &crate::core::attribution::Attribution` :602
+  - `pub(crate) fn create_backup(&mut self) -> Result<PathBuf>` :606
+  - `pub fn analyze(&self) -> &TreeNode` :659
+  - `pub fn show_node(&self, node_path: &str) -> Result<String>` :663
+  - `pub fn node_count(&self) -> usize` :676
+  - `pub fn node_exists(&self, node_path: &str) -> bool` :685
+  - `pub fn expect_node(` :696
+  - `pub fn edit(&mut self, operation: EditOperation, force: bool) -> Result<()>` :738
+  - `fn is_json_document(&self) -> bool` :1197
+  - `pub fn preview_edit(&self, operation: EditOperation) -> Result<String>` :1205
+  - `fn resolve_path<'a>(&'a self, query: &str) -> Option<&'a TreeNode>` :1249
+  - `fn find_node_by_path<'a>(&self, tree: &'a TreeNode, path: &str) -> Option<&'a TreeNode>` :1265
+  - `fn find_node_by_name<'a>(` :1280
+  - `fn doc_block_start_line(&self, node: &TreeNode) -> usize` :1332
+  - `pub fn describe_node(&self, query: &str) -> Option<(String, String, Option<String>)>` :1354
+  - `fn json_semantic_edit(&self, node_path: &str, new_content: &str) -> Result<String>` :1375
+  - `fn json_new_value(content: &str, allow_string: bool) -> Option<serde_json::Value>` :1478
+  - `fn json_content_error(content: &str, target: &str) -> anyhow::Error` :1488
+  - `fn json_render(v: &serde_json::Value) -> String` :1500
+  - `fn join_preserving_newline<S: AsRef<str>>(lines: &[S], source: &str) -> String` :1515
+  - `fn edit_node_at_path(&self, node_path: &str, new_content: &str) -> Result<String>` :1534
+  - `fn insert_node_at_path(` :1651
+  - `fn delete_node_at_path(&self, node_path: &str) -> Result<String>` :1852
+  - `pub fn get_source(&self) -> &str` :1896
+- `pub fn find_project_root(start_path: &Path) -> PathBuf` :1903
+- `pub fn find_project_root_in(start_path: &Path, boundary: Option<&Path>) -> PathBuf` :1916
+- `fn count_changed_bytes(before: &str, after: &str) -> usize` :1954
+- `pub(crate) fn verdict_json(` :1966
+- `pub(crate) fn signature_impact_for(` :1985
 
 ### pack.rs (749 rader)
 - `pub enum PackFormat` :15
@@ -1493,29 +1493,29 @@ _(inga toppnivå-items)_
   - `pub fn new() -> Self` :24
   - `pub fn generate_markdown_report(&self, project_root: &Path, limit: usize) -> Result<String>` :28
 
-### restoration_engine.rs (446 rader)
+### restoration_engine.rs (451 rader)
 - `pub struct RestorationEngine` :9
 - `pub struct RestorationResult` :16
 - `pub struct BackupFile` :24
-- `impl RestorationEngine` :31
-  - `pub fn new<P: AsRef<Path>>(project_root: P) -> Result<Self>` :33
-  - `pub fn execute_project_restoration(` :50
-  - `pub fn restore_file_to_transaction(&self, transaction_id: &str) -> Result<PathBuf>` :104
-  - `fn restore_by_hash(&self, transaction: &Transaction) -> Result<PathBuf>` :121
-  - `fn restore_by_timestamp(&self, transaction: &Transaction) -> Result<PathBuf>` :149
-  - `pub fn restore_files_before_timestamp(` :188
-  - `pub fn restore_file_before_timestamp(` :244
-  - `pub fn restore_session(&self, session_id: &str) -> Result<RestorationResult>` :266
-  - `fn get_session_transactions(&self, session_id: &str) -> Result<Vec<Transaction>>` :294
-  - `fn find_next_transaction_for_file(` :303
-  - `fn find_backup_by_content_hash(&self, content_hash: &str) -> Result<Option<BackupFile>>` :325
-  - `fn list_backup_files(&self) -> Result<Vec<BackupFile>>` :341
-  - `fn restore_from_backup(&self, target_path: &Path, backup_path: &Path) -> Result<PathBuf>` :358
-  - `pub fn get_restoration_stats(&self) -> Result<RestorationStats>` :364
-- `pub struct RestorationStats` :385
-- `impl RestorationResult` :393
-  - `pub fn print_summary(&self)` :394
-  - `pub fn success_rate(&self) -> f64` :412
+- `impl RestorationEngine` :34
+  - `pub fn new<P: AsRef<Path>>(project_root: P) -> Result<Self>` :36
+  - `pub fn execute_project_restoration(` :53
+  - `pub fn restore_file_to_transaction(&self, transaction_id: &str) -> Result<PathBuf>` :107
+  - `fn restore_by_hash(&self, transaction: &Transaction) -> Result<PathBuf>` :124
+  - `fn restore_by_timestamp(&self, transaction: &Transaction) -> Result<PathBuf>` :152
+  - `pub fn restore_files_before_timestamp(` :191
+  - `pub fn restore_file_before_timestamp(` :247
+  - `pub fn restore_session(&self, session_id: &str) -> Result<RestorationResult>` :269
+  - `fn get_session_transactions(&self, session_id: &str) -> Result<Vec<Transaction>>` :297
+  - `fn find_next_transaction_for_file(` :306
+  - `fn find_backup_by_content_hash(&self, content_hash: &str) -> Result<Option<BackupFile>>` :328
+  - `fn list_backup_files(&self) -> Result<Vec<BackupFile>>` :345
+  - `fn restore_from_backup(&self, target_path: &Path, backup_path: &Path) -> Result<PathBuf>` :363
+  - `pub fn get_restoration_stats(&self) -> Result<RestorationStats>` :369
+- `pub struct RestorationStats` :390
+- `impl RestorationResult` :398
+  - `pub fn print_summary(&self)` :399
+  - `pub fn success_rate(&self) -> f64` :417
 
 ### rules.rs (1289 rader)
 - `pub enum Severity` :17
@@ -1599,7 +1599,7 @@ _(inga toppnivå-items)_
   - `pub fn file_hash(&self, path: &str) -> Option<&str>` :89
 - `fn get_git_head(project_root: &Path) -> String` :95
 
-### state_head.rs (461 rader)
+### state_head.rs (465 rader)
 - `pub const HEAD_FILE: &str = ".gnawtreewriter_head.json"` :27
 - `const SCHEMA: u32 = 1` :28
 - `pub struct HeadEntry` :31
@@ -1645,52 +1645,58 @@ _(inga toppnivå-items)_
 - `impl TokenSummary` :48
   - `pub fn from_files(entries: &[(&str, &str)]) -> Self` :49
 
-### transaction_log.rs (758 rader)
+### transaction_log.rs (906 rader)
 - `pub struct Transaction` :11
 - `impl Transaction` :24
   - `pub fn attribution(&self) -> crate::core::attribution::Attribution` :27
-- `pub enum OperationType` :33
-- `pub struct TransactionLog` :65
-- `impl TransactionLog` :72
-  - `pub fn get_current_session_id(&self) -> &str` :73
-  - `pub fn new<P: AsRef<Path>>(project_root: P) -> Result<Self>` :78
-  - `pub fn load<P: AsRef<Path>>(project_root: P) -> Result<Self>` :108
-  - `fn ensure_session_exists(&mut self) -> Result<()>` :139
-  - `pub fn log_transaction(` :170
-  - `pub fn get_transaction(&self, transaction_id: &str) -> Result<Transaction>` :214
-  - `pub fn get_session_history(&self) -> &[Transaction]` :220
-  - `pub fn get_full_history(&self) -> Result<Vec<Transaction>>` :225
-  - `pub fn applied_transactions(history: &[Transaction]) -> (Vec<String>, Vec<String>)` :243
-  - `pub fn redo_candidates(history: &[Transaction]) -> Vec<String>` :291
-  - `fn load_full_history_from_file(log_file: &PathBuf) -> Result<Vec<Transaction>>` :315
-  - `pub fn get_file_history<P: AsRef<Path>>(&self, file_path: P) -> Result<Vec<Transaction>>` :340
-  - `pub fn get_history_since(&self, since: DateTime<Utc>) -> Result<Vec<Transaction>>` :351
-  - `pub fn get_history_range(` :361
-  - `pub fn get_affected_files_since(&self, since: DateTime<Utc>) -> Result<Vec<PathBuf>>` :375
-  - `pub fn get_session_files(&self, session_id: &str) -> Result<Vec<PathBuf>>` :392
-  - `pub fn get_last_transaction_before(` :411
-  - `pub fn get_project_restoration_plan(` :431
-  - `fn count_modifications_since(` :460
-  - `fn count_transactions_since(&self, since: DateTime<Utc>) -> Result<usize>` :479
-  - `pub fn find_transaction(&self, transaction_id: &str) -> Result<Option<Transaction>>` :493
-  - `pub fn get_last_n_transactions(&self, n: usize) -> Result<Vec<Transaction>>` :513
-  - `pub fn start_new_session(&mut self, name: Option<String>) -> Result<()>` :520
-  - `pub fn export_history(&self, format: ExportFormat) -> Result<String>` :573
-  - `fn append_to_log(&self, transaction: &Transaction) -> Result<()>` :585
-- `pub enum ExportFormat` :605
-- `pub struct ProjectRestorationPlan` :612
-- `pub struct FileRestorationPlan` :620
-- `impl ProjectRestorationPlan` :627
-  - `pub fn has_changes(&self) -> bool` :629
-  - `pub fn get_summary(&self) -> String` :634
-  - `pub fn get_file_list(&self) -> Vec<&PathBuf>` :644
-- `fn generate_session_id() -> String` :650
-- `fn generate_transaction_id() -> String` :655
-- `pub fn calculate_content_hash(content: &str) -> String` :660
-- `impl OperationType` :669
-  - `pub fn is_content_operation(&self) -> bool` :674
+  - `pub fn hash_scheme(&self) -> &str` :35
+  - `pub fn content_hash_matching(&self, content: &str) -> Result<String>` :46
+- `pub enum OperationType` :52
+- `pub struct TransactionLog` :84
+- `impl TransactionLog` :91
+  - `pub fn get_current_session_id(&self) -> &str` :92
+  - `pub fn new<P: AsRef<Path>>(project_root: P) -> Result<Self>` :97
+  - `pub fn load<P: AsRef<Path>>(project_root: P) -> Result<Self>` :127
+  - `fn ensure_session_exists(&mut self) -> Result<()>` :158
+  - `pub fn log_transaction(` :189
+  - `pub fn get_transaction(&self, transaction_id: &str) -> Result<Transaction>` :244
+  - `pub fn get_session_history(&self) -> &[Transaction]` :250
+  - `pub fn get_full_history(&self) -> Result<Vec<Transaction>>` :255
+  - `pub fn applied_transactions(history: &[Transaction]) -> (Vec<String>, Vec<String>)` :273
+  - `pub fn redo_candidates(history: &[Transaction]) -> Vec<String>` :321
+  - `fn load_full_history_from_file(log_file: &PathBuf) -> Result<Vec<Transaction>>` :345
+  - `pub fn get_file_history<P: AsRef<Path>>(&self, file_path: P) -> Result<Vec<Transaction>>` :370
+  - `pub fn get_history_since(&self, since: DateTime<Utc>) -> Result<Vec<Transaction>>` :381
+  - `pub fn get_history_range(` :391
+  - `pub fn get_affected_files_since(&self, since: DateTime<Utc>) -> Result<Vec<PathBuf>>` :405
+  - `pub fn get_session_files(&self, session_id: &str) -> Result<Vec<PathBuf>>` :422
+  - `pub fn get_last_transaction_before(` :441
+  - `pub fn get_project_restoration_plan(` :461
+  - `fn count_modifications_since(` :490
+  - `fn count_transactions_since(&self, since: DateTime<Utc>) -> Result<usize>` :509
+  - `pub fn find_transaction(&self, transaction_id: &str) -> Result<Option<Transaction>>` :523
+  - `pub fn get_last_n_transactions(&self, n: usize) -> Result<Vec<Transaction>>` :543
+  - `pub fn start_new_session(&mut self, name: Option<String>) -> Result<()>` :550
+  - `pub fn export_history(&self, format: ExportFormat) -> Result<String>` :603
+  - `fn append_to_log(&self, transaction: &Transaction) -> Result<()>` :615
+- `pub enum ExportFormat` :635
+- `pub struct ProjectRestorationPlan` :642
+- `pub struct FileRestorationPlan` :650
+- `impl ProjectRestorationPlan` :657
+  - `pub fn has_changes(&self) -> bool` :659
+  - `pub fn get_summary(&self) -> String` :664
+  - `pub fn get_file_list(&self) -> Vec<&PathBuf>` :674
+- `fn generate_session_id() -> String` :680
+- `fn generate_transaction_id() -> String` :685
+- `pub const HASH_SCHEME_MD5: &str = "md5"` :694
+- `pub const HASH_SCHEME_LEGACY: &str = "siphash"` :697
+- `pub fn legacy_content_hash(content: &str) -> String` :703
+- `pub fn content_hash_for_scheme(scheme: &str, content: &str) -> Result<String>` :714
+- `pub fn calculate_content_hash(content: &str) -> String` :726
+- `impl OperationType` :730
+  - `pub fn is_content_operation(&self) -> bool` :735
 
-### undo_redo.rs (1290 rader)
+### undo_redo.rs (1294 rader)
 - `pub struct UndoRedoManager` :11
 - `impl UndoRedoManager` :19
   - `pub fn new<P: AsRef<Path>>(project_root: P) -> Result<Self>` :21
@@ -1707,24 +1713,24 @@ _(inga toppnivå-items)_
   - `fn undo_edit(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :290
   - `fn redo_edit(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :316
   - `fn undo_create_file(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :353
-  - `pub fn undo_file_creation(&mut self) -> Result<Option<UndoRedoResult>>` :399
-  - `fn undo_insert(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :430
-  - `fn redo_insert(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :475
-  - `fn undo_delete(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :519
-  - `fn redo_delete(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :561
-  - `fn undo_add_property(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :605
-  - `fn redo_add_property(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :650
-  - `fn undo_add_component(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :694
-  - `fn redo_add_component(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :739
-  - `fn undo_move(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :783
-  - `fn redo_move(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :825
-  - `fn undo_restore(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :866
-  - `fn redo_restore(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :911
-  - `fn find_next_transaction_for_file(` :956
-  - `fn find_backup_by_hash(` :977
-  - `fn restore_from_backup(&self, target_path: &Path, backup_path: &Path) -> Result<()>` :1013
-- `pub struct UndoRedoResult` :1037
-- `pub struct UndoRedoState` :1047
+  - `pub fn undo_file_creation(&mut self) -> Result<Option<UndoRedoResult>>` :403
+  - `fn undo_insert(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :434
+  - `fn redo_insert(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :479
+  - `fn undo_delete(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :523
+  - `fn redo_delete(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :565
+  - `fn undo_add_property(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :609
+  - `fn redo_add_property(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :654
+  - `fn undo_add_component(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :698
+  - `fn redo_add_component(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :743
+  - `fn undo_move(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :787
+  - `fn redo_move(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :829
+  - `fn undo_restore(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :870
+  - `fn redo_restore(&self, transaction: &Transaction) -> Result<UndoRedoResult>` :915
+  - `fn find_next_transaction_for_file(` :960
+  - `fn find_backup_by_hash(` :981
+  - `fn restore_from_backup(&self, target_path: &Path, backup_path: &Path) -> Result<()>` :1017
+- `pub struct UndoRedoResult` :1041
+- `pub struct UndoRedoState` :1051
 
 ### visualizer.rs (200 rader)
 - `pub struct TreeVisualizer` :5

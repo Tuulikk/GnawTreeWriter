@@ -22,8 +22,13 @@ pub struct BackupFile {
     pub timestamp: DateTime<Utc>,
     /// Original source file path stored in the backup JSON
     pub original_file_path: PathBuf,
-    /// Optional content hash of the source code (calculated at parse time)
+    /// md5 of `source_code` — the unified scheme, matching `files.hash`
+    /// and every transaction written since (§8.9 step 1).
     pub content_hash: Option<String>,
+    /// Pre-unification DefaultHasher of `source_code`, computed so hash
+    /// lookups keep finding backups written before the md5 unification.
+    /// `None` when only the name is known (v3 fast path, no content read).
+    pub legacy_content_hash: Option<String>,
 }
 
 /// List all backup files found in `backup_dir`.
@@ -89,17 +94,22 @@ pub fn parse_backup_file<P: AsRef<Path>>(backup_path: P) -> Result<BackupFile> {
         .context("Failed to parse backup timestamp")?
         .with_timezone(&Utc);
 
-    // Extract source_code (used for hash calculation)
+    // Extract source_code and hash it under BOTH schemes over the same
+    // bytes: `content_hash` is the unified md5, `legacy_content_hash`
+    // keeps pre-unification lookups working (docs/HISTORY_STORAGE_DESIGN.md
+    // §8.9 step 1 — "parse_backup_file räknar båda hasharna").
     let source_code = json["source_code"]
         .as_str()
         .ok_or_else(|| anyhow!("Backup file missing 'source_code'"))?;
     let content_hash = Some(crate::core::calculate_content_hash(source_code));
+    let legacy_content_hash = Some(crate::core::legacy_content_hash(source_code));
 
     Ok(BackupFile {
         path: backup_path.to_path_buf(),
         timestamp,
         original_file_path: PathBuf::from(original_file_path_str),
         content_hash,
+        legacy_content_hash,
     })
 }
 
@@ -109,7 +119,10 @@ pub fn find_backup_by_content_hash<P: AsRef<Path>>(
     backup_dir: P,
     content_hash: &str,
 ) -> Result<Option<BackupFile>> {
-    // v3 names first: the hash is IN the name, zero content reads.
+    // v3 names first: the hash is IN the name, zero content reads. Old
+    // backups carry 16-hex (siphash) names, new ones 32-hex (md5); the
+    // caller's key is compared against the name verbatim, so each
+    // generation finds its own names fast.
     if let Ok(entries) = fs::read_dir(backup_dir.as_ref()) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
@@ -120,13 +133,15 @@ pub fn find_backup_by_content_hash<P: AsRef<Path>>(
             }
         }
     }
-    // Legacy scan (pre-v3 names).
+    // Content scan: a backup matches when EITHER scheme hashes to the key —
+    // that is what lets an md5 caller find a pre-unification blob with the
+    // same content, and a legacy key find a blob parsed today.
     let backups = list_backup_files(backup_dir)?;
     for b in backups {
-        if let Some(h) = &b.content_hash {
-            if h == content_hash {
-                return Ok(Some(b));
-            }
+        if b.content_hash.as_deref() == Some(content_hash)
+            || b.legacy_content_hash.as_deref() == Some(content_hash)
+        {
+            return Ok(Some(b));
         }
     }
     Ok(None)
@@ -148,8 +163,12 @@ pub(crate) fn parse_backup_name(name: &str) -> Option<(String, String)> {
     let mangled = stem[..idx].to_string();
     let rest = &stem[idx + "_backup_".len()..];
     let (hash, timestamp) = rest.split_once('_')?;
-    let is_hex16 = hash.len() == 16 && hash.chars().all(|c| c.is_ascii_hexdigit());
-    if is_hex16 && !timestamp.is_empty() {
+    // 16-hex = pre-unification DefaultHasher names; 32-hex = md5 (the
+    // unified scheme, §8.9 step 1). Both accepted so lookups keep finding
+    // backups across the scheme boundary.
+    let is_valid_hash =
+        (hash.len() == 16 || hash.len() == 32) && hash.chars().all(|c| c.is_ascii_hexdigit());
+    if is_valid_hash && !timestamp.is_empty() {
         Some((mangled, hash.to_string()))
     } else {
         None
@@ -192,12 +211,15 @@ fn find_v3_by_hash_and_path<P: AsRef<Path>>(
         if let Some((mangled, hash)) = parse_backup_name(&name) {
             if hash == content_hash && mangled == mangled_target {
                 // The recorded file_path is the one the writer saw; the name is
-                // derived from it, so reconstructing it here is lossless.
+                // derived from it, so reconstructing it here is lossless. The
+                // legacy hash is unknown without a content read — the content
+                // scan fills it when a caller needs it.
                 return Ok(Some(BackupFile {
                     path: entry.path(),
                     timestamp: name_timestamp(&name).unwrap_or(Utc::now()),
                     original_file_path: original_file.to_path_buf(),
                     content_hash: Some(content_hash.to_string()),
+                    legacy_content_hash: None,
                 }));
             }
         }
@@ -214,22 +236,23 @@ pub fn find_backup_by_content_hash_for_file<P: AsRef<Path>>(
     if let Some(b) = find_v3_by_hash_and_path(&backup_dir, content_hash, original_file)? {
         return Ok(Some(b));
     }
-    // Legacy scan (pre-v3 names): unchanged behavior, still correct.
+    // Legacy scan (pre-v3 names): a backup matches when EITHER scheme
+    // hashes to the key (md5 or pre-unification siphash).
     let backups = list_backup_files(backup_dir)?;
     // Prefer exact file match
     for b in &backups {
-        if let Some(h) = &b.content_hash {
-            if h == content_hash && b.original_file_path == original_file {
-                return Ok(Some(b.clone()));
-            }
+        let scheme_matches = b.content_hash.as_deref() == Some(content_hash)
+            || b.legacy_content_hash.as_deref() == Some(content_hash);
+        if scheme_matches && b.original_file_path == original_file {
+            return Ok(Some(b.clone()));
         }
     }
     // Fallback: any matching hash
     for b in backups {
-        if let Some(h) = &b.content_hash {
-            if h == content_hash {
-                return Ok(Some(b));
-            }
+        if b.content_hash.as_deref() == Some(content_hash)
+            || b.legacy_content_hash.as_deref() == Some(content_hash)
+        {
+            return Ok(Some(b));
         }
     }
     Ok(None)
@@ -545,5 +568,92 @@ mod tests {
         let c = find_v3_by_hash_and_path(&backups, &hash, Path::new("src/c/dup.rs"))
             .expect("lookup ok");
         assert!(c.is_none(), "an unrelated path must not claim a backup");
+    }
+
+    /// §8.9 step 1: backup names may carry 16-hex (pre-unification siphash)
+    /// OR 32-hex (md5) — both parse; anything else is not a hash name.
+    #[test]
+    fn backup_names_accept_legacy_and_md5_hashes() {
+        let mangled = mangle_path_for_name("src/x.rs");
+        let legacy = format!("{mangled}_backup_0123456789abcdef_20261119T000000000.json");
+        let md5 =
+            format!("{mangled}_backup_0123456789abcdef0123456789abcdef_20261119T000000001.json");
+        let junk = format!("{mangled}_backup_zz_20261119T000000002.json");
+        assert!(
+            parse_backup_name(&legacy).is_some(),
+            "16-hex (siphash) names must parse"
+        );
+        assert!(
+            parse_backup_name(&md5).is_some(),
+            "32-hex (md5) names must parse"
+        );
+        assert!(
+            parse_backup_name(&junk).is_none(),
+            "non-hex names must not parse"
+        );
+    }
+
+    /// parse_backup_file computes BOTH schemes over the same bytes, so a
+    /// lookup keyed by either scheme can find the blob (§8.9 step 1:
+    /// "parse_backup_file räknar båda hasharna under övergången").
+    #[test]
+    fn parse_computes_both_hash_schemes() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let backups = dir.path().join(".gnawtreewriter_backups");
+        std::fs::create_dir_all(&backups)?;
+        let source = "fn historic_content() {}";
+        let path = backups.join("legacy_blob.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "file_path": "src/legacy.rs",
+                "timestamp": Utc::now().to_rfc3339(),
+                "source_code": source
+            })
+            .to_string(),
+        )?;
+
+        let parsed = parse_backup_file(&path)?;
+        assert_eq!(
+            parsed.content_hash.as_deref(),
+            Some(crate::core::calculate_content_hash(source).as_str()),
+            "md5 must be the unified primary hash"
+        );
+        assert_eq!(
+            parsed.legacy_content_hash.as_deref(),
+            Some(crate::core::legacy_content_hash(source).as_str()),
+            "the legacy hash keeps old keys working"
+        );
+        assert_ne!(parsed.content_hash, parsed.legacy_content_hash);
+        Ok(())
+    }
+
+    /// A backup is findable by EITHER its md5 or its legacy hash — the
+    /// parity proof for hash-keyed lookups across the scheme boundary.
+    #[test]
+    fn content_hash_lookup_matches_either_scheme() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let backups = dir.path().join(".gnawtreewriter_backups");
+        std::fs::create_dir_all(&backups)?;
+        let source = "fn either_scheme_finds_me() {}";
+        let path = backups.join("mixed_blob.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "file_path": "src/mixed.rs",
+                "timestamp": Utc::now().to_rfc3339(),
+                "source_code": source
+            })
+            .to_string(),
+        )?;
+
+        let by_md5 =
+            find_backup_by_content_hash(&backups, &crate::core::calculate_content_hash(source))?;
+        assert!(by_md5.is_some(), "md5 key must find the backup");
+        let by_legacy =
+            find_backup_by_content_hash(&backups, &crate::core::legacy_content_hash(source))?;
+        assert!(by_legacy.is_some(), "legacy key must find the same backup");
+        assert_eq!(by_md5.unwrap().path, by_legacy.unwrap().path);
+        Ok(())
     }
 }

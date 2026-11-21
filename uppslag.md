@@ -13,6 +13,42 @@
 
 ---
 
+## 2026-11-21 — hash-unifieringen (§8.9 steg 1): vad som byttes och tre konsekvenser att hålla utkik efter  ⚠️ DELVIS ÖPPEN
+
+**Påståendet:** en hash för hela systemet. `calculate_content_hash` (DefaultHasher/
+SipHash, 16-hex, instabil mellan Rust-versioner) är nu md5 av bytes — samma schema
+som `files.hash` i storen. Gamla journalrader läses via `hash_scheme`-märket
+(saknat märke = siphash), `parse_backup_file` räknar båda hasharna, och
+backup-sökningar matchar båda schemana. Paritetsprovet är gjort på tre nivåer:
+enhetstest (`old_journal_rows_read_as_legacy_scheme`, `content_hash_lookup_matches_either_scheme`),
+undo-across-process (4 gröna), och hela lib-sviten (402 gröna).
+
+**Bevisat:** md5-vektorn pinad i test (`38772d98c1724542fe6b690b7497514b` för
+`def test(): pass`), debug-hash visar båda schemana live på CLI, clippy
+`-D warnings` ren, mcp_integration 26 gröna.
+
+**Öppet — tre konsekvenser som inte syns förrän de händer:**
+
+1. **Vektorindexet bygger om en gång.** `embeddings.db` lagrar filfingeravtryck
+   som nu jämförs mot md5 medan raderna håller siphash-värden → nästa
+   `ai index` ser allt som ogiltigt och bygger om inbäddningarna. Medveten drift
+   (en ombyggnad), INTE migrerad: att räkna om nycklarna från disk skulle kunna
+   välsigna föråldrade vektorer som färska — farlig väg, därför lämnad.
+2. **B1-kvitton över uppdateringsgränsen.** En klient som SPARAT ett
+   `node_content_hash` från gammal binär (siphash) och jämför mot ny binär (md5)
+   får en engångs `E_PATH_STALE`. Det är det säkra felet (omkodning krävs), men
+   Motor2 m.fl. bör veta varför ett plötsligt stale-svar kan dyka upp.
+3. **`label_manager` är frostad på siphash med avsikt** — persistade etiketter
+   kan inte migreras (nodinnehållet sparas inte). Om etiketterna börjar användas
+   på riktigt måste migreringen designas i store-konsolideringen (steg 3–4), inte
+   swaps.
+
+**Om det är fel:** om gamla undo:n NEKAS efter det här steget är paritetskontraktet
+trasigt — börja med `Transaction::hash_scheme` och `content_hash_matching`, inte
+med `calculate_content_hash`.
+
+---
+
 ## 2026-11-19 — claim_scan: först byggd, sedan **använd** — första fångsten stängd  ✅
 
 **Ägarens invändning (ordagrant i sak):** *"om saker inte används eller läser

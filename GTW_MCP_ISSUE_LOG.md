@@ -2175,6 +2175,46 @@ tillgänglighetsbugg oavsett verktygets semantik.
 
 **Reproducerbart:** ja, deterministiskt på samma fil.
 
+## 2026-11-21 — semantic_insert ankar fel nod (confidence 0.61) och batch-delete kaskaderar syskonpositioner
+
+**Kontext:** hash-unifieringen (§8.9 steg 1, detta repo, mot träd vid `5371f00`).
+Två oberoende verktygsfynd i samma fil (`src/core/transaction_log.rs`).
+
+| Anrop | Parametrar (exakt) | Förväntat | Faktiskt |
+|---|---|---|---|
+| `semantic_insert` | file_path="src/core/transaction_log.rs", anchor_query="the calculate_content_hash function", intent="after", content=(konstanter + 2 fn:er, ~35 rader) | blocket landar bredvid `calculate_content_hash` på modulnivå | *"Successfully inserted code near anchor '15.2.10' (confidence: 0.61)"* — blocket hamnade **inuti `impl TransactionLog`** (efter `log_transaction`), dvs. fel mål trots att ankaret namngav funktionen. Syntaktiskt giltigt (associerade objekt) så valideringen stoppade det inte; det som avslöjade det var `cargo check` (E0425 på de nakna referenserna). |
+| `batch` (preview) | 16 st `{"type":"delete","path":"15.2.10..15.2.25"}` i STIGANDE ordning + insert_text + edit | exakt blocket 15.2.10–15.2.25 tas bort | previewen visar att delete-operationerna **kaskaderar**: varje delete skiftar syskonpositionerna, så 16 sekventiella deletes åt upp blocket PLUS `log_transaction`, `get_transaction`, `get_session_history`, `get_full_history` och doc-fragment. Inget skrevs (preview-grinden fungerade). |
+
+**Omväg som användes:** (1) felplaceringen korrigerades med en atomär batch i
+**FALLANDE** sökvägsordning (15.2.25 → 15.2.10) — varje delete träffar då en
+position som tidigare deletes inte har skiftat; previewen bevisade exakt rätt
+block före apply. (2) Doc-kommentar-redigering på `line_comment`-noder med
+flerradigt innehåll nekades två gånger av `edit_node`/`preview_edit`
+("PROPOSED content does not parse") trots att filen parsade — flyttades till
+CLI `quick-replace` (med fullsträngade ankare; mitt eget trunkerade sökvarv
+`/ Utility…` var en separat selvförvållad syntaxfälla, se lärdomen nedan).
+
+**Bedömning:**
+- [ ] Använt fel?
+- [ ] Bugg? — batch-kaskaden är en (dokumenterad positionssemantik, farlig
+  default-ordning); semantic_insert-fellaceringen är en annan (ankarnamngivning
+  slår fel och confidence 0.61 rapporteras som success, inte som varning).
+- [x] Saknad funktion? — batch varnar inte om stigande delete-ordning mot
+  syskon; inget "descending recommended"-hint i svaret.
+- [ ] Sub-funktion saknas / svår att nå / inte hittad vid behov / under förmåga?
+
+**Önskade fixar:** (1) batch/delete: acceptera (eller auto-ordna) fallande
+syskon-deletes, eller gör path-ID:n invarianta inom en batch; (2)
+semantic_insert: när confidence ligger under tröskel, skriv tydlig varning i
+svaret och namnge den valda ankarnoden explicit (15.2.10 = log_transaction —
+hade avslöjat misstanken direkt).
+
+**Lärdom (egen, ogiltigförklarar inget ovan):** `quick-replace` med
+`--`-avgränsare får inte efterföljas av `--preview` (blev positionsargument);
+och söksträngen får aldrig trunkera `///` till `/ ` — 0-byte-diffens "not
+found" räddade filen, syntaxvalideringen räddade innehållet. Preview före
+apply är inte dekoration.
+
 
 
 

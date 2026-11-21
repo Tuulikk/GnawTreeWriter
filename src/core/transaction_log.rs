@@ -27,6 +27,25 @@ impl Transaction {
     pub fn attribution(&self) -> crate::core::attribution::Attribution {
         crate::core::attribution::Attribution::from_metadata(&self.metadata)
     }
+
+    /// The scheme this transaction's `before_hash`/`after_hash` were computed
+    /// with. Journals written before the md5 unification carry no marker and
+    /// read as `siphash` — that default IS the parity contract that keeps
+    /// old undos working (docs/HISTORY_STORAGE_DESIGN.md §8.9 step 1).
+    pub fn hash_scheme(&self) -> &str {
+        self.metadata
+            .get("hash_scheme")
+            .map(String::as_str)
+            .unwrap_or(HASH_SCHEME_LEGACY)
+    }
+
+    /// Hash `content` under THIS transaction's scheme — the only valid
+    /// comparison partner for its stored hashes. Comparing a stored hash
+    /// against a hash from a different scheme is the false-refusal class
+    /// this method exists to prevent.
+    pub fn content_hash_matching(&self, content: &str) -> Result<String> {
+        content_hash_for_scheme(self.hash_scheme(), content)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -175,7 +194,7 @@ impl TransactionLog {
         before_hash: Option<String>,
         after_hash: Option<String>,
         description: String,
-        metadata: HashMap<String, String>,
+        mut metadata: HashMap<String, String>,
     ) -> Result<String> {
         // Ensure we have an active session (auto-start default session if needed)
         // Skip for session operations to avoid infinite recursion
@@ -184,6 +203,17 @@ impl TransactionLog {
             OperationType::SessionStart | OperationType::SessionEnd
         ) {
             self.ensure_session_exists()?;
+        }
+
+        // Stamp the scheme the hashes were computed with (docs/
+        // HISTORY_STORAGE_DESIGN.md §8.9 step 1). Every caller that passes
+        // hashes computes them via calculate_content_hash, so the marker is
+        // truthful by construction. Absent marker (old journals) reads as
+        // siphash — see Transaction::hash_scheme.
+        if before_hash.is_some() || after_hash.is_some() {
+            metadata
+                .entry("hash_scheme".to_string())
+                .or_insert_with(|| HASH_SCHEME_MD5.to_string());
         }
 
         let transaction = Transaction {
@@ -656,14 +686,45 @@ fn generate_transaction_id() -> String {
     format!("txn_{}", Utc::now().timestamp_nanos_opt().unwrap_or(0))
 }
 
-/// Utility function to calculate content hash
-pub fn calculate_content_hash(content: &str) -> String {
+/// Scheme marker stamped into `metadata["hash_scheme"]` for every transaction
+/// that carries content hashes (docs/HISTORY_STORAGE_DESIGN.md §8.9 step 1).
+/// Old journals lack the marker; a missing marker means
+/// `HASH_SCHEME_LEGACY` - the pre-unification values cannot be converted,
+/// so readers pick the function from the marker instead of guessing.
+pub const HASH_SCHEME_MD5: &str = "md5";
+
+/// Pre-unification scheme name (`Transaction::hash_scheme` default).
+pub const HASH_SCHEME_LEGACY: &str = "siphash";
+
+/// The pre-unification hash (DefaultHasher), kept ONLY for reading legacy
+/// data: old journals, persisted label stores, and backup lookups that
+/// predate the md5 unification. Never for new writes - those are
+/// `calculate_content_hash`.
+pub fn legacy_content_hash(content: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
     let mut hasher = DefaultHasher::new();
     content.hash(&mut hasher);
     format!("{:x}", hasher.finish())
+}
+
+/// Hash `content` under a named scheme. Unknown schemes are refused loudly -
+/// a silent fallback would let a corrupted marker read as truth.
+pub fn content_hash_for_scheme(scheme: &str, content: &str) -> Result<String> {
+    match scheme {
+        HASH_SCHEME_MD5 => Ok(calculate_content_hash(content)),
+        HASH_SCHEME_LEGACY => Ok(legacy_content_hash(content)),
+        other => Err(anyhow::anyhow!("Unknown hash scheme: {other:?}")),
+    }
+}
+
+/// The ONE content hash - md5 hex of the bytes, the same scheme the Code
+/// Index store uses for `files.hash` (unified 2026-11-21,
+/// docs/HISTORY_STORAGE_DESIGN.md §8.9 step 1). Consumers must not invent
+/// their own scheme; legacy readers use `legacy_content_hash`.
+pub fn calculate_content_hash(content: &str) -> String {
+    format!("{:x}", md5::compute(content.as_bytes()))
 }
 
 impl OperationType {
@@ -754,5 +815,92 @@ mod tests {
 
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, hash3);
+    }
+
+    /// §8.9 step 1: the unified hash is md5 of the bytes — the SAME scheme
+    /// the Code Index store uses for files.hash. Known vector pins it.
+    #[test]
+    fn content_hash_is_md5_of_bytes() {
+        let hash = calculate_content_hash("def test(): pass");
+        assert_eq!(hash, "38772d98c1724542fe6b690b7497514b");
+        assert_eq!(hash.len(), 32);
+    }
+
+    /// The legacy reader differs from md5 and stays deterministic — it must,
+    /// or old journals could not be verified at all.
+    #[test]
+    fn legacy_hash_differs_from_md5_and_is_stable() {
+        let legacy1 = legacy_content_hash("def test(): pass");
+        let legacy2 = legacy_content_hash("def test(): pass");
+        let md5 = calculate_content_hash("def test(): pass");
+        assert_eq!(legacy1, legacy2);
+        assert_ne!(legacy1, md5);
+    }
+
+    /// Every transaction that carries content hashes is stamped md5; session
+    /// markers (no hashes) keep their metadata untouched.
+    #[test]
+    fn transactions_carrying_hashes_stamp_md5_scheme() {
+        let temp_dir = tempdir().unwrap();
+        let mut log = TransactionLog::new(temp_dir.path()).unwrap();
+
+        let txid = log
+            .log_transaction(
+                OperationType::Edit,
+                PathBuf::from("x.rs"),
+                None,
+                Some(calculate_content_hash("before")),
+                Some(calculate_content_hash("after")),
+                "stamp test".to_string(),
+                HashMap::new(),
+            )
+            .unwrap();
+        let tx = log.find_transaction(&txid).unwrap().unwrap();
+        assert_eq!(tx.hash_scheme(), HASH_SCHEME_MD5);
+
+        // A session marker has no hashes -> no stamp -> reads as legacy.
+        let sids = log.get_session_history();
+        let session_tx = sids
+            .iter()
+            .find(|t| t.operation == OperationType::SessionStart)
+            .unwrap();
+        assert_eq!(session_tx.hash_scheme(), HASH_SCHEME_LEGACY);
+        assert!(!session_tx.metadata.contains_key("hash_scheme"));
+    }
+
+    /// PARITY CONTRACT: a journal row written before the unification has no
+    /// marker and siphash hashes; it must read as siphash and its stored
+    /// hash must be reproducible from the content it names.
+    #[test]
+    fn old_journal_rows_read_as_legacy_scheme() {
+        let content = "fn unchanged() {}";
+        let json = format!(
+            r#"{{"id":"txn_old","timestamp":"2026-01-01T00:00:00Z","operation":"Edit","file_path":"a.rs","node_path":null,"before_hash":null,"after_hash":"{}","description":"old","session_id":"s","metadata":{{}}}}"#,
+            legacy_content_hash(content)
+        );
+        let tx: Transaction = serde_json::from_str(&json).unwrap();
+        assert_eq!(tx.hash_scheme(), HASH_SCHEME_LEGACY);
+        assert_eq!(
+            tx.content_hash_matching(content).unwrap(),
+            tx.after_hash.clone().unwrap()
+        );
+        // The same content under the md5 marker reproduces the md5 value.
+        let mut md5_tx = tx.clone();
+        md5_tx
+            .metadata
+            .insert("hash_scheme".to_string(), HASH_SCHEME_MD5.to_string());
+        md5_tx.after_hash = Some(calculate_content_hash(content));
+        assert_eq!(
+            md5_tx.content_hash_matching(content).unwrap(),
+            md5_tx.after_hash.clone().unwrap()
+        );
+    }
+
+    /// Unknown scheme markers are refused loudly, never silently guessed.
+    #[test]
+    fn unknown_scheme_marker_is_a_loud_error() {
+        let json = r#"{"id":"txn_x","timestamp":"2026-01-01T00:00:00Z","operation":"Edit","file_path":"a.rs","node_path":null,"before_hash":null,"after_hash":"deadbeef","description":"x","session_id":"s","metadata":{"hash_scheme":"sha999"}}"#;
+        let tx: Transaction = serde_json::from_str(json).unwrap();
+        assert!(tx.content_hash_matching("anything").is_err());
     }
 }

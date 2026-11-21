@@ -369,9 +369,13 @@ impl UndoRedoManager {
                 "CreateFile undo refused: the transaction carries no content hash, so GTW cannot prove the file is still the one it created",
             ));
         };
-        let current = crate::core::transaction_log::calculate_content_hash(
-            &fs::read_to_string(&transaction.file_path).unwrap_or_default(),
-        );
+        let Ok(current) = transaction
+            .content_hash_matching(&fs::read_to_string(&transaction.file_path).unwrap_or_default())
+        else {
+            return Ok(refuse(
+                "CreateFile undo refused: the transaction names an unknown hash_scheme marker",
+            ));
+        };
         if &current != after {
             return Ok(refuse(
                 "CreateFile undo refused: the file has changed since it was created — GTW does not delete work it did not write",

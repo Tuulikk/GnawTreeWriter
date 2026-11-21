@@ -51,9 +51,10 @@ pub struct LevelsReport {
 }
 
 /// Content fingerprint — the SAME function the vector store records, so the two
-/// are comparable. (Not md5: the store uses `calculate_content_hash`, and
-/// comparing two different hashes produced a false "0 % current" on this very
-/// repo, 2026-11-11.)
+/// are comparable. Since the §8.9 step-1 unification this IS md5 — the same
+/// scheme as `files.hash` in the store. History: comparing two DIFFERENT
+/// schemes produced a false "0 % current" on this very repo (2026-11-11);
+/// one scheme on both sides is the invariant, whichever it is.
 fn content_fingerprint(text: &str) -> String {
     crate::core::transaction_log::calculate_content_hash(text)
 }

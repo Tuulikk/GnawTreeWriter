@@ -1,4 +1,9 @@
-use crate::core::transaction_log::calculate_content_hash;
+// Labels are keyed by the PRE-UNIFICATION hash (DefaultHasher): persisted label
+// stores hold siphash keys and the labeled node content is NOT stored anywhere,
+// so existing keys cannot be re-derived under md5. Frozen on the legacy scheme
+// on purpose (docs/HISTORY_STORAGE_DESIGN.md §8.9 step 1); a scheme migration
+// belongs to the store-consolidation steps, not to a hash swap.
+use crate::core::transaction_log::legacy_content_hash;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -42,7 +47,7 @@ impl LabelManager {
     }
 
     pub fn add_label(&mut self, file_path: &str, node_content: &str, label: &str) -> Result<()> {
-        let hash = calculate_content_hash(node_content);
+        let hash = legacy_content_hash(node_content);
         let file_entry = self.store.files.entry(file_path.to_string()).or_default();
         let label_info = file_entry.entry(hash).or_insert_with(|| LabelInfo {
             labels: Vec::new(),
@@ -59,7 +64,7 @@ impl LabelManager {
     }
 
     pub fn get_labels(&self, file_path: &str, node_content: &str) -> Vec<String> {
-        let hash = calculate_content_hash(node_content);
+        let hash = legacy_content_hash(node_content);
         self.store
             .files
             .get(file_path)
@@ -74,7 +79,7 @@ impl LabelManager {
         node_content: &str,
         label: &str,
     ) -> Result<bool> {
-        let hash = calculate_content_hash(node_content);
+        let hash = legacy_content_hash(node_content);
         if let Some(file_entry) = self.store.files.get_mut(file_path) {
             if let Some(label_info) = file_entry.get_mut(&hash) {
                 let initial_len = label_info.labels.len();

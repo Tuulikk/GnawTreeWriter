@@ -231,13 +231,17 @@ pub fn verify(head: &Head, project_root: &Path) -> Vec<Discrepancy> {
             let blob = backup_dir.join(name);
             match crate::core::backup::parse_backup_file(&blob) {
                 Ok(b) => {
-                    let actual = b.content_hash.clone().unwrap_or_default();
-                    if &actual != expected {
+                    let actual_md5 = b.content_hash.clone().unwrap_or_default();
+                    let actual_legacy = b.legacy_content_hash.clone().unwrap_or_default();
+                    // Entries written before the md5 unification hold
+                    // siphash values, new ones md5 (§8.9 step 1) — the
+                    // blob's bytes match when EITHER scheme agrees.
+                    if actual_md5 != *expected && actual_legacy != *expected {
                         out.push(Discrepancy::SourceHashMismatch {
                             path: key.clone(),
                             source: entry.content_source.clone(),
                             expected: expected.clone(),
-                            actual,
+                            actual: actual_md5,
                         });
                     }
                 }

@@ -26,6 +26,9 @@ pub struct BackupFile {
     pub timestamp: DateTime<Utc>,
     pub original_file_path: PathBuf,
     pub content_hash: Option<String>,
+    /// Pre-unification hash from the parsed blob (§8.9 step 1) — present when
+    /// the struct was filled from a content read, None on the name fast path.
+    pub legacy_content_hash: Option<String>,
 }
 
 impl RestorationEngine {
@@ -331,6 +334,7 @@ impl RestorationEngine {
                 timestamp: b.timestamp,
                 original_file_path: b.original_file_path,
                 content_hash: b.content_hash,
+                legacy_content_hash: b.legacy_content_hash,
             }));
         }
 
@@ -347,6 +351,7 @@ impl RestorationEngine {
                 timestamp: b.timestamp,
                 original_file_path: b.original_file_path,
                 content_hash: b.content_hash,
+                legacy_content_hash: b.legacy_content_hash,
             })
             .collect())
     }

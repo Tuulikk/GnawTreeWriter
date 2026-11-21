@@ -5064,18 +5064,27 @@ Use --no-preview to perform the restoration"
     }
 
     fn handle_debug_hash(content: &str) -> Result<()> {
-        use crate::core::calculate_content_hash;
+        use crate::core::{calculate_content_hash, legacy_content_hash};
 
-        let hash = calculate_content_hash(content);
         println!("Content: {:?}", content);
-        println!("Hash: {}", hash);
+        println!(
+            "Hash (md5, unified — matches files.hash): {}",
+            calculate_content_hash(content)
+        );
+        println!(
+            "Hash (siphash, legacy journals): {}",
+            legacy_content_hash(content)
+        );
 
         // Also test with file content if it exists
         if std::path::Path::new(content).exists() {
             let file_content = std::fs::read_to_string(content)?;
-            let file_hash = calculate_content_hash(&file_content);
             println!("File content: {:?}", file_content);
-            println!("File hash: {}", file_hash);
+            println!("File hash (md5): {}", calculate_content_hash(&file_content));
+            println!(
+                "File hash (siphash): {}",
+                legacy_content_hash(&file_content)
+            );
         }
 
         Ok(())

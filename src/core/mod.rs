@@ -71,8 +71,9 @@ pub use restoration_engine::{RestorationEngine, RestorationResult, RestorationSt
 pub use scaffold::ScaffoldEngine;
 pub use tag_manager::TagManager;
 pub use transaction_log::{
-    calculate_content_hash, FileRestorationPlan, OperationType, ProjectRestorationPlan,
-    Transaction, TransactionLog,
+    calculate_content_hash, content_hash_for_scheme, legacy_content_hash, FileRestorationPlan,
+    OperationType, ProjectRestorationPlan, Transaction, TransactionLog, HASH_SCHEME_LEGACY,
+    HASH_SCHEME_MD5,
 };
 pub use undo_redo::{UndoRedoManager, UndoRedoResult, UndoRedoState};
 
@@ -641,6 +642,7 @@ impl GnawTreeWriter {
             "format": "gtw-backup-v3",
             "file_path": self.file_path,
             "content_hash": content_hash,
+            "hash_scheme": HASH_SCHEME_MD5,
             "timestamp": Utc::now().to_rfc3339(),
             "source_code": self.source_code
         });
