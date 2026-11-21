@@ -2,7 +2,7 @@
 
 **Guide for AI agents contributing to the GnawTreeWriter project through dogfooding**
 
-Version: 2.4 | Last Updated: 2026-11-18
+Version: 2.5 | Last Updated: 2026-11-21
 
 ---
 
@@ -282,6 +282,38 @@ sessioner. De gäller oavsett vilket verktyg du använder.
     lämnar aldrig tyst. En smutsig grind (`commit-build` → `fail:dirty`) är
     en signal att disposition ska påbörjas — inte ett hinder att klassa bort.
     M13 gäller: agenten är medägare av repots hela tillstånd, med ägaren.
+22. **"X och Y är röda samtidigt" är inte "X orsakar Y".** Fynd 2026-11-21,
+    mellan två agenter: Gnawdrivers `cargo test` var rött samtidigt som GTW
+    hade okommitterat arbete, och orsakskedjan skrevs i chatten utan mätning.
+    GTW:s WIP var oskyldig — mätt: samma fel vid **exakt samma byte** med rent
+    och smutsigt grannrepo (ett path-beroende kompilerar filerna på disk;
+    git-status påverkar inte kompileringen). Min efterhandsrapport gjorde
+    **samma fel en gång till**: den tillskrev commit `2553065` att ha fryst
+    artefakten vid 316 rader, men en isolerad worktree på den commiten visade
+    källa 316 / artefakt 316 och `cargo test` **exit 0** — commiten var frisk.
+    Den verkliga diskrepansen kom från ett **smutsigt arbetsträd**, och mitt
+    `wc -l` läste disken medan jag citerade `git show`: rätt observation, fel
+    tillskrivning.
+
+    **Regeln:** en orsakskedja är ett påstående som alla andra — den kräver
+    ett kommando vars utskrift binder X till Y, inte två röda som delar
+    tidsstämpel. Innan du skriver "blockeras av", "orsakas av" eller
+    "frystes i": kör experimentet som gör X ensam (t.ex. samma test med rent
+    vs smutsigt grannrepo, eller en isolerad `git worktree` på den
+    misstänkta commiten) och citera **exit-koden**, inte utfallet i en pipe —
+    `cmd | tail` ger `tail`s exit, inte `cmd`s (mätt samma dag: `--check` såg
+    grön ut i en pipe och var röd utan).
+
+    **Proceduren när en grind är röd bredvid någon annans arbete:** (1) mät
+    ditt eget fel isolerat — vilken fil, vilket test, vilken rad; (2) kör om
+    med det andra trädet **orört**; (3) ändras inget → det andra arbetet är
+    oskyldigt, säg det högt i stället för att lämna misstanken; (4) rapportera
+    fyndet till den som äger ytan med utskrifterna, inte med slutsatsen.
+
+    **Varför det spelar roll:** en påhittad orsakskedja kostar en annan agents
+    tid (här: felsökning på en oskyldig yta) och blir värre av att den låter
+    trovärdig. M13 gäller i båda riktningarna — är du medägare till trädet är
+    du också medägare till diagnoserna om det.
 
 ### OpenCode 2.x — arkitektur, MCP-livscykel, binär-pickup (2026-11-10)
 

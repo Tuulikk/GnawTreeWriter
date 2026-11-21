@@ -13,6 +13,88 @@
 
 ---
 
+## 2026-11-21 — auto-capture av styrdokument är DÖD sedan 2026-10-06 (M14-klass)  🟥 BLOCKERAR LÄRDOMSSPRIDNING
+
+**Mätt, inte antaget.** `memory-server` påstår i sin systemprompt att `spec.md`,
+`AGENTS.md`, `ROADMAP.md` m.fl. "auto-captured on every edit/write … always up
+to date in memory, no agent action needed". Det stämmer inte:
+
+| Fakta | Värde |
+|---|---|
+| `AGENTS.md` på disk | **Version 2.4**, 74 130 tecken, mtime 2026-11-21 15:25 |
+| `GnawTreeWriter:reference:agents` i memory | **Version 2.1**, 35 566 tecken, "Last Updated: 2026-10-06" |
+| Antal snapshots i `memory_history` | 6 — **alla** 2026-10-06 eller äldre |
+| Probe: skrev AGENTS.md via GTW, räknade om | 6 → **6** (inget nytt snapshot) |
+| Probe: skrev AGENTS.md via `edit`-verktyget (Version 2.4→2.5) | 6 → **6**, lagrad text fortfarande 2.1 → **båda vägarna döda** |
+| `GnawTreeWriter:reference:uppslag` | **finns inte alls** (0 tecken) |
+
+**Konsekvensen — och varför detta drabbar just den här sessionen:** jag skrev
+lärdom #22 i `AGENTS.md` (persisterat i repot, läsbart för varje agent som läser
+filen) och en minneskopia via `memory_store` (nåbar via `memory_search`). Men
+**den kanal som skulle bära den automatiskt** — den som injiceras i
+systemprompten vid sessionsstart — serverar en månad gammal text utan lärdom
+22, utan M13-raden och utan hela §8-stycket. En framtida agent som litar på
+den får sämre information än en som läser filen.
+
+**Detta är M14 i ren form:** funktionen är byggd, dokumenterad som verksam och
+**används** — den bara gör ingenting. Att "0 nya snapshots" ser ut som ett
+resultat är precis den tysta nollan M14 förbjuder.
+
+**Varför det inte är mitt att laga här:** ägaren är `memory-server`-repot.
+Fyndet ska dit med samma disciplin som Gnawdriver-fyndet: utskrifter, inte
+slutsatser. **Reproduktion:**
+
+```
+memory_get("GnawTreeWriter:reference:agents")      # Version 2.1 / 2026-10-06
+memory_history("GnawTreeWriter:reference:agents")  # 6 snapshots, alla ≤ 2026-10-06
+STAT -c %y AGENTS.md                              # 2026-11-21, Version 2.4 på disk
+<skriv filen> ; memory_history(...)               # fortfarande 6
+```
+
+**Tills det är lagat:** lärdomar hör i `AGENTS.md` (filen är sanningen) **och**
+som `memory_store`-post (för `memory_search`). Den auto-injicerade
+`reference:agents` ska INTE citeras som aktuell — kontrollera `Version:`-raden
+mot filen innan du litar på den.
+
+**Om det är fel:** capture-proben är körd på **båda** vägarna (GTW:s
+`quick-replace` och `edit`-verktyget) med samma utfall — det är alltså inte en
+verktygsspecifik lucka. Enda kvarvarande osäkerheten är om capture kräver
+något som saknas i den här sessionens miljö (plugin, hook, env-var); det
+utesluts först i `memory-server`-repot.
+
+---
+
+## 2026-11-21 — orsakskedjan jag skrev utan att mäta, och mätte fel när jag mätte om  ⚠️ PROCESS
+
+**Påståendet som fälldes:** att Gnawdrivers röda `cargo test` orsakades av GTW:s
+okommitterade arbete. Det skrevs i en rapport till en annan agent utan ett
+experiment som band dem samman.
+
+**Beviset (två mätningar, båda reproducerbara):**
+
+| Fråga | Kommando | Utfall |
+|---|---|---|
+| Är GTW:s WIP orsaken? | samma test, rent vs smutsigt GTW-träd | **identiskt fel, samma byte** → oskyldig |
+| Var commit `2553065` frisk? | isolerad `git worktree` på rev + `cargo test` | källa 316 / artefakt 316 / **EXIT 0** → frisk |
+
+**Och mitt eget mätfel:** `317` kom från ett **smutsigt arbetsträd**. Jag körde
+`wc -l` på disken medan jag citerade `git show` — rätt observation, fel
+tillskrivning. Det är samma klass av fel som det jag kritiserade, en
+dag senare, i samma rapport.
+
+**Regeln (nu ÄVEN i AGENTS.md §Lektioner punkt 22):** en orsakskedja kräver ett
+kommando vars utskrift binder X till Y — aldrig två röda som delar tidsstämpel.
+Kör om med det andra trädet **orört** innan du skriver "blockeras av". Citera
+**exit-koden**, inte pipens (`cmd | tail` ger `tail`s exit; `--check` såg grön
+ut i en pipe och var röd utan — mätt samma dag).
+
+**Om det är fel:** om ett path-beroende någon gång *faktiskt* slutar kompilera
+p.g.a. ett smutsigt grannrepo är det ett annat fynd (t.ex. en `include!` av en
+genererad fil) — då ska det bevisas med utskrift, inte ärvas från den här
+posten.
+
+---
+
 ## 2026-11-21 — hash-unifieringen (§8.9 steg 1): vad som byttes och tre konsekvenser att hålla utkik efter  ⚠️ DELVIS ÖPPEN
 
 **Påståendet:** en hash för hela systemet. `calculate_content_hash` (DefaultHasher/
