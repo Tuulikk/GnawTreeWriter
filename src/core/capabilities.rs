@@ -211,6 +211,10 @@ fn role_of(dir: &str) -> &'static str {
         "bge-base" => "L3 embedder (ai index / sense)",
         "modernbert" => "no reader since 2026-11-11 — its only load was removed",
         "lfm25" | "lfm2.5" => "L4 generative (explain / summarize / investigate)",
+        // cera-backed, opt-in behind AiModel::Qwen35 (docs/LOCAL_MODEL_BAKEOFF.md
+        // §9). Named as measured, not as hoped: faster on reading tasks, fails
+        // propose_edit on both engines — so it is a spike, never the default.
+        "qwen35" => "L4 generative, spike (cera; propose_edit needs grammar)",
         _ => "no loader in this build — not referenced by AiModel",
     }
 }
@@ -333,7 +337,14 @@ mod tests {
     /// described it as "L4 generative".
     #[test]
     fn only_known_model_dirs_claim_a_role() {
-        for known in ["bge-base", "modernbert", "lfm25", "lfm2.5"] {
+        // Every dir an AiModel variant maps to. qwen35 is behind the same
+        // "mamba" gate as its variant, so it appears in the list only there —
+        // a dir name alone never earns a role.
+        let mut known = vec!["bge-base", "modernbert", "lfm25", "lfm2.5"];
+        if cfg!(feature = "mamba") {
+            known.push("qwen35");
+        }
+        for known in known {
             assert!(
                 !role_of(known).contains("no loader"),
                 "{known} is a real model and must have a role"
