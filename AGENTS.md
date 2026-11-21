@@ -2,7 +2,7 @@
 
 **Guide for AI agents contributing to the GnawTreeWriter project through dogfooding**
 
-Version: 2.5 | Last Updated: 2026-11-21
+Version: 2.6 | Last Updated: 2026-11-21
 
 ---
 

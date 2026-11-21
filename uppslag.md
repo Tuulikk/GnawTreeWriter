@@ -13,11 +13,11 @@
 
 ---
 
-## 2026-11-21 — auto-capture av styrdokument är DÖD sedan 2026-10-06 (M14-klass)  🟥 BLOCKERAR LÄRDOMSSPRIDNING
+## 2026-11-21 — auto-capture av styrdokument var död: rotorsaken satt i ADDONS, inte i memory-server  ✅ ROTORSAK FUNNEN (annan än jag först skrev)
 
 **Mätt, inte antaget.** `memory-server` påstår i sin systemprompt att `spec.md`,
 `AGENTS.md`, `ROADMAP.md` m.fl. "auto-captured on every edit/write … always up
-to date in memory, no agent action needed". Det stämmer inte:
+to date in memory, no agent action needed". Det stämde inte i den här sessionen:
 
 | Fakta | Värde |
 |---|---|
@@ -25,10 +25,77 @@ to date in memory, no agent action needed". Det stämmer inte:
 | `GnawTreeWriter:reference:agents` i memory | **Version 2.1**, 35 566 tecken, "Last Updated: 2026-10-06" |
 | Antal snapshots i `memory_history` | 6 — **alla** 2026-10-06 eller äldre |
 | Probe: skrev AGENTS.md via GTW, räknade om | 6 → **6** (inget nytt snapshot) |
-| Probe: skrev AGENTS.md via `edit`-verktyget (Version 2.4→2.5) | 6 → **6**, lagrad text fortfarande 2.1 → **båda vägarna döda** |
+| Probe: skrev AGENTS.md via `edit`-verktyget (Version 2.4→2.5) | 6 → **6**, lagrad text fortfarande 2.1 |
 | `GnawTreeWriter:reference:uppslag` | **finns inte alls** (0 tecken) |
 
-**Konsekvensen — och varför detta drabbar just den här sessionen:** jag skrev
+### ⚠️ RÄTTELSE (samma dag, efter Gnawdrivers oberoende mätning)
+
+**Jag skrev att kanalen var "död" och att ägaren var `memory-server`. Det var fel
+på båda punkter.** Gnawdriver mätte samma symptom i sitt repo
+(`gnawdriver:reference:agents`: 49 433 tecken från 2026-10-14 mot 92 694 tecken
+på disk) och hittade sedan rotorsaken — som **inte** är memory-servern:
+
+| Addon | Läste fältet | Effekt |
+|---|---|---|
+| `tool-guard` | `filePath ?? filepath ?? **file**` | ✅ GTW-nudges syntes hela sessionen |
+| `checkpoint.js` | `filePath \|\| filepath` | ❌ 0 auto-shadows |
+| `memory-integration.js` | `filePath \|\| filepath` | ❌ 0 doc-captures |
+
+En enda fallback skilde dem. V2-kontraktet säger `input: unknown` — hosten
+definierar inte fältnamnet, så att gissa två varianter var strukturellt fel.
+Fixat i `gnaw-agent-addons` `016067f`: alla tre läser nu
+`filePath/filepath/file/path`. `memory-integration.js` är symlänkad från
+`~/.config/opencode/plugins/`, och den länkade filen innehåller fixen (verifierat:
+`grep -c 'input?.path'` = 1) — så nästa session får rätt kod.
+
+**Verifierat att den här sessionen INTE har fixen:** efter ytterligare en edit
+(Version 2.5→2.6) är `memory_history` fortfarande **6 snapshots**, lagrad text
+fortfarande 2.1. Hookarna laddas vid sessionsstart — den ordningen är nu
+bekräftad, inte antagen.
+
+### Vad felet i min egen rapport var
+
+Jag attribuerade en delad observation (två repon, samma symptom) till **en enda
+ägare** utan att mäta mellanledet. Det är lärdom 22 igen, inuti min egen post om
+lärdom 22: *"X och Y är röda samtidigt"* → *"X orsakar Y"*. Den gemensamma
+nämnaren var addonlagret, inte servern. Posten till memory-server (id 40) ska
+läsas som ett **symptom**, inte som en rotorsak; `memory_search`-filtret som
+Gnawdriver rapporterade (id 42) är ett separat, fortfarande öppet fynd.
+
+**Öppen grind (bevisas efter reload):** **en** edit → `memory_get(reference:agents)`
+(dagens datum). Auto-shadows kan **inte** bli > 0 ännu — se nästa stycke.
+
+### ⚠️ ANDRA FYNDET: checkpoint-fixen träffade fel fil
+
+Gnawdrivers `016067f` fixade `gnaw-agent-addons/checkpoint.js`. Men
+`~/.config/opencode/opencode.jsonc` registrerar ett **annat paket**:
+
+```jsonc
+"plugins": [
+  { "package": ".../gnaw-opencode-checkpoint", "options": { ... } }
+]
+```
+
+Och det paketet har samma defekt, orörd:
+
+```
+gnaw-opencode-checkpoint/src/checkpoint.js:1256
+  const filePath = event.input?.filePath || event.input?.filepath;
+```
+
+Två kodbaser, samma bugg, **bara en av dem laddad**. `~/.config/opencode/plugins/`
+har symlänkar för `tool-guard`, `memory-integration` och `gnawdriver-guard` — men
+**inte** för `checkpoint`, vilket är spåret som avslöjar att den kommer från
+paketregistreringen i stället.
+
+Konsekvens för grinden: "auto-shadows > 0" kan inte uppfyllas förrän
+paketfrågan är avgjord (vilket paket äger hooken; två implementationer av samma
+sak är samma sjukdom som Gnawdriver nyss slog ihop för code-index-jämförelsen).
+`memory_get`-delen av grinden är oberoende och kan bevisas direkt.
+
+Rapporterat till gnawdriver (post 44). Ägaren avgör; jag rörde inget.
+
+**Konsekvensen — och varför detta drabbade just den här sessionen:** jag skrev
 lärdom #22 i `AGENTS.md` (persisterat i repot, läsbart för varje agent som läser
 filen) och en minneskopia via `memory_store` (nåbar via `memory_search`). Men
 **den kanal som skulle bära den automatiskt** — den som injiceras i
@@ -40,27 +107,31 @@ den får sämre information än en som läser filen.
 **används** — den bara gör ingenting. Att "0 nya snapshots" ser ut som ett
 resultat är precis den tysta nollan M14 förbjuder.
 
-**Varför det inte är mitt att laga här:** ägaren är `memory-server`-repot.
-Fyndet ska dit med samma disciplin som Gnawdriver-fyndet: utskrifter, inte
-slutsatser. **Reproduktion:**
+**Ägaren — rättad:** inte `memory-server`-repot, utan **`gnaw-agent-addons`**
+(`memory-integration.js` läste fel fältnamn; fixat i `016067f`). Fyndet till
+memory-server (id 40) är ett korrekt *symptom* men fel *ägare*.
+
+**Reproduktion (mätt):**
 
 ```
 memory_get("GnawTreeWriter:reference:agents")      # Version 2.1 / 2026-10-06
 memory_history("GnawTreeWriter:reference:agents")  # 6 snapshots, alla ≤ 2026-10-06
-STAT -c %y AGENTS.md                              # 2026-11-21, Version 2.4 på disk
-<skriv filen> ; memory_history(...)               # fortfarande 6
+stat -c %y AGENTS.md                               # 2026-11-21, Version 2.4 på disk
+<skriv filen> ; memory_history(...)                # fortfarande 6 (hookarna laddade vid sessionsstart)
+grep -c 'input?.path' ~/.config/opencode/plugins/memory-integration.js   # 1 = fixen finns på disk
 ```
 
-**Tills det är lagat:** lärdomar hör i `AGENTS.md` (filen är sanningen) **och**
+**Tills nästa session:** lärdomar hör i `AGENTS.md` (filen är sanningen) **och**
 som `memory_store`-post (för `memory_search`). Den auto-injicerade
 `reference:agents` ska INTE citeras som aktuell — kontrollera `Version:`-raden
 mot filen innan du litar på den.
 
-**Om det är fel:** capture-proben är körd på **båda** vägarna (GTW:s
-`quick-replace` och `edit`-verktyget) med samma utfall — det är alltså inte en
-verktygsspecifik lucka. Enda kvarvarande osäkerheten är om capture kräver
-något som saknas i den här sessionens miljö (plugin, hook, env-var); det
-utesluts först i `memory-server`-repot.
+**Om det är fel:** attributionsfelet i min första version är den exakta
+varningen — jag hade **en delad observation** (två repon, samma symptom) och
+skrev **en orsak** utan att mäta mellanledet (addonlagret). Fyndet är fortfarande
+sant som symptom; det var ägaren jag gissade. Fixen är verifierad på disk men
+**inte** i en levande session — efter reload: en edit, sedan `status`
+(auto-shadows > 0) och `memory_get` (dagens datum).
 
 ---
 
