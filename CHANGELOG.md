@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+### Added — bake-off mätt: Qwen3.5-0.8B via Cera (spike, INTE default)
+
+Qwen3.5-0.8B (508 MB GGUF, −27 % mot LFM2.5) körd genom `cera 0.7.5` bakom
+`generate_lfm25`-fasaden. Fullständiga tal och metod i
+`docs/LOCAL_MODEL_BAKEOFF.md` §9.
+
+**Resultat:** `explain` 26,8 s mot baslinjens 85,5 s (**3,2×**), korrekt svar;
+decode 36 tok/s mot 13. `propose_edit` **fallerar på båda motorerna** (LFM2.5:
+205,5 s + syntaxfel; Qwen: 31,5 s + fel rad) — ingen av dem är användbar utan
+grammatikstyrning. `expand_query_terms` loopar på 0,8B-modellen.
+
+**Defaulten är INTE bytt.** Spike enligt §7:1: `generate_qwen35`,
+`AiModel::Qwen35` och `cached_qwen35` finns bakom fasaden, oanvända. `cera`
+är en opt-in-dependency som bara dras in av `--features mamba`.
+
 ### Added — hash-unifiering (§8.9 steg 1: temporal store, förutsättningen)
 
 `calculate_content_hash` är nu **md5 av bytes** — samma schema som Code Index-storens

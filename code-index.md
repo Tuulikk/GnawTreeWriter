@@ -4,7 +4,7 @@
 > Återskapa: `gnawtreewriter code-index <root> -o code-index.md --intro <introfil>`
 > Inaktuellt om `code-index --check` failar — kör om kommandot, redigera ALDRIG det genererade innehållet för hand.
 > Merge-konflikt i code-index.md: tag valfri sida och kör om verktyget — hand-merga aldrig (P3).
-> Body-hash: 37c87e99812cdbd16fe5377f25d70af3
+> Body-hash: 027980532080ffd3f4c8aee9a4d24902
 
 ## Träd
 
@@ -145,7 +145,7 @@ src/core/
   visualizer.rs (200 rader)
   visualizer_test.rs (82 rader)
 src/llm/
-  ai_manager.rs (1761 rader)
+  ai_manager.rs (1898 rader)
   batch.rs (96 rader)
   gnaw_sense.rs (977 rader)
   harmony.rs (364 rader)
@@ -1752,79 +1752,82 @@ _(inga toppnivå-items)_
 
 ## src/llm/
 
-### ai_manager.rs (1761 rader)
+### ai_manager.rs (1898 rader)
 - `pub enum ModelSource` :24
 - `impl ModelSource` :29
   - `pub fn as_str(self) -> &'static str` :30
 - `pub struct ResolvedModel` :45
 - `impl AiModel` :51
   - `pub fn dir_name(&self) -> &'static str` :53
-  - `pub fn probe(&self) -> &'static str` :68
-  - `pub fn id(&self) -> &'static str` :78
-- `pub enum AiModel` :90
-- `pub enum DeviceType` :104
-- `pub struct CapabilityReport` :124
-- `pub fn capability_report(ai_compiled: bool, mamba_compiled: bool) -> CapabilityReport` :139
-- `impl From<&str> for DeviceType` :180
-  - `fn from(s: &str) -> Self` :181
-- `pub fn decide_index_device(` :207
-- `fn vram_free_percent() -> Option<f32>` :235
-- `pub fn indexing_device() -> DeviceType` :261
-- `pub struct ModernBertModel` :295
-- `pub enum EmbeddingBackbone` :304
-- `pub struct Lfm25Model` :313
-- `pub struct Generation` :323
-- `pub enum Resolution` :334
-- `impl Resolution` :346
-  - `pub fn parse(s: &str) -> Self` :347
-- `pub struct TimingProfile` :363
-- `impl Default for TimingProfile` :376
-  - `fn default() -> Self` :377
-- `impl TimingProfile` :389
-  - `pub fn estimate_seconds(&self, input_tokens: usize, output_tokens: usize) -> f64` :391
-- `pub struct TokenBudget` :405
-- `impl Default for TokenBudget` :425
-  - `fn default() -> Self` :426
-- `impl TokenBudget` :441
-  - `pub fn record(&mut self, gen: &Generation)` :443
-  - `pub fn estimate_seconds(&mut self, profile: &TimingProfile)` :452
-- `impl ModernBertModel` :458
-  - `pub fn get_embedding(&self, text: &str) -> Result<Tensor>` :459
-  - `pub fn get_query_embedding(&self, text: &str) -> Result<Tensor>` :480
-  - `fn bge_embed_batched(&self, model: &BertModel, texts: &[&str]) -> Result<Vec<Vec<f32>>>` :501
-  - `fn bge_embed(&self, model: &BertModel, text: &str, is_query: bool) -> Result<Tensor>` :584
-  - `pub fn get_embeddings(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>` :610
-- `pub struct AiManager` :683
-- `impl AiManager` :703
-  - `pub fn index_model() -> AiModel` :710
-  - `pub fn new(project_root: &Path) -> Result<Self>` :714
-  - `fn roots(&self) -> Vec<(PathBuf, ModelSource)>` :761
-  - `pub fn resolve(&self, model: &AiModel) -> Option<ResolvedModel>` :770
-  - `pub fn resolved_models(&self) -> Vec<ResolvedModel>` :784
-  - `fn for_test(local: PathBuf, global: PathBuf) -> Self` :795
-  - `pub fn timing(&self) -> TimingProfile` :812
-  - `pub fn calibrate_timing(&self) -> Result<TimingProfile>` :822
-  - `pub fn load_model(` :850
-  - `pub fn load_lfm25_model(&self) -> Result<&Lfm25Model>` :929
-  - `pub fn estimate_tokens(&self, text: &str) -> usize` :979
-  - `pub fn generate_lfm25(` :992
-  - `pub async fn generate_semantic_report(&self, file_path: &str) -> Result<SemanticReport>` :1066
-  - `pub async fn setup(&self, _model: AiModel, _device: DeviceType, _force: bool) -> Result<()>` :1133
-  - `pub fn get_status(&self) -> Result<AiStatus>` :1223
-  - `fn get_model_path(&self, model: &AiModel) -> PathBuf` :1246
-- `fn sample_token(` :1261
-- `pub struct SemanticReport` :1312
-- `pub struct QualityFinding` :1319
-- `pub struct Source` :1330
-- `pub fn sources_from_evidence(evidence: &[(String, String)]) -> Vec<Source>` :1339
-- `impl SemanticReport` :1385
-  - `pub fn sources(&self) -> Vec<Source>` :1388
-- `pub struct AiStatus` :1407
-- `fn download_file(url: &str, dest: &std::path::Path) -> Result<()>` :1424
-- `fn timing_profile_path(cache_dir: &Path) -> PathBuf` :1437
-- `fn load_timing_profile(cache_dir: &Path) -> TimingProfile` :1443
-- `fn save_timing_profile(cache_dir: &Path, profile: &TimingProfile)` :1453
-- `fn measure_profile(` :1466
+  - `pub fn probe(&self) -> &'static str` :70
+  - `pub fn id(&self) -> &'static str` :82
+- `pub enum AiModel` :96
+- `pub enum DeviceType` :117
+- `pub struct CapabilityReport` :137
+- `pub fn capability_report(ai_compiled: bool, mamba_compiled: bool) -> CapabilityReport` :152
+- `impl From<&str> for DeviceType` :193
+  - `fn from(s: &str) -> Self` :194
+- `pub fn decide_index_device(` :220
+- `fn vram_free_percent() -> Option<f32>` :248
+- `pub fn indexing_device() -> DeviceType` :274
+- `pub struct ModernBertModel` :308
+- `pub enum EmbeddingBackbone` :317
+- `pub struct Lfm25Model` :326
+- `pub struct Qwen35Engine` :341
+- `pub struct Generation` :349
+- `pub enum Resolution` :360
+- `impl Resolution` :372
+  - `pub fn parse(s: &str) -> Self` :373
+- `pub struct TimingProfile` :389
+- `impl Default for TimingProfile` :402
+  - `fn default() -> Self` :403
+- `impl TimingProfile` :415
+  - `pub fn estimate_seconds(&self, input_tokens: usize, output_tokens: usize) -> f64` :417
+- `pub struct TokenBudget` :431
+- `impl Default for TokenBudget` :451
+  - `fn default() -> Self` :452
+- `impl TokenBudget` :467
+  - `pub fn record(&mut self, gen: &Generation)` :469
+  - `pub fn estimate_seconds(&mut self, profile: &TimingProfile)` :478
+- `impl ModernBertModel` :484
+  - `pub fn get_embedding(&self, text: &str) -> Result<Tensor>` :485
+  - `pub fn get_query_embedding(&self, text: &str) -> Result<Tensor>` :506
+  - `fn bge_embed_batched(&self, model: &BertModel, texts: &[&str]) -> Result<Vec<Vec<f32>>>` :527
+  - `fn bge_embed(&self, model: &BertModel, text: &str, is_query: bool) -> Result<Tensor>` :610
+  - `pub fn get_embeddings(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>` :636
+- `pub struct AiManager` :709
+- `impl AiManager` :733
+  - `pub fn index_model() -> AiModel` :740
+  - `pub fn new(project_root: &Path) -> Result<Self>` :744
+  - `fn roots(&self) -> Vec<(PathBuf, ModelSource)>` :793
+  - `pub fn resolve(&self, model: &AiModel) -> Option<ResolvedModel>` :802
+  - `pub fn resolved_models(&self) -> Vec<ResolvedModel>` :816
+  - `fn for_test(local: PathBuf, global: PathBuf) -> Self` :827
+  - `pub fn timing(&self) -> TimingProfile` :846
+  - `pub fn calibrate_timing(&self) -> Result<TimingProfile>` :856
+  - `pub fn load_model(` :884
+  - `pub fn load_lfm25_model(&self) -> Result<&Lfm25Model>` :963
+  - `pub fn estimate_tokens(&self, text: &str) -> usize` :1013
+  - `pub fn generate_lfm25(` :1026
+  - `pub fn load_qwen35_model(&self) -> Result<&Qwen35Engine>` :1106
+  - `pub fn generate_qwen35(` :1138
+  - `pub async fn generate_semantic_report(&self, file_path: &str) -> Result<SemanticReport>` :1203
+  - `pub async fn setup(&self, _model: AiModel, _device: DeviceType, _force: bool) -> Result<()>` :1270
+  - `pub fn get_status(&self) -> Result<AiStatus>` :1360
+  - `fn get_model_path(&self, model: &AiModel) -> PathBuf` :1383
+- `fn sample_token(` :1398
+- `pub struct SemanticReport` :1449
+- `pub struct QualityFinding` :1456
+- `pub struct Source` :1467
+- `pub fn sources_from_evidence(evidence: &[(String, String)]) -> Vec<Source>` :1476
+- `impl SemanticReport` :1522
+  - `pub fn sources(&self) -> Vec<Source>` :1525
+- `pub struct AiStatus` :1544
+- `fn download_file(url: &str, dest: &std::path::Path) -> Result<()>` :1561
+- `fn timing_profile_path(cache_dir: &Path) -> PathBuf` :1574
+- `fn load_timing_profile(cache_dir: &Path) -> TimingProfile` :1580
+- `fn save_timing_profile(cache_dir: &Path, profile: &TimingProfile)` :1590
+- `fn measure_profile(` :1603
 
 ### batch.rs (96 rader)
 - `pub struct BatchOperation` :6

@@ -304,5 +304,87 @@ Qwen3.5-0.8B, text-only Q4 (508 MB, **−27 %** mot i dag), via Cera bakom
 samtidigt öppnar wgpu-vägen RX 580. Abortvillkoren i §4 gäller oförändrat, med
 **81 s** som baslinje för `explain`.
 
+---
+
+## 9. Mätt 2026-11-21: Qwen3.5-0.8B via Cera — snabbare, men `propose_edit` fallerar på BÅDA
+
+Mätningen är gjord på samma maskin, samma prompts (byggda ur GTW:s egen
+`prompts.rs`, inte handskrivna), CPU, en process per körning.
+
+**Motor:** `cera 0.7.5`, `default-features = false, features = ["parallel",
+"mmap", "std-fs"]` (ingen `vl-preprocess` — text-only). Kompilerar på Rust
+1.98 utan anpassning. Bakom fasaden: `generate_qwen35` + `AiModel::Qwen35`
++ `cached_qwen35`, med modellens EGEN chat-template ur GGUF:en (inte
+`im_start`-hacket som candle-vägen använder).
+
+**Modell:** `unsloth/Qwen3.5-0.8B-GGUF` → `Qwen3.5-0.8B-Q4_K_S.gguf`,
+**508 104 960 B**, `.gnawtreewriter_ai/models/qwen35/model.gguf`.
+
+### 9.1 Läsuppgifterna — Qwen vinner klart
+
+| Uppgift | LFM2.5 (candle) | Qwen3.5 (cera) | Faktor |
+|---|---|---|---|
+| `explain age.rs` | **85,5 s** (upprepad live: 85,5 / 87,7) | **26,8 s** | **3,2×** |
+| `summarize` | 19 s (2 anrop, 1 fil) | 23,4 s (inkl. 20,5 s prefill) | ~1× |
+| Tokens in/ut | 1203 / 72 | 1186 / 101 | — |
+| Stopp | budget-tak | `finish=Stop` (naturligt) | — |
+| Decode | 13 tok/s | ~36 tok/s | **2,8×** |
+
+Båda svaren är innehållsmässigt korrekta: `explain` identifierar
+`git blame --line-porcelain`, `LineAge`, cache-nyckeln och `FileAge`-returen.
+
+**Kostnaden sitter i prefill, inte decode:** 23–26 s av 26,8 s för 1 186
+tokens. Det motsäger inget i §8.1 — det flyttar bara vikten från decode
+(candle) till prefill (cera).
+
+### 9.2 `propose_edit` — den hårda grinden, och båda underkänns
+
+| Motor | Wall | Resultat | Facit |
+|---|---|---|---|
+| LFM2.5 | **205,5 s** | föreslog 48 tecken på fel nod | **syntaxfel — GTW nekade** |
+| Qwen3.5 | **31,5 s** | `{"line":17,"new":"<fyra fältdeklarationer>"}` | giltig JSON, **fel rad → hade kraschat koden** |
+
+LFM2.5 fallerar långsamt och katastrofalt (AST brutet, Guardian räddade
+filen). Qwen fallerar billigt och på ett sätt Guardian också fångar, men
+den hade inte gjort rätt sak. **Ingen av dem är användbar för `propose_edit`
+utan strukturell styrning** — §7:s GBNF-not är alltså inte en riskhypotes
+utan ett mätt behov. Cera har `GenerateOpts::grammar`; candle-vägen har
+ingen motsvarighet.
+
+### 9.3 `expand_query_terms` — Qwen loopar
+
+Qwen fastnade i en repetitionsloop (`["backup","restore","file","copy",…]`
+upprepat tills 256-token-taket) och gav ingen användbar termlista. Det är
+exakt 0,8B-svagheten §7 förutsåg, och den syns bara för att mätningen
+kördes — inte i `explain`, som gick bra.
+
+### 9.4 Slutsats — vad som får flyttas och vad som inte får
+
+**Abortvillkoren i §4, prövade:**
+
+| Villkor | Utfall |
+|---|---|
+| giltiga `propose_edit` ≥ baslinjen | **NEJ** — båda fel; Qwen fel på billigare sätt |
+| wall time ≤ 81 s | **JA** — 26,8 s på `explain` (3,2× snabbare) |
+| svenskbedömning ej under baslinjen | **INTE MÄTT** — ingen SV-körning gjord |
+
+**Rekommendation:** byt **inte** L4-defaulten. `propose_edit` är den enda
+uppgiften där fel är dyrt och det är den enda som har hårt facit —
+och den fallerar. Det som däremot är belagt:
+
+1. **Läsuppgifterna (`explain`/`summarize`) kan flyttas till Qwen3.5** och
+   bli ~3× snabbare, förutsatt att Motor2-beroendet verifieras (path-dep,
+   `AiModel` fick en ny variant).
+2. **`propose_edit` kräver grammatikstyrning** innan någon motor byts.
+   Cera har `grammar`; det är nästa mätpunkt, med ett känt-facit-testfall.
+3. **Qwen behöver anti-loop-inställning** (`repetition_penalty` höjd,
+   `min_p`/`top_k` justerade) innan `expand` kan mätas rättvist.
+
+**Inget är bytt.** `generate_qwen35`, `AiModel::Qwen35` och
+`cached_qwen35` finns bakom fasaden, oanvända, som spike — precis vad
+§7:1 föreskrev ("därför spike, inte migration"). Nästa session kan mäta
+grammatik-vägen utan att bygga om något.
+
+
 
 

@@ -80,6 +80,10 @@ rayon = "1.10"
 rusqlite = { version = "0.32", features = ["bundled"] }
 
 # AI dependencies (optional)
+# cera 0.7 = the second engine behind generate_lfm25 (docs/LOCAL_MODEL_BAKEOFF.md):
+# candle has no qwen35 module, cera does. Features are explicit on purpose —
+# vl-preprocess (image decoding) is NOT wanted for a text-only bake-off.
+cera = { version = "0.7", optional = true, default-features = false, features = ["parallel", "mmap", "std-fs"] }
 candle-core = { version = "0.9", optional = true }
 candle-nn = { version = "0.9", optional = true }
 candle-transformers = { version = "0.9", optional = true }
@@ -116,7 +120,7 @@ ai = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "ureq", "toke
 # documented in CHANGELOG but could not warn about. Motor2 hit exactly this
 # (FEEDBACK_FRAN_MOTOR2_2026-11-12.md §2). Remove after the next minor release.
 modernbert = ["ai"]
-mamba = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "ureq", "tokenizers", "dep:fastrand"]
+mamba = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "ureq", "tokenizers", "dep:fastrand", "dep:cera"]
 mcp = ["dep:reqwest", "hyper", "axum", "tokio-stream", "tower-http"]
 cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]

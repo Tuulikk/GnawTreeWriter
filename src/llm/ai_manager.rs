@@ -56,6 +56,8 @@ impl AiModel {
             Self::Bge => "bge-base",
             #[cfg(feature = "mamba")]
             Self::Lfm25 => "lfm25",
+            #[cfg(feature = "mamba")]
+            Self::Qwen35 => "qwen35",
         }
     }
 
@@ -70,6 +72,8 @@ impl AiModel {
             Self::ModernBert | Self::Bge => "config.json",
             #[cfg(feature = "mamba")]
             Self::Lfm25 => "model.gguf",
+            #[cfg(feature = "mamba")]
+            Self::Qwen35 => "model.gguf",
         }
     }
 
@@ -81,6 +85,8 @@ impl AiModel {
             Self::Bge => "bge-base-en-v1.5",
             #[cfg(feature = "mamba")]
             Self::Lfm25 => "lfm25",
+            #[cfg(feature = "mamba")]
+            Self::Qwen35 => "qwen35",
         }
     }
 }
@@ -95,8 +101,15 @@ pub enum AiModel {
     /// L2-normalized, query prefix). The retrieval default since the
     /// recall harness proved the MLM checkpoint unusable.
     Bge,
+    /// LFM2.5-1.2B-Instruct via candle — the current L4 default
+    /// (docs/LOCAL_MODEL_BAKEOFF.md §8.1 baseline).
     #[cfg(feature = "mamba")]
     Lfm25,
+    /// Qwen3.5-0.8B via cera: 27 % smaller, served by a second engine
+    /// because candle has no qwen35 module (§8.2). Loaded from a bare GGUF;
+    /// the tokenizer lives in the GGUF, so there is no tokenizer.json.
+    #[cfg(feature = "mamba")]
+    Qwen35,
 }
 
 /// Execution device for AI models
@@ -314,6 +327,19 @@ pub struct Lfm25Model {
     pub model: std::sync::Mutex<candle_transformers::models::quantized_lfm2::ModelWeights>,
     pub tokenizer: tokenizers::Tokenizer,
     pub device: candle_core::Device,
+}
+
+/// cera-backed generative engine for models candle cannot serve (Qwen3.5's
+/// Gated DeltaNet layers need kernels candle lacks even in 0.9.2 — measured in
+/// docs/LOCAL_MODEL_BAKEOFF.md §8.2).
+///
+/// No Mutex: cera's `Session` owns the KV state and takes `&mut self`, so the
+/// engine hands out a fresh session per call and nothing is shared mutably.
+/// No separate tokenizer file: the tokenizer and its chat template travel in
+/// the GGUF, which is why this slot has no `tokenizer.json`.
+#[cfg(feature = "mamba")]
+pub struct Qwen35Engine {
+    pub engine: cera::CeraEngine,
 }
 
 /// Result of a generation call: the text plus whether the token budget was
@@ -695,6 +721,10 @@ pub struct AiManager {
     /// Separate cache for the LFM2.5 model (each model gets its own slot).
     #[cfg(feature = "mamba")]
     cached_lfm25: std::sync::OnceLock<Lfm25Model>,
+    /// cera's engine handle for Qwen3.5 — a different engine AND a different
+    /// model, so it gets its own slot (docs/LOCAL_MODEL_BAKEOFF.md section 8.4).
+    #[cfg(feature = "mamba")]
+    cached_qwen35: std::sync::OnceLock<Qwen35Engine>,
     /// Measured timing profile for this machine (self-calibrated, persisted).
     #[cfg(feature = "mamba")]
     timing_profile: std::sync::RwLock<TimingProfile>,
@@ -751,6 +781,8 @@ impl AiManager {
             #[cfg(feature = "mamba")]
             cached_lfm25: std::sync::OnceLock::new(),
             #[cfg(feature = "mamba")]
+            cached_qwen35: std::sync::OnceLock::new(),
+            #[cfg(feature = "mamba")]
             timing_profile: std::sync::RwLock::new(timing_profile),
         })
     }
@@ -802,6 +834,8 @@ impl AiManager {
             cached_model: std::sync::OnceLock::new(),
             #[cfg(feature = "mamba")]
             cached_lfm25: std::sync::OnceLock::new(),
+            #[cfg(feature = "mamba")]
+            cached_qwen35: std::sync::OnceLock::new(),
             #[cfg(feature = "mamba")]
             timing_profile: std::sync::RwLock::new(TimingProfile::default()),
         }
@@ -1059,6 +1093,109 @@ impl AiManager {
             text: decoded,
             truncated,
             tokens: generated.len(),
+        })
+    }
+
+    /// Load (or reuse) the cera-backed Qwen3.5 engine from a bare GGUF.
+    ///
+    /// Mirrors `load_lfm25_model`'s contract — missing weights is a loud error
+    /// naming what to fetch — but the load is cera's: a bare `.gguf` gets a
+    /// synthesized text manifest, and the tokenizer + chat template are read
+    /// from the GGUF itself, so there is no separate tokenizer.json here.
+    #[cfg(feature = "mamba")]
+    pub fn load_qwen35_model(&self) -> Result<&Qwen35Engine> {
+        if let Some(engine) = self.cached_qwen35.get() {
+            return Ok(engine);
+        }
+
+        let model_dir = self.get_model_path(&AiModel::Qwen35);
+        let weights_path = model_dir.join("model.gguf");
+        if !weights_path.exists() {
+            return Err(anyhow::anyhow!(
+                "Missing Qwen3.5 weights: {}. Download the text-only GGUF (Q4_K_S, 508 MB) from unsloth/Qwen3.5-0.8B-GGUF as model.gguf — see docs/LOCAL_MODEL_BAKEOFF.md section 5 step 2.",
+                weights_path.display()
+            ));
+        }
+
+        let engine = cera::CeraEngine::from_path(&weights_path, cera::EngineConfig::default())
+            .map_err(|e| anyhow::anyhow!("failed to load Qwen3.5 via cera: {e}"))?;
+
+        self.cached_qwen35
+            .set(Qwen35Engine { engine })
+            .ok()
+            .expect("Qwen3.5 cache already set");
+        Ok(self.cached_qwen35.get().unwrap())
+    }
+
+    /// Generate text with Qwen3.5-0.8B through cera.
+    ///
+    /// Same signature and return contract as `generate_lfm25` — that is the
+    /// facade the bake-off is measured behind (docs/LOCAL_MODEL_BAKEOFF.md
+    /// section 5 step 1: switch engines by naming a directory, never by
+    /// touching `pipeline.rs`). The chat template is the model's OWN, read from
+    /// the GGUF, not a hardcoded im_start wrapper.
+    #[cfg(feature = "mamba")]
+    pub fn generate_qwen35(
+        &self,
+        prompt: &str,
+        max_tokens: usize,
+        temperature: f32,
+    ) -> Result<Generation> {
+        use cera::{FinishReason, GenerateOpts, ModalitySink, SessionConfig};
+
+        /// Collect generated token ids; cera streams them through this sink.
+        struct Collector(Vec<u32>);
+        impl ModalitySink for Collector {
+            fn on_text_tokens(&mut self, tokens: &[u32]) {
+                self.0.extend_from_slice(tokens);
+            }
+            fn on_done(&mut self, _reason: FinishReason) {}
+        }
+
+        let qwen = self.load_qwen35_model()?;
+        let engine = &qwen.engine;
+
+        // Render the model's own chat template — the one thing the candle path
+        // hardcodes and this path must not.
+        let chat_prompt = cera::tokenizer::apply_chat_template(
+            engine.tokenizer(),
+            &[serde_json::json!({ "role": "user", "content": prompt.trim() })],
+            true,
+        )
+        .map_err(|e| anyhow::anyhow!("Qwen3.5 chat template render failed: {e}"))?;
+
+        let mut session = engine
+            .new_session(SessionConfig::default())
+            .map_err(|e| anyhow::anyhow!("Qwen3.5 session creation failed: {e}"))?;
+
+        let tokens = engine.tokenizer().encode(&chat_prompt);
+        if tokens.is_empty() {
+            anyhow::bail!("empty prompt after tokenization");
+        }
+        // Prefill happens inside append_tokens (cera's contract) and is where
+        // the measured cost lives: 23-26 s of the 27 s wall time for a 1 186
+        // token prompt (docs/LOCAL_MODEL_BAKEOFF.md section 9).
+        session
+            .append_tokens(&tokens)
+            .map_err(|e| anyhow::anyhow!("Qwen3.5 prefill failed: {e}"))?;
+
+        let mut sink = Collector(Vec::new());
+        let summary = session
+            .generate(
+                &GenerateOpts {
+                    max_tokens: max_tokens as u32,
+                    temperature,
+                    ..GenerateOpts::default()
+                },
+                &mut sink,
+            )
+            .map_err(|e| anyhow::anyhow!("Qwen3.5 generation failed: {e}"))?;
+
+        let decoded = engine.tokenizer().decode(&sink.0);
+        Ok(Generation {
+            text: decoded.trim().to_string(),
+            truncated: matches!(summary.finish_reason, FinishReason::MaxTokens),
+            tokens: sink.0.len(),
         })
     }
 
